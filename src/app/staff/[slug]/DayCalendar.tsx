@@ -53,8 +53,8 @@ export default function DayCalendar({ club, courts, bookings: initialBookings, b
     const ids = [...new Set((b ?? []).map((x) => x.player_id).filter(Boolean))] as string[];
     const names = new Map<string, string | null>();
     if (ids.length) {
-      const { data } = await supabase.from("player_public").select("id, name").in("id", ids);
-      data?.forEach((p) => names.set(p.id, p.name));
+      const { data } = await supabase.rpc("player_names", { p_ids: ids });
+      (data as { id: string; name: string | null }[] | null)?.forEach((p) => names.set(p.id, p.name));
     }
     setBookings((b ?? []).map((x) => ({ ...x, player_name: x.player_id ? names.get(x.player_id) ?? null : null })) as Booking[]);
     setBlocks((k ?? []) as Block[]);

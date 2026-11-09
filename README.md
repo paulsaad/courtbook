@@ -10,8 +10,9 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | Path | What |
 | --- | --- |
 | `supabase/migrations/0001_init.sql` | Full schema: tables, enums, double-booking guards, `book_slot` / `cancel_booking`, RLS |
+| `supabase/migrations/0009_player_names_fn.sql` | `player_names(ids)` lookup replaces the `player_public` view (no directory listing) |
 | `supabase/migrations/0008_flexible_durations.sql` | 30-min grid; `min_booking_minutes` / `max_booking_minutes` per club for players; prices per hour |
-| `supabase/migrations/0007_phase1_schema.sql` | `clubs.booking_window_days` (default 14), `close_club()` whole-club closure, `player_public` view |
+| `supabase/migrations/0007_phase1_schema.sql` | `clubs.booking_window_days` (default 14), `close_club()` whole-club closure, `player_public` view (replaced in 0009) |
 | `supabase/migrations/0006_duration_utc.sql` | Duration = real elapsed time (DST-safe) |
 | `supabase/migrations/0005_validation_edges.sql` | Exact-minute grid, no midnight exception (`close_time = 24:00` for midnight), staff cannot mark own booking club-caused |
 | `supabase/migrations/0004_slot_validation_trigger.sql` | Trigger: every court booking inside opening hours, on the grid, k × slot_minutes; players exactly 1 slot |
@@ -34,7 +35,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 - All RPCs: EXECUTE revoked from PUBLIC/anon, granted to `authenticated`. New functions must repeat this (Supabase default privileges grant anon).
 - Cancellation policy: player may cancel any time; credit refunded only before the club cutoff (after it, the kept credit is the fee — MATCHi model). Staff cancellation refunds after the cutoff only when flagged club-caused (`cancel_booking(id, true)`); nobody can flag their own booking.
 - Players never insert into `bookings` or `credit_transactions` directly (no RLS policy for it); they call the functions.
-- `occupancy` view exposes slot times without names/phones; the grid reads it.
+- `occupancy` view exposes slot times without names/phones; the grid reads it. Names only via `player_names(ids)`.
 
 Run `supabase/tests/run.sh` against any local Postgres (needs `psql`) after touching the schema.
 

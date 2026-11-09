@@ -69,8 +69,8 @@ export default async function StaffClubPage({
   const playerIds = [...new Set((bookings ?? []).map((b) => b.player_id).filter(Boolean))] as string[];
   const names = new Map<string, string | null>();
   if (playerIds.length) {
-    const { data } = await supabase.from("player_public").select("id, name").in("id", playerIds);
-    data?.forEach((p) => names.set(p.id, p.name));
+    const { data } = await supabase.rpc("player_names", { p_ids: playerIds });
+    (data as { id: string; name: string | null }[] | null)?.forEach((p) => names.set(p.id, p.name));
   }
   const bookingsWithNames: Booking[] = (bookings ?? []).map((b) => ({
     ...b,

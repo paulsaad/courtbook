@@ -175,8 +175,10 @@ $PSQL -q -d $DB -c "insert into credit_transactions (profile_id, delta, kind) va
 \set ON_ERROR_STOP off
 \echo '27. player books 20 days ahead (window 14) -> expect ERROR beyond_booking_window'
 select book_slot('$CLUB','$COURT2',null, (current_date + 20 + time '09:30') at time zone 'Asia/Beirut', (current_date + 20 + time '11:00') at time zone 'Asia/Beirut');
-\echo '28. player reads player_public -> expect 4 rows, no phone column'
-select count(*) from player_public; select phone from player_public;
+\echo '28. player_public gone -> expect ERROR does not exist ; player_names by id -> expect 1 row ; anon -> expect permission denied'
+select count(*) from player_public;
+select count(*) from player_names(array['$P1'::uuid]);
+set role anon; select count(*) from player_names(array['$P1'::uuid]); set role authenticated;
 \echo '29. player calls close_club -> expect ERROR forbidden'
 select close_club('$CLUB', (current_date + 5 + time '08:00') at time zone 'Asia/Beirut', (current_date + 5 + time '23:00') at time zone 'Asia/Beirut', 'holiday');
 EOF
