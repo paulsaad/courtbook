@@ -21,7 +21,7 @@ export type Booking = {
   guest_phone: string | null;
   start_at: string;
   end_at: string;
-  status: "confirmed" | "cancelled" | "no_show";
+  status: "confirmed" | "cancelled" | "no_show" | "pending" | "expired";
   source: "app" | "staff";
   credit_tx_id: string | null;
   player_name?: string | null;
@@ -40,6 +40,10 @@ export const ERRORS: Record<string, string> = {
   forbidden: "You are not allowed to do that.",
   not_started: "The booking has not started yet.",
   not_confirmed: "This booking is no longer active.",
+  hold_already_active: "You already have a slot on hold. Finish or cancel that one first.",
+  beyond_booking_window: "Too far ahead to book yet.",
+  slot_in_past: "That time has passed.",
+  no_price_rule: "No price set for this time. Ask the club.",
 };
 
 export function friendlyError(message: string | undefined): string {

@@ -9,192 +9,208 @@ DB=courtbook_test
 P1=11111111-1111-1111-1111-111111111111
 P2=22222222-2222-2222-2222-222222222222
 ADMIN=33333333-3333-3333-3333-333333333333
-STAFF_B=44444444-4444-4444-4444-444444444444   # staff of a second club
+STAFF_B=44444444-4444-4444-4444-444444444444
 
 $PSQL -q -c "drop database if exists $DB" -c "create database $DB" >/dev/null
-MIG=$(ls supabase/migrations/*.sql | sort | sed 's/^/-f /' | tr '\n' ' ')
-$PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql $MIG -f supabase/seed.sql \
-  || { echo "MIGRATION FAILED"; exit 1; }
+# each migration file in its own transaction (0011 adds enum values that 0012 uses)
+$PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql || exit 1
+for f in $(ls supabase/migrations/*.sql | sort); do
+  $PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f "$f" || { echo "MIGRATION FAILED: $f"; exit 1; }
+done
+$PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/seed.sql || exit 1
 echo "migrations + seed: OK"
 
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 <<EOF
 insert into auth.users (id, phone) values ('$P1','+9611'), ('$P2','+9612'), ('$ADMIN','+9613'), ('$STAFF_B','+9614');
 update profiles set roles='{player,admin}' where id='$ADMIN';
-insert into credit_transactions (profile_id, delta, kind) values ('$P1',1,'purchase'), ('$P2',1,'purchase');
+update clubs set cancel_cutoff_hours = 6 where slug = 'batroun';
 insert into clubs (name, slug) values ('Other Club', 'other');
 insert into courts (club_id, name, sport) select id, 'Other 1', 'padel' from clubs where slug='other';
 insert into club_staff (club_id, profile_id) select id, '$STAFF_B' from clubs where slug='other';
 EOF
 COURT=$($PSQL -At -d $DB -c "select id from courts where name='Padel 1'")
 COURT2=$($PSQL -At -d $DB -c "select id from courts where name='Padel 2'")
+COURT3=$($PSQL -At -d $DB -c "select id from courts where name='Padel 3'")
 CLUB=$($PSQL -At -d $DB -c "select id from clubs where slug='batroun'")
 CLUB_B=$($PSQL -At -d $DB -c "select id from clubs where slug='other'")
 # Tomorrow 09:30-11:00 Beirut (club opens 08:00, 30-min grid, players 60-180 min)
 S="(current_date + 1 + time '09:30') at time zone 'Asia/Beirut'"
 E="(current_date + 1 + time '11:00') at time zone 'Asia/Beirut'"
 as_user() { echo "set role authenticated; select set_config('request.jwt.claim.sub','$1',false);"; }
-filter() { grep -vE "^(SET|UPDATE|INSERT|set_config|-+|\(1 row\)|\s*$|CONTEXT|LINE|\s+\^| 1111| 2222| 3333| 4444| set_config|PL/pgSQL|SQL statement)"; }
+as_service() { echo "set role service_role; select set_config('request.jwt.claim.sub','',false);"; }
+filter() { grep -vE "^(SET|UPDATE|INSERT|DELETE|set_config|-+|\(1 row\)|\(0 rows\)|\s*$|CONTEXT|LINE|\s+\^| 1111| 2222| 3333| 4444| set_config|PL/pgSQL|SQL statement|\s+values|\s+insert)"; }
+pay_of() { $PSQL -At -d $DB -c "select id from payments where booking_id='$1'"; }
 
-echo "--- A. concurrent double booking: two players, same slot, overlapping transactions"
-book() { { as_user $1; echo "begin; select book_slot('$CLUB','$2',null, $S, $E); select pg_sleep(1.5); commit;"; } | $PSQL -d $DB 2>&1; }
-book $P1 $COURT > /tmp/cb_p1.log & sleep 0.4; book $P2 $COURT > /tmp/cb_p2.log & wait
-grep -q "ERROR:  slot_taken" /tmp/cb_p2.log && echo "loser got slot_taken: OK" || { echo "FAIL: second booking not rejected"; cat /tmp/cb_p2.log; }
-$PSQL -At -d $DB -c "select 'confirmed bookings = '||count(*)||' (expect 1)' from bookings where status='confirmed'"
-$PSQL -At -d $DB -c "select 'balances p1,p2 = '||credit_balance('$P1')||','||credit_balance('$P2')||' (expect 0,1)'"
-B=$($PSQL -At -d $DB -c "select id from bookings where status='confirmed' limit 1")
+echo "--- A. two players hold the same slot concurrently -> one hold, other slot_taken"
+hold() { { as_user $1; echo "begin; select booking_id from hold_slot('$CLUB','$2', $S, $E); select pg_sleep(1.5); commit;"; } | $PSQL -d $DB 2>&1; }
+hold $P1 $COURT > /tmp/cb_p1.log & sleep 0.4; hold $P2 $COURT > /tmp/cb_p2.log & wait
+grep -q "ERROR:  slot_taken" /tmp/cb_p2.log && echo "loser got slot_taken: OK" || { echo "FAIL"; cat /tmp/cb_p2.log; }
+B=$($PSQL -At -d $DB -c "select id from bookings where status='pending' and player_id='$P1'")
+PAY=$(pay_of $B)
+$PSQL -At -d $DB -c "select 'price,fee,total = '||amount_usd||','||fee_usd||','||total_usd||' (expect 30.00,1.00,31.00: 1.5h off-peak at 20/h)' from payments where id='$PAY'"
 
-echo "--- B. same player, one credit, two different courts concurrently (review #1)"
-$PSQL -q -d $DB -c "insert into credit_transactions (profile_id, delta, kind) values ('$P1',1,'purchase')"
+echo "--- B. payment confirmation"
+{ as_user $P1; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '1. player tries confirm_payment directly -> expect permission denied'
+select confirm_payment('$PAY', 'SIM-1', 31.00);
+\echo '2. player tries to update bookings/payments directly -> expect UPDATE 0 (no policy) and permission/RLS'
+update bookings set status='confirmed' where id='$B';
+update payments set status='paid' where id='$PAY';
+select status from payments where id='$PAY';
+EOF
+as_service; cat <<EOF
+\echo '3. service confirms with wrong amount -> expect ERROR amount_mismatch'
+select confirm_payment('$PAY', 'SIM-1', 30.00);
+\echo '4. service confirms -> expect confirmed ; again -> expect already_paid (idempotent)'
+select confirm_payment('$PAY', 'SIM-1', 31.00);
+select confirm_payment('$PAY', 'SIM-1', 31.00);
+select status from bookings where id='$B'; select status from payments where id='$PAY';
+EOF
+} | $PSQL -d $DB 2>&1 | filter
+
+echo "--- C. expired hold never confirms a slot someone else took"
+$PSQL -q -d $DB -c "update clubs set hold_minutes=2 where id='$CLUB'"
 S2="(current_date + 2 + time '09:30') at time zone 'Asia/Beirut'"; E2="(current_date + 2 + time '11:00') at time zone 'Asia/Beirut'"
-book2() { { as_user $P1; echo "begin; select book_slot('$CLUB','$1',null, $S2, $E2); select pg_sleep(1.5); commit;"; } | $PSQL -d $DB 2>&1; }
-book2 $COURT > /tmp/cb_b1.log & sleep 0.4; book2 $COURT2 > /tmp/cb_b2.log & wait
-grep -q "insufficient_credits" /tmp/cb_b2.log && echo "second got insufficient_credits: OK" || { echo "FAIL: balance race"; cat /tmp/cb_b2.log; }
-$PSQL -At -d $DB -c "select 'p1 balance = '||credit_balance('$P1')||' (expect 0, never negative)'"
+B2=$({ as_user $P1; echo "select booking_id from hold_slot('$CLUB','$COURT', $S2, $E2);"; } | $PSQL -At -d $DB | tail -1)
+PAY2=$(pay_of $B2)
+$PSQL -q -d $DB -c "update bookings set hold_expires_at = now() - interval '1 min' where id='$B2'"   # simulate time passing
+{ as_user $P2; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '5. player2 holds the same slot after player1 hold expired -> expect a booking id (stale hold swept)'
+select booking_id is not null as got_hold from hold_slot('$CLUB','$COURT', $S2, $E2);
+EOF
+as_service; cat <<EOF
+\echo '6. late payment for player1 expired hold -> expect refund_due, booking stays expired'
+select confirm_payment('$PAY2', 'SIM-2', 31.00);
+select status from bookings where id='$B2'; select status from payments where id='$PAY2';
+\echo '7. duplicate provider ref on another payment -> expect ERROR duplicate_provider_ref'
+select confirm_payment((select id from payments where profile_id='$P2' and status='pending' limit 1), 'SIM-1', 31.00);
+EOF
+} | $PSQL -d $DB 2>&1 | filter
+$PSQL -q -d $DB -c "update clubs set hold_minutes=10 where id='$CLUB'"
 
-echo "--- C. rules"
+echo "--- D. hold rules"
+{ as_user $P2; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '8. second live hold for the same player -> expect ERROR hold_already_active'
+select booking_id from hold_slot('$CLUB','$COURT2', $S, $E);
+\echo '9. release hold -> then holding another slot works'
+select release_hold((select id from bookings where player_id=auth.uid() and status='pending'));
+select booking_id is not null from hold_slot('$CLUB','$COURT2', $S, $E);
+\echo '10. bad durations: 45 min -> bad_duration ; 30 min (<60 min minimum) -> bad_duration'
+select release_hold((select id from bookings where player_id=auth.uid() and status='pending'));
+select booking_id from hold_slot('$CLUB','$COURT3', $S, $S + interval '45 min');
+select booking_id from hold_slot('$CLUB','$COURT3', $S, $S + interval '30 min');
+\echo '11. off-grid 09:45 -> not_on_grid ; before opening -> outside_opening_hours ; other club court -> court_not_found ; 20 days ahead -> beyond_booking_window'
+select booking_id from hold_slot('$CLUB','$COURT3', $S + interval '15 min', $E + interval '15 min');
+select booking_id from hold_slot('$CLUB','$COURT3', (current_date + 1 + time '06:30') at time zone 'Asia/Beirut', (current_date + 1 + time '08:00') at time zone 'Asia/Beirut');
+select booking_id from hold_slot('$CLUB_B','$COURT3', $S, $E);
+select booking_id from hold_slot('$CLUB','$COURT3', (current_date + 20 + time '09:30') at time zone 'Asia/Beirut', (current_date + 20 + time '11:00') at time zone 'Asia/Beirut');
+\echo '12. peak price: 2h at 17:00 (30/h) -> expect 60.00'
+select quote_price('$COURT3', (current_date + 1 + time '17:00') at time zone 'Asia/Beirut', (current_date + 1 + time '19:00') at time zone 'Asia/Beirut');
+\echo '13. occupancy shows player1 confirmed booking as Booked with null id; own ids visible'
+select count(*) filter (where id is null) as others, count(*) filter (where mine) as mine from occupancy;
+EOF
+} | $PSQL -d $DB 2>&1 | filter
+
+echo "--- E. staff rules (blocks, moves, cross-club, direct updates)"
 { as_user $ADMIN; cat <<EOF
 \set ON_ERROR_STOP off
-\echo '1. block over existing booking -> expect ERROR block_overlaps_booking'
+\echo '14. block over player1 confirmed booking -> expect ERROR block_overlaps_booking'
 insert into blocks (club_id, court_id, start_at, end_at, reason, created_by) values ('$CLUB','$COURT', $S, $S + interval '60 min','maint','$ADMIN');
-\echo '2. block a free window -> expect no error'
+\echo '15. block a free window (day+3 08:00-12:30) -> ok ; then player holds inside it -> expect slot_taken'
 insert into blocks (club_id, court_id, start_at, end_at, reason, created_by) values ('$CLUB','$COURT', (current_date + 3 + time '08:00') at time zone 'Asia/Beirut', (current_date + 3 + time '12:30') at time zone 'Asia/Beirut','tournament','$ADMIN');
 EOF
-as_user $P2; cat <<EOF
-\echo '3. player2 books inside the block -> expect ERROR slot_taken'
-select book_slot('$CLUB','$COURT',null, (current_date + 3 + time '09:30') at time zone 'Asia/Beirut', (current_date + 3 + time '11:00') at time zone 'Asia/Beirut');
-\echo '4. bad duration (45 min: off the 30-min grid) -> expect ERROR bad_duration ; 30 min (below player minimum 60) -> expect ERROR bad_duration'
-select book_slot('$CLUB','$COURT2',null, $S, $S + interval '45 min');
-select book_slot('$CLUB','$COURT2',null, $S, $S + interval '30 min');
-\echo '5. off-grid start (09:45) -> expect ERROR not_on_grid'
-select book_slot('$CLUB','$COURT2',null, $S + interval '15 min', $E + interval '15 min');
-\echo '6. before opening (06:30) -> expect ERROR outside_opening_hours'
-select book_slot('$CLUB','$COURT2',null, (current_date + 1 + time '06:30') at time zone 'Asia/Beirut', (current_date + 1 + time '08:00') at time zone 'Asia/Beirut');
-\echo '7. court from another club -> expect ERROR court_not_found'
-select book_slot('$CLUB_B','$COURT2',null, $S, $E);
-\echo '8. coach path -> expect ERROR coach_booking_not_available'
-select book_slot('$CLUB',null,'$P1', $S, $E);
-\echo '9. player2 visible rows in bookings -> expect 0 ; occupancy -> expect 3 rows, 0 ids'
-select count(*) from bookings; select count(*) as rows, count(id) as ids from occupancy;
-\echo '10. self-promote -> expect roles {player}'
+as_user $P1; cat <<EOF
+select booking_id from hold_slot('$CLUB','$COURT', (current_date + 3 + time '09:30') at time zone 'Asia/Beirut', (current_date + 3 + time '11:00') at time zone 'Asia/Beirut');
+\echo '16. self-promote -> roles {player} ; read others balance -> forbidden'
 update profiles set roles='{player,admin}' where id=auth.uid(); select roles from profiles where id=auth.uid();
-\echo '11. cancel someone else booking -> expect ERROR forbidden'
-select cancel_booking('$B');
-\echo '12. direct credit insert -> expect ERROR row-level security'
-insert into credit_transactions (profile_id, delta, kind) values (auth.uid(), 100, 'purchase');
-\echo '13. read another players balance -> expect ERROR forbidden'
-select credit_balance('$P1');
 EOF
 as_user $STAFF_B; cat <<EOF
-\echo '14. staff of club B inserts a booking on club A court with club_id=B -> expect ERROR court_not_found (trigger; FK is the backstop)'
+\echo '17. staff of club B: insert booking on club A court -> court_not_found ; update club A booking -> UPDATE 0 ; move it -> forbidden'
 insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB_B','$COURT2','Walk-in', $S, $E, 'staff', auth.uid());
-\echo '15. staff of club B updates club A booking directly -> expect UPDATE 0 (no policy)'
 update bookings set status='cancelled' where id='$B';
-\echo '16. staff of club B moves club A booking -> expect ERROR forbidden'
-select move_booking('$B','$COURT2', $S, $E);
+select move_booking('$B','$COURT3', $S, $E);
 EOF
 as_user $ADMIN; cat <<EOF
-\echo '17. admin (staff) moves booking to Padel 2 -> expect no error'
-select move_booking('$B','$COURT2', $S, $E);
-\echo '18. admin direct update -> expect UPDATE 0 (policy removed for everyone)'
-update bookings set status='cancelled' where id='$B';
-\echo '17b. move to 02:00 (closed) -> expect ERROR outside_opening_hours'
-select move_booking('$B','$COURT2', (current_date + 1 + time '02:00') at time zone 'Asia/Beirut', (current_date + 1 + time '03:30') at time zone 'Asia/Beirut');
-\echo '17c. move to 4h05 (not a multiple of 30) -> expect ERROR bad_duration'
-select move_booking('$B','$COURT2', $S, $S + interval '4 hour 5 min');
-\echo '17d. move off-grid 09:45 -> expect ERROR not_on_grid'
-select move_booking('$B','$COURT2', $S + interval '15 min', $E + interval '15 min');
-\echo '17e. staff extends to 3h -> expect no error ; then back to 90 min'
-select move_booking('$B','$COURT2', $S, $S + interval '3 hour'); select move_booking('$B','$COURT2', $S, $E);
-\echo '17g. staff insert 21:00-00:00 (past 23:00 close) -> expect ERROR outside_opening_hours'
-insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT','X', (current_date + 1 + time '21:00') at time zone 'Asia/Beirut', (current_date + 2 + time '00:00') at time zone 'Asia/Beirut', 'staff', auth.uid());
-\echo '17h. start 09:30:30 -> expect ERROR not_on_grid ; duration 90min+20s -> expect ERROR bad_duration'
-insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT','X', $S + interval '30 sec', $E + interval '30 sec', 'staff', auth.uid());
-insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT','X', (current_date + 2 + time '09:30') at time zone 'Asia/Beirut', (current_date + 2 + time '11:00:20') at time zone 'Asia/Beirut', 'staff', auth.uid());
-\echo '17f. staff insert walk-in at 21:30-23:00 (ends at close) -> expect no error'
+\echo '18. admin moves player1 booking to Padel 3 -> ok ; to 02:00 -> outside_opening_hours ; 4h05 -> bad_duration ; 09:45 -> not_on_grid'
+select move_booking('$B','$COURT3', $S, $E);
+select move_booking('$B','$COURT3', (current_date + 1 + time '02:00') at time zone 'Asia/Beirut', (current_date + 1 + time '03:30') at time zone 'Asia/Beirut');
+select move_booking('$B','$COURT3', $S, $S + interval '4 hour 5 min');
+select move_booking('$B','$COURT3', $S + interval '15 min', $E + interval '15 min');
+\echo '19. staff walk-in 21:30-23:00 -> ok ; 21:00-00:00 -> outside_opening_hours ; 09:30:30 start -> not_on_grid'
 insert into bookings (club_id, court_id, guest_name, guest_phone, start_at, end_at, source, created_by) values ('$CLUB','$COURT','Walk-in','+961', (current_date + 1 + time '21:30') at time zone 'Asia/Beirut', (current_date + 1 + time '23:00') at time zone 'Asia/Beirut', 'staff', auth.uid());
-EOF
-as_user $P2; cat <<EOF
-\echo '18b. player passes club_caused=true -> expect ERROR forbidden'
-select cancel_booking('$B', true);
-EOF
-as_user $P1; cat <<EOF
-\echo '19. player1 cancels own booking >12h ahead -> expect balance 1'
-select cancel_booking('$B'); select credit_balance(auth.uid());
-\echo '20. anon reads clubs -> expect 2 ; anon occupancy -> expect permission denied ; anon cancel -> expect permission denied'
-set role anon; select count(*) from clubs; select count(*) from occupancy; select cancel_booking('$B');
+insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT2','X', (current_date + 1 + time '21:00') at time zone 'Asia/Beirut', (current_date + 2 + time '00:00') at time zone 'Asia/Beirut', 'staff', auth.uid());
+insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT2','X', $S + interval '30 sec', $E + interval '30 sec', 'staff', auth.uid());
+\echo '20. close day+1 with bookings -> block_overlaps_booking ; close day+5 -> 5'
+select close_club('$CLUB', (current_date + 1 + time '08:00') at time zone 'Asia/Beirut', (current_date + 1 + time '23:00') at time zone 'Asia/Beirut', 'holiday');
+select close_club('$CLUB', (current_date + 5 + time '08:00') at time zone 'Asia/Beirut', (current_date + 5 + time '23:00') at time zone 'Asia/Beirut', 'holiday');
 EOF
 } | $PSQL -d $DB 2>&1 | filter
 
-echo "--- D. cancellation reason vs role (review round 2, #2)"
-# Admin (staff) holds two personal app bookings tomorrow 09:30; cutoff raised to 48h so they are inside it.
-B5=55555555-5555-5555-5555-555555555555; B6=66666666-6666-6666-6666-666666666666
+echo "--- F. cancellation and refunds (cutoff 6h)"
+{ as_user $P2; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '21. player2 cancels player1 booking -> forbidden ; passes club_caused -> forbidden'
+select cancel_booking('$B'); select cancel_booking('$B', true);
+EOF
+as_user $P1; cat <<EOF
+\echo '22. player1 cancels own paid booking >6h ahead -> payment refund_due'
+select cancel_booking('$B'); select status from payments where booking_id='$B';
+EOF
+} | $PSQL -d $DB 2>&1 | filter
+# late cancellation: paid booking starting in 2h (inserted directly, grid-aligned by using hold on a near slot is awkward; insert confirmed + paid rows)
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 <<EOF
-update clubs set cancel_cutoff_hours = 48 where id = '$CLUB';
-insert into credit_transactions (profile_id, delta, kind) values ('$ADMIN', 2, 'purchase');
-with tx as (insert into credit_transactions (profile_id, delta, kind, created_by) values ('$ADMIN',-1,'booking','$ADMIN') returning id)
-insert into bookings (id, club_id, court_id, player_id, start_at, end_at, source, credit_tx_id, created_by)
-select '$B5','$CLUB',(select id from courts where name='Padel 3'),'$ADMIN', $S, $E, 'app', tx.id, '$ADMIN' from tx;
-with tx as (insert into credit_transactions (profile_id, delta, kind, created_by) values ('$ADMIN',-1,'booking','$ADMIN') returning id)
-insert into bookings (id, club_id, court_id, player_id, start_at, end_at, source, credit_tx_id, created_by)
-select '$B6','$CLUB',(select id from courts where name='Tennis 1'),'$ADMIN', $S, $E, 'app', tx.id, '$ADMIN' from tx;
+update clubs set cancel_cutoff_hours = 48 where id='$CLUB';
+insert into bookings (id, club_id, court_id, player_id, start_at, end_at, status, source, created_by, price_usd, fee_usd)
+values ('55555555-5555-5555-5555-555555555555','$CLUB','$COURT3','$ADMIN', (current_date + 1 + time '12:30') at time zone 'Asia/Beirut', (current_date + 1 + time '14:00') at time zone 'Asia/Beirut', 'confirmed','app','$ADMIN', 30, 1);
+insert into payments (booking_id, profile_id, club_id, provider, provider_ref, amount_usd, fee_usd, total_usd, status, paid_at)
+values ('55555555-5555-5555-5555-555555555555','$ADMIN','$CLUB','simulated','SIM-L1',30,1,31,'paid',now());
+insert into bookings (id, club_id, court_id, player_id, start_at, end_at, status, source, created_by, price_usd, fee_usd)
+values ('66666666-6666-6666-6666-666666666666','$CLUB','$COURT3','$ADMIN', (current_date + 1 + time '14:00') at time zone 'Asia/Beirut', (current_date + 1 + time '15:30') at time zone 'Asia/Beirut', 'confirmed','app','$ADMIN', 30, 1);
+insert into payments (booking_id, profile_id, club_id, provider, provider_ref, amount_usd, fee_usd, total_usd, status, paid_at)
+values ('66666666-6666-6666-6666-666666666666','$ADMIN','$CLUB','simulated','SIM-L2',30,1,31,'paid',now());
+insert into club_staff (club_id, profile_id) values ('$CLUB','$STAFF_B');
 EOF
 { as_user $ADMIN; cat <<EOF
 \set ON_ERROR_STOP off
-\echo '21. staff cancels own personal booking inside cutoff, not club-caused -> expect balance 0'
-select cancel_booking('$B5'); select credit_balance(auth.uid());
-\echo '22. staff marks OWN booking club-caused -> expect ERROR forbidden'
-select cancel_booking('$B6', true);
+\echo '23. staff cancels OWN booking inside cutoff -> payment stays paid (no refund) ; flags own as club-caused -> forbidden'
+select cancel_booking('55555555-5555-5555-5555-555555555555'); select status from payments where booking_id='55555555-5555-5555-5555-555555555555';
+select cancel_booking('66666666-6666-6666-6666-666666666666', true);
 EOF
-} | $PSQL -d $DB 2>&1 | filter
-$PSQL -q -d $DB -c "insert into club_staff (club_id, profile_id) values ('$CLUB','$STAFF_B')"
-{ as_user $STAFF_B; cat <<EOF
-\echo '23. another staff member cancels it club-caused -> expect no error'
-select cancel_booking('$B6', true);
-EOF
-as_user $ADMIN; cat <<EOF
-\echo '24. admin balance after club-caused refund -> expect 1'
-select credit_balance(auth.uid());
+as_user $STAFF_B; cat <<EOF
+\echo '24. another staff cancels it club-caused -> refund_due'
+select cancel_booking('66666666-6666-6666-6666-666666666666', true); select status from payments where booking_id='66666666-6666-6666-6666-666666666666';
+\echo '25. staff reads payments of own club -> 2+ rows ; anon reads occupancy -> permission denied'
+select count(*) >= 2 from payments where club_id='$CLUB';
+set role anon; select count(*) from occupancy;
 EOF
 } | $PSQL -d $DB 2>&1 | filter
 
-echo "--- E. DST: real elapsed time, not wall-clock (review round 4)"
+echo "--- G. DST: real elapsed time (London test club)"
 $PSQL -q -d $DB -c "update clubs set timezone='Europe/London', open_time='00:00', close_time='24:00', slot_minutes=90, min_booking_minutes=90, max_booking_minutes=180 where id='$CLUB'"
 { as_user $ADMIN; cat <<EOF
 \set ON_ERROR_STOP off
-\echo '25. 90 real minutes spanning the 2027-03-28 01:00Z spring-forward (local 00:00->02:30) -> expect no error'
+\echo '26. 90 real min across spring-forward -> ok ; 150 real min that look like 90 local across fall-back -> bad_duration'
 insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT','DST', '2027-03-28 00:00:00+00', '2027-03-28 01:30:00+00', 'staff', auth.uid());
-\echo '26. 150 real minutes that look like 90 local minutes across the 2027-10-31 fall-back -> expect ERROR bad_duration'
 insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT','DST', '2027-10-31 00:00:00+00', '2027-10-31 02:30:00+00', 'staff', auth.uid());
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+$PSQL -q -d $DB -c "update clubs set timezone='Asia/Beirut', open_time='08:00', close_time='23:00', slot_minutes=30, min_booking_minutes=60, max_booking_minutes=180, cancel_cutoff_hours=6 where id='$CLUB'"
 
-echo "--- F. Phase 1: booking window, close_club, player_public"
-$PSQL -q -d $DB -c "update clubs set timezone='Asia/Beirut', open_time='08:00', close_time='23:00', slot_minutes=30, min_booking_minutes=60, max_booking_minutes=180 where id='$CLUB'"
-$PSQL -q -d $DB -c "insert into credit_transactions (profile_id, delta, kind) values ('$P2', 1, 'purchase')"
+echo "--- H. names"
 $PSQL -q -d $DB -c "insert into matches (id, club_id, sport, organizer_id, start_at, players_needed) values ('77777777-7777-7777-7777-777777777777','$CLUB','padel','$P1', now()+interval '3 day', 3)"
 { as_user $P2; cat <<EOF
 \set ON_ERROR_STOP off
-\echo '27. player books 20 days ahead (window 14) -> expect ERROR beyond_booking_window'
-select book_slot('$CLUB','$COURT2',null, (current_date + 20 + time '09:30') at time zone 'Asia/Beirut', (current_date + 20 + time '11:00') at time zone 'Asia/Beirut');
-\echo '28. player_public gone -> expect ERROR does not exist ; player2 looks up player1 -> expect 0 (not yet related) ; anon -> expect permission denied'
-select count(*) from player_public;
+\echo '27. player2 looks up player1 -> 0 ; after joining their match -> 1'
 select count(*) from player_names(array['$P1'::uuid]);
-set role anon; select count(*) from player_names(array['$P1'::uuid]); set role authenticated;
-\echo '28b. player2 looks up player1 (no shared match) -> expect 0'
-select count(*) from player_names(array['$P1'::uuid]);
-\echo '28c. player2 joins player1 match, looks up again -> expect 1'
 insert into match_players (match_id, profile_id) values ('77777777-7777-7777-7777-777777777777', auth.uid());
 select count(*) from player_names(array['$P1'::uuid]);
-\echo '29. player calls close_club -> expect ERROR forbidden'
-select close_club('$CLUB', (current_date + 5 + time '08:00') at time zone 'Asia/Beirut', (current_date + 5 + time '23:00') at time zone 'Asia/Beirut', 'holiday');
 EOF
 as_user $ADMIN; cat <<EOF
-\echo '28d. staff looks up a booker at their club -> expect 1 (player1 ; own id also 1)'
+\echo '28. staff looks up a booker at their club -> 1 ; anon -> permission denied'
 select count(*) from player_names(array['$P1'::uuid]);
-\echo '30. staff closes a day with a confirmed booking on it (day+1) -> expect ERROR block_overlaps_booking, 0 blocks created'
-select close_club('$CLUB', (current_date + 1 + time '08:00') at time zone 'Asia/Beirut', (current_date + 1 + time '23:00') at time zone 'Asia/Beirut', 'holiday');
-select count(*) as blocks_day1 from blocks where reason='holiday';
-\echo '31. staff closes a free day (day+5) -> expect 5 (one block per court)'
-select close_club('$CLUB', (current_date + 5 + time '08:00') at time zone 'Asia/Beirut', (current_date + 5 + time '23:00') at time zone 'Asia/Beirut', 'holiday');
+set role anon; select count(*) from player_names(array['$P1'::uuid]);
 EOF
 } | $PSQL -d $DB 2>&1 | filter

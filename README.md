@@ -10,6 +10,8 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | Path | What |
 | --- | --- |
 | `supabase/migrations/0001_init.sql` | Full schema: tables, enums, double-booking guards, `book_slot` / `cancel_booking`, RLS |
+| `supabase/migrations/0012_payments.sql` | Payments model: `payments` table, `hold_slot` (pending hold, frozen price), `confirm_payment` (service role, idempotent), `release_hold`, `quote_price`, refund rules in `cancel_booking` |
+| `supabase/migrations/0011_booking_status_values.sql` | Adds `pending` / `expired` booking states (separate file: enum values can't be used in the same transaction) |
 | `supabase/migrations/0010_player_names_scope.sql` | `player_names` returns only self, bookers at the caller's club (staff), or match co-participants |
 | `supabase/migrations/0009_player_names_fn.sql` | `player_names(ids)` lookup replaces the `player_public` view (no directory listing) |
 | `supabase/migrations/0008_flexible_durations.sql` | 30-min grid; `min_booking_minutes` / `max_booking_minutes` per club for players; prices per hour |
@@ -24,13 +26,17 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | `src/lib/supabase/` | Browser and server Supabase clients |
 | `src/app/` | Pages: `/` (clubs), `/login` (email link), `/auth/callback`, `/auth/signout` |
 
+## Payment model (Phase 2+)
+
+Player pays court price + `clubs.service_fee_usd` in the app. `hold_slot()` creates a `pending` booking (occupies the slot like a confirmed one) and a `payments` row with the price frozen; the hold expires after `clubs.hold_minutes`. Stale holds are expired inside the next `hold_slot()` on the same court (serialized by the court row lock). The browser never confirms a payment: `/api/pay/simulate` (server) verifies the caller owns the payment, then calls `confirm_payment()` with the **service role** key (`SUPABASE_SERVICE_ROLE_KEY`, server-only env var). `confirm_payment` is idempotent and marks a late payment `refund_due` instead of confirming an expired hold. Refund rules: full refund before the club cutoff or when staff flag club-caused; otherwise none. A real provider (Whish Pay / Areeba) replaces the simulate route with a redirect + server verification.
+
 ## Booking safety (do not weaken)
 
 - `bookings.no_double_booking_court` / `_coach`: GiST exclusion on `(court_id, period)` for confirmed rows.
 - `blocks.no_overlapping_blocks`: same on blocks.
 - Triggers `bookings_block_check` / `blocks_booking_check`: cross-table overlap check, serialized by `select … from courts for update`.
 - `bookings_slot_validation` trigger: inside opening hours, grid-aligned start, duration k × slot_minutes — for any source, insert or move.
-- `book_slot()`: players book between the club's min and max minutes in grid steps, one credit per booking; locks the player's `profiles` row, then credit debit + booking insert in one transaction; a rejected booking never costs a credit.
+- `hold_slot()`: validates club/court/duration/window, locks the court row, expires stale holds, inserts the pending booking + payment; exclusion constraint covers `confirmed` and `pending`.
 - `(court_id, club_id)` composite FKs on bookings, blocks, price_rules: a court can only be used under its own club.
 - Staff never UPDATE bookings directly: `move_booking()`, `cancel_booking()`, `mark_no_show()`.
 - All RPCs: EXECUTE revoked from PUBLIC/anon, granted to `authenticated`. New functions must repeat this (Supabase default privileges grant anon).
@@ -45,7 +51,7 @@ Run `supabase/tests/run.sh` against any local Postgres (needs `psql`) after touc
 1. **Supabase → SQL Editor → New query.** Paste each file in `supabase/migrations/` in order, Run each. Expect "Success. No rows returned".
 2. Same for `supabase/seed.sql`.
 3. **Supabase → Authentication → URL Configuration.** Site URL = your Vercel URL. Add `https://<vercel-url>/auth/callback` and `http://localhost:3000/auth/callback` to Redirect URLs.
-4. **Vercel → New Project → import this repo.** Environment variables: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (Supabase → Project Settings → API). Deploy.
+4. **Vercel → New Project → import this repo.** Environment variables: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (publishable key) and `SUPABASE_SERVICE_ROLE_KEY` (the *secret* key; server-only, never `NEXT_PUBLIC_`). Deploy.
 5. Open the URL on your phone → Sign in → email link → you should see "Batroun Padel & Tennis Club" with 5 courts.
 6. Make yourself admin: SQL Editor →
    `update profiles set roles = '{player,admin}' where id = (select id from auth.users where email = 'you@example.com');`

@@ -47,7 +47,7 @@ export default function DayCalendar({ club, courts, bookings: initialBookings, b
     const { dayStart, dayEnd } = dayBounds(date, club.timezone);
     const [{ data: b }, { data: k }] = await Promise.all([
       supabase.from("bookings").select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id")
-        .eq("club_id", club.id).eq("status", "confirmed").not("court_id", "is", null).lt("start_at", dayEnd).gt("end_at", dayStart).order("start_at"),
+        .eq("club_id", club.id).in("status", ["confirmed", "pending"]).not("court_id", "is", null).lt("start_at", dayEnd).gt("end_at", dayStart).order("start_at"),
       supabase.from("blocks").select("id, court_id, start_at, end_at, reason").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart),
     ]);
     const ids = [...new Set((b ?? []).map((x) => x.player_id).filter(Boolean))] as string[];
@@ -168,11 +168,12 @@ export default function DayCalendar({ club, courts, bookings: initialBookings, b
                   {bookings.filter((b) => b.court_id === c.id).map((b) => {
                     const p = place(b.start_at, b.end_at);
                     const app = b.source === "app";
+                    const pending = b.status === "pending";
                     return (
                       <button key={b.id} onClick={() => setSheet({ kind: "booking", booking: b })}
-                        className={`absolute inset-x-1 overflow-hidden rounded-md border-l-4 px-2 py-1 text-left text-xs ${app ? "border-turf bg-turf-soft" : "border-sand bg-sand-soft"}`}
+                        className={`absolute inset-x-1 overflow-hidden rounded-md border-l-4 px-2 py-1 text-left text-xs ${pending ? "border-dashed border-turf bg-white" : app ? "border-turf bg-turf-soft" : "border-sand bg-sand-soft"}`}
                         style={{ top: p.row * ROW_PX + 2, height: p.span * ROW_PX - 4 }}>
-                        <div className="truncate text-sm font-medium">{b.guest_name ?? b.player_name ?? "Player"}</div>
+                        <div className="truncate text-sm font-medium">{pending ? "Paying…" : b.guest_name ?? b.player_name ?? "Player"}</div>
                         <div className="text-muted">{hhmm(b.start_at, club.timezone)}–{hhmm(b.end_at, club.timezone)}</div>
                       </button>
                     );

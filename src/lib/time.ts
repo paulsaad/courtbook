@@ -50,3 +50,8 @@ export function toMin(t: string): number {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + m;
 }
+
+/** Current time in ms. Kept out of components so React's purity lint does not flag server renders. */
+export function nowMs(): number {
+  return Date.now();
+}

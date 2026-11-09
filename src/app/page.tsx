@@ -36,6 +36,8 @@ export default async function Home() {
 
       {error && <p className="text-sm text-red-600">Could not load clubs: {error.message}</p>}
 
+      {user && <Link href="/bookings" className="text-sm text-action underline">My bookings</Link>}
+
       {isStaff && (
         <Link href="/staff" className="rounded-2xl bg-action px-4 py-3.5 text-center font-medium text-white">
           Staff calendar
@@ -43,7 +45,7 @@ export default async function Home() {
       )}
 
       {clubs?.map((club) => (
-        <section key={club.id} className="rounded-2xl border border-grid bg-white p-5">
+        <Link key={club.id} href={`/club/${club.slug}`} className="block rounded-2xl border border-grid bg-white p-5 active:bg-paper">
           <h2 className="text-lg font-medium">{club.name}</h2>
           <p className="text-sm text-muted">
             {club.open_time.slice(0, 5)}–{club.close_time.slice(0, 5)} · {club.slot_minutes}-min steps
@@ -56,7 +58,8 @@ export default async function Home() {
               </li>
             ))}
           </ul>
-        </section>
+          <div className="mt-4 text-sm font-medium text-action">See availability ›</div>
+        </Link>
       ))}
     </main>
   );
