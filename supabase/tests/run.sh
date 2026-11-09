@@ -166,3 +166,24 @@ insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, c
 insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT','DST', '2027-10-31 00:00:00+00', '2027-10-31 02:30:00+00', 'staff', auth.uid());
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+
+echo "--- F. Phase 1: booking window, close_club, player_public"
+$PSQL -q -d $DB -c "update clubs set timezone='Asia/Beirut', open_time='08:00', close_time='23:00' where id='$CLUB'"
+$PSQL -q -d $DB -c "insert into credit_transactions (profile_id, delta, kind) values ('$P2', 1, 'purchase')"
+{ as_user $P2; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '27. player books 20 days ahead (window 14) -> expect ERROR beyond_booking_window'
+select book_slot('$CLUB','$COURT2',null, (current_date + 20 + time '09:30') at time zone 'Asia/Beirut', (current_date + 20 + time '11:00') at time zone 'Asia/Beirut');
+\echo '28. player reads player_public -> expect 4 rows, no phone column'
+select count(*) from player_public; select phone from player_public;
+\echo '29. player calls close_club -> expect ERROR forbidden'
+select close_club('$CLUB', (current_date + 5 + time '08:00') at time zone 'Asia/Beirut', (current_date + 5 + time '23:00') at time zone 'Asia/Beirut', 'holiday');
+EOF
+as_user $ADMIN; cat <<EOF
+\echo '30. staff closes a day with a confirmed booking on it (day+1) -> expect ERROR block_overlaps_booking, 0 blocks created'
+select close_club('$CLUB', (current_date + 1 + time '08:00') at time zone 'Asia/Beirut', (current_date + 1 + time '23:00') at time zone 'Asia/Beirut', 'holiday');
+select count(*) as blocks_day1 from blocks where reason='holiday';
+\echo '31. staff closes a free day (day+5) -> expect 5 (one block per court)'
+select close_club('$CLUB', (current_date + 5 + time '08:00') at time zone 'Asia/Beirut', (current_date + 5 + time '23:00') at time zone 'Asia/Beirut', 'holiday');
+EOF
+} | $PSQL -d $DB 2>&1 | filter
