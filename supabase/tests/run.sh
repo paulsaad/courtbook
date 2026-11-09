@@ -264,3 +264,24 @@ tab $COURT /tmp/cb_t1.log & sleep 0.3; tab $COURT2 /tmp/cb_t2.log & wait
 grep -q "deadlock\|hold_conflict" /tmp/cb_t1.log /tmp/cb_t2.log && { echo "FAIL"; cat /tmp/cb_t1.log /tmp/cb_t2.log; }
 $PSQL -At -d $DB -c "select 'live holds = '||count(*)||' (expect 1) ; pending payments = '||(select count(*) from payments where profile_id='$P2' and status='pending')||' (expect 1)' from bookings where player_id='$P2' and status='pending'"
 $PSQL -At -d $DB -c "select 'unique index present: '||(exists(select 1 from pg_indexes where indexname='one_pending_hold_per_player'))::text"
+
+echo "--- L. club admin RPCs"
+{ as_user $P2; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '30. player updates club settings -> forbidden ; adds staff -> forbidden'
+select update_club_settings('$CLUB','08:00','23:00',30,60,180,6,10,14,'');
+select add_club_staff('$CLUB','+9612');
+EOF
+as_user $ADMIN; cat <<EOF
+\echo '31. admin adds staff by email (none in test) -> user_not_found ; staff list works -> rows'
+select add_club_staff('$CLUB','nobody@example.com');
+select count(*) >= 1 from club_staff_list('$CLUB');
+EOF
+as_user $STAFF_B; cat <<EOF
+\echo '32. staff updates own club hours -> ok ; inserts price rules for both clubs they staff -> ok'
+select update_club_settings('$CLUB','07:00','23:00',30,60,180,6,10,14,'https://maps.example');
+insert into price_rules (club_id, court_id, weekday_mask, start_time, end_time, price_usd, label) values ('$CLUB', null, 127, '07:00','08:00', 15, 'early');
+insert into price_rules (club_id, court_id, weekday_mask, start_time, end_time, price_usd, label) values ((select id from clubs where slug='other'), null, 127, '07:00','08:00', 15, 'early');
+EOF
+} | $PSQL -d $DB 2>&1 | filter
+$PSQL -q -d $DB -c "delete from club_staff where club_id='$CLUB' and profile_id='$STAFF_B'" 2>/dev/null

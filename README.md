@@ -10,6 +10,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | Path | What |
 | --- | --- |
 | `supabase/migrations/0001_init.sql` | Full schema: tables, enums, double-booking guards, `book_slot` / `cancel_booking`, RLS |
+| `supabase/migrations/0016_club_admin.sql` | Club setup RPCs: `update_club_settings` (staff), `add_club_staff` / `remove_club_staff` / `club_staff_list` (admin) |
 | `supabase/migrations/0015_one_hold_per_player.sql` | `hold_slot` serialized per player (profile lock first); partial unique index: one pending hold per player |
 | `supabase/migrations/0014_lock_order.sql` | One lock order everywhere (court → booking → payment); `already_paid` only for identical retries |
 | `supabase/migrations/0013_hold_ux.sql` | Expired holds invisible + swept by any booking/block on the court; new hold replaces the player's previous one; `my_active_hold()` |
@@ -27,7 +28,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | `supabase/seed.sql` | Demo club (Batroun), 5 courts, peak/off-peak prices, credit packs. Idempotent |
 | `supabase/tests/run.sh` | Local Postgres test: concurrent double-booking, blocks, credits, RLS |
 | `src/lib/supabase/` | Browser and server Supabase clients |
-| `src/app/` | Pages: `/` (clubs), `/login` (email link), `/auth/callback`, `/auth/signout` |
+| `src/app/` | Pages: `/` clubs · `/club/[slug]` availability + hold · `/pay/[id]` · `/bookings` · `/profile` · `/staff/[slug]` calendar + `/settings` · `/admin` clubs, `/admin/clubs/[slug]`, `/admin/payments` · `/api/pay/simulate` |
 
 ## Payment model (Phase 2+)
 

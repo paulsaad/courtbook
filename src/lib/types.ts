@@ -43,6 +43,11 @@ export const ERRORS: Record<string, string> = {
   beyond_booking_window: "Too far ahead to book yet.",
   slot_in_past: "That time has passed.",
   no_price_rule: "No price set for this time. Ask the club.",
+  user_not_found: "No account with that email. They need to sign in once first.",
+  clubs_booking_minutes_check: "Min/max must be multiples of the grid step, and max ≥ min.",
+  clubs_slot_minutes_check: "Grid step must be 30, 60 or 90.",
+  clubs_booking_window_days_check: "Booking window must be 1–365 days.",
+  clubs_hold_minutes_check: "Hold must be 2–30 minutes.",
 };
 
 export function friendlyError(message: string | undefined): string {

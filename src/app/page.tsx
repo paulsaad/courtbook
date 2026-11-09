@@ -6,12 +6,14 @@ export default async function Home() {
   const { data: { user } } = await supabase.auth.getUser();
 
   let isStaff = false;
+  let isAdmin = false;
   if (user) {
     const [{ data: profile }, { count }] = await Promise.all([
       supabase.from("profiles").select("roles").eq("id", user.id).single(),
       supabase.from("club_staff").select("*", { count: "exact", head: true }).eq("profile_id", user.id),
     ]);
-    isStaff = (profile?.roles?.includes("admin") ?? false) || (count ?? 0) > 0;
+    isAdmin = profile?.roles?.includes("admin") ?? false;
+    isStaff = isAdmin || (count ?? 0) > 0;
   }
 
   const { data: clubs, error } = await supabase
@@ -48,6 +50,7 @@ export default async function Home() {
           Staff calendar
         </Link>
       )}
+      {isAdmin && <Link href="/admin" className="text-sm text-action underline">Admin: clubs & payments</Link>}
 
       {clubs?.map((club) => (
         <Link key={club.id} href={`/club/${club.slug}`} className="block rounded-2xl border border-grid bg-white p-5 active:bg-paper">
