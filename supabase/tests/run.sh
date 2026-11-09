@@ -104,6 +104,11 @@ select move_booking('$B','$COURT2', $S, $S + interval '4 hour');
 select move_booking('$B','$COURT2', $S + interval '15 min', $E + interval '15 min');
 \echo '17e. staff extends to 3h (2 slots) -> expect no error ; then back to 1 slot'
 select move_booking('$B','$COURT2', $S, $S + interval '3 hour'); select move_booking('$B','$COURT2', $S, $E);
+\echo '17g. staff insert 21:00-00:00 (past 23:00 close) -> expect ERROR outside_opening_hours'
+insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT','X', (current_date + 1 + time '21:00') at time zone 'Asia/Beirut', (current_date + 2 + time '00:00') at time zone 'Asia/Beirut', 'staff', auth.uid());
+\echo '17h. start 09:30:30 -> expect ERROR not_on_grid ; duration 90min+20s -> expect ERROR bad_duration'
+insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT','X', $S + interval '30 sec', $E + interval '30 sec', 'staff', auth.uid());
+insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT','X', (current_date + 2 + time '09:30') at time zone 'Asia/Beirut', (current_date + 2 + time '11:00:20') at time zone 'Asia/Beirut', 'staff', auth.uid());
 \echo '17f. staff insert walk-in at 21:30-23:00 (ends at close) -> expect no error'
 insert into bookings (club_id, court_id, guest_name, guest_phone, start_at, end_at, source, created_by) values ('$CLUB','$COURT','Walk-in','+961', (current_date + 1 + time '21:30') at time zone 'Asia/Beirut', (current_date + 1 + time '23:00') at time zone 'Asia/Beirut', 'staff', auth.uid());
 EOF
@@ -136,7 +141,17 @@ EOF
 \set ON_ERROR_STOP off
 \echo '21. staff cancels own personal booking inside cutoff, not club-caused -> expect balance 0'
 select cancel_booking('$B5'); select credit_balance(auth.uid());
-\echo '22. staff cancels own booking inside cutoff, club-caused -> expect balance 1'
-select cancel_booking('$B6', true); select credit_balance(auth.uid());
+\echo '22. staff marks OWN booking club-caused -> expect ERROR forbidden'
+select cancel_booking('$B6', true);
+EOF
+} | $PSQL -d $DB 2>&1 | filter
+$PSQL -q -d $DB -c "insert into club_staff (club_id, profile_id) values ('$CLUB','$STAFF_B')"
+{ as_user $STAFF_B; cat <<EOF
+\echo '23. another staff member cancels it club-caused -> expect no error'
+select cancel_booking('$B6', true);
+EOF
+as_user $ADMIN; cat <<EOF
+\echo '24. admin balance after club-caused refund -> expect 1'
+select credit_balance(auth.uid());
 EOF
 } | $PSQL -d $DB 2>&1 | filter

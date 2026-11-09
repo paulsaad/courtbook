@@ -10,6 +10,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | Path | What |
 | --- | --- |
 | `supabase/migrations/0001_init.sql` | Full schema: tables, enums, double-booking guards, `book_slot` / `cancel_booking`, RLS |
+| `supabase/migrations/0005_validation_edges.sql` | Exact-minute grid, no midnight exception (`close_time = 24:00` for midnight), staff cannot mark own booking club-caused |
 | `supabase/migrations/0004_slot_validation_trigger.sql` | Trigger: every court booking inside opening hours, on the grid, k × slot_minutes; players exactly 1 slot |
 | `supabase/migrations/0003_cancel_reason.sql` | `cancel_booking(id, club_caused)`: refund after cutoff only when staff mark it club-caused |
 | `supabase/migrations/0002_review_fixes.sql` | Phase 0 review fixes: per-player lock, (court, club) FKs, function privileges, `move_booking` / `mark_no_show`, slot validation |
@@ -28,7 +29,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 - `(court_id, club_id)` composite FKs on bookings, blocks, price_rules: a court can only be used under its own club.
 - Staff never UPDATE bookings directly: `move_booking()`, `cancel_booking()`, `mark_no_show()`.
 - All RPCs: EXECUTE revoked from PUBLIC/anon, granted to `authenticated`. New functions must repeat this (Supabase default privileges grant anon).
-- Cancellation policy: player may cancel any time; credit refunded only before the club cutoff (after it, the kept credit is the fee — MATCHi model). Staff cancellation refunds after the cutoff only when flagged club-caused (`cancel_booking(id, true)`).
+- Cancellation policy: player may cancel any time; credit refunded only before the club cutoff (after it, the kept credit is the fee — MATCHi model). Staff cancellation refunds after the cutoff only when flagged club-caused (`cancel_booking(id, true)`); nobody can flag their own booking.
 - Players never insert into `bookings` or `credit_transactions` directly (no RLS policy for it); they call the functions.
 - `occupancy` view exposes slot times without names/phones; the grid reads it.
 
