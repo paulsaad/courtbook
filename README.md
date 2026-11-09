@@ -10,6 +10,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | Path | What |
 | --- | --- |
 | `supabase/migrations/0001_init.sql` | Full schema: tables, enums, double-booking guards, `book_slot` / `cancel_booking`, RLS |
+| `supabase/migrations/0004_slot_validation_trigger.sql` | Trigger: every court booking inside opening hours, on the grid, k × slot_minutes; players exactly 1 slot |
 | `supabase/migrations/0003_cancel_reason.sql` | `cancel_booking(id, club_caused)`: refund after cutoff only when staff mark it club-caused |
 | `supabase/migrations/0002_review_fixes.sql` | Phase 0 review fixes: per-player lock, (court, club) FKs, function privileges, `move_booking` / `mark_no_show`, slot validation |
 | `supabase/seed.sql` | Demo club (Batroun), 5 courts, peak/off-peak prices, credit packs. Idempotent |
@@ -22,7 +23,8 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 - `bookings.no_double_booking_court` / `_coach`: GiST exclusion on `(court_id, period)` for confirmed rows.
 - `blocks.no_overlapping_blocks`: same on blocks.
 - Triggers `bookings_block_check` / `blocks_booking_check`: cross-table overlap check, serialized by `select … from courts for update`.
-- `book_slot()`: locks the player's `profiles` row, validates club/court/duration/hours/grid, then credit debit + booking insert in one transaction; a rejected booking never costs a credit.
+- `bookings_slot_validation` trigger: inside opening hours, grid-aligned start, duration k × slot_minutes — for any source, insert or move.
+- `book_slot()`: players get exactly one slot; locks the player's `profiles` row, then credit debit + booking insert in one transaction; a rejected booking never costs a credit.
 - `(court_id, club_id)` composite FKs on bookings, blocks, price_rules: a court can only be used under its own club.
 - Staff never UPDATE bookings directly: `move_booking()`, `cancel_booking()`, `mark_no_show()`.
 - All RPCs: EXECUTE revoked from PUBLIC/anon, granted to `authenticated`. New functions must repeat this (Supabase default privileges grant anon).

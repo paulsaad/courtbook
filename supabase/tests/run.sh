@@ -84,7 +84,7 @@ insert into credit_transactions (profile_id, delta, kind) values (auth.uid(), 10
 select credit_balance('$P1');
 EOF
 as_user $STAFF_B; cat <<EOF
-\echo '14. staff of club B inserts a booking on club A court with club_id=B -> expect ERROR foreign key'
+\echo '14. staff of club B inserts a booking on club A court with club_id=B -> expect ERROR court_not_found (trigger; FK is the backstop)'
 insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB_B','$COURT2','Walk-in', $S, $E, 'staff', auth.uid());
 \echo '15. staff of club B updates club A booking directly -> expect UPDATE 0 (no policy)'
 update bookings set status='cancelled' where id='$B';
@@ -96,6 +96,16 @@ as_user $ADMIN; cat <<EOF
 select move_booking('$B','$COURT2', $S, $E);
 \echo '18. admin direct update -> expect UPDATE 0 (policy removed for everyone)'
 update bookings set status='cancelled' where id='$B';
+\echo '17b. move to 02:00 (closed) -> expect ERROR outside_opening_hours'
+select move_booking('$B','$COURT2', (current_date + 1 + time '02:00') at time zone 'Asia/Beirut', (current_date + 1 + time '03:30') at time zone 'Asia/Beirut');
+\echo '17c. move to 4h (not a multiple of 90) -> expect ERROR bad_duration'
+select move_booking('$B','$COURT2', $S, $S + interval '4 hour');
+\echo '17d. move off-grid 09:45 -> expect ERROR not_on_grid'
+select move_booking('$B','$COURT2', $S + interval '15 min', $E + interval '15 min');
+\echo '17e. staff extends to 3h (2 slots) -> expect no error ; then back to 1 slot'
+select move_booking('$B','$COURT2', $S, $S + interval '3 hour'); select move_booking('$B','$COURT2', $S, $E);
+\echo '17f. staff insert walk-in at 21:30-23:00 (ends at close) -> expect no error'
+insert into bookings (club_id, court_id, guest_name, guest_phone, start_at, end_at, source, created_by) values ('$CLUB','$COURT','Walk-in','+961', (current_date + 1 + time '21:30') at time zone 'Asia/Beirut', (current_date + 1 + time '23:00') at time zone 'Asia/Beirut', 'staff', auth.uid());
 EOF
 as_user $P2; cat <<EOF
 \echo '18b. player passes club_caused=true -> expect ERROR forbidden'
@@ -110,16 +120,17 @@ EOF
 } | $PSQL -d $DB 2>&1 | filter
 
 echo "--- D. cancellation reason vs role (review round 2, #2)"
-# Admin (staff) holds two personal app bookings starting in 2h (inside the 12h cutoff). Inserted directly: off-grid is fine here.
+# Admin (staff) holds two personal app bookings tomorrow 09:30; cutoff raised to 48h so they are inside it.
 B5=55555555-5555-5555-5555-555555555555; B6=66666666-6666-6666-6666-666666666666
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 <<EOF
+update clubs set cancel_cutoff_hours = 48 where id = '$CLUB';
 insert into credit_transactions (profile_id, delta, kind) values ('$ADMIN', 2, 'purchase');
 with tx as (insert into credit_transactions (profile_id, delta, kind, created_by) values ('$ADMIN',-1,'booking','$ADMIN') returning id)
 insert into bookings (id, club_id, court_id, player_id, start_at, end_at, source, credit_tx_id, created_by)
-select '$B5','$CLUB','$COURT','$ADMIN', now() + interval '2 hour', now() + interval '3 hour 30 min', 'app', tx.id, '$ADMIN' from tx;
+select '$B5','$CLUB',(select id from courts where name='Padel 3'),'$ADMIN', $S, $E, 'app', tx.id, '$ADMIN' from tx;
 with tx as (insert into credit_transactions (profile_id, delta, kind, created_by) values ('$ADMIN',-1,'booking','$ADMIN') returning id)
 insert into bookings (id, club_id, court_id, player_id, start_at, end_at, source, credit_tx_id, created_by)
-select '$B6','$CLUB','$COURT2','$ADMIN', now() + interval '2 hour', now() + interval '3 hour 30 min', 'app', tx.id, '$ADMIN' from tx;
+select '$B6','$CLUB',(select id from courts where name='Tennis 1'),'$ADMIN', $S, $E, 'app', tx.id, '$ADMIN' from tx;
 EOF
 { as_user $ADMIN; cat <<EOF
 \set ON_ERROR_STOP off
