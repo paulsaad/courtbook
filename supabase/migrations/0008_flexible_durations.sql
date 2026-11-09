@@ -8,6 +8,9 @@ alter table clubs add constraint clubs_slot_minutes_check check (slot_minutes in
 alter table clubs alter column slot_minutes set default 30;
 alter table clubs add column min_booking_minutes int not null default 60;
 alter table clubs add column max_booking_minutes int not null default 180;
+-- existing clubs: make the new columns consistent with their current grid before adding the rule
+update clubs set min_booking_minutes = slot_minutes, max_booking_minutes = slot_minutes * 2
+where min_booking_minutes % slot_minutes <> 0 or max_booking_minutes % slot_minutes <> 0;
 alter table clubs add constraint clubs_booking_minutes_check check (
   min_booking_minutes > 0 and max_booking_minutes >= min_booking_minutes
   and min_booking_minutes % slot_minutes = 0 and max_booking_minutes % slot_minutes = 0
