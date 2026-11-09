@@ -36,7 +36,12 @@ export default async function Home() {
 
       {error && <p className="text-sm text-red-600">Could not load clubs: {error.message}</p>}
 
-      {user && <Link href="/bookings" className="text-sm text-action underline">My bookings</Link>}
+      {user && (
+        <div className="flex gap-4 text-sm">
+          <Link href="/bookings" className="text-action underline">My bookings</Link>
+          <Link href="/profile" className="text-action underline">Profile</Link>
+        </div>
+      )}
 
       {isStaff && (
         <Link href="/staff" className="rounded-2xl bg-action px-4 py-3.5 text-center font-medium text-white">

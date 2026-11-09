@@ -17,6 +17,8 @@ export default async function ClubPage({
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?next=/club/${slug}`);
+  const { data: me } = await supabase.from("profiles").select("name").eq("id", user.id).single();
+  if (!me?.name) redirect(`/profile?next=/club/${slug}`);
 
   const { data: club } = await supabase
     .from("clubs")
