@@ -1,9 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
+  // Pages read the auth cookie on every request; keep the classic dynamic-rendering model.
+  cacheComponents: false,
   turbopack: {
     rules: {
       "*.css": {
