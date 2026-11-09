@@ -7,6 +7,7 @@ import "server-only";
  * with the service role. Swapping simulated → Whish/Areeba touches only this folder.
  */
 export type StartPaymentInput = {
+  /** Also the gateway idempotency key: a provider must never create two sessions for one paymentId. */
   paymentId: string;
   totalUsd: number;
   currency: "USD" | "LBP";

@@ -323,3 +323,10 @@ as_user $STAFF_B; cat <<EOF
 insert into club_payouts (club_id, amount_usd, created_by) values ('$CLUB', 5, auth.uid());
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+
+echo "--- O. concurrency: overlapping price rules (both see none) -> exactly one succeeds ; session claim -> one true"
+rule() { { as_user $ADMIN; echo "begin; insert into price_rules (club_id, court_id, weekday_mask, start_time, end_time, price_usd, label) values ('$CLUB','$COURT2', 8, '20:00','21:00', 99, 'race-$1'); select pg_sleep(1); commit;"; } | $PSQL -d $DB > /tmp/cb_r$1.log 2>&1; }
+rule 1 & sleep 0.3; rule 2 & wait
+$PSQL -At -d $DB -c "select 'race rules committed = '||count(*)||' (expect 1)' from price_rules where label like 'race-%'"
+BQ=$({ as_user $P1; echo "select booking_id from hold_slot('$CLUB','$COURT3', (current_date + 8 + time '09:30') at time zone 'Asia/Beirut', (current_date + 8 + time '11:00') at time zone 'Asia/Beirut');"; } | $PSQL -At -d $DB | tail -1); PQ=$(pay_of $BQ)
+{ as_service; echo "select claim_payment_session('$PQ'); select claim_payment_session('$PQ'); select release_payment_session_claim('$PQ'); select claim_payment_session('$PQ');"; } | $PSQL -At -d $DB 2>&1 | grep -E "^(t|f)$" | tr '\n' ' '; echo "(expect t f t)"
