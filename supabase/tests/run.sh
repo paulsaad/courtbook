@@ -171,18 +171,26 @@ EOF
 echo "--- F. Phase 1: booking window, close_club, player_public"
 $PSQL -q -d $DB -c "update clubs set timezone='Asia/Beirut', open_time='08:00', close_time='23:00', slot_minutes=30, min_booking_minutes=60, max_booking_minutes=180 where id='$CLUB'"
 $PSQL -q -d $DB -c "insert into credit_transactions (profile_id, delta, kind) values ('$P2', 1, 'purchase')"
+$PSQL -q -d $DB -c "insert into matches (id, club_id, sport, organizer_id, start_at, players_needed) values ('77777777-7777-7777-7777-777777777777','$CLUB','padel','$P1', now()+interval '3 day', 3)"
 { as_user $P2; cat <<EOF
 \set ON_ERROR_STOP off
 \echo '27. player books 20 days ahead (window 14) -> expect ERROR beyond_booking_window'
 select book_slot('$CLUB','$COURT2',null, (current_date + 20 + time '09:30') at time zone 'Asia/Beirut', (current_date + 20 + time '11:00') at time zone 'Asia/Beirut');
-\echo '28. player_public gone -> expect ERROR does not exist ; player_names by id -> expect 1 row ; anon -> expect permission denied'
+\echo '28. player_public gone -> expect ERROR does not exist ; player2 looks up player1 -> expect 0 (not yet related) ; anon -> expect permission denied'
 select count(*) from player_public;
 select count(*) from player_names(array['$P1'::uuid]);
 set role anon; select count(*) from player_names(array['$P1'::uuid]); set role authenticated;
+\echo '28b. player2 looks up player1 (no shared match) -> expect 0'
+select count(*) from player_names(array['$P1'::uuid]);
+\echo '28c. player2 joins player1 match, looks up again -> expect 1'
+insert into match_players (match_id, profile_id) values ('77777777-7777-7777-7777-777777777777', auth.uid());
+select count(*) from player_names(array['$P1'::uuid]);
 \echo '29. player calls close_club -> expect ERROR forbidden'
 select close_club('$CLUB', (current_date + 5 + time '08:00') at time zone 'Asia/Beirut', (current_date + 5 + time '23:00') at time zone 'Asia/Beirut', 'holiday');
 EOF
 as_user $ADMIN; cat <<EOF
+\echo '28d. staff looks up a booker at their club -> expect 1 (player1 ; own id also 1)'
+select count(*) from player_names(array['$P1'::uuid]);
 \echo '30. staff closes a day with a confirmed booking on it (day+1) -> expect ERROR block_overlaps_booking, 0 blocks created'
 select close_club('$CLUB', (current_date + 1 + time '08:00') at time zone 'Asia/Beirut', (current_date + 1 + time '23:00') at time zone 'Asia/Beirut', 'holiday');
 select count(*) as blocks_day1 from blocks where reason='holiday';

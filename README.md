@@ -10,6 +10,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | Path | What |
 | --- | --- |
 | `supabase/migrations/0001_init.sql` | Full schema: tables, enums, double-booking guards, `book_slot` / `cancel_booking`, RLS |
+| `supabase/migrations/0010_player_names_scope.sql` | `player_names` returns only self, bookers at the caller's club (staff), or match co-participants |
 | `supabase/migrations/0009_player_names_fn.sql` | `player_names(ids)` lookup replaces the `player_public` view (no directory listing) |
 | `supabase/migrations/0008_flexible_durations.sql` | 30-min grid; `min_booking_minutes` / `max_booking_minutes` per club for players; prices per hour |
 | `supabase/migrations/0007_phase1_schema.sql` | `clubs.booking_window_days` (default 14), `close_club()` whole-club closure, `player_public` view (replaced in 0009) |
