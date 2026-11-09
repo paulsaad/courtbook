@@ -16,7 +16,7 @@ export default async function MyBookings() {
 
   const { data } = await supabase
     .from("bookings")
-    .select("id, status, start_at, end_at, price_usd, fee_usd, clubs(name, slug, timezone), courts(name)")
+    .select("id, status, start_at, end_at, price_usd, fee_usd, clubs(name, slug, timezone), courts!bookings_court_id_fkey(name)")
     .eq("player_id", user.id)
     .in("status", ["confirmed", "cancelled", "no_show"])
     .order("start_at", { ascending: false })

@@ -14,7 +14,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
 
   const { data: b } = await supabase
     .from("bookings")
-    .select("id, status, start_at, end_at, price_usd, fee_usd, cancelled_at, clubs(name, slug, timezone, cancel_cutoff_hours, location_url), courts(name, sport)")
+    .select("id, status, start_at, end_at, price_usd, fee_usd, cancelled_at, clubs(name, slug, timezone, cancel_cutoff_hours, location_url), courts!bookings_court_id_fkey(name, sport)")
     .eq("id", id)
     .eq("player_id", user.id)
     .single();
