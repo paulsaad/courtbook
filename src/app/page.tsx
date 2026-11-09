@@ -5,6 +5,15 @@ export default async function Home() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
+  let isStaff = false;
+  if (user) {
+    const [{ data: profile }, { count }] = await Promise.all([
+      supabase.from("profiles").select("roles").eq("id", user.id).single(),
+      supabase.from("club_staff").select("*", { count: "exact", head: true }).eq("profile_id", user.id),
+    ]);
+    isStaff = (profile?.roles?.includes("admin") ?? false) || (count ?? 0) > 0;
+  }
+
   const { data: clubs, error } = await supabase
     .from("clubs")
     .select("id, name, slug, slot_minutes, open_time, close_time, courts(id, name, sport, surface, sort)")
@@ -26,6 +35,12 @@ export default async function Home() {
       </header>
 
       {error && <p className="text-sm text-red-600">Could not load clubs: {error.message}</p>}
+
+      {isStaff && (
+        <Link href="/staff" className="rounded-xl bg-black px-4 py-3 text-center font-medium text-white">
+          Staff calendar
+        </Link>
+      )}
 
       {clubs?.map((club) => (
         <section key={club.id} className="rounded-xl border p-4">
