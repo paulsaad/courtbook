@@ -10,6 +10,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | Path | What |
 | --- | --- |
 | `supabase/migrations/0001_init.sql` | Full schema: tables, enums, double-booking guards, `book_slot` / `cancel_booking`, RLS |
+| `supabase/migrations/0015_one_hold_per_player.sql` | `hold_slot` serialized per player (profile lock first); partial unique index: one pending hold per player |
 | `supabase/migrations/0014_lock_order.sql` | One lock order everywhere (court → booking → payment); `already_paid` only for identical retries |
 | `supabase/migrations/0013_hold_ux.sql` | Expired holds invisible + swept by any booking/block on the court; new hold replaces the player's previous one; `my_active_hold()` |
 | `supabase/migrations/0012_payments.sql` | Payments model: `payments` table, `hold_slot` (pending hold, frozen price), `confirm_payment` (service role, idempotent), `release_hold`, `quote_price`, refund rules in `cancel_booking` |
@@ -30,7 +31,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 
 ## Payment model (Phase 2+)
 
-Player pays court price + `clubs.service_fee_usd` in the app. `hold_slot()` creates a `pending` booking (occupies the slot like a confirmed one) and a `payments` row with the price frozen; the hold expires after `clubs.hold_minutes`. Stale holds are expired inside the next `hold_slot()` on the same court (serialized by the court row lock). The browser never confirms a payment: `/api/pay/simulate` (server) verifies the caller owns the payment, then calls `confirm_payment()` with the **service role** key (`SUPABASE_SERVICE_ROLE_KEY`, server-only env var). `confirm_payment` is idempotent and marks a late payment `refund_due` instead of confirming an expired hold. Refund rules: full refund before the club cutoff or when staff flag club-caused; otherwise none. A real provider (Whish Pay / Areeba) replaces the simulate route with a redirect + server verification.
+Player pays court price + `clubs.service_fee_usd` in the app. Lock order in every RPC: player → courts (id order) → booking → payment. `hold_slot()` creates a `pending` booking (occupies the slot like a confirmed one) and a `payments` row with the price frozen; the hold expires after `clubs.hold_minutes`. Stale holds are expired inside the next `hold_slot()` on the same court (serialized by the court row lock). The browser never confirms a payment: `/api/pay/simulate` (server) verifies the caller owns the payment, then calls `confirm_payment()` with the **service role** key (`SUPABASE_SERVICE_ROLE_KEY`, server-only env var). `confirm_payment` is idempotent and marks a late payment `refund_due` instead of confirming an expired hold. Refund rules: full refund before the club cutoff or when staff flag club-caused; otherwise none. A real provider (Whish Pay / Areeba) replaces the simulate route with a redirect + server verification.
 
 ## Booking safety (do not weaken)
 

@@ -255,3 +255,12 @@ select confirm_payment('$PI','SIM-I2',31.00);
 select confirm_payment('$PI','SIM-I1',30.00);
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+
+echo "--- K. same player, two tabs, two courts at once -> exactly one live hold (review Phase 2 round 2)"
+$PSQL -q -d $DB -c "update bookings set status='cancelled' where player_id='$P2' and status='pending'"
+S10="(current_date + 7 + time '09:30') at time zone 'Asia/Beirut'"; E10="(current_date + 7 + time '11:00') at time zone 'Asia/Beirut'"
+tab() { { as_user $P2; echo "begin; select booking_id from hold_slot('$CLUB','$1', $S10, $E10); select pg_sleep(1); commit;"; } | $PSQL -d $DB > $2 2>&1; }
+tab $COURT /tmp/cb_t1.log & sleep 0.3; tab $COURT2 /tmp/cb_t2.log & wait
+grep -q "deadlock\|hold_conflict" /tmp/cb_t1.log /tmp/cb_t2.log && { echo "FAIL"; cat /tmp/cb_t1.log /tmp/cb_t2.log; }
+$PSQL -At -d $DB -c "select 'live holds = '||count(*)||' (expect 1) ; pending payments = '||(select count(*) from payments where profile_id='$P2' and status='pending')||' (expect 1)' from bookings where player_id='$P2' and status='pending'"
+$PSQL -At -d $DB -c "select 'unique index present: '||(exists(select 1 from pg_indexes where indexname='one_pending_hold_per_player'))::text"
