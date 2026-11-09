@@ -34,8 +34,9 @@ export default function PayPanel(p: Props) {
   async function pay() {
     setBusy(true); setError(null);
     const res = await fetch("/api/pay/simulate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ paymentId: p.paymentId }) });
-    const json = (await res.json()) as { outcome?: string; error?: string };
+    const json = (await res.json()) as { outcome?: string; error?: string; redirect?: string };
     if (!res.ok) { setBusy(false); setError(json.error ?? "Payment failed."); return; }
+    if (json.redirect) { window.location.href = json.redirect; return; }
     if (json.outcome === "confirmed" || json.outcome === "already_paid") { router.replace(`/bookings/${p.bookingId}?new=1`); return; }
     setBusy(false);
     setError("The slot was released before the payment completed. You will be refunded.");

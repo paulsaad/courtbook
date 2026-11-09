@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getProvider } from "@/lib/payments";
 
 /**
- * Simulated payment provider (Milestone A). The browser only says "pay this payment id";
- * the server verifies the caller owns it, then confirms through the service role.
- * A real provider replaces this route with a redirect + a server-side verification/callback.
+ * Pay a pending payment through the configured provider.
+ * Simulated: start() returns immediately → the server confirms with the DB amount via the service role.
+ * Hosted providers: start() returns a redirect URL; confirmation then happens in the provider's
+ * callback/verify route, never here. The browser only ever sends the payment id.
  */
 export async function POST(request: Request) {
   const { paymentId } = (await request.json().catch(() => ({}))) as { paymentId?: string };
@@ -15,20 +17,34 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "not_authenticated" }, { status: 401 });
 
-  // RLS: the user can only see their own payments
   const { data: payment } = await supabase
     .from("payments")
-    .select("id, total_usd, status, provider")
+    .select("id, total_usd, status, provider, currency")
     .eq("id", paymentId)
     .eq("profile_id", user.id)
     .single();
   if (!payment) return NextResponse.json({ error: "not_found" }, { status: 404 });
-  if (payment.provider !== "simulated") return NextResponse.json({ error: "wrong_provider" }, { status: 400 });
 
+  const provider = getProvider();
+  if (payment.provider !== provider.name) return NextResponse.json({ error: "wrong_provider" }, { status: 400 });
+
+  const origin = new URL(request.url).origin;
+  const started = await provider.start({
+    paymentId: payment.id,
+    totalUsd: Number(payment.total_usd),
+    currency: "USD",
+    description: "CourtBook court booking",
+    returnUrl: `${origin}/pay/return?payment=${payment.id}`,
+    failUrl: `${origin}/pay/return?payment=${payment.id}&failed=1`,
+  });
+
+  if (started.kind === "redirect") return NextResponse.json({ redirect: started.url });
+
+  // immediate (simulated): confirm server-side with the amount recorded in the DB
   const admin = createAdminClient();
   const { data, error } = await admin.rpc("confirm_payment", {
     p_payment: payment.id,
-    p_provider_ref: `SIM-${payment.id.slice(0, 8)}`,
+    p_provider_ref: started.providerRef,
     p_total_usd: payment.total_usd,
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 409 });
