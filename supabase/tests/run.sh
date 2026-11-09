@@ -97,10 +97,35 @@ select move_booking('$B','$COURT2', $S, $E);
 \echo '18. admin direct update -> expect UPDATE 0 (policy removed for everyone)'
 update bookings set status='cancelled' where id='$B';
 EOF
+as_user $P2; cat <<EOF
+\echo '18b. player passes club_caused=true -> expect ERROR forbidden'
+select cancel_booking('$B', true);
+EOF
 as_user $P1; cat <<EOF
 \echo '19. player1 cancels own booking >12h ahead -> expect balance 1'
 select cancel_booking('$B'); select credit_balance(auth.uid());
 \echo '20. anon reads clubs -> expect 2 ; anon occupancy -> expect permission denied ; anon cancel -> expect permission denied'
 set role anon; select count(*) from clubs; select count(*) from occupancy; select cancel_booking('$B');
+EOF
+} | $PSQL -d $DB 2>&1 | filter
+
+echo "--- D. cancellation reason vs role (review round 2, #2)"
+# Admin (staff) holds two personal app bookings starting in 2h (inside the 12h cutoff). Inserted directly: off-grid is fine here.
+B5=55555555-5555-5555-5555-555555555555; B6=66666666-6666-6666-6666-666666666666
+$PSQL -q -d $DB -v ON_ERROR_STOP=1 <<EOF
+insert into credit_transactions (profile_id, delta, kind) values ('$ADMIN', 2, 'purchase');
+with tx as (insert into credit_transactions (profile_id, delta, kind, created_by) values ('$ADMIN',-1,'booking','$ADMIN') returning id)
+insert into bookings (id, club_id, court_id, player_id, start_at, end_at, source, credit_tx_id, created_by)
+select '$B5','$CLUB','$COURT','$ADMIN', now() + interval '2 hour', now() + interval '3 hour 30 min', 'app', tx.id, '$ADMIN' from tx;
+with tx as (insert into credit_transactions (profile_id, delta, kind, created_by) values ('$ADMIN',-1,'booking','$ADMIN') returning id)
+insert into bookings (id, club_id, court_id, player_id, start_at, end_at, source, credit_tx_id, created_by)
+select '$B6','$CLUB','$COURT2','$ADMIN', now() + interval '2 hour', now() + interval '3 hour 30 min', 'app', tx.id, '$ADMIN' from tx;
+EOF
+{ as_user $ADMIN; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '21. staff cancels own personal booking inside cutoff, not club-caused -> expect balance 0'
+select cancel_booking('$B5'); select credit_balance(auth.uid());
+\echo '22. staff cancels own booking inside cutoff, club-caused -> expect balance 1'
+select cancel_booking('$B6', true); select credit_balance(auth.uid());
 EOF
 } | $PSQL -d $DB 2>&1 | filter

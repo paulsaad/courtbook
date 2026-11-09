@@ -10,6 +10,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | Path | What |
 | --- | --- |
 | `supabase/migrations/0001_init.sql` | Full schema: tables, enums, double-booking guards, `book_slot` / `cancel_booking`, RLS |
+| `supabase/migrations/0003_cancel_reason.sql` | `cancel_booking(id, club_caused)`: refund after cutoff only when staff mark it club-caused |
 | `supabase/migrations/0002_review_fixes.sql` | Phase 0 review fixes: per-player lock, (court, club) FKs, function privileges, `move_booking` / `mark_no_show`, slot validation |
 | `supabase/seed.sql` | Demo club (Batroun), 5 courts, peak/off-peak prices, credit packs. Idempotent |
 | `supabase/tests/run.sh` | Local Postgres test: concurrent double-booking, blocks, credits, RLS |
@@ -25,7 +26,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 - `(court_id, club_id)` composite FKs on bookings, blocks, price_rules: a court can only be used under its own club.
 - Staff never UPDATE bookings directly: `move_booking()`, `cancel_booking()`, `mark_no_show()`.
 - All RPCs: EXECUTE revoked from PUBLIC/anon, granted to `authenticated`. New functions must repeat this (Supabase default privileges grant anon).
-- Cancellation policy: player may cancel any time; credit refunded only before the club cutoff (after it, the kept credit is the fee — MATCHi model). Staff cancellation always refunds.
+- Cancellation policy: player may cancel any time; credit refunded only before the club cutoff (after it, the kept credit is the fee — MATCHi model). Staff cancellation refunds after the cutoff only when flagged club-caused (`cancel_booking(id, true)`).
 - Players never insert into `bookings` or `credit_transactions` directly (no RLS policy for it); they call the functions.
 - `occupancy` view exposes slot times without names/phones; the grid reads it.
 
