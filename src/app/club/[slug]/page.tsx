@@ -29,10 +29,12 @@ export default async function ClubPage({
   const date = qDate && /^\d{4}-\d{2}-\d{2}$/.test(qDate) ? qDate : todayIn(club.timezone);
   const { dayStart, dayEnd } = dayBounds(date, club.timezone);
 
-  const [{ data: courts }, { data: occ }] = await Promise.all([
+  const [{ data: courts }, { data: occ }, { data: holdRows }] = await Promise.all([
     supabase.from("courts").select("id, name, sport, surface, sort, active").eq("club_id", club.id).eq("active", true).order("sort"),
     supabase.from("occupancy").select("id, court_id, start_at, end_at, status, mine, kind").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart),
+    supabase.rpc("my_active_hold"),
   ]);
+  const hold = ((holdRows ?? []) as { booking_id: string; court_name: string; start_at: string; end_at: string; hold_expires_at: string }[])[0] ?? null;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col">
@@ -40,7 +42,7 @@ export default async function ClubPage({
         <Link href="/" className="text-muted">‹ Clubs</Link>
         <Link href="/bookings" className="text-action">My bookings</Link>
       </div>
-      <PlayerGrid club={club} courts={(courts ?? []) as Court[]} occ={(occ ?? []) as Occ[]} date={date} key={date} />
+      <PlayerGrid club={club} courts={(courts ?? []) as Court[]} occ={(occ ?? []) as Occ[]} date={date} hold={hold} key={date} />
     </main>
   );
 }

@@ -10,6 +10,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | Path | What |
 | --- | --- |
 | `supabase/migrations/0001_init.sql` | Full schema: tables, enums, double-booking guards, `book_slot` / `cancel_booking`, RLS |
+| `supabase/migrations/0013_hold_ux.sql` | Expired holds invisible + swept by any booking/block on the court; new hold replaces the player's previous one; `my_active_hold()` |
 | `supabase/migrations/0012_payments.sql` | Payments model: `payments` table, `hold_slot` (pending hold, frozen price), `confirm_payment` (service role, idempotent), `release_hold`, `quote_price`, refund rules in `cancel_booking` |
 | `supabase/migrations/0011_booking_status_values.sql` | Adds `pending` / `expired` booking states (separate file: enum values can't be used in the same transaction) |
 | `supabase/migrations/0010_player_names_scope.sql` | `player_names` returns only self, bookers at the caller's club (staff), or match co-participants |

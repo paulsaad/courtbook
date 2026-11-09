@@ -5,13 +5,15 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
-import { clubLocalToUtc, shiftDate, slotTimes, todayIn, toMin } from "@/lib/time";
+import { clubLocalToUtc, hhmm, shiftDate, slotTimes, todayIn, toMin } from "@/lib/time";
 import { friendlyError, type Club, type Court } from "@/lib/types";
 
 export type Occ = { id: string | null; court_id: string; start_at: string; end_at: string; status: string; mine: boolean; kind: "booking" | "block" };
 type ClubX = Club & { booking_window_days: number; service_fee_usd: number; location_url: string | null; hold_minutes: number };
 
-export default function PlayerGrid({ club, courts, occ, date }: { club: ClubX; courts: Court[]; occ: Occ[]; date: string }) {
+type Hold = { booking_id: string; court_name: string; start_at: string; end_at: string; hold_expires_at: string } | null;
+
+export default function PlayerGrid({ club, courts, occ, date, hold }: { club: ClubX; courts: Court[]; occ: Occ[]; date: string; hold: Hold }) {
   const router = useRouter();
   const times = slotTimes(club.open_time, club.close_time, club.slot_minutes);
   const ROW_PX = club.slot_minutes <= 30 ? 34 : 52;
@@ -33,6 +35,10 @@ export default function PlayerGrid({ club, courts, occ, date }: { club: ClubX; c
     return occ.some((o) => o.court_id === courtId && new Date(o.start_at).getTime() < e && new Date(o.end_at).getTime() > s);
   }
   function isPast(t: string) { return slotStartMs(t) <= nowMs; }
+  function myHoldAt(courtId: string, t: string) {
+    const s = slotStartMs(t), e = s + club.slot_minutes * 60000;
+    return occ.find((o) => o.mine && o.status === "pending" && o.court_id === courtId && new Date(o.start_at).getTime() < e && new Date(o.end_at).getTime() > s) ?? null;
+  }
   /** how many consecutive free slots from t, capped by the club max */
   function freeRun(courtId: string, t: string) {
     const i = times.indexOf(t);
@@ -84,6 +90,13 @@ export default function PlayerGrid({ club, courts, occ, date }: { club: ClubX; c
         </div>
       </header>
 
+      {hold && (
+        <Link href={`/pay/${hold.booking_id}`} className="mx-4 mb-2 flex items-center justify-between rounded-xl bg-turf px-4 py-3 text-sm text-white">
+          <span>Slot on hold: {hold.court_name}, {hhmm(hold.start_at, club.timezone)}–{hhmm(hold.end_at, club.timezone)}</span>
+          <span className="font-medium">Continue to payment ›</span>
+        </Link>
+      )}
+
       <div className="flex-1 overflow-x-auto px-2 pb-28">
         <div className="flex min-w-max">
           <div className="relative w-12 shrink-0" style={{ height: times.length * ROW_PX, marginTop: 36 }}>
@@ -98,6 +111,14 @@ export default function PlayerGrid({ club, courts, occ, date }: { club: ClubX; c
                 {times.map((t, i) => {
                   const taken = isTaken(c.id, t);
                   const past = isPast(t);
+                  const mine = myHoldAt(c.id, t);
+                  if (mine) {
+                    return (
+                      <button key={t} onClick={() => router.push(`/pay/${mine.id}`)} className="absolute inset-x-0 border-t border-dashed border-turf bg-turf-soft text-xs font-medium text-turf" style={{ top: i * ROW_PX, height: ROW_PX }}>
+                        {i % labelEvery === 0 ? "Your hold · pay" : ""}
+                      </button>
+                    );
+                  }
                   const selected = pick?.courtId === c.id && toMin(t) >= toMin(pick.time) && toMin(t) < toMin(pick.time) + slots * club.slot_minutes;
                   const bookable = !taken && !past && freeRun(c.id, t) >= minSlots;
                   return (

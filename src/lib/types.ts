@@ -40,7 +40,6 @@ export const ERRORS: Record<string, string> = {
   forbidden: "You are not allowed to do that.",
   not_started: "The booking has not started yet.",
   not_confirmed: "This booking is no longer active.",
-  hold_already_active: "You already have a slot on hold. Finish or cancel that one first.",
   beyond_booking_window: "Too far ahead to book yet.",
   slot_in_past: "That time has passed.",
   no_price_rule: "No price set for this time. Ask the club.",

@@ -52,7 +52,7 @@ export default async function StaffClubPage({
       .from("bookings")
       .select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id")
       .eq("club_id", club.id)
-      .in("status", ["confirmed", "pending"])
+      .or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`)
       .not("court_id", "is", null)
       .lt("start_at", dayEnd)
       .gt("end_at", dayStart)

@@ -93,11 +93,13 @@ $PSQL -q -d $DB -c "update clubs set hold_minutes=10 where id='$CLUB'"
 echo "--- D. hold rules"
 { as_user $P2; cat <<EOF
 \set ON_ERROR_STOP off
-\echo '8. second live hold for the same player -> expect ERROR hold_already_active'
-select booking_id from hold_slot('$CLUB','$COURT2', $S, $E);
-\echo '9. release hold -> then holding another slot works'
+\echo '8. second hold for the same player replaces the first -> expect 1 live hold, on Padel 2'
+select booking_id is not null from hold_slot('$CLUB','$COURT2', $S, $E);
+select count(*) as live_holds, bool_and(court_id='$COURT2') as on_padel2 from bookings where player_id=auth.uid() and status='pending';
+\echo '9. release hold -> then holding another slot works ; my_active_hold shows it'
 select release_hold((select id from bookings where player_id=auth.uid() and status='pending'));
 select booking_id is not null from hold_slot('$CLUB','$COURT2', $S, $E);
+select court_name from my_active_hold();
 \echo '10. bad durations: 45 min -> bad_duration ; 30 min (<60 min minimum) -> bad_duration'
 select release_hold((select id from bookings where player_id=auth.uid() and status='pending'));
 select booking_id from hold_slot('$CLUB','$COURT3', $S, $S + interval '45 min');
@@ -143,6 +145,10 @@ select move_booking('$B','$COURT3', $S + interval '15 min', $E + interval '15 mi
 insert into bookings (club_id, court_id, guest_name, guest_phone, start_at, end_at, source, created_by) values ('$CLUB','$COURT','Walk-in','+961', (current_date + 1 + time '21:30') at time zone 'Asia/Beirut', (current_date + 1 + time '23:00') at time zone 'Asia/Beirut', 'staff', auth.uid());
 insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT2','X', (current_date + 1 + time '21:00') at time zone 'Asia/Beirut', (current_date + 2 + time '00:00') at time zone 'Asia/Beirut', 'staff', auth.uid());
 insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT2','X', $S + interval '30 sec', $E + interval '30 sec', 'staff', auth.uid());
+\echo '19b. stale hold (expired, unswept) on Padel 2 day+2 does not block a staff booking -> ok'
+insert into bookings (club_id, court_id, player_id, start_at, end_at, status, source, created_by, hold_expires_at, price_usd, fee_usd) values ('$CLUB','$COURT2','$P2', (current_date + 2 + time '12:30') at time zone 'Asia/Beirut', (current_date + 2 + time '14:00') at time zone 'Asia/Beirut', 'pending','app','$P2', now() - interval '1 min', 30, 1);
+insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT2','Walk-in', (current_date + 2 + time '12:30') at time zone 'Asia/Beirut', (current_date + 2 + time '14:00') at time zone 'Asia/Beirut', 'staff', auth.uid());
+select count(*) as staff_bookings_there from bookings where court_id='$COURT2' and status='confirmed' and guest_name='Walk-in' and start_at=(current_date + 2 + time '12:30') at time zone 'Asia/Beirut';
 \echo '20. close day+1 with bookings -> block_overlaps_booking ; close day+5 -> 5'
 select close_club('$CLUB', (current_date + 1 + time '08:00') at time zone 'Asia/Beirut', (current_date + 1 + time '23:00') at time zone 'Asia/Beirut', 'holiday');
 select close_club('$CLUB', (current_date + 5 + time '08:00') at time zone 'Asia/Beirut', (current_date + 5 + time '23:00') at time zone 'Asia/Beirut', 'holiday');

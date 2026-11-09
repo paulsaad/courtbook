@@ -47,7 +47,7 @@ export default function DayCalendar({ club, courts, bookings: initialBookings, b
     const { dayStart, dayEnd } = dayBounds(date, club.timezone);
     const [{ data: b }, { data: k }] = await Promise.all([
       supabase.from("bookings").select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id")
-        .eq("club_id", club.id).in("status", ["confirmed", "pending"]).not("court_id", "is", null).lt("start_at", dayEnd).gt("end_at", dayStart).order("start_at"),
+        .eq("club_id", club.id).or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`).not("court_id", "is", null).lt("start_at", dayEnd).gt("end_at", dayStart).order("start_at"),
       supabase.from("blocks").select("id, court_id, start_at, end_at, reason").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart),
     ]);
     const ids = [...new Set((b ?? []).map((x) => x.player_id).filter(Boolean))] as string[];
