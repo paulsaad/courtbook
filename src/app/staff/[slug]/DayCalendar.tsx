@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
-import { clubLocalToUtc, hhmm, shiftDate, slotTimes, todayIn, toMin } from "@/lib/time";
+import { clubLocalToUtc, dayBounds, hhmm, shiftDate, slotTimes, todayIn, toMin } from "@/lib/time";
 import { friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: "grid" | "list" };
@@ -44,8 +44,7 @@ export default function DayCalendar({ club, courts, bookings: initialBookings, b
   // Refetch only the day's rows from the browser: faster than re-rendering the page.
   const reload = useCallback(async () => {
     const supabase = createClient();
-    const dayStart = clubLocalToUtc(date, "00:00", club.timezone).toISOString();
-    const dayEnd = clubLocalToUtc(date, "23:59:59", club.timezone).toISOString();
+    const { dayStart, dayEnd } = dayBounds(date, club.timezone);
     const [{ data: b }, { data: k }] = await Promise.all([
       supabase.from("bookings").select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id")
         .eq("club_id", club.id).eq("status", "confirmed").not("court_id", "is", null).lt("start_at", dayEnd).gt("end_at", dayStart).order("start_at"),
@@ -298,8 +297,8 @@ function AddSheet({ club, court, time, times, busy, onSave }: {
 }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [slots, setSlots] = useState(Math.max(1, Math.round(club.min_booking_minutes / club.slot_minutes)));
   const remaining = times.length - times.indexOf(time);
+  const [slots, setSlots] = useState(Math.min(remaining, Math.max(1, Math.round(club.min_booking_minutes / club.slot_minutes))));
   const endTime = (n: number) => {
     const m = toMin(time) + n * club.slot_minutes;
     return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;

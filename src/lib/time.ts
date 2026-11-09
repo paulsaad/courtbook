@@ -1,9 +1,18 @@
 import { addMinutes, format, parseISO } from "date-fns";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 
-/** "2026-11-09" + "09:30" in a club's timezone → UTC Date */
+/** "2026-11-09" + "09:30" in a club's timezone → UTC Date. "24:00" means midnight at the end of that day. */
 export function clubLocalToUtc(date: string, time: string, tz: string): Date {
+  if (time.startsWith("24:")) return fromZonedTime(`${shiftDate(date, 1)}T00:00:00`, tz);
   return fromZonedTime(`${date}T${time.length === 5 ? time + ":00" : time}`, tz);
+}
+
+/** [start, end) of a local calendar day as UTC ISO strings; end is the next local midnight (DST-safe). */
+export function dayBounds(date: string, tz: string): { dayStart: string; dayEnd: string } {
+  return {
+    dayStart: fromZonedTime(`${date}T00:00:00`, tz).toISOString(),
+    dayEnd: fromZonedTime(`${shiftDate(date, 1)}T00:00:00`, tz).toISOString(),
+  };
 }
 
 /** UTC instant → "HH:mm" in the club's timezone */

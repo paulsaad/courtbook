@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { clubLocalToUtc, todayIn } from "@/lib/time";
+import { dayBounds, todayIn } from "@/lib/time";
 import type { Block, Booking, Club, Court } from "@/lib/types";
 import DayCalendar from "./DayCalendar";
 
@@ -44,8 +44,7 @@ export default async function StaffClubPage({
   }
 
   const date = qDate && /^\d{4}-\d{2}-\d{2}$/.test(qDate) ? qDate : todayIn(club.timezone);
-  const dayStart = clubLocalToUtc(date, "00:00", club.timezone).toISOString();
-  const dayEnd = clubLocalToUtc(date, "23:59:59", club.timezone).toISOString();
+  const { dayStart, dayEnd } = dayBounds(date, club.timezone);
 
   const [{ data: courts }, { data: bookings }, { data: blocks }] = await Promise.all([
     supabase.from("courts").select("id, name, sport, surface, sort, active").eq("club_id", club.id).eq("active", true).order("sort"),
