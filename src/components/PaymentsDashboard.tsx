@@ -8,14 +8,16 @@ import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/types";
 
 export type Summary = { club_id: string; club_name: string; bookings: number; gross: number; fees: number; owed_to_club: number; refunds_due: number; refunded: number };
-export type RefundRow = { payment_id: string; club_name: string; player_name: string | null; court_name: string | null; start_at: string; total_usd: number; note: string | null; since: string | null };
+export type Balance = { club_id: string; club_name: string; club_share: number; paid_out: number; outstanding: number };
+export type RefundRow = { payment_id: string; club_id: string; club_name: string; player_name: string | null; court_name: string | null; start_at: string; total_usd: number; note: string | null; since: string | null };
 export type PaymentRow = { payment_id: string; status: string; player_name: string | null; court_name: string | null; start_at: string; amount_usd: number; fee_usd: number; total_usd: number; paid_at: string | null; provider_ref: string | null };
 
 const usd = (n: number | string) => `$${Number(n).toFixed(2)}`;
 const tz = "Asia/Beirut";
 
-export default function PaymentsDashboard({ month, summary, refunds, rows, clubId, backHref, title, basePath }: {
+export default function PaymentsDashboard({ month, summary, refunds, rows, clubId, backHref, title, basePath, balances, isAdmin }: {
   month: string; summary: Summary[]; refunds: RefundRow[]; rows: PaymentRow[] | null; clubId: string | null; backHref: string; title: string; basePath: string;
+  balances: Balance[]; isAdmin: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -48,7 +50,7 @@ export default function PaymentsDashboard({ month, summary, refunds, rows, clubI
       <section className="rounded-2xl border border-grid bg-white p-4">
         <h2 className="mb-3 font-medium">Month summary</h2>
         <table className="w-full text-sm">
-          <thead className="text-left text-xs text-muted"><tr><th className="py-1">Club</th><th className="text-right">Paid bookings</th><th className="text-right">Collected</th><th className="text-right">CourtBook fees</th><th className="text-right">Owed to club</th></tr></thead>
+          <thead className="text-left text-xs text-muted"><tr><th className="py-1">Club</th><th className="text-right">Paid bookings</th><th className="text-right">Collected</th><th className="text-right">CourtBook fees</th><th className="text-right">Club share</th></tr></thead>
           <tbody>
             {summary.map((s) => (
               <tr key={s.club_id} className="border-t border-grid">
@@ -61,7 +63,23 @@ export default function PaymentsDashboard({ month, summary, refunds, rows, clubI
             )}
           </tbody>
         </table>
-        <p className="mt-2 text-xs text-muted">Counts payments with status paid. Refunded bookings are excluded. Payouts to clubs are manual in v0.1 (test mode: no real money).</p>
+        <p className="mt-2 text-xs text-muted">Payments with status paid in this month; refunded bookings excluded. Club share is before payouts — see balances below.</p>
+      </section>
+
+      <section className="rounded-2xl border border-grid bg-white p-4">
+        <h2 className="mb-2 font-medium">Club balances (all time)</h2>
+        <table className="w-full text-sm">
+          <thead className="text-left text-xs text-muted"><tr><th className="py-1">Club</th><th className="text-right">Club share</th><th className="text-right">Paid out</th><th className="text-right">Outstanding</th></tr></thead>
+          <tbody>
+            {balances.map((b) => (
+              <tr key={b.club_id} className="border-t border-grid">
+                <td className="py-2">{b.club_name}</td><td className="text-right">{usd(b.club_share)}</td><td className="text-right">{usd(b.paid_out)}</td>
+                <td className={`text-right font-medium ${Number(b.outstanding) > 0 ? "text-danger" : ""}`}>{usd(b.outstanding)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {isAdmin && clubId && <PayoutForm clubId={clubId} />}
       </section>
 
       <section className="rounded-2xl border border-grid bg-white p-4">
@@ -103,5 +121,34 @@ export default function PaymentsDashboard({ month, summary, refunds, rows, clubI
         </section>
       )}
     </main>
+  );
+}
+
+function PayoutForm({ clubId }: { clubId: string }) {
+  const router = useRouter();
+  const [amount, setAmount] = useState("");
+  const [method, setMethod] = useState("Whish");
+  const [reference, setReference] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error } = await supabase.from("club_payouts").insert({ club_id: clubId, amount_usd: Number(amount), method, reference: reference.trim() || null, created_by: user!.id });
+    setBusy(false);
+    if (error) { setError(friendlyError(error.message)); return; }
+    setAmount(""); setReference("");
+    router.refresh();
+  }
+  return (
+    <form onSubmit={save} className="mt-3 flex flex-wrap items-end gap-2 border-t border-grid pt-3 text-sm">
+      <label className="flex flex-col gap-1">Record payout ($)<input className="w-28 rounded-lg border border-grid px-3 py-2" inputMode="decimal" required value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
+      <label className="flex flex-col gap-1">Method<select className="rounded-lg border border-grid px-3 py-2" value={method} onChange={(e) => setMethod(e.target.value)}><option>Whish</option><option>Cash</option><option>Bank</option></select></label>
+      <label className="flex flex-1 flex-col gap-1">Reference<input className="rounded-lg border border-grid px-3 py-2" value={reference} onChange={(e) => setReference(e.target.value)} /></label>
+      <button disabled={busy} className="rounded-lg bg-action px-4 py-2 font-medium text-white disabled:opacity-50">Save</button>
+      {error && <p className="w-full text-danger">{error}</p>}
+    </form>
   );
 }

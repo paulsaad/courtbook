@@ -16,8 +16,14 @@ export async function GET(request: Request) {
   if (error) return new Response(error.message, { status: 400 });
 
   const cols = ["payment_id", "booking_id", "status", "provider", "provider_ref", "player_name", "court_name", "start_at", "end_at", "amount_usd", "fee_usd", "total_usd", "paid_at", "refunded_at", "note"];
-  const esc = (v: unknown) => { const s = v === null || v === undefined ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  const lines = [cols.join(","), ...((data ?? []) as Record<string, unknown>[]).map((r) => cols.map((c) => esc(r[c])).join(","))];
+  const numeric = new Set(["amount_usd", "fee_usd", "total_usd"]);
+  const esc = (v: unknown, col: string) => {
+    let s = v === null || v === undefined ? "" : String(v);
+    // spreadsheet formula injection: text that starts with = + - @ (after whitespace) gets a leading apostrophe
+    if (!numeric.has(col) && /^\s*[=+\-@]/.test(s)) s = "'" + s;
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [cols.join(","), ...((data ?? []) as Record<string, unknown>[]).map((r) => cols.map((c) => esc(r[c], c)).join(","))];
   return new Response(lines.join("\n"), {
     headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="payments-${month}.csv"` },
   });

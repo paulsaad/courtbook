@@ -304,3 +304,22 @@ select count(*) from payments where status='refunded';
 select count(*) > 0, bool_and(court_name is not null) from payments_list('$CLUB', current_date);
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+
+echo "--- N. Phase 3 review: price rule overlap, payouts, refunds club_id"
+{ as_user $ADMIN; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '36. overlapping club-wide rule (Sat 10:00-12:00 vs existing every-day 08:00-17:00) -> ERROR price_rule_overlap ; court-specific rule for same window -> ok'
+insert into price_rules (club_id, court_id, weekday_mask, start_time, end_time, price_usd) values ('$CLUB', null, 32, '10:00', '12:00', 25);
+insert into price_rules (club_id, court_id, weekday_mask, start_time, end_time, price_usd) values ('$CLUB', '$COURT', 32, '10:00', '12:00', 25);
+\echo '37. club_balances: club_share > 0, outstanding = share ; record payout 10 -> outstanding = share - 10'
+select club_share > 0, outstanding = club_share from club_balances() where club_id='$CLUB';
+insert into club_payouts (club_id, amount_usd, method, created_by) values ('$CLUB', 10, 'cash', auth.uid());
+select outstanding = club_share - 10 from club_balances() where club_id='$CLUB';
+\echo '38. refunds_due has club_id column'
+select count(*) >= 0 from refunds_due() where club_id is not null;
+EOF
+as_user $STAFF_B; cat <<EOF
+\echo '39. staff records payout -> RLS error'
+insert into club_payouts (club_id, amount_usd, created_by) values ('$CLUB', 5, auth.uid());
+EOF
+} | $PSQL -d $DB 2>&1 | filter

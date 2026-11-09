@@ -17,8 +17,8 @@ export type StartPaymentInput = {
 };
 
 export type StartPaymentResult =
-  | { kind: "redirect"; url: string }          // hosted payment page (Whish Collect, Areeba hosted checkout)
-  | { kind: "immediate"; providerRef: string }; // simulated: nothing to redirect to
+  | { kind: "redirect"; url: string; sessionRef: string } // hosted payment page; sessionRef identifies the gateway session for reuse
+  | { kind: "immediate"; providerRef: string }; // ONLY the simulated provider may return this
 
 export type VerifyResult =
   | { status: "paid"; providerRef: string; totalUsd: number }

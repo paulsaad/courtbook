@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import PaymentsDashboard, { type PaymentRow, type RefundRow, type Summary } from "@/components/PaymentsDashboard";
+import PaymentsDashboard, { type Balance, type PaymentRow, type RefundRow, type Summary } from "@/components/PaymentsDashboard";
 
 export default async function StaffPayments({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ month?: string }> }) {
   const { slug } = await params;
@@ -12,15 +12,16 @@ export default async function StaffPayments({ params, searchParams }: { params: 
   if (!club) notFound();
 
   const month = qMonth && /^\d{4}-\d{2}$/.test(qMonth) ? qMonth : new Date().toISOString().slice(0, 7);
-  const [{ data: summary }, { data: refunds }, { data: rows }] = await Promise.all([
+  const [{ data: summary }, { data: refunds }, { data: rows }, { data: balances }] = await Promise.all([
     supabase.rpc("payments_summary", { p_month: `${month}-01` }),
     supabase.rpc("refunds_due"),
     supabase.rpc("payments_list", { p_club: club.id, p_month: `${month}-01` }),
+    supabase.rpc("club_balances"),
   ]);
   const mine = ((summary ?? []) as Summary[]).filter((s) => s.club_id === club.id);
   if (mine.length === 0) return <main className="p-6">You are not staff at {club.name}.</main>;
 
   return (
-    <PaymentsDashboard month={month} summary={mine} refunds={((refunds ?? []) as RefundRow[]).filter((r) => r.club_name === club.name)} rows={rows as PaymentRow[]} clubId={club.id} backHref={`/staff/${slug}`} title={`${club.name} payments`} basePath={`/staff/${slug}/payments`} />
+    <PaymentsDashboard month={month} summary={mine} refunds={((refunds ?? []) as RefundRow[]).filter((r) => r.club_id === club.id)} rows={rows as PaymentRow[]} clubId={club.id} balances={((balances ?? []) as Balance[]).filter((b) => b.club_id === club.id)} isAdmin={false} backHref={`/staff/${slug}`} title={`${club.name} payments`} basePath={`/staff/${slug}/payments`} />
   );
 }

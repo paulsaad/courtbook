@@ -10,6 +10,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | Path | What |
 | --- | --- |
 | `supabase/migrations/0001_init.sql` | Full schema: tables, enums, double-booking guards, `book_slot` / `cancel_booking`, RLS |
+| `supabase/migrations/0018_phase3_review.sql` | Price-rule overlap trigger; `club_payouts` + `club_balances()`; `refunds_due` with club_id; payment session columns |
 | `supabase/migrations/0017_payments_summary.sql` | `payments_summary(month)`, `payments_list(club, month)`, `refunds_due()`; staff may `mark_refunded` |
 | `supabase/migrations/0016_club_admin.sql` | Club setup RPCs: `update_club_settings` (staff), `add_club_staff` / `remove_club_staff` / `club_staff_list` (admin) |
 | `supabase/migrations/0015_one_hold_per_player.sql` | `hold_slot` serialized per player (profile lock first); partial unique index: one pending hold per player |
