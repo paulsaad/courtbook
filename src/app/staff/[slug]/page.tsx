@@ -21,7 +21,7 @@ export default async function StaffClubPage({
 
   const { data: club } = await supabase
     .from("clubs")
-    .select("id, name, slug, timezone, slot_minutes, cancel_cutoff_hours, open_time, close_time")
+    .select("id, name, slug, timezone, slot_minutes, cancel_cutoff_hours, open_time, close_time, min_booking_minutes, max_booking_minutes")
     .eq("slug", slug)
     .single<Club>();
   if (!club) notFound();
@@ -80,6 +80,7 @@ export default async function StaffClubPage({
 
   return (
     <DayCalendar
+      key={date}
       club={club}
       courts={(courts ?? []) as Court[]}
       bookings={bookingsWithNames}

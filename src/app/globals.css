@@ -1,24 +1,27 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  --color-paper: #f6f7f4;
+  --color-ink: #17201c;
+  --color-muted: #64706a;
+  --color-grid: #d9ded9;
+  --color-turf: #1e7b5a;
+  --color-turf-soft: #dcefe6;
+  --color-sand: #c99a3b;
+  --color-sand-soft: #f6ecd3;
+  --color-slate-soft: #e4e7e6;
+  --color-action: #176b4f;
+  --color-danger: #b4382d;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-}
+html { background: var(--color-paper); color: var(--color-ink); }
+body { font-family: var(--font-sans); font-variant-numeric: tabular-nums; -webkit-tap-highlight-color: transparent; }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.hatch {
+  background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(23, 32, 28, 0.08) 6px 8px);
 }
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@media (prefers-reduced-motion: no-preference) {
+  .sheet-enter { animation: sheet-in 160ms ease-out; }
+  @keyframes sheet-in { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
 }

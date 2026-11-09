@@ -39,12 +39,12 @@ export default function LoginPage() {
             placeholder="you@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="rounded-lg border px-4 py-3 text-base"
+            className="rounded-xl border border-grid bg-white px-4 py-3 text-base outline-none focus:border-action"
           />
           <button
             type="submit"
             disabled={state === "sending"}
-            className="rounded-lg bg-black px-4 py-3 text-base font-medium text-white disabled:opacity-50"
+            className="rounded-xl bg-action px-4 py-3.5 text-base font-medium text-white disabled:opacity-50"
           >
             {state === "sending" ? "Sending…" : "Send sign-in link"}
           </button>

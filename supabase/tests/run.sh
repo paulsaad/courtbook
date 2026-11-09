@@ -29,7 +29,7 @@ COURT=$($PSQL -At -d $DB -c "select id from courts where name='Padel 1'")
 COURT2=$($PSQL -At -d $DB -c "select id from courts where name='Padel 2'")
 CLUB=$($PSQL -At -d $DB -c "select id from clubs where slug='batroun'")
 CLUB_B=$($PSQL -At -d $DB -c "select id from clubs where slug='other'")
-# Grid-aligned slot: tomorrow 09:30-11:00 Beirut (club opens 08:00, 90-min slots)
+# Tomorrow 09:30-11:00 Beirut (club opens 08:00, 30-min grid, players 60-180 min)
 S="(current_date + 1 + time '09:30') at time zone 'Asia/Beirut'"
 E="(current_date + 1 + time '11:00') at time zone 'Asia/Beirut'"
 as_user() { echo "set role authenticated; select set_config('request.jwt.claim.sub','$1',false);"; }
@@ -62,8 +62,9 @@ EOF
 as_user $P2; cat <<EOF
 \echo '3. player2 books inside the block -> expect ERROR slot_taken'
 select book_slot('$CLUB','$COURT',null, (current_date + 3 + time '09:30') at time zone 'Asia/Beirut', (current_date + 3 + time '11:00') at time zone 'Asia/Beirut');
-\echo '4. bad duration (60 min at a 90-min club) -> expect ERROR bad_duration'
-select book_slot('$CLUB','$COURT2',null, $S, $S + interval '60 min');
+\echo '4. bad duration (45 min: off the 30-min grid) -> expect ERROR bad_duration ; 30 min (below player minimum 60) -> expect ERROR bad_duration'
+select book_slot('$CLUB','$COURT2',null, $S, $S + interval '45 min');
+select book_slot('$CLUB','$COURT2',null, $S, $S + interval '30 min');
 \echo '5. off-grid start (09:45) -> expect ERROR not_on_grid'
 select book_slot('$CLUB','$COURT2',null, $S + interval '15 min', $E + interval '15 min');
 \echo '6. before opening (06:30) -> expect ERROR outside_opening_hours'
@@ -98,11 +99,11 @@ select move_booking('$B','$COURT2', $S, $E);
 update bookings set status='cancelled' where id='$B';
 \echo '17b. move to 02:00 (closed) -> expect ERROR outside_opening_hours'
 select move_booking('$B','$COURT2', (current_date + 1 + time '02:00') at time zone 'Asia/Beirut', (current_date + 1 + time '03:30') at time zone 'Asia/Beirut');
-\echo '17c. move to 4h (not a multiple of 90) -> expect ERROR bad_duration'
-select move_booking('$B','$COURT2', $S, $S + interval '4 hour');
+\echo '17c. move to 4h05 (not a multiple of 30) -> expect ERROR bad_duration'
+select move_booking('$B','$COURT2', $S, $S + interval '4 hour 5 min');
 \echo '17d. move off-grid 09:45 -> expect ERROR not_on_grid'
 select move_booking('$B','$COURT2', $S + interval '15 min', $E + interval '15 min');
-\echo '17e. staff extends to 3h (2 slots) -> expect no error ; then back to 1 slot'
+\echo '17e. staff extends to 3h -> expect no error ; then back to 90 min'
 select move_booking('$B','$COURT2', $S, $S + interval '3 hour'); select move_booking('$B','$COURT2', $S, $E);
 \echo '17g. staff insert 21:00-00:00 (past 23:00 close) -> expect ERROR outside_opening_hours'
 insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT','X', (current_date + 1 + time '21:00') at time zone 'Asia/Beirut', (current_date + 2 + time '00:00') at time zone 'Asia/Beirut', 'staff', auth.uid());
@@ -157,7 +158,7 @@ EOF
 } | $PSQL -d $DB 2>&1 | filter
 
 echo "--- E. DST: real elapsed time, not wall-clock (review round 4)"
-$PSQL -q -d $DB -c "update clubs set timezone='Europe/London', open_time='00:00', close_time='24:00' where id='$CLUB'"
+$PSQL -q -d $DB -c "update clubs set timezone='Europe/London', open_time='00:00', close_time='24:00', slot_minutes=90, min_booking_minutes=90, max_booking_minutes=180 where id='$CLUB'"
 { as_user $ADMIN; cat <<EOF
 \set ON_ERROR_STOP off
 \echo '25. 90 real minutes spanning the 2027-03-28 01:00Z spring-forward (local 00:00->02:30) -> expect no error'
@@ -168,7 +169,7 @@ EOF
 } | $PSQL -d $DB 2>&1 | filter
 
 echo "--- F. Phase 1: booking window, close_club, player_public"
-$PSQL -q -d $DB -c "update clubs set timezone='Asia/Beirut', open_time='08:00', close_time='23:00' where id='$CLUB'"
+$PSQL -q -d $DB -c "update clubs set timezone='Asia/Beirut', open_time='08:00', close_time='23:00', slot_minutes=30, min_booking_minutes=60, max_booking_minutes=180 where id='$CLUB'"
 $PSQL -q -d $DB -c "insert into credit_transactions (profile_id, delta, kind) values ('$P2', 1, 'purchase')"
 { as_user $P2; cat <<EOF
 \set ON_ERROR_STOP off

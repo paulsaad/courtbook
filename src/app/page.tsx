@@ -26,7 +26,7 @@ export default async function Home() {
         <h1 className="text-2xl font-semibold">CourtBook</h1>
         {user ? (
           <form action="/auth/signout" method="post" className="flex items-center gap-3 text-sm">
-            <span className="text-gray-600">{user.email ?? user.phone}</span>
+            <span className="text-muted">{user.email ?? user.phone}</span>
             <button className="underline">Sign out</button>
           </form>
         ) : (
@@ -37,22 +37,22 @@ export default async function Home() {
       {error && <p className="text-sm text-red-600">Could not load clubs: {error.message}</p>}
 
       {isStaff && (
-        <Link href="/staff" className="rounded-xl bg-black px-4 py-3 text-center font-medium text-white">
+        <Link href="/staff" className="rounded-2xl bg-action px-4 py-3.5 text-center font-medium text-white">
           Staff calendar
         </Link>
       )}
 
       {clubs?.map((club) => (
-        <section key={club.id} className="rounded-xl border p-4">
+        <section key={club.id} className="rounded-2xl border border-grid bg-white p-5">
           <h2 className="text-lg font-medium">{club.name}</h2>
-          <p className="text-sm text-gray-600">
-            {club.open_time.slice(0, 5)}–{club.close_time.slice(0, 5)} · {club.slot_minutes}-min slots
+          <p className="text-sm text-muted">
+            {club.open_time.slice(0, 5)}–{club.close_time.slice(0, 5)} · {club.slot_minutes}-min steps
           </p>
           <ul className="mt-3 flex flex-col gap-1 text-sm">
             {[...club.courts].sort((a, b) => a.sort - b.sort).map((c) => (
               <li key={c.id} className="flex justify-between">
                 <span>{c.name}</span>
-                <span className="text-gray-500">{c.sport}{c.surface ? ` · ${c.surface}` : ""}</span>
+                <span className="text-muted">{c.sport}{c.surface ? ` · ${c.surface}` : ""}</span>
               </li>
             ))}
           </ul>

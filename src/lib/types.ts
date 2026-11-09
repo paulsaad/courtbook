@@ -7,6 +7,8 @@ export type Club = {
   cancel_cutoff_hours: number;
   open_time: string;
   close_time: string;
+  min_booking_minutes: number;
+  max_booking_minutes: number;
 };
 
 export type Court = { id: string; name: string; sport: string; surface: string | null; sort: number; active: boolean };

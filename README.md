@@ -10,6 +10,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | Path | What |
 | --- | --- |
 | `supabase/migrations/0001_init.sql` | Full schema: tables, enums, double-booking guards, `book_slot` / `cancel_booking`, RLS |
+| `supabase/migrations/0008_flexible_durations.sql` | 30-min grid; `min_booking_minutes` / `max_booking_minutes` per club for players; prices per hour |
 | `supabase/migrations/0007_phase1_schema.sql` | `clubs.booking_window_days` (default 14), `close_club()` whole-club closure, `player_public` view |
 | `supabase/migrations/0006_duration_utc.sql` | Duration = real elapsed time (DST-safe) |
 | `supabase/migrations/0005_validation_edges.sql` | Exact-minute grid, no midnight exception (`close_time = 24:00` for midnight), staff cannot mark own booking club-caused |
@@ -27,7 +28,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 - `blocks.no_overlapping_blocks`: same on blocks.
 - Triggers `bookings_block_check` / `blocks_booking_check`: cross-table overlap check, serialized by `select … from courts for update`.
 - `bookings_slot_validation` trigger: inside opening hours, grid-aligned start, duration k × slot_minutes — for any source, insert or move.
-- `book_slot()`: players get exactly one slot; locks the player's `profiles` row, then credit debit + booking insert in one transaction; a rejected booking never costs a credit.
+- `book_slot()`: players book between the club's min and max minutes in grid steps, one credit per booking; locks the player's `profiles` row, then credit debit + booking insert in one transaction; a rejected booking never costs a credit.
 - `(court_id, club_id)` composite FKs on bookings, blocks, price_rules: a court can only be used under its own club.
 - Staff never UPDATE bookings directly: `move_booking()`, `cancel_booking()`, `mark_no_show()`.
 - All RPCs: EXECUTE revoked from PUBLIC/anon, granted to `authenticated`. New functions must repeat this (Supabase default privileges grant anon).

@@ -1,8 +1,8 @@
 -- Demo club for Milestone A (fictional Batroun club, per spec default).
 -- Idempotent: safe to run more than once.
 
-insert into clubs (name, slug, location_url, slot_minutes, cancel_cutoff_hours, open_time, close_time)
-values ('Batroun Padel & Tennis Club', 'batroun', 'https://maps.google.com/?q=Batroun', 90, 12, '08:00', '23:00')
+insert into clubs (name, slug, location_url, slot_minutes, cancel_cutoff_hours, open_time, close_time, min_booking_minutes, max_booking_minutes)
+values ('Batroun Padel & Tennis Club', 'batroun', 'https://maps.google.com/?q=Batroun', 30, 12, '08:00', '23:00', 60, 180)
 on conflict (slug) do nothing;
 
 with c as (select id from clubs where slug = 'batroun')
@@ -17,7 +17,7 @@ from c, (values
 ) as v(name, sport, surface, sort)
 on conflict (club_id, name) do nothing;
 
--- Prices: whole-club rules by sport-independent time band. Off-peak 08:00-17:00, peak 17:00-23:00.
+-- Prices per hour: whole-club rules by time band. Off-peak 08:00-17:00, peak 17:00-23:00.
 -- (Court-specific overrides go in with court_id set.)
 with c as (select id from clubs where slug = 'batroun')
 insert into price_rules (club_id, court_id, weekday_mask, start_time, end_time, price_usd, label)
