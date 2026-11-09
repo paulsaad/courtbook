@@ -10,6 +10,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | Path | What |
 | --- | --- |
 | `supabase/migrations/0001_init.sql` | Full schema: tables, enums, double-booking guards, `book_slot` / `cancel_booking`, RLS |
+| `supabase/migrations/0006_duration_utc.sql` | Duration = real elapsed time (DST-safe) |
 | `supabase/migrations/0005_validation_edges.sql` | Exact-minute grid, no midnight exception (`close_time = 24:00` for midnight), staff cannot mark own booking club-caused |
 | `supabase/migrations/0004_slot_validation_trigger.sql` | Trigger: every court booking inside opening hours, on the grid, k × slot_minutes; players exactly 1 slot |
 | `supabase/migrations/0003_cancel_reason.sql` | `cancel_booking(id, club_caused)`: refund after cutoff only when staff mark it club-caused |

@@ -155,3 +155,14 @@ as_user $ADMIN; cat <<EOF
 select credit_balance(auth.uid());
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+
+echo "--- E. DST: real elapsed time, not wall-clock (review round 4)"
+$PSQL -q -d $DB -c "update clubs set timezone='Europe/London', open_time='00:00', close_time='24:00' where id='$CLUB'"
+{ as_user $ADMIN; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '25. 90 real minutes spanning the 2027-03-28 01:00Z spring-forward (local 00:00->02:30) -> expect no error'
+insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT','DST', '2027-03-28 00:00:00+00', '2027-03-28 01:30:00+00', 'staff', auth.uid());
+\echo '26. 150 real minutes that look like 90 local minutes across the 2027-10-31 fall-back -> expect ERROR bad_duration'
+insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT','DST', '2027-10-31 00:00:00+00', '2027-10-31 02:30:00+00', 'staff', auth.uid());
+EOF
+} | $PSQL -d $DB 2>&1 | filter
