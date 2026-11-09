@@ -96,7 +96,7 @@ export default function DayCalendar({ club, courts, bookings: initialBookings, b
       <header className="sticky top-0 z-10 bg-paper/95 backdrop-blur">
         <div className="flex items-center justify-between px-4 pt-3 text-sm">
           <Link href="/" className="text-muted">‹ {club.name}</Link>
-          <div className="flex gap-4"><Link href={`/staff/${club.slug}/settings`} className="text-muted">Settings</Link><button onClick={() => setSheet({ kind: "close" })} className="text-danger">Close courts…</button></div>
+          <div className="flex gap-4"><Link href={`/staff/${club.slug}/payments`} className="text-muted">Payments</Link><Link href={`/staff/${club.slug}/settings`} className="text-muted">Settings</Link><button onClick={() => setSheet({ kind: "close" })} className="text-danger">Close courts…</button></div>
         </div>
         <div className="flex items-end justify-between px-4 pb-3 pt-1">
           <div className="flex items-end gap-3">

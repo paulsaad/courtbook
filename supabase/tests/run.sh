@@ -285,3 +285,22 @@ insert into price_rules (club_id, court_id, weekday_mask, start_time, end_time, 
 EOF
 } | $PSQL -d $DB 2>&1 | filter
 $PSQL -q -d $DB -c "delete from club_staff where club_id='$CLUB' and profile_id='$STAFF_B'" 2>/dev/null
+
+echo "--- M. payments dashboard RPCs"
+{ as_user $P2; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '33. player: payments_summary -> 0 rows ; refunds_due -> 0 rows ; mark_refunded on an invisible payment -> not_found'
+select count(*) from payments_summary(current_date);
+select count(*) from refunds_due();
+select mark_refunded((select id from payments where status='refund_due' limit 1));
+EOF
+as_user $ADMIN; cat <<EOF
+\echo '34. admin: summary has Batroun with paid count>0 ; refunds_due > 0 ; mark one refunded -> refunded'
+select club_name, bookings > 0 as has_paid, fees > 0 as has_fees, refunds_due from payments_summary(current_date) where club_name like 'Batroun%';
+select count(*) > 0 from refunds_due();
+select mark_refunded((select payment_id from refunds_due() limit 1));
+select count(*) from payments where status='refunded';
+\echo '35. payments_list for Batroun this month -> rows with court names'
+select count(*) > 0, bool_and(court_name is not null) from payments_list('$CLUB', current_date);
+EOF
+} | $PSQL -d $DB 2>&1 | filter
