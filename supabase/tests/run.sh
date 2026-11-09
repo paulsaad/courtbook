@@ -220,3 +220,38 @@ select count(*) from player_names(array['$P1'::uuid]);
 set role anon; select count(*) from player_names(array['$P1'::uuid]);
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+
+echo "--- I. lock order: concurrent confirm vs cancel / release / replacement -> no deadlocks (review Phase 2 #2)"
+$PSQL -q -d $DB -c "update clubs set hold_minutes=10 where id='$CLUB'"
+S9="(current_date + 6 + time '09:30') at time zone 'Asia/Beirut'"; E9="(current_date + 6 + time '11:00') at time zone 'Asia/Beirut'"
+S9b="(current_date + 6 + time '12:30') at time zone 'Asia/Beirut'"; E9b="(current_date + 6 + time '14:00') at time zone 'Asia/Beirut'"
+for round in 1 2 3; do
+  BH=$({ as_user $P1; echo "select booking_id from hold_slot('$CLUB','$COURT', $S9, $E9);"; } | $PSQL -At -d $DB | tail -1)
+  PH=$(pay_of $BH)
+  case $round in
+    1) # confirm vs cancel (player)
+       { as_service; echo "begin; select confirm_payment('$PH','SIM-D$round',31.00); select pg_sleep(0.5); commit;"; } | $PSQL -d $DB > /tmp/cb_d1.log 2>&1 &
+       { as_user $P1; echo "begin; select cancel_booking('$BH'); select pg_sleep(0.5); commit;"; } | $PSQL -d $DB > /tmp/cb_d2.log 2>&1 & ;;
+    2) # confirm vs release
+       { as_service; echo "begin; select confirm_payment('$PH','SIM-D$round',31.00); select pg_sleep(0.5); commit;"; } | $PSQL -d $DB > /tmp/cb_d1.log 2>&1 &
+       { as_user $P1; echo "begin; select release_hold('$BH'); select pg_sleep(0.5); commit;"; } | $PSQL -d $DB > /tmp/cb_d2.log 2>&1 & ;;
+    3) # confirm vs the same player replacing the hold with another court
+       { as_service; echo "begin; select confirm_payment('$PH','SIM-D$round',31.00); select pg_sleep(0.5); commit;"; } | $PSQL -d $DB > /tmp/cb_d1.log 2>&1 &
+       { as_user $P1; echo "begin; select booking_id from hold_slot('$CLUB','$COURT2', $S9b, $E9b); select pg_sleep(0.5); commit;"; } | $PSQL -d $DB > /tmp/cb_d2.log 2>&1 & ;;
+  esac
+  wait
+  if grep -q "deadlock" /tmp/cb_d1.log /tmp/cb_d2.log; then echo "round $round: FAIL deadlock"; cat /tmp/cb_d1.log /tmp/cb_d2.log; else
+    echo "round $round: no deadlock; booking=$($PSQL -At -d $DB -c "select status from bookings where id='$BH'") payment=$($PSQL -At -d $DB -c "select status from payments where id='$PH'")"; fi
+  $PSQL -q -d $DB -c "update bookings set status='cancelled' where id in (select id from bookings where player_id='$P1' and status in ('confirmed','pending') and start_at >= $S9)" 
+done
+echo "--- J. idempotency identity (review Phase 2 #3)"
+BI=$({ as_user $P1; echo "select booking_id from hold_slot('$CLUB','$COURT3', $S9, $E9);"; } | $PSQL -At -d $DB | tail -1); PI=$(pay_of $BI)
+{ as_service; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '29. confirm -> confirmed ; identical retry -> already_paid ; different ref -> ERROR payment_mismatch ; different amount -> ERROR payment_mismatch'
+select confirm_payment('$PI','SIM-I1',31.00);
+select confirm_payment('$PI','SIM-I1',31.00);
+select confirm_payment('$PI','SIM-I2',31.00);
+select confirm_payment('$PI','SIM-I1',30.00);
+EOF
+} | $PSQL -d $DB 2>&1 | filter
