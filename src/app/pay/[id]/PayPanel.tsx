@@ -78,7 +78,7 @@ export default function PayPanel(p: Props) {
           <p className="text-center text-xs text-muted">
             Test mode: no money is taken. Slot held for {left !== null ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "…"}.
           </p>
-          <button disabled={busy} onClick={giveUp} className="py-2 text-sm text-muted">Cancel and release the slot</button>
+          <button disabled={busy} onClick={giveUp} className="rounded-xl border border-grid bg-white py-3 text-base">Cancel and release the slot</button>
         </>
       )}
     </main>
