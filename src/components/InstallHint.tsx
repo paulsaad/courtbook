@@ -4,23 +4,28 @@ import { useEffect, useState } from "react";
 
 type BeforeInstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
 const KEY = "cb_install_hint_dismissed";
+const isIosDevice = () => /iPhone|iPad|iPod/.test(navigator.userAgent);
 
 /** One-line "Add to Home Screen" hint. Hidden when already installed or dismissed. */
 export default function InstallHint() {
-  const [show, setShow] = useState(false);
-  const [ios, setIos] = useState(false);
+  // decided once, lazily, from browser state — no setState inside the effect body
+  const [ios] = useState(() => typeof navigator !== "undefined" && isIosDevice());
+  const [show, setShow] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      const standalone = window.matchMedia("(display-mode: standalone)").matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
+      if (standalone || localStorage.getItem(KEY)) return false;
+    } catch { return false; }
+    return isIosDevice(); // Android waits for beforeinstallprompt
+  });
   const [prompt, setPrompt] = useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
-    try {
-      const standalone = window.matchMedia("(display-mode: standalone)").matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
-      if (standalone || localStorage.getItem(KEY)) return;
-    } catch { return; }
-    const ua = navigator.userAgent;
-    const isIos = /iPhone|iPad|iPod/.test(ua);
-    setIos(isIos);
-    if (isIos) { setShow(true); return; }
-    const onPrompt = (e: Event) => { e.preventDefault(); setPrompt(e as BeforeInstallPromptEvent); setShow(true); };
+    const onPrompt = (e: Event) => {
+      e.preventDefault();
+      try { if (localStorage.getItem(KEY)) return; } catch {}
+      setPrompt(e as BeforeInstallPromptEvent); setShow(true);
+    };
     window.addEventListener("beforeinstallprompt", onPrompt);
     return () => window.removeEventListener("beforeinstallprompt", onPrompt);
   }, []);
