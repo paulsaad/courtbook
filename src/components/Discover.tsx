@@ -19,7 +19,7 @@ export type OpenMatch = {
 };
 
 const TZ = "Asia/Beirut";
-const chip = (on: boolean) => `shrink-0 rounded-full border px-3.5 py-1.5 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
+const chip = (on: boolean) => `min-h-11 shrink-0 rounded-full border px-4 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
 
 export default function Discover({ areas, sports, initialClubs, initialMatches, signedIn, initialError }: { areas: Governorate[]; sports: Sport[]; initialClubs: ClubCard[]; initialMatches: OpenMatch[]; signedIn: boolean; initialError?: boolean }) {
   const [prefs, setPrefs] = useState<Prefs>(EMPTY);
@@ -84,6 +84,7 @@ export default function Discover({ areas, sports, initialClubs, initialMatches, 
         <p className="flex items-center justify-between rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">Could not load clubs. <button onClick={() => setTick((n) => n + 1)} className="font-medium underline">Retry</button></p>
       )}
       <section className={`flex flex-col gap-3 ${busy ? "opacity-60" : ""}`}>
+        <h2 className="font-medium">{clubs.length === 1 ? "1 club" : `${clubs.length} clubs`}{prefs.sport ? ` · ${sportName(prefs.sport)}` : ""}</h2>
         {!failed && clubs.length === 0 && <p className="rounded-2xl border border-dashed border-grid p-6 text-center text-sm text-muted">No clubs here yet. Try a wider area or another sport.</p>}
         {clubs.map((c) => (
           <article key={c.club_id} className="overflow-hidden rounded-2xl border border-grid bg-white">

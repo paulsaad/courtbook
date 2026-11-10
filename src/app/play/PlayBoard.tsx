@@ -11,7 +11,7 @@ import type { OpenMatch } from "@/components/Discover";
 
 const TZ = "Asia/Beirut";
 const LEVELS = ["beginner", "intermediate", "advanced"];
-const chip = (on: boolean) => `shrink-0 rounded-full border px-3.5 py-1.5 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
+const chip = (on: boolean) => `min-h-11 shrink-0 rounded-full border px-4 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
 
 export default function PlayBoard({ areas, sports, initial, clubs }: { areas: Governorate[]; sports: Sport[]; initial: OpenMatch[]; clubs: { id: string; name: string; slug: string }[] }) {
   const [prefs, setPrefs] = useState<Prefs>(EMPTY);
@@ -55,7 +55,7 @@ export default function PlayBoard({ areas, sports, initial, clubs }: { areas: Go
       </div>
 
       <section className={`flex flex-col gap-3 ${busy ? "opacity-60" : ""}`}>
-        {rows.length === 0 && <p className="rounded-2xl border border-dashed border-grid p-6 text-center text-sm text-muted">No open matches match these filters.</p>}
+        {rows.length === 0 && <p className="rounded-2xl border border-dashed border-grid p-6 text-center text-sm text-muted">No open matches here. Widen the area or day, or post one below.</p>}
         {rows.map((m) => {
           const spots = m.players_needed - m.joined;
           return (

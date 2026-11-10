@@ -128,9 +128,9 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         </div>
         {sports.length > 1 && (
           <div className="flex gap-1.5 overflow-x-auto px-4 pb-3">
-            <Link href={q(date, view, null)} className={`shrink-0 rounded-full border px-3 py-1 text-xs ${!sport ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>All sports</Link>
+            <Link href={q(date, view, null)} className={`min-h-9 shrink-0 rounded-full border px-3 text-xs leading-9 ${!sport ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>All sports</Link>
             {sports.map((sp) => (
-              <Link key={sp} href={q(date, view, sp)} className={`shrink-0 rounded-full border px-3 py-1 text-xs ${sport === sp ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>{sportNames[sp] ?? sp}</Link>
+              <Link key={sp} href={q(date, view, sp)} className={`min-h-9 shrink-0 rounded-full border px-3 text-xs leading-9 ${sport === sp ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>{sportNames[sp] ?? sp}</Link>
             ))}
           </div>
         )}

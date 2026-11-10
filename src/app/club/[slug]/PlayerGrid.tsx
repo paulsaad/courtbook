@@ -14,7 +14,7 @@ type ClubX = Club & { booking_window_days: number; service_fee_usd: number; loca
 type Hold = { booking_id: string; court_name: string; start_at: string; end_at: string; hold_expires_at: string } | null;
 type Preselect = { date: string; time: string; courtId: string; minutes: number | null } | null;
 
-const chip = (on: boolean) => `shrink-0 rounded-full border px-3.5 py-1.5 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
+const chip = (on: boolean) => `min-h-11 shrink-0 rounded-full border px-4 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
 
 export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: initialOcc, occError, date: initialDate, hold, preselect, sportNames }: {
   signedIn: boolean; club: ClubX; courts: Court[]; occ: Occ[]; occError: boolean; date: string; hold: Hold; preselect: Preselect; sportNames: Record<string, string>;
@@ -215,7 +215,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
       </div>
 
       {pick && (
-        <div className="fixed inset-x-0 bottom-0 z-30 mx-auto max-w-lg rounded-t-2xl border-t border-grid bg-white px-5 pb-8 pt-4 shadow-2xl">
+        <div className="sheet-enter fixed inset-x-0 bottom-0 z-30 mx-auto max-w-lg rounded-t-2xl border-t border-grid bg-white px-5 pb-8 pt-4 shadow-2xl">
           {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
           <div className="flex items-baseline justify-between">
             <h2 className="text-lg font-semibold">{allCourts.find((c) => c.id === pick.courtId)?.name} · {pick.time}–{endLabel(pick.time, slots)}</h2>

@@ -25,7 +25,7 @@ export default function AreaPicker({ areas, value, onChange }: { areas: Governor
       </button>
       {open && (
         <div className="fixed inset-0 z-30 flex items-end bg-ink/40" onClick={() => setOpen(false)}>
-          <div className="max-h-[80vh] w-full overflow-y-auto rounded-t-3xl bg-paper p-5 pb-8" onClick={(e) => e.stopPropagation()}>
+          <div className="sheet-enter max-h-[80vh] w-full overflow-y-auto rounded-t-3xl bg-paper p-5 pb-8" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-lg font-semibold">{g ? g.name_en : "Where do you want to play?"}</h2>
               {g ? <button onClick={() => setGov(null)} className="text-sm text-action">‹ Governorates</button> : <button onClick={() => setOpen(false)} className="text-sm text-muted">Close</button>}

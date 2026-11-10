@@ -26,7 +26,7 @@ export default async function MatchPage({ params }: { params: Promise<{ id: stri
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5 pb-24">
-      <Link href={`/club/${m.club_slug}/matches`} className="text-sm text-muted">‹ {m.club_name} matches</Link>
+      <div className="flex justify-between text-sm"><Link href="/play" className="text-muted">‹ Find a game</Link><Link href={`/club/${m.club_slug}/matches`} className="text-action">{m.club_name} board ›</Link></div>
       <MatchCard m={m} tz={tz} />
       <section className="rounded-2xl border border-grid bg-white p-4">
         <h2 className="mb-2 font-medium">Players {m.joined + 1}/{m.players_needed + 1}</h2>

@@ -35,7 +35,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5">
-      <Link href="/bookings" className="text-sm text-muted">‹ My bookings</Link>
+      <Link href="/me" className="text-sm text-muted">‹ My CourtBook</Link>
       <div>
         {isNew && b.status === "confirmed" && <p className="mb-2 inline-block rounded-full bg-turf-soft px-3 py-1 text-sm font-medium text-turf">Booked</p>}
         <h1 className="text-2xl font-semibold tracking-tight">{club.name}</h1>
