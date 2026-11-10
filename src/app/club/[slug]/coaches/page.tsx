@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { loadClubHead } from "@/lib/clubHead";
+import ClubHeader from "../ClubHeader";
 
 type CoachRow = { coach_id: string; name: string | null; sports: string[]; levels: string[]; price_usd: number; bio: string | null; whatsapp: string | null };
 
@@ -9,15 +11,15 @@ export default async function ClubCoaches({ params }: { params: Promise<{ slug: 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?next=/club/${slug}/coaches`);
-  const { data: club } = await supabase.from("clubs").select("id, name, slug").eq("slug", slug).single();
+  const { data: club } = await supabase.from("clubs").select("id, name, slug, open_time, close_time, location_url, town_id").eq("slug", slug).single();
   if (!club) notFound();
-  const { data } = await supabase.rpc("coaches_at_club", { p_club: club.id });
+  const [{ data }, head] = await Promise.all([supabase.rpc("coaches_at_club", { p_club: club.id }), loadClubHead(supabase, club)]);
   const coaches = (data ?? []) as CoachRow[];
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5">
-      <Link href={`/club/${slug}`} className="text-sm text-muted">‹ {club.name}</Link>
-      <h1 className="text-2xl font-semibold tracking-tight">Coaches at {club.name}</h1>
+    <main className="mx-auto flex min-h-screen max-w-5xl flex-col">
+      <ClubHeader club={head} tab="/coaches" />
+      <div className="mx-auto flex w-full max-w-md flex-col gap-5 p-5">
       {coaches.length === 0 && <p className="text-muted">No coaches listed here yet.</p>}
       <ul className="flex flex-col gap-3">
         {coaches.map((c) => (
@@ -30,6 +32,7 @@ export default async function ClubCoaches({ params }: { params: Promise<{ slug: 
           </li>
         ))}
       </ul>
+      </div>
     </main>
   );
 }

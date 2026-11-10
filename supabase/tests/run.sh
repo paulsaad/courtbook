@@ -626,7 +626,7 @@ echo "--- Y. Phase 6 (b): discovery"
 { as_user $P1; cat <<EOF
 \set ON_ERROR_STOP off
 \echo '78. club_discovery all Lebanon -> batroun club with town Batroun / North, sports contain padel, price_from 20'
-select slug, town, governorate, 'padel' = any(sports), price_from from club_discovery();
+select slug, town, governorate, 'padel' = any(sports), price_from, next_free_court_id is not null or next_free_at is null from club_discovery();
 \echo '79. filters: district batroun -> 1+ ; district tyre -> 0 ; sport football -> 0 (pitch inactive) ; query "bat" -> 1+ ; query arabic -> 1+'
 select count(*) from club_discovery(null, null, 'batroun');
 select count(*) from club_discovery(null, null, 'tyre');

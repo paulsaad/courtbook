@@ -10,7 +10,7 @@ import AreaPicker from "./AreaPicker";
 
 export type ClubCard = {
   club_id: string; name: string; slug: string; town: string | null; district: string | null; governorate: string | null;
-  sports: string[]; price_from: number | null; next_free_at: string | null; next_free_court: string | null; location_url: string | null;
+  sports: string[]; price_from: number | null; next_free_at: string | null; next_free_court: string | null; next_free_court_id: string | null; location_url: string | null;
   open_time: string; close_time: string;
 };
 export type OpenMatch = {
@@ -87,7 +87,7 @@ export default function Discover({ areas, sports, initialClubs, initialMatches }
             </Link>
             <div className="flex items-center justify-between border-t border-grid px-4 py-2.5 text-sm">
               {c.next_free_at ? (
-                <Link href={`/club/${c.slug}?at=${encodeURIComponent(c.next_free_at)}`} className="rounded-full bg-turf-soft px-3 py-1 font-medium text-turf">Today {formatInTimeZone(new Date(c.next_free_at), TZ, "HH:mm")} · {c.next_free_court} ›</Link>
+                <Link href={`/club/${c.slug}?at=${encodeURIComponent(c.next_free_at)}&court=${c.next_free_court_id ?? ""}`} className="rounded-full bg-turf-soft px-3 py-1 font-medium text-turf">Today {formatInTimeZone(new Date(c.next_free_at), TZ, "HH:mm")} · {c.next_free_court} ›</Link>
               ) : (
                 <span className="text-muted">Full today — see other days</span>
               )}

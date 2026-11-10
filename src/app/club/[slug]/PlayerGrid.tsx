@@ -2,32 +2,69 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
-import { clubLocalToUtc, hhmm, shiftDate, slotTimes, todayIn, toMin } from "@/lib/time";
+import { clubLocalToUtc, dayBounds, hhmm, shiftDate, slotTimes, todayIn, toMin } from "@/lib/time";
 import { friendlyError, type Club, type Court } from "@/lib/types";
+import { readPrefs } from "@/lib/prefs";
 
 export type Occ = { id: string | null; court_id: string; start_at: string; end_at: string; status: string; mine: boolean; kind: "booking" | "block" };
 type ClubX = Club & { booking_window_days: number; service_fee_usd: number; location_url: string | null; hold_minutes: number };
-
 type Hold = { booking_id: string; court_name: string; start_at: string; end_at: string; hold_expires_at: string } | null;
+type Preselect = { date: string; time: string; courtId: string } | null;
 
-export default function PlayerGrid({ club, courts, occ, date, hold }: { club: ClubX; courts: Court[]; occ: Occ[]; date: string; hold: Hold }) {
+const chip = (on: boolean) => `shrink-0 rounded-full border px-3.5 py-1.5 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
+
+export default function PlayerGrid({ club, courts: allCourts, occ: initialOcc, date: initialDate, hold, preselect, sportNames }: {
+  club: ClubX; courts: Court[]; occ: Occ[]; date: string; hold: Hold; preselect: Preselect; sportNames: Record<string, string>;
+}) {
   const router = useRouter();
   const times = slotTimes(club.open_time, club.close_time, club.slot_minutes);
   const ROW_PX = club.slot_minutes <= 30 ? 34 : 52;
   const labelEvery = club.slot_minutes <= 30 ? 2 : 1;
   const today = todayIn(club.timezone);
-  const isToday = date === today;
-  const lastDate = shiftDate(today, club.booking_window_days);
   const [nowMs] = useState(() => Date.now());
+  const days = Array.from({ length: club.booking_window_days + 1 }, (_, i) => shiftDate(today, i));
 
-  const [pick, setPick] = useState<{ courtId: string; time: string } | null>(null);
+  const [date, setDate] = useState(initialDate);
+  // occupancy: the server gives today's; other days are fetched on the client (no page reload)
+  const [fetched, setFetched] = useState<{ date: string; occ: Occ[] } | null>(null);
+  const occ = date === initialDate ? initialOcc : fetched?.date === date ? fetched.occ : [];
+  const loading = date !== initialDate && fetched?.date !== date;
+  const sports = [...new Set(allCourts.map((c) => c.sport))];
+  const [sport, setSport] = useState<string | null>(null);
+  const courts = sport && sports.includes(sport) ? allCourts.filter((c) => c.sport === sport) : allCourts;
+
+  const [pick, setPick] = useState<{ courtId: string; time: string } | null>(preselect && preselect.date === initialDate ? { courtId: preselect.courtId, time: preselect.time } : null);
   const [slots, setSlots] = useState(Math.round(club.min_booking_minutes / club.slot_minutes));
   const [price, setPrice] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  // remembered sport from Home, if this club has it
+  useEffect(() => {
+    const t = setTimeout(() => { const p = readPrefs().sport; if (p && sports.length > 1 && sports.includes(p)) setSport(p); }, 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (date === initialDate) return;
+    let alive = true;
+    (async () => {
+      const { dayStart, dayEnd } = dayBounds(date, club.timezone);
+      const { data } = await createClient().from("occupancy").select("id, court_id, start_at, end_at, status, mine, kind").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart);
+      if (alive) setFetched({ date, occ: (data ?? []) as Occ[] });
+    })();
+    return () => { alive = false; };
+  }, [date, initialDate, club.id, club.timezone]);
+
+  useEffect(() => {
+    const el = stripRef.current?.querySelector<HTMLElement>("[data-on=true]");
+    el?.scrollIntoView({ inline: "center", block: "nearest" });
+  }, [date]);
 
   function slotStartMs(t: string) { return clubLocalToUtc(date, t, club.timezone).getTime(); }
   function isTaken(courtId: string, t: string) {
@@ -39,7 +76,6 @@ export default function PlayerGrid({ club, courts, occ, date, hold }: { club: Cl
     const s = slotStartMs(t), e = s + club.slot_minutes * 60000;
     return occ.find((o) => o.mine && o.status === "pending" && o.court_id === courtId && new Date(o.start_at).getTime() < e && new Date(o.end_at).getTime() > s) ?? null;
   }
-  /** how many consecutive free slots from t, capped by the club max */
   function freeRun(courtId: string, t: string) {
     const i = times.indexOf(t);
     let n = 0;
@@ -49,7 +85,6 @@ export default function PlayerGrid({ club, courts, occ, date, hold }: { club: Cl
   const minSlots = Math.round(club.min_booking_minutes / club.slot_minutes);
   const maxSlotsHere = pick ? freeRun(pick.courtId, pick.time) : 0;
 
-  // price quote for the current pick
   useEffect(() => {
     if (!pick) return;
     let cancelled = false;
@@ -71,40 +106,51 @@ export default function PlayerGrid({ club, courts, occ, date, hold }: { club: Cl
     router.push(`/pay/${row.booking_id}`);
   }
 
+  const changeDate = (d: string) => { setDate(d); setPick(null); setError(null); };
   const endLabel = (t: string, n: number) => { const m = toMin(t) + n * club.slot_minutes; return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; };
   const fmtDur = (m: number) => (m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60}`);
-  const dayLabel = formatInTimeZone(clubLocalToUtc(date, "12:00", club.timezone), club.timezone, "EEEE d MMMM");
+  const dayOf = (d: string) => clubLocalToUtc(d, "12:00", club.timezone);
 
   return (
     <>
-      <header className="px-4 pb-2 pt-2">
-        <h1 className="text-2xl font-semibold tracking-tight">{club.name}</h1>
-        <p className="text-sm text-muted">
-          {club.open_time.slice(0, 5)}–{club.close_time.slice(0, 5)} · book {fmtDur(club.min_booking_minutes)} to {fmtDur(club.max_booking_minutes)}
-          {club.location_url && <> · <a className="underline" href={club.location_url} target="_blank" rel="noreferrer">Map</a></>}
-        </p>
-        <div className="mt-3 flex items-center justify-between">
-          <Link aria-disabled={isToday} href={`/club/${club.slug}?date=${shiftDate(date, -1)}`} className={`grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-lg ${isToday ? "pointer-events-none opacity-30" : ""}`}>‹</Link>
-          <div className="text-center font-medium">{isToday ? "Today" : dayLabel}{isToday && <div className="text-xs font-normal text-muted">{dayLabel}</div>}</div>
-          <Link aria-disabled={date >= lastDate} href={`/club/${club.slug}?date=${shiftDate(date, 1)}`} className={`grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-lg ${date >= lastDate ? "pointer-events-none opacity-30" : ""}`}>›</Link>
+      {/* date strip */}
+      <div ref={stripRef} className="mt-3 flex gap-2 overflow-x-auto px-4 pb-1">
+        {days.map((d) => {
+          const on = d === date;
+          return (
+            <button key={d} data-on={on} onClick={() => changeDate(d)} className={`flex w-12 shrink-0 flex-col items-center rounded-2xl border py-2 ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>
+              <span className={`text-[11px] uppercase ${on ? "opacity-80" : "text-muted"}`}>{d === today ? "Today" : formatInTimeZone(dayOf(d), club.timezone, "EEE")}</span>
+              <span className="text-lg font-semibold leading-tight">{formatInTimeZone(dayOf(d), club.timezone, "d")}</span>
+              <span className={`text-[10px] ${on ? "opacity-80" : "text-muted"}`}>{formatInTimeZone(dayOf(d), club.timezone, "MMM")}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {sports.length > 1 && (
+        <div className="mt-2 flex gap-2 overflow-x-auto px-4">
+          <button onClick={() => { setSport(null); setPick(null); }} className={chip(!sport)}>All</button>
+          {sports.map((sp) => <button key={sp} onClick={() => { setSport(sp); setPick(null); }} className={chip(sport === sp)}>{sportNames[sp] ?? sp}</button>)}
         </div>
-      </header>
+      )}
+
+      <p className="px-4 pt-2 text-xs text-muted">Book {fmtDur(club.min_booking_minutes)} to {fmtDur(club.max_booking_minutes)} · tap a free slot{loading ? " · loading…" : ""}</p>
 
       {hold && (
-        <Link href={`/pay/${hold.booking_id}`} className="mx-4 mb-2 flex items-center justify-between rounded-xl bg-turf px-4 py-3 text-sm text-white">
+        <Link href={`/pay/${hold.booking_id}`} className="mx-4 mt-2 flex items-center justify-between rounded-xl bg-turf px-4 py-3 text-sm text-white">
           <span>Slot on hold: {hold.court_name}, {hhmm(hold.start_at, club.timezone)}–{hhmm(hold.end_at, club.timezone)}</span>
           <span className="font-medium">Continue to payment ›</span>
         </Link>
       )}
 
-      <div className="flex-1 overflow-x-auto px-2 pb-28">
+      <div className={`flex-1 overflow-x-auto px-2 pb-28 pt-2 ${loading ? "opacity-60" : ""}`}>
         <div className="flex min-w-max">
           <div className="relative w-12 shrink-0" style={{ height: times.length * ROW_PX, marginTop: 36 }}>
             {times.map((t, i) => i % labelEvery === 0 && <div key={t} className="absolute right-2 -translate-y-1/2 text-xs text-muted" style={{ top: i * ROW_PX }}>{t}</div>)}
           </div>
           <div className="grid flex-1 gap-x-1.5" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(6.5rem, 1fr))` }}>
             {courts.map((c) => (
-              <div key={c.id} className="h-9 px-1 text-center text-sm"><div className="font-medium leading-tight">{c.name}</div><div className="text-xs text-muted">{c.sport}</div></div>
+              <div key={c.id} className="h-9 px-1 text-center text-sm"><div className="font-medium leading-tight">{c.name}</div><div className="text-xs text-muted">{sportNames[c.sport] ?? c.sport}</div></div>
             ))}
             {courts.map((c) => (
               <div key={c.id} className="relative rounded-lg border border-grid bg-white" style={{ height: times.length * ROW_PX }}>
@@ -138,12 +184,13 @@ export default function PlayerGrid({ club, courts, occ, date, hold }: { club: Cl
       </div>
 
       {pick && (
-        <div className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-lg rounded-t-2xl border-t border-grid bg-white px-5 pb-6 pt-4 shadow-2xl">
+        <div className="fixed inset-x-0 bottom-0 z-30 mx-auto max-w-lg rounded-t-2xl border-t border-grid bg-white px-5 pb-8 pt-4 shadow-2xl">
           {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
           <div className="flex items-baseline justify-between">
-            <h2 className="text-lg font-semibold">{courts.find((c) => c.id === pick.courtId)?.name} · {pick.time}–{endLabel(pick.time, slots)}</h2>
+            <h2 className="text-lg font-semibold">{allCourts.find((c) => c.id === pick.courtId)?.name} · {pick.time}–{endLabel(pick.time, slots)}</h2>
             <button onClick={() => setPick(null)} className="text-sm text-muted">Close</button>
           </div>
+          <p className="text-sm text-muted">{date === today ? "Today" : formatInTimeZone(dayOf(date), club.timezone, "EEEE d MMMM")}</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {Array.from({ length: maxSlotsHere }, (_, i) => i + 1).filter((n) => n >= minSlots).map((n) => (
               <button key={n} onClick={() => { setSlots(n); setPrice(null); }} className={`rounded-xl border px-3 py-2 text-sm ${slots === n ? "border-ink bg-ink text-white" : "border-grid"}`}>{fmtDur(n * club.slot_minutes)}</button>
