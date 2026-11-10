@@ -10,6 +10,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | Path | What |
 | --- | --- |
 | `supabase/migrations/0001_init.sql` | Full schema: tables, enums, double-booking guards, `book_slot` / `cancel_booking`, RLS |
+| `supabase/migrations/0024_match_board.sql` | Match board: `post_match` (optional booking link), `join_match` (atomic capacity, auto-close), `leave_match`, `set_match_status`, `match_board`, `match_participants` |
 | `supabase/migrations/0023_coach_exceptions.sql` | Exceptions per club; closed ranges split weekly windows |
 | `supabase/migrations/0022_coach_privacy.sql` | Availability readable only for listed coaches (or coach/staff); `coach_availability` enforces it; staff decide via RPC only, approve only pending |
 | `supabase/migrations/0021_coach_rerequest.sql` | Removed/declined coach may request again |
@@ -35,7 +36,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | `supabase/seed.sql` | Demo club (Batroun), 5 courts, peak/off-peak prices, credit packs. Idempotent |
 | `supabase/tests/run.sh` | Local Postgres test: concurrent double-booking, blocks, credits, RLS |
 | `src/lib/supabase/` | Browser and server Supabase clients |
-| `src/app/` | Pages: `/` clubs · `/club/[slug]` availability + hold · `/pay/[id]` · `/bookings` · `/profile` · `/staff/[slug]` calendar + `/settings` · `/admin` clubs, `/admin/clubs/[slug]`, `/admin/payments` · `/coach` coach dashboard · `/club/[slug]/coaches`, `/coaches/[id]` · `/api/pay/simulate` |
+| `src/app/` | Pages: `/` clubs · `/club/[slug]` availability + hold · `/pay/[id]` · `/bookings` · `/profile` · `/staff/[slug]` calendar + `/settings` · `/admin` clubs, `/admin/clubs/[slug]`, `/admin/payments` · `/coach` coach dashboard · `/club/[slug]/coaches`, `/coaches/[id]` · `/club/[slug]/matches`, `/matches/[id]` · `/api/pay/simulate` |
 
 ## Payment model (Phase 2+)
 

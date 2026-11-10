@@ -419,3 +419,59 @@ select count(*) from coach_availability(my_coach_id(), '$CLUB', $NEXT_TUE, 1);
 select count(*) from coach_availability(my_coach_id(), '$CLUB_B', $NEXT_TUE, 1);
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+
+echo "--- T. match board"
+$PSQL -q -d $DB -c "insert into auth.users (id, phone) values ('55555555-aaaa-4aaa-8aaa-555555555555','+9615') on conflict do nothing; insert into profiles (id, name) values ('55555555-aaaa-4aaa-8aaa-555555555555','Third') on conflict do nothing; update profiles set name='Player One' where id='$P1'; update profiles set name='Player Two' where id='$P2';"
+P3=55555555-aaaa-4aaa-8aaa-555555555555
+M=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '2 day', now()+interval '2 day 90 min', 'intermediate', 2, 'Need 2 for doubles', null);"; } | $PSQL -At -d $DB | tail -1)
+{ as_user $P1; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '51. organizer tries to join own match -> ERROR organizer_cannot_join ; direct insert into matches -> RLS'
+select join_match('$M');
+insert into matches (club_id, sport, organizer_id, start_at, players_needed) values ('$CLUB','padel',auth.uid(),now()+interval '3 day',2);
+EOF
+as_user $P2; cat <<EOF
+\echo '52. player2 sees the match on the board with organizer name, joined 0 -> then joins -> joined 1, still open'
+select organizer_name, joined, status from match_board('$CLUB', 14) where match_id='$M';
+select join_match('$M');
+select joined, status, i_joined from match_board('$CLUB', 14) where match_id='$M';
+\echo '53. player2 sees participants (names) -> 2 rows'
+select count(*) from match_participants('$M');
+EOF
+} | $PSQL -d $DB 2>&1 | filter
+echo "54. two players race for the last place -> exactly one joins, match closes"
+join() { { as_user $1; echo "begin; select join_match('$M'); select pg_sleep(1); commit;"; } | $PSQL -d $DB > /tmp/cb_j$2.log 2>&1; }
+join $P3 1 & sleep 0.3; join $ADMIN 2 & wait
+grep -h "ERROR" /tmp/cb_j1.log /tmp/cb_j2.log | sort | uniq -c
+$PSQL -At -d $DB -c "select 'joined = '||count(*)||' (expect 2) ; status = '||(select status from matches where id='$M')||' (expect closed)' from match_players where match_id='$M'"
+{ as_user $P2; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '55. player2 leaves -> reopens with 1 joined ; outsider (not participant) cannot see participants -> 0'
+select leave_match('$M');
+select joined, status from match_board('$CLUB', 14) where match_id='$M';
+EOF
+as_user $STAFF_B; cat <<EOF
+select count(*) from match_participants('$M');
+EOF
+as_user $P1; cat <<EOF
+\echo '56. organizer closes -> closed ; outsider no longer sees it on the board -> 0 ; organizer still sees it -> 1'
+select set_match_status('$M', 'closed');
+EOF
+as_user $STAFF_B; cat <<EOF
+select count(*) from match_board('$CLUB', 14) where match_id='$M';
+EOF
+as_user $P1; cat <<EOF
+select count(*) from match_board('$CLUB', 14) where match_id='$M';
+EOF
+} | $PSQL -d $DB 2>&1 | filter
+$PSQL -q -d $DB -c "insert into bookings (id, club_id, court_id, player_id, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('99999999-9999-4999-8999-999999999999','$CLUB','$COURT3','$P1', (current_date + 9 + time '09:30') at time zone 'Asia/Beirut', (current_date + 9 + time '11:00') at time zone 'Asia/Beirut', 'confirmed','app','$P1',30,1)"
+{ as_user $P1; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '57. post linked to own confirmed booking -> club/time copied (t) ; player2 linking that booking -> ERROR booking_not_found'
+select post_match(null,'padel',null,null,null,3,'from booking','99999999-9999-4999-8999-999999999999') as linked \gset
+select club_id = '$CLUB' and start_at = (select start_at from bookings where id='99999999-9999-4999-8999-999999999999') from matches where id = :'linked';
+EOF
+as_user $P2; cat <<EOF
+select post_match(null,'padel',null,null,null,3,'x','99999999-9999-4999-8999-999999999999');
+EOF
+} | $PSQL -d $DB 2>&1 | filter
