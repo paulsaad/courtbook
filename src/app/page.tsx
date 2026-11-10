@@ -7,11 +7,14 @@ export default async function Home() {
 
   let isStaff = false;
   let isAdmin = false;
+  let isCoach = false;
   if (user) {
-    const [{ data: profile }, { count }] = await Promise.all([
+    const [{ data: profile }, { count }, { count: coachCount }] = await Promise.all([
       supabase.from("profiles").select("roles").eq("id", user.id).single(),
       supabase.from("club_staff").select("*", { count: "exact", head: true }).eq("profile_id", user.id),
+      supabase.from("coaches").select("*", { count: "exact", head: true }).eq("profile_id", user.id),
     ]);
+    isCoach = (coachCount ?? 0) > 0;
     isAdmin = profile?.roles?.includes("admin") ?? false;
     isStaff = isAdmin || (count ?? 0) > 0;
   }
@@ -42,6 +45,7 @@ export default async function Home() {
         <div className="flex gap-4 text-sm">
           <Link href="/bookings" className="text-action underline">My bookings</Link>
           <Link href="/profile" className="text-action underline">Profile</Link>
+          <Link href="/coach" className="text-action underline">{isCoach ? "Coach profile" : "I'm a coach"}</Link>
         </div>
       )}
 
