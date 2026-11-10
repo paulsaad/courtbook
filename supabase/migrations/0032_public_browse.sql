@@ -18,7 +18,8 @@ create or replace view public_occupancy with (security_invoker = false) as
 revoke all on public_occupancy from public;
 grant select on public_occupancy to anon, authenticated;
 
--- Discovery RPCs without the signed-in guard
+-- Discovery RPCs without the signed-in guard (return types changed in 0031 → drop first; safe if 0031 was skipped)
+drop function if exists club_discovery(sport, text, text, text);
 create or replace function next_free_slot(p_club uuid, p_sport sport default null)
 returns table (start_at timestamptz, court_id uuid, court_name text)
 language plpgsql stable security definer set search_path = public as $$
