@@ -50,8 +50,8 @@ who_sql() { case $1 in anon) echo "set role anon; select set_config('request.jwt
 check() { CHECKS=$((CHECKS+1)); local got; got=$({ who_sql $1; echo "$3"; } | $PSQL -At -d $DB 2>&1 | grep -v set_config | tail -1)
   if [ "$got" == "$4" ]; then echo "  ok    $2"; else echo "  FAIL  $2 — expected [$4] got [$got]"; FAILS=$((FAILS+1)); fi; }
 # denied <who> <label> <sql> : must raise (permission denied or a business error)
-denied() { CHECKS=$((CHECKS+1)); local got; got=$({ who_sql $1; echo "$3"; } | $PSQL -At -d $DB 2>&1 | grep -v set_config | tail -1)
-  if [[ "$got" == *ERROR* ]]; then echo "  ok    $2 ($got)"; else echo "  FAIL  $2 — expected an error, got [$got]"; FAILS=$((FAILS+1)); fi; }
+denied() { CHECKS=$((CHECKS+1)); local out got; out=$({ who_sql $1; echo "$3"; } | $PSQL -At -d $DB 2>&1 | grep -v set_config); got=$(echo "$out" | grep -m1 ERROR)
+  if [ -n "$got" ]; then echo "  ok    $2 ($got)"; else echo "  FAIL  $2 — expected an error, got [$(echo "$out" | tail -1)]"; FAILS=$((FAILS+1)); fi; }
 
 echo "--- A. two players hold the same slot concurrently -> one hold, other slot_taken"
 hold() { { as_user $1; echo "begin; select booking_id from hold_slot('$CLUB','$2', $S, $E); select pg_sleep(1.5); commit;"; } | $PSQL -d $DB 2>&1; }
@@ -712,7 +712,18 @@ check service "I2 at most one live match per booking"         "select count(*) f
 check service "I3 no live match linked to a non-confirmed booking" "select count(*) from matches m join bookings b on b.id=m.booking_id where m.status<>'cancelled' and b.status<>'confirmed';" 0
 check service "I4 every live hold has a pending payment"      "select count(*) from bookings b where b.status='pending' and not exists (select 1 from payments p where p.booking_id=b.id and p.status='pending');" 0
 check service "I5 no player holds two live slots"             "select count(*) from (select player_id from bookings where status='pending' and hold_expires_at>now() group by 1 having count(*)>1) x;" 0
-check service "I6 no RPC executable by anon except the public set" "select count(*) from information_schema.routine_privileges where grantee='anon' and specific_schema='public' and routine_name not in ('club_discovery','next_free_slot','areas','club_sports','quote_price');" 0
+check service "I6 anon can execute only the public RPCs (effective, incl. PUBLIC)" "select string_agg(distinct p.proname, ',' order by p.proname) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and not exists (select 1 from pg_depend d where d.objid=p.oid and d.deptype='e') and has_function_privilege('anon', p.oid, 'EXECUTE');" "areas,club_discovery,club_sports,next_free_slot,quote_price"
+$PSQL -q -d $DB -c "create function _probe_fn() returns int language sql as 'select 1';"
+denied anon    "I6b a new function without grants is not executable by anon" "select _probe_fn();"
+check  service "I6c ...nor by authenticated (explicit grant needed)" "select has_function_privilege('authenticated', '_probe_fn()', 'EXECUTE');" f
+$PSQL -q -d $DB -c "drop function _probe_fn();"
+denied anon    "Q1 anon one-year quote rejected"                  "select quote_price('$COURT', (current_date + 12 + time '10:00') at time zone 'Asia/Beirut', (current_date + 377 + time '10:00') at time zone 'Asia/Beirut');"
+denied anon    "Q2 anon quote on inactive court rejected"        "select quote_price((select id from courts where name='Pitch 1'), (current_date + 12 + time '10:00') at time zone 'Asia/Beirut', (current_date + 12 + time '11:00') at time zone 'Asia/Beirut');"
+denied anon    "Q3 anon quote on inactive club rejected"         "select quote_price((select id from courts where name='C1'), (current_date + 12 + time '10:00') at time zone 'Asia/Beirut', (current_date + 12 + time '11:00') at time zone 'Asia/Beirut');"
+denied anon    "Q4 anon quote with end before start rejected"    "select quote_price('$COURT', (current_date + 12 + time '11:00') at time zone 'Asia/Beirut', (current_date + 12 + time '10:00') at time zone 'Asia/Beirut');"
+denied anon    "Q5 anon quote above club max (4 h) rejected"     "select quote_price('$COURT', (current_date + 12 + time '10:00') at time zone 'Asia/Beirut', (current_date + 12 + time '14:00') at time zone 'Asia/Beirut');"
+denied anon    "Q6 expire_stale_holds not callable by anon"      "select expire_stale_holds('$COURT');"
+denied anon    "Q7 lock_courts not callable by anon"             "select lock_courts(array['$COURT'::uuid]);"
 check service "I7 anon can read only the public tables"      "select string_agg(table_name, ',' order by table_name) from information_schema.tables t where t.table_schema='public' and has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'SELECT');" "clubs,courts,districts,governorates,price_rules,public_occupancy,sports"
 check service "I8 anon cannot write any table"                "select count(*) from information_schema.tables t where t.table_schema='public' and (has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'INSERT') or has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'UPDATE') or has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'DELETE'));" 0
 check service "I9 anon reads towns geography columns only"    "select string_agg(column_name, ',' order by column_name) from information_schema.columns c where table_name='towns' and has_column_privilege('anon', 'public.towns', column_name, 'SELECT');" "created_at,district_code,id,lat,lng,name_ar,name_en,seeded"

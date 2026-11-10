@@ -57,6 +57,8 @@ export const ERRORS: Record<string, string> = {
   bad_district: "Choose a district first.",
   bad_town_name: "Town name must be 2–60 characters.",
   bad_town: "That town does not exist.",
+  too_long: "That booking is longer than the club allows.",
+  club_not_found: "This club is not available.",
   user_not_found: "No account with that email. They need to sign in once first.",
   clubs_booking_minutes_check: "Min/max must be multiples of the grid step, and max ≥ min.",
   clubs_slot_minutes_check: "Grid step must be 30, 60 or 90.",
