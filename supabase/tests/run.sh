@@ -475,3 +475,44 @@ as_user $P2; cat <<EOF
 select post_match(null,'padel',null,null,null,3,'x','99999999-9999-4999-8999-999999999999');
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+
+echo "--- U. join approval, notifications, chat"
+MA=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '4 day', now()+interval '4 day 90 min', null, 1, 'approval match', null, 'approval');"; } | $PSQL -At -d $DB | tail -1)
+{ as_user $P2; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '58. join approval match -> pending ; board shows my_status pending, joined 0 ; participants hidden (not accepted) -> 0 ; chat insert -> RLS'
+select join_match('$MA');
+select my_status, joined, pending from match_board('$CLUB', 14) where match_id='$MA';
+select count(*) from match_participants('$MA');
+insert into match_messages (match_id, profile_id, body) values ('$MA', auth.uid(), 'hi');
+EOF
+as_user $P1; cat <<EOF
+\echo '59. organizer has a join_request notification -> 1 ; sees pending participant -> 2 rows ; accepts -> match closes (needed 1)'
+select count(*) from notifications where match_id='$MA' and kind='join_request';
+select count(*) from match_participants('$MA');
+select decide_join('$MA', '$P2', true);
+select status from matches where id='$MA';
+\echo '60. organizer writes a message -> ok ; player2 gets join_accepted + match_message notifications'
+insert into match_messages (match_id, profile_id, body) values ('$MA', auth.uid(), 'See you at 7');
+EOF
+as_user $P2; cat <<EOF
+select kind from notifications where match_id='$MA' order by created_at;
+select count(*) from match_messages_list('$MA', null);
+\echo '61. outsider cannot read messages -> 0 ; mark read -> unread 0'
+EOF
+as_user $STAFF_B; cat <<EOF
+select count(*) from match_messages_list('$MA', null);
+select count(*) from match_messages where match_id='$MA';
+EOF
+as_user $P2; cat <<EOF
+select mark_notifications_read(null);
+select count(*) from notifications where read_at is null;
+EOF
+as_user $P1; cat <<EOF
+\echo '62. organizer cancels -> player2 gets match_cancelled'
+select set_match_status('$MA', 'cancelled');
+EOF
+as_user $P2; cat <<EOF
+select count(*) from notifications where match_id='$MA' and kind='match_cancelled';
+EOF
+} | $PSQL -d $DB 2>&1 | filter

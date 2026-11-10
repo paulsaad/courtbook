@@ -50,6 +50,7 @@ export const ERRORS: Record<string, string> = {
   match_closed: "This match is no longer open.",
   organizer_cannot_join: "You organise this match.",
   booking_not_found: "Pick one of your own upcoming bookings.",
+  not_pending_join: "That request is no longer pending.",
   user_not_found: "No account with that email. They need to sign in once first.",
   clubs_booking_minutes_check: "Min/max must be multiples of the grid step, and max ≥ min.",
   clubs_slot_minutes_check: "Grid step must be 30, 60 or 90.",

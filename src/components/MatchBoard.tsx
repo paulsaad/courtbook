@@ -10,8 +10,8 @@ import { friendlyError } from "@/lib/types";
 
 export type MatchRow = {
   match_id: string; club_id: string; club_name: string; club_slug: string; sport: string; start_at: string; end_at: string | null;
-  level: string | null; players_needed: number; joined: number; status: string; note: string | null;
-  organizer_id: string; organizer_name: string | null; i_joined: boolean; i_organize: boolean; booking_id: string | null; court_name: string | null;
+  level: string | null; players_needed: number; joined: number; pending: number; status: string; note: string | null; join_mode: string;
+  organizer_id: string; organizer_name: string | null; my_status: string | null; i_organize: boolean; booking_id: string | null; court_name: string | null;
 };
 type ClubX = { id: string; name: string; slug: string; timezone: string; open_time: string; close_time: string; slot_minutes: number };
 type MyBooking = { id: string; start_at: string; end_at: string; courts: { name: string } | null };
@@ -27,7 +27,7 @@ export function MatchCard({ m, tz }: { m: MatchRow; tz: string }) {
         <span className="font-medium">{formatInTimeZone(new Date(m.start_at), tz, "EEE d MMM · HH:mm")}{m.end_at ? `–${hhmm(m.end_at, tz)}` : ""}</span>
         <span className={`rounded-full px-2 py-0.5 text-xs ${m.status === "open" ? "bg-turf-soft text-turf" : "bg-slate-soft text-muted"}`}>{m.status === "open" ? `${spots} spot${spots === 1 ? "" : "s"} left` : m.status}</span>
       </div>
-      <div className="mt-1 text-sm text-muted">{m.sport}{m.level ? ` · ${m.level}` : ""}{m.court_name ? ` · ${m.court_name} booked` : ""} · by {m.organizer_name ?? "player"}{m.i_organize ? " (you)" : m.i_joined ? " · you're in" : ""}</div>
+      <div className="mt-1 text-sm text-muted">{m.sport}{m.level ? ` · ${m.level}` : ""}{m.court_name ? ` · ${m.court_name} booked` : ""} · by {m.organizer_name ?? "player"}{m.i_organize ? " (you)" : m.my_status === "accepted" ? " · you're in" : m.my_status === "pending" ? " · requested" : ""}{m.i_organize && m.pending > 0 ? ` · ${m.pending} waiting` : ""}</div>
       {m.note && <p className="mt-2 text-sm">{m.note}</p>}
     </Link>
   );
@@ -39,7 +39,7 @@ export default function MatchBoard({ club, rows, myBookings }: { club: ClubX; ro
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const today = todayIn(club.timezone);
-  const [f, setF] = useState({ sport: "padel", level: "", date: today, time: "18:00", needed: 3, note: "", bookingId: "" });
+  const [f, setF] = useState({ sport: "padel", level: "", date: today, time: "18:00", needed: 3, note: "", bookingId: "", joinMode: "open" });
 
   async function post(e: React.FormEvent) {
     e.preventDefault();
@@ -48,7 +48,7 @@ export default function MatchBoard({ club, rows, myBookings }: { club: ClubX; ro
     const end = f.bookingId || !start ? null : new Date(new Date(start).getTime() + 90 * 60000).toISOString();
     const { data, error } = await createClient().rpc("post_match", {
       p_club: club.id, p_sport: f.sport, p_start: start, p_end: end, p_level: f.level || null,
-      p_players_needed: f.needed, p_note: f.note, p_booking: f.bookingId || null,
+      p_players_needed: f.needed, p_note: f.note, p_booking: f.bookingId || null, p_join_mode: f.joinMode,
     });
     setBusy(false);
     if (error) { setError(friendlyError(error.message)); return; }
@@ -82,6 +82,7 @@ export default function MatchBoard({ club, rows, myBookings }: { club: ClubX; ro
           )}
           <div className="text-sm">Level<div className="mt-1 flex gap-2">{[["", "any"], ["beginner", "beginner"], ["intermediate", "intermediate"], ["advanced", "advanced"]].map(([v, l]) => <button type="button" key={v} onClick={() => setF({ ...f, level: v })} className={chip(f.level === v)}>{l}</button>)}</div></div>
           <div className="text-sm">Players needed<div className="mt-1 flex gap-2">{[1, 2, 3].map((n) => <button type="button" key={n} onClick={() => setF({ ...f, needed: n })} className={chip(f.needed === n)}>{n}</button>)}</div></div>
+          <div className="text-sm">Who can join<div className="mt-1 flex gap-2">{[["open", "anyone"], ["approval", "I approve each player"]].map(([v, l]) => <button type="button" key={v} onClick={() => setF({ ...f, joinMode: v })} className={chip(f.joinMode === v)}>{l}</button>)}</div></div>
           <input className={input} placeholder="Note (optional): e.g. friendly doubles, bring balls" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
           <button disabled={busy} className="rounded-xl bg-action py-3 font-medium text-white disabled:opacity-50">{busy ? "Posting…" : "Post"}</button>
         </form>

@@ -8,12 +8,15 @@ export default async function Home() {
   let isStaff = false;
   let isAdmin = false;
   let isCoach = false;
+  let unread = 0;
   if (user) {
-    const [{ data: profile }, { count }, { count: coachCount }] = await Promise.all([
+    const [{ data: profile }, { count }, { count: coachCount }, { count: unreadCount }] = await Promise.all([
       supabase.from("profiles").select("roles").eq("id", user.id).single(),
       supabase.from("club_staff").select("*", { count: "exact", head: true }).eq("profile_id", user.id),
       supabase.from("coaches").select("*", { count: "exact", head: true }).eq("profile_id", user.id),
+      supabase.from("notifications").select("*", { count: "exact", head: true }).eq("profile_id", user.id).is("read_at", null),
     ]);
+    unread = unreadCount ?? 0;
     isCoach = (coachCount ?? 0) > 0;
     isAdmin = profile?.roles?.includes("admin") ?? false;
     isStaff = isAdmin || (count ?? 0) > 0;
@@ -43,6 +46,7 @@ export default async function Home() {
 
       {user && (
         <div className="flex gap-4 text-sm">
+          <Link href="/notifications" className="text-action underline">Activity{unread > 0 && <span className="ml-1 rounded-full bg-danger px-1.5 text-xs text-white">{unread}</span>}</Link>
           <Link href="/bookings" className="text-action underline">My bookings</Link>
           <Link href="/profile" className="text-action underline">Profile</Link>
           <Link href="/coach" className="text-action underline">{isCoach ? "Coach profile" : "I'm a coach"}</Link>

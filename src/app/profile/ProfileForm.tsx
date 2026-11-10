@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-type Initial = { name: string; phone: string; level: string; sports: string[] };
+type Initial = { name: string; phone: string; level: string; sports: string[]; email_notifications: boolean };
 const LEVELS = [["beginner", "Beginner"], ["intermediate", "Intermediate"], ["advanced", "Advanced"]] as const;
 const SPORTS = [["padel", "Padel"], ["tennis", "Tennis"]] as const;
 
@@ -21,7 +21,7 @@ export default function ProfileForm({ initial, next, firstTime }: { initial: Ini
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     const { error } = await supabase.from("profiles")
-      .update({ name: f.name.trim(), phone: f.phone.trim() || null, level: f.level || null, sports: f.sports })
+      .update({ name: f.name.trim(), phone: f.phone.trim() || null, level: f.level || null, sports: f.sports, email_notifications: f.email_notifications })
       .eq("id", user!.id);
     if (error) { setBusy(false); setError(error.message); return; }
     router.replace(next);
@@ -61,6 +61,7 @@ export default function ProfileForm({ initial, next, firstTime }: { initial: Ini
             ))}
           </div>
         </fieldset>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.email_notifications} onChange={(e) => setF({ ...f, email_notifications: e.target.checked })} /> Email me about my matches (join requests, messages, cancellations)</label>
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
         <button type="submit" disabled={busy} className="rounded-xl bg-action py-3.5 font-medium text-white disabled:opacity-50">{busy ? "Saving…" : firstTime ? "Continue" : "Save"}</button>
       </form>
