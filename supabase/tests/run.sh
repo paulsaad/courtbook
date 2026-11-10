@@ -674,3 +674,30 @@ select count(*) from player_names(array['$P1'::uuid]);
 select count(*) from profiles;
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+
+echo "--- AA. my_agenda"
+{ as_user $P1; cat <<EOF
+\echo '84. P1 agenda: has bookings and matches, matches organized by P1 marked organizer, no rows from other players'
+select kind, count(*) from my_agenda() group by kind order by kind;
+select count(*) from my_agenda() where kind='match' and role <> 'organizer';
+EOF
+as_user $P3; cat <<EOF
+\echo '85. P3 agenda: only matches P3 applied to / joined (role pending or accepted)'
+select role, count(*) from my_agenda() group by role order by role;
+EOF
+} | $PSQL -d $DB 2>&1 | filter
+
+echo "--- AB. public_occupancy scope"
+$PSQL -q -d $DB -c "insert into clubs (name, slug, active) values ('Closed Club','closed', false); insert into courts (club_id, name, sport) select id, 'C1', 'padel' from clubs where slug='closed';
+insert into bookings (club_id, court_id, player_id, start_at, end_at, status, source, created_by, price_usd, fee_usd) select c.id, k.id, '$P1', (current_date + 2 + time '10:00') at time zone 'Asia/Beirut', (current_date + 2 + time '11:00') at time zone 'Asia/Beirut', 'confirmed','app','$P1',10,1 from clubs c join courts k on k.club_id=c.id where c.slug='closed';
+insert into bookings (club_id, court_id, player_id, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$CLUB','$COURT','$P1', (current_date - 30 + time '10:00') at time zone 'Asia/Beirut', (current_date - 30 + time '11:00') at time zone 'Asia/Beirut', 'confirmed','app','$P1',10,1);
+insert into bookings (club_id, court_id, player_id, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$CLUB','$COURT','$P1', (current_date + 400 + time '10:00') at time zone 'Asia/Beirut', (current_date + 400 + time '11:00') at time zone 'Asia/Beirut', 'confirmed','app','$P1',10,1);"
+$PSQL -At -d $DB -c "select 'fixtures: '||((select count(*) from bookings where club_id=(select id from clubs where slug='closed')) + (select count(*) from bookings where court_id='$COURT' and (start_at < now() - interval '20 day' or start_at > now() + interval '300 day')))||' (expect 3)'"
+{ echo "set role anon; select set_config('request.jwt.claims', '', true);"; cat <<EOF
+\echo '86. anon public_occupancy: inactive club -> 0 ; 30 days ago -> 0 ; 400 days ahead -> 0 ; within window -> rows'
+select count(*) from public_occupancy where club_id = (select id from clubs where slug='closed');
+select count(*) from public_occupancy where start_at < now() - interval '2 day';
+select count(*) from public_occupancy where start_at > now() + interval '100 day';
+select count(*) > 0 from public_occupancy where club_id='$CLUB';
+EOF
+} | $PSQL -d $DB 2>&1 | filter

@@ -18,6 +18,8 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | `supabase/migrations/0030_discovery.sql` | Home discovery: `next_free_slot`, `club_discovery` (sport/area/text filters), `open_matches` (global board) — read-only |
 | `supabase/migrations/0031_discovery_court_id.sql` | `club_discovery` returns `next_free_court_id` (Home pill preselects the slot) |
 | `supabase/migrations/0032_public_browse.sql` | Public browsing: anon may read sports/geography, `public_occupancy` (taken/free only), `club_discovery`, `next_free_slot`, `areas`, `club_sports`, `quote_price`. Holds, matches, names stay signed-in |
+| `supabase/migrations/0033_my_agenda.sql` | `my_agenda()`: bookings + matches of the signed-in player (My CourtBook, Home play-next) |
+| `supabase/migrations/0034_public_occupancy_scope.sql` | `public_occupancy` limited to active clubs/courts, yesterday → booking window |
 | `supabase/migrations/0024_match_board.sql` | Match board: `post_match` (optional booking link), `join_match` (atomic capacity, auto-close), `leave_match`, `set_match_status`, `match_board`, `match_participants` |
 | `supabase/migrations/0023_coach_exceptions.sql` | Exceptions per club; closed ranges split weekly windows |
 | `supabase/migrations/0022_coach_privacy.sql` | Availability readable only for listed coaches (or coach/staff); `coach_availability` enforces it; staff decide via RPC only, approve only pending |

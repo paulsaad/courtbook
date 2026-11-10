@@ -21,14 +21,14 @@ export type OpenMatch = {
 const TZ = "Asia/Beirut";
 const chip = (on: boolean) => `shrink-0 rounded-full border px-3.5 py-1.5 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
 
-export default function Discover({ areas, sports, initialClubs, initialMatches, signedIn }: { areas: Governorate[]; sports: Sport[]; initialClubs: ClubCard[]; initialMatches: OpenMatch[]; signedIn: boolean }) {
+export default function Discover({ areas, sports, initialClubs, initialMatches, signedIn, initialError }: { areas: Governorate[]; sports: Sport[]; initialClubs: ClubCard[]; initialMatches: OpenMatch[]; signedIn: boolean; initialError?: boolean }) {
   const [prefs, setPrefs] = useState<Prefs>(EMPTY);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
   const [clubs, setClubs] = useState(initialClubs);
   const [matches, setMatches] = useState(initialMatches);
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState(!!initialError);
   const [tick, setTick] = useState(0); // bumped by Retry
   // sport chips come from the area/search result *without* the sport filter, so other sports stay reachable
   const [facets, setFacets] = useState<string[]>([...new Set(initialClubs.flatMap((c) => c.sports))]);
@@ -41,7 +41,7 @@ export default function Discover({ areas, sports, initialClubs, initialMatches, 
     const isDefault = !prefs.gov && !prefs.district && !prefs.sport && query.trim() === "";
     let alive = true;
     const t = setTimeout(async () => {
-      if (isDefault) { setClubs(initialClubs); setMatches(initialMatches); setFacets([...new Set(initialClubs.flatMap((c) => c.sports))]); setBusy(false); setFailed(false); return; }
+      if (isDefault && tick === 0 && !initialError) { setClubs(initialClubs); setMatches(initialMatches); setFacets([...new Set(initialClubs.flatMap((c) => c.sports))]); setBusy(false); setFailed(false); return; }
       setBusy(true);
       const supabase = createClient();
       const area = { p_governorate: prefs.gov, p_district: prefs.district };

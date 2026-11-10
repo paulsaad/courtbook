@@ -12,12 +12,12 @@ import { readPrefs } from "@/lib/prefs";
 export type Occ = { id?: string | null; court_id: string; start_at: string; end_at: string; status?: string; mine?: boolean; kind: "booking" | "block" };
 type ClubX = Club & { booking_window_days: number; service_fee_usd: number; location_url: string | null; hold_minutes: number };
 type Hold = { booking_id: string; court_name: string; start_at: string; end_at: string; hold_expires_at: string } | null;
-type Preselect = { date: string; time: string; courtId: string } | null;
+type Preselect = { date: string; time: string; courtId: string; minutes: number | null } | null;
 
 const chip = (on: boolean) => `shrink-0 rounded-full border px-3.5 py-1.5 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
 
-export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: initialOcc, date: initialDate, hold, preselect, sportNames }: {
-  signedIn: boolean; club: ClubX; courts: Court[]; occ: Occ[]; date: string; hold: Hold; preselect: Preselect; sportNames: Record<string, string>;
+export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: initialOcc, occError, date: initialDate, hold, preselect, sportNames }: {
+  signedIn: boolean; club: ClubX; courts: Court[]; occ: Occ[]; occError: boolean; date: string; hold: Hold; preselect: Preselect; sportNames: Record<string, string>;
 }) {
   const router = useRouter();
   const times = slotTimes(club.open_time, club.close_time, club.slot_minutes);
@@ -28,16 +28,24 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
   const days = Array.from({ length: club.booking_window_days + 1 }, (_, i) => shiftDate(today, i));
 
   const [date, setDate] = useState(initialDate);
-  // occupancy: the server gives today's; other days are fetched on the client (no page reload)
-  const [fetched, setFetched] = useState<{ date: string; occ: Occ[] } | null>(null);
-  const occ = date === initialDate ? initialOcc : fetched?.date === date ? fetched.occ : [];
-  const loading = date !== initialDate && fetched?.date !== date;
+  // occupancy: the server gives the first day's; other days are fetched on the client (no page reload).
+  // Unknown availability (loading or failed) never shows as free: slots are not selectable until it is known.
+  const [fetched, setFetched] = useState<{ date: string; occ: Occ[] | null } | null>(null);
+  const [tick, setTick] = useState(0);
+  const occ: Occ[] | null = date === initialDate ? (fetched?.date === initialDate ? fetched.occ : occError ? null : initialOcc) : fetched?.date === date ? fetched.occ : null;
+  const known = occ !== null;
+  const loading = !known && !(fetched?.date === date && fetched.occ === null);
+  const failed = !known && !loading;
   const sports = [...new Set(allCourts.map((c) => c.sport))];
   const [sport, setSport] = useState<string | null>(null);
   const courts = sport && sports.includes(sport) ? allCourts.filter((c) => c.sport === sport) : allCourts;
 
   const [pick, setPick] = useState<{ courtId: string; time: string } | null>(preselect && preselect.date === initialDate ? { courtId: preselect.courtId, time: preselect.time } : null);
-  const [slots, setSlots] = useState(Math.round(club.min_booking_minutes / club.slot_minutes));
+  const [slots, setSlots] = useState(() => {
+    const want = preselect?.minutes ? Math.round(preselect.minutes / club.slot_minutes) : 0;
+    return Math.max(Math.round(club.min_booking_minutes / club.slot_minutes), Math.min(want, Math.round(club.max_booking_minutes / club.slot_minutes)));
+  });
+  const [notice, setNotice] = useState<string | null>(null);
   const [price, setPrice] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -51,18 +59,18 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
   }, []);
 
   useEffect(() => {
-    if (date === initialDate) return;
+    if (date === initialDate && !occError && tick === 0) return;
     let alive = true;
     (async () => {
       const { dayStart, dayEnd } = dayBounds(date, club.timezone);
       const sb = createClient();
-      const { data } = signedIn
+      const { data, error } = signedIn
         ? await sb.from("occupancy").select("id, court_id, start_at, end_at, status, mine, kind").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart)
         : await sb.from("public_occupancy").select("court_id, start_at, end_at, kind").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart);
-      if (alive) setFetched({ date, occ: (data ?? []) as Occ[] });
+      if (alive) setFetched({ date, occ: error ? null : ((data ?? []) as Occ[]) });
     })();
     return () => { alive = false; };
-  }, [date, initialDate, club.id, club.timezone, signedIn]);
+  }, [date, initialDate, occError, tick, club.id, club.timezone, signedIn]);
 
   useEffect(() => {
     const el = stripRef.current?.querySelector<HTMLElement>("[data-on=true]");
@@ -72,12 +80,12 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
   function slotStartMs(t: string) { return clubLocalToUtc(date, t, club.timezone).getTime(); }
   function isTaken(courtId: string, t: string) {
     const s = slotStartMs(t), e = s + club.slot_minutes * 60000;
-    return occ.some((o) => o.court_id === courtId && new Date(o.start_at).getTime() < e && new Date(o.end_at).getTime() > s);
+    return (occ ?? []).some((o) => o.court_id === courtId && new Date(o.start_at).getTime() < e && new Date(o.end_at).getTime() > s);
   }
   function isPast(t: string) { return slotStartMs(t) <= nowMs; }
   function myHoldAt(courtId: string, t: string) {
     const s = slotStartMs(t), e = s + club.slot_minutes * 60000;
-    return occ.find((o) => o.mine && o.status === "pending" && o.court_id === courtId && new Date(o.start_at).getTime() < e && new Date(o.end_at).getTime() > s) ?? null;
+    return (occ ?? []).find((o) => o.mine && o.status === "pending" && o.court_id === courtId && new Date(o.start_at).getTime() < e && new Date(o.end_at).getTime() > s) ?? null;
   }
   function freeRun(courtId: string, t: string) {
     const i = times.indexOf(t);
@@ -87,6 +95,19 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
   }
   const minSlots = Math.round(club.min_booking_minutes / club.slot_minutes);
   const maxSlotsHere = pick ? freeRun(pick.courtId, pick.time) : 0;
+
+  // a preselected slot (from Home, or carried through sign-in / profile setup) is re-checked once availability is known
+  useEffect(() => {
+    if (!preselect || !known || date !== preselect.date) return;
+    const run = freeRun(preselect.courtId, preselect.time);
+    const ok = !isTaken(preselect.courtId, preselect.time) && !isPast(preselect.time) && run >= minSlots;
+    const t = setTimeout(() => {
+      if (!ok) { setPick(null); setNotice("That slot was taken in the meantime — pick another one."); return; }
+      setSlots((n) => Math.min(n, run));
+    }, 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [known, date]);
 
   useEffect(() => {
     if (!pick) return;
@@ -103,7 +124,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
     const start = clubLocalToUtc(date, pick.time, club.timezone);
     if (!signedIn) {
       // sign in, then come back with this slot selected
-      router.push(`/login?next=${encodeURIComponent(`/club/${club.slug}?at=${start.toISOString()}&court=${pick.courtId}`)}`);
+      router.push(`/login?next=${encodeURIComponent(`/club/${club.slug}?at=${start.toISOString()}&court=${pick.courtId}&dur=${slots * club.slot_minutes}`)}`);
       return;
     }
     setBusy(true); setError(null);
@@ -114,7 +135,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
     router.push(`/pay/${row.booking_id}`);
   }
 
-  const changeDate = (d: string) => { setDate(d); setPick(null); setError(null); };
+  const changeDate = (d: string) => { setDate(d); setPick(null); setError(null); setNotice(null); };
   const endLabel = (t: string, n: number) => { const m = toMin(t) + n * club.slot_minutes; return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; };
   const fmtDur = (m: number) => (m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60}`);
   const dayOf = (d: string) => clubLocalToUtc(d, "12:00", club.timezone);
@@ -143,6 +164,8 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
       )}
 
       <p className="px-4 pt-2 text-xs text-muted">Book {fmtDur(club.min_booking_minutes)} to {fmtDur(club.max_booking_minutes)} · tap a free slot{loading ? " · loading…" : ""}</p>
+      {failed && <p className="mx-4 mt-2 flex items-center justify-between rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">Could not load availability. <button onClick={() => setTick((n) => n + 1)} className="font-medium underline">Retry</button></p>}
+      {notice && <p className="mx-4 mt-2 rounded-xl bg-sand-soft px-3 py-2 text-sm">{notice}</p>}
 
       {hold && (
         <Link href={`/pay/${hold.booking_id}`} className="mx-4 mt-2 flex items-center justify-between rounded-xl bg-turf px-4 py-3 text-sm text-white">
@@ -151,7 +174,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
         </Link>
       )}
 
-      <div className={`flex-1 overflow-x-auto px-2 pb-28 pt-2 ${loading ? "opacity-60" : ""}`}>
+      <div className={`flex-1 overflow-x-auto px-2 pb-28 pt-2 ${known ? "" : "opacity-60"}`}>
         <div className="flex min-w-max">
           <div className="relative w-12 shrink-0" style={{ height: times.length * ROW_PX, marginTop: 36 }}>
             {times.map((t, i) => i % labelEvery === 0 && <div key={t} className="absolute right-2 -translate-y-1/2 text-xs text-muted" style={{ top: i * ROW_PX }}>{t}</div>)}
@@ -174,10 +197,10 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
                     );
                   }
                   const selected = pick?.courtId === c.id && toMin(t) >= toMin(pick.time) && toMin(t) < toMin(pick.time) + slots * club.slot_minutes;
-                  const bookable = !taken && !past && freeRun(c.id, t) >= minSlots;
+                  const bookable = known && !taken && !past && freeRun(c.id, t) >= minSlots;
                   return (
                     <button key={t} disabled={!bookable}
-                      onClick={() => { setPick({ courtId: c.id, time: t }); setSlots(Math.min(minSlots, freeRun(c.id, t))); setPrice(null); setError(null); }}
+                      onClick={() => { setPick({ courtId: c.id, time: t }); setSlots(Math.min(minSlots, freeRun(c.id, t))); setPrice(null); setError(null); setNotice(null); }}
                       className={`absolute inset-x-0 border-t text-xs first:border-t-0 ${i % labelEvery === 0 ? "border-grid" : "border-dashed border-grid/50"} ${
                         selected ? "bg-turf text-white" : taken ? "hatch bg-slate-soft text-muted" : past ? "bg-paper text-muted/60" : bookable ? "active:bg-turf-soft" : "text-muted/60"}`}
                       style={{ top: i * ROW_PX, height: ROW_PX }}>

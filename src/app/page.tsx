@@ -2,8 +2,10 @@ import Link from "next/link";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
 import { loadRefData } from "@/lib/geo";
+import { nowMs } from "@/lib/time";
 import InstallHint from "@/components/InstallHint";
 import Discover, { type ClubCard, type OpenMatch } from "@/components/Discover";
+import type { AgendaRow } from "@/app/me/page";
 
 const TZ = "Asia/Beirut";
 
@@ -12,7 +14,7 @@ export default async function Home() {
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
-    const [ref, { data: clubs }] = await Promise.all([loadRefData(supabase), supabase.rpc("club_discovery")]);
+    const [ref, { data: clubs, error: clubsError }] = await Promise.all([loadRefData(supabase), supabase.rpc("club_discovery")]);
     return (
       <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5">
         <header className="flex items-center justify-between">
@@ -21,26 +23,28 @@ export default async function Home() {
         </header>
         <p className="text-sm text-muted">Book sports courts, find players and coaches across Lebanon. Browse freely; sign in when you reserve.</p>
         <InstallHint />
-        <Discover areas={ref.areas} sports={ref.sports} initialClubs={(clubs ?? []) as ClubCard[]} initialMatches={[]} signedIn={false} />
+        <Discover areas={ref.areas} sports={ref.sports} initialClubs={(clubs ?? []) as ClubCard[]} initialMatches={[]} signedIn={false} initialError={!!clubsError} />
       </main>
     );
   }
 
-  const [{ data: me }, ref, { data: clubs }, { data: matches }, { data: nextBooking }, { data: myMatches }] = await Promise.all([
+  const [{ data: me }, ref, { data: clubs, error: clubsError }, { data: matches }, { data: agenda }] = await Promise.all([
     supabase.from("profiles").select("name").eq("id", user.id).single(),
     loadRefData(supabase),
     supabase.rpc("club_discovery"),
     supabase.rpc("open_matches", { p_limit: 3 }),
-    supabase.from("bookings").select("id, start_at, end_at, clubs(name, slug), courts!bookings_court_id_fkey(name)").eq("player_id", user.id).eq("status", "confirmed").gt("end_at", new Date().toISOString()).order("start_at").limit(1),
-    supabase.rpc("match_board", { p_club: null, p_days: 14 }),
+    supabase.rpc("my_agenda"),
   ]);
   const firstName = me?.name?.split(" ")[0];
-  const nb = (nextBooking as unknown as { id: string; start_at: string; end_at: string; clubs: { name: string; slug: string } | null; courts: { name: string } | null }[] | null)?.[0] ?? null;
-  const nm = ((myMatches ?? []) as { match_id: string; start_at: string; club_name: string; sport: string; i_joined: boolean; i_organize: boolean; status: string }[])
-    .filter((m) => (m.i_joined || m.i_organize) && m.status !== "cancelled")[0] ?? null;
-  const next = nb && (!nm || nb.start_at <= nm.start_at)
-    ? { href: `/bookings/${nb.id}`, when: nb.start_at, title: `${nb.clubs?.name} · ${nb.courts?.name}`, kind: "Your booking" }
-    : nm ? { href: `/matches/${nm.match_id}`, when: nm.start_at, title: `${nm.sport} match · ${nm.club_name}`, kind: nm.i_organize ? "Your match" : "You're playing" } : null;
+  const now = nowMs();
+  const nx = ((agenda ?? []) as AgendaRow[])
+    .filter((r) => r.status !== "cancelled" && r.status !== "no_show" && new Date(r.end_at ?? r.start_at).getTime() > now)
+    .sort((a, b) => a.start_at.localeCompare(b.start_at))[0] ?? null;
+  const next = nx ? {
+    href: nx.kind === "booking" ? `/bookings/${nx.id}` : `/matches/${nx.id}`, when: nx.start_at,
+    title: `${nx.title ?? ""} · ${nx.club_name}`,
+    kind: nx.kind === "booking" ? "Your booking" : nx.role === "organizer" ? "Your match" : nx.role === "pending" ? "Requested" : "You're playing",
+  } : null;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5">
@@ -62,7 +66,7 @@ export default async function Home() {
           <span className="opacity-70">›</span>
         </Link>
       )}
-      <Discover areas={ref.areas} sports={ref.sports} initialClubs={(clubs ?? []) as ClubCard[]} initialMatches={(matches ?? []) as OpenMatch[]} signedIn />
+      <Discover areas={ref.areas} sports={ref.sports} initialClubs={(clubs ?? []) as ClubCard[]} initialMatches={(matches ?? []) as OpenMatch[]} signedIn initialError={!!clubsError} />
     </main>
   );
 }
