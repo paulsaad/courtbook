@@ -28,7 +28,7 @@ export default async function MatchPage({ params }: { params: Promise<{ id: stri
             {participants.map((p) => <li key={p.profile_id} className="flex justify-between py-2"><span>{p.name ?? "Player"}{p.is_organizer ? " · organizer" : ""}</span><span className="text-muted">{p.level ?? ""}</span></li>)}
           </ul>
         ) : (
-          <p className="text-sm text-muted">Join to see who's playing.</p>
+          <p className="text-sm text-muted">Join to see who&apos;s playing.</p>
         )}
       </section>
       <MatchActions m={m} />
