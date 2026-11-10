@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import InstallHint from "@/components/InstallHint";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -41,6 +42,7 @@ export default async function Home() {
           <Link href="/login" className="text-sm underline">Sign in</Link>
         )}
       </header>
+      <InstallHint />
 
       {error && <p className="text-sm text-red-600">Could not load clubs: {error.message}</p>}
 
