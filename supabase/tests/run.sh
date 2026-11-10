@@ -330,3 +330,39 @@ rule 1 & sleep 0.3; rule 2 & wait
 $PSQL -At -d $DB -c "select 'race rules committed = '||count(*)||' (expect 1)' from price_rules where label like 'race-%'"
 BQ=$({ as_user $P1; echo "select booking_id from hold_slot('$CLUB','$COURT3', (current_date + 8 + time '09:30') at time zone 'Asia/Beirut', (current_date + 8 + time '11:00') at time zone 'Asia/Beirut');"; } | $PSQL -At -d $DB | tail -1); PQ=$(pay_of $BQ)
 { as_service; echo "select claim_payment_session('$PQ'); select claim_payment_session('$PQ'); select release_payment_session_claim('$PQ'); select claim_payment_session('$PQ');"; } | $PSQL -At -d $DB 2>&1 | grep -E "^(t|f)$" | tr '\n' ' '; echo "(expect t f t)"
+
+echo "--- P. coaches: profile, club request, approval, availability"
+{ as_user $P1; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '40. player1 becomes a coach, requests Batroun -> ok ; player2 cannot see them yet (not approved) -> 0'
+insert into coaches (profile_id, sports, levels, price_usd, bio, whatsapp) values (auth.uid(), '{padel}', '{beginner,intermediate}', 25, 'Padel coach', '+96170000000');
+insert into coach_clubs (coach_id, club_id) values (my_coach_id(), '$CLUB');
+insert into availability_rules (coach_id, club_id, weekday, start_time, end_time) values (my_coach_id(), '$CLUB', 1, '09:00', '12:00');
+insert into availability_rules (coach_id, club_id, weekday, start_time, end_time) values (my_coach_id(), '$CLUB', 1, '15:00', '18:00');
+EOF
+as_user $P2; cat <<EOF
+select count(*) from coaches_at_club('$CLUB');
+\echo '41. player2 tries to approve -> RLS: UPDATE 0'
+update coach_clubs set status='approved' where club_id='$CLUB';
+EOF
+as_user $ADMIN; cat <<EOF
+\echo '42. staff sees the pending request -> 1 ; approves -> ok'
+select count(*) from club_coach_requests('$CLUB') where status='pending';
+select decide_coach_club((select coach_id from club_coach_requests('$CLUB') limit 1), '$CLUB', true);
+EOF
+as_user $P2; cat <<EOF
+\echo '43. player2 now sees 1 coach ; availability next Tuesday has 2 windows ; after a closed-day exception -> 0'
+select count(*) from coaches_at_club('$CLUB');
+select count(*) from coach_availability((select coach_id from coaches_at_club('$CLUB') limit 1), '$CLUB', (current_date + ((8 - extract(isodow from current_date)::int) % 7 + 1))::date, 1);
+EOF
+as_user $P1; cat <<EOF
+insert into availability_exceptions (coach_id, date, available) values (my_coach_id(), (current_date + ((8 - extract(isodow from current_date)::int) % 7 + 1))::date, false);
+EOF
+as_user $P2; cat <<EOF
+select count(*) from coach_availability((select coach_id from coaches_at_club('$CLUB') limit 1), '$CLUB', (current_date + ((8 - extract(isodow from current_date)::int) % 7 + 1))::date, 1);
+\echo '44. player2 edits coach availability -> RLS (0 rows) ; coach_card visible -> 1 row'
+delete from availability_rules where club_id='$CLUB';
+select count(*) from availability_rules where club_id='$CLUB';
+select count(*) from coach_card((select coach_id from coaches_at_club('$CLUB') limit 1));
+EOF
+} | $PSQL -d $DB 2>&1 | filter

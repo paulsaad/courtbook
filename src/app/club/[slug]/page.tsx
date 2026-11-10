@@ -42,7 +42,7 @@ export default async function ClubPage({
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col">
       <div className="flex items-center justify-between px-4 pt-3 text-sm">
         <Link href="/" className="text-muted">‹ Clubs</Link>
-        <Link href="/bookings" className="text-action">My bookings</Link>
+        <div className="flex gap-4"><Link href={`/club/${slug}/coaches`} className="text-action">Coaches</Link><Link href="/bookings" className="text-action">My bookings</Link></div>
       </div>
       <PlayerGrid club={club} courts={(courts ?? []) as Court[]} occ={(occ ?? []) as Occ[]} date={date} hold={hold} key={date} />
     </main>

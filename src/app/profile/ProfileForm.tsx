@@ -64,6 +64,7 @@ export default function ProfileForm({ initial, next, firstTime }: { initial: Ini
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
         <button type="submit" disabled={busy} className="rounded-xl bg-action py-3.5 font-medium text-white disabled:opacity-50">{busy ? "Saving…" : firstTime ? "Continue" : "Save"}</button>
       </form>
+      {!firstTime && <Link href="/coach" className="text-sm text-action underline">Are you a coach? Set up your coach profile</Link>}
     </main>
   );
 }

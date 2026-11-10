@@ -14,6 +14,7 @@ type ClubRow = {
 type CourtRow = { id: string; name: string; sport: string; surface: string | null; active: boolean; sort: number };
 type RuleRow = { id: string; court_id: string | null; weekday_mask: number; start_time: string; end_time: string; price_usd: number; label: string | null };
 type StaffRow = { profile_id: string; name: string | null; email: string };
+type CoachReq = { coach_id: string; name: string | null; sports: string[]; price_usd: number; status: string };
 
 const DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 const input = "rounded-xl border border-grid bg-white px-3 py-2.5 text-base outline-none focus:border-action";
@@ -21,7 +22,7 @@ const primary = "rounded-xl bg-action px-4 py-2.5 font-medium text-white disable
 const hhmm = (t: string) => t.slice(0, 5);
 const section = "flex flex-col gap-3 rounded-2xl border border-grid bg-white p-4";
 
-export default function ClubSettings({ club, courts, rules, staff, isAdmin, backHref }: { club: ClubRow; courts: CourtRow[]; rules: RuleRow[]; staff: StaffRow[]; isAdmin: boolean; backHref: string }) {
+export default function ClubSettings({ club, courts, rules, staff, coaches, isAdmin, backHref }: { club: ClubRow; courts: CourtRow[]; rules: RuleRow[]; staff: StaffRow[]; coaches: CoachReq[]; isAdmin: boolean; backHref: string }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -46,6 +47,7 @@ export default function ClubSettings({ club, courts, rules, staff, isAdmin, back
       <Hours club={club} busy={busy} run={run} />
       <Courts clubId={club.id} courts={courts} busy={busy} run={run} />
       <Prices clubId={club.id} courts={courts} rules={rules} busy={busy} run={run} />
+      <Coaches clubId={club.id} coaches={coaches} busy={busy} run={run} />
       {isAdmin && <Staff clubId={club.id} staff={staff} busy={busy} run={run} />}
     </main>
   );
@@ -190,6 +192,36 @@ function Staff({ clubId, staff, busy, run }: { clubId: string; staff: StaffRow[]
         <input className={`${input} flex-1`} type="email" placeholder="staff@email.com" required value={email} onChange={(e) => setEmail(e.target.value)} />
         <button disabled={busy} className="rounded-xl border border-grid px-4">Add</button>
       </form>
+    </section>
+  );
+}
+
+function Coaches({ clubId, coaches, busy, run }: { clubId: string; coaches: CoachReq[]; busy: boolean; run: Run }) {
+  const pending = coaches.filter((c) => c.status === "pending");
+  const approved = coaches.filter((c) => c.status === "approved");
+  const decide = (coachId: string, approve: boolean) => run(() => createClient().rpc("decide_coach_club", { p_coach: coachId, p_club: clubId, p_approve: approve }));
+  return (
+    <section className={section}>
+      <h2 className="font-medium">Coaches</h2>
+      {pending.length > 0 && (
+        <ul className="divide-y divide-grid">
+          {pending.map((c) => (
+            <li key={c.coach_id} className="flex items-center justify-between py-2 text-sm">
+              <div>{c.name ?? "Coach"} <span className="text-muted">· {c.sports.join(", ")} · ${Number(c.price_usd).toFixed(0)}/h</span><span className="ml-2 rounded-full bg-sand-soft px-2 py-0.5 text-xs">wants to be listed</span></div>
+              <div className="flex gap-3"><button disabled={busy} onClick={() => decide(c.coach_id, true)} className="text-action underline">Approve</button><button disabled={busy} onClick={() => decide(c.coach_id, false)} className="text-muted underline">Decline</button></div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <ul className="divide-y divide-grid">
+        {approved.length === 0 && pending.length === 0 && <li className="py-2 text-sm text-muted">No coaches yet. Coaches request a listing from their own profile.</li>}
+        {approved.map((c) => (
+          <li key={c.coach_id} className="flex items-center justify-between py-2 text-sm">
+            <div>{c.name ?? "Coach"} <span className="text-muted">· {c.sports.join(", ")} · ${Number(c.price_usd).toFixed(0)}/h</span></div>
+            <button disabled={busy} onClick={() => decide(c.coach_id, false)} className="text-danger underline">Remove</button>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

@@ -10,6 +10,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | Path | What |
 | --- | --- |
 | `supabase/migrations/0001_init.sql` | Full schema: tables, enums, double-booking guards, `book_slot` / `cancel_booking`, RLS |
+| `supabase/migrations/0020_coaches.sql` | Coach discovery: `coach_clubs` (club-approved listings), per-club availability rules, `coaches_at_club`, `coach_card`, `coach_availability`, `decide_coach_club` |
 | `supabase/migrations/0019_serialize_rules_sessions.sql` | Club-row lock in the price-rule trigger; `claim_payment_session` / `release_payment_session_claim` (service role) |
 | `supabase/migrations/0018_phase3_review.sql` | Price-rule overlap trigger; `club_payouts` + `club_balances()`; `refunds_due` with club_id; payment session columns |
 | `supabase/migrations/0017_payments_summary.sql` | `payments_summary(month)`, `payments_list(club, month)`, `refunds_due()`; staff may `mark_refunded` |
@@ -31,7 +32,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | `supabase/seed.sql` | Demo club (Batroun), 5 courts, peak/off-peak prices, credit packs. Idempotent |
 | `supabase/tests/run.sh` | Local Postgres test: concurrent double-booking, blocks, credits, RLS |
 | `src/lib/supabase/` | Browser and server Supabase clients |
-| `src/app/` | Pages: `/` clubs · `/club/[slug]` availability + hold · `/pay/[id]` · `/bookings` · `/profile` · `/staff/[slug]` calendar + `/settings` · `/admin` clubs, `/admin/clubs/[slug]`, `/admin/payments` · `/api/pay/simulate` |
+| `src/app/` | Pages: `/` clubs · `/club/[slug]` availability + hold · `/pay/[id]` · `/bookings` · `/profile` · `/staff/[slug]` calendar + `/settings` · `/admin` clubs, `/admin/clubs/[slug]`, `/admin/payments` · `/coach` coach dashboard · `/club/[slug]/coaches`, `/coaches/[id]` · `/api/pay/simulate` |
 
 ## Payment model (Phase 2+)
 
