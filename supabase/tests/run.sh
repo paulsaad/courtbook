@@ -19,6 +19,8 @@ for f in $(ls supabase/migrations/*.sql | sort); do
 done
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/seed.sql || exit 1
 echo "migrations + seed: OK"
+# SELFTEST=1: deliberately break a privacy rule to prove the suite fails (expect exit 1 with 82f/I9 failing)
+if [ -n "${SELFTEST:-}" ]; then $PSQL -q -d $DB -c "grant select (created_by) on towns to anon; grant select on notifications to anon;"; echo "SELFTEST: privacy deliberately broken"; fi
 
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 <<EOF
 insert into auth.users (id, phone) values ('$P1','+9611'), ('$P2','+9612'), ('$ADMIN','+9613'), ('$STAFF_B','+9614');
@@ -40,6 +42,16 @@ as_user() { echo "set role authenticated; select set_config('request.jwt.claim.s
 as_service() { echo "set role service_role; select set_config('request.jwt.claim.sub','',false);"; }
 filter() { grep -vE "^(SET|UPDATE|INSERT|DELETE|set_config|-+|\(1 row\)|\(0 rows\)|\s*$|CONTEXT|LINE|\s+\^| 1111| 2222| 3333| 4444| set_config|PL/pgSQL|SQL statement|\s+values|\s+insert)"; }
 pay_of() { $PSQL -At -d $DB -c "select id from payments where booking_id='$1'"; }
+
+# ---- assertions: the script exits 1 if any check fails (the printed sections above are for reading; these decide)
+FAILS=0; CHECKS=0
+who_sql() { case $1 in anon) echo "set role anon; select set_config('request.jwt.claim.sub','',false);";; service) as_service;; *) as_user $1;; esac; }
+# check <who> <label> <sql returning one value> <expected>
+check() { CHECKS=$((CHECKS+1)); local got; got=$({ who_sql $1; echo "$3"; } | $PSQL -At -d $DB 2>&1 | grep -v set_config | tail -1)
+  if [ "$got" == "$4" ]; then echo "  ok    $2"; else echo "  FAIL  $2 — expected [$4] got [$got]"; FAILS=$((FAILS+1)); fi; }
+# denied <who> <label> <sql> : must raise (permission denied or a business error)
+denied() { CHECKS=$((CHECKS+1)); local got; got=$({ who_sql $1; echo "$3"; } | $PSQL -At -d $DB 2>&1 | grep -v set_config | tail -1)
+  if [[ "$got" == *ERROR* ]]; then echo "  ok    $2 ($got)"; else echo "  FAIL  $2 — expected an error, got [$got]"; FAILS=$((FAILS+1)); fi; }
 
 echo "--- A. two players hold the same slot concurrently -> one hold, other slot_taken"
 hold() { { as_user $1; echo "begin; select booking_id from hold_slot('$CLUB','$2', $S, $E); select pg_sleep(1.5); commit;"; } | $PSQL -d $DB 2>&1; }
@@ -658,46 +670,54 @@ EOF
 } | $PSQL -d $DB 2>&1 | filter
 
 echo "--- Z. public browsing (Phase 6 review) — anon sees availability and prices, never names, holds or matches"
-{ echo "set role anon; select set_config('request.jwt.claims', '', true);"; cat <<EOF
-\set ON_ERROR_STOP off
-\echo '82. anon: club_discovery -> rows ; areas -> 9 ; public_occupancy -> rows, no id/mine columns ; quote_price works'
-select count(*) > 0 from club_discovery();
-select jsonb_array_length(areas());
-select count(*) >= 0 from public_occupancy;
-select count(*) from information_schema.columns where table_name='public_occupancy' and column_name in ('id','mine','status');
-select quote_price('$COURT', (current_date + 12 + time '10:00') at time zone 'Asia/Beirut', (current_date + 12 + time '11:00') at time zone 'Asia/Beirut');
-\echo '83. anon: occupancy, hold_slot, open_matches, player_names, profiles -> all permission denied'
-select count(*) from occupancy;
-select * from hold_slot('$CLUB','$COURT', (current_date + 12 + time '10:00') at time zone 'Asia/Beirut', (current_date + 12 + time '11:00') at time zone 'Asia/Beirut');
-select count(*) from open_matches();
-select count(*) from player_names(array['$P1'::uuid]);
-select count(*) from profiles;
-EOF
-} | $PSQL -d $DB 2>&1 | filter
+check  anon "82a anon club_discovery returns clubs"        "select count(*) > 0 from club_discovery();" t
+check  anon "82b anon areas() has 9 governorates"           "select jsonb_array_length(areas());" 9
+check  anon "82c public_occupancy has no id/mine/status"    "select count(*) from information_schema.columns where table_name='public_occupancy' and column_name in ('id','mine','status','player_id');" 0
+check  anon "82d anon quote_price works"                    "select quote_price('$COURT', (current_date + 12 + time '10:00') at time zone 'Asia/Beirut', (current_date + 12 + time '11:00') at time zone 'Asia/Beirut');" 20.00
+check  anon "82e anon reads town geography columns"         "select count(*) > 300 from towns;" t
+denied anon "82f anon cannot read towns.created_by"         "select created_by from towns limit 1;"
+denied anon "82g anon cannot read towns.*"                  "select * from towns limit 1;"
+denied anon "83a anon occupancy"                            "select count(*) from occupancy;"
+denied anon "83b anon hold_slot"                            "select * from hold_slot('$CLUB','$COURT', (current_date + 12 + time '10:00') at time zone 'Asia/Beirut', (current_date + 12 + time '11:00') at time zone 'Asia/Beirut');"
+denied anon "83c anon open_matches"                         "select count(*) from open_matches();"
+denied anon "83d anon player_names"                         "select count(*) from player_names(array['$P1'::uuid]);"
+denied anon "83e anon profiles"                             "select count(*) from profiles;"
+denied anon "83f anon my_agenda"                            "select count(*) from my_agenda();"
+denied anon "83g anon match_messages"                       "select count(*) from match_messages;"
+denied anon "83h anon notifications"                        "select count(*) from notifications;"
+check  $P1  "83i player cannot read towns.created_by either" "select count(*) from information_schema.column_privileges where table_name='towns' and column_name='created_by' and grantee in ('anon','authenticated') and privilege_type='SELECT';" 0
 
 echo "--- AA. my_agenda"
-{ as_user $P1; cat <<EOF
-\echo '84. P1 agenda: has bookings and matches, matches organized by P1 marked organizer, no rows from other players'
-select kind, count(*) from my_agenda() group by kind order by kind;
-select count(*) from my_agenda() where kind='match' and role <> 'organizer';
-EOF
-as_user $P3; cat <<EOF
-\echo '85. P3 agenda: only matches P3 applied to / joined (role pending or accepted)'
-select role, count(*) from my_agenda() group by role order by role;
-EOF
-} | $PSQL -d $DB 2>&1 | filter
+check $P1 "84a P1 agenda has bookings"                      "select count(*) > 0 from my_agenda() where kind='booking';" t
+check $P1 "84b P1 agenda has matches"                       "select count(*) > 0 from my_agenda() where kind='match';" t
+check $P1 "84c P1's matches are all organized by P1"        "select count(*) from my_agenda() where kind='match' and role <> 'organizer';" 0
+check $P3 "85a P3 agenda: one accepted"                     "select count(*) from my_agenda() where role='accepted';" 1
+check $P3 "85b P3 agenda: one pending"                      "select count(*) from my_agenda() where role='pending';" 1
+check $P3 "85c P3 agenda: no bookings (P3 never booked)"    "select count(*) from my_agenda() where kind='booking';" 0
 
 echo "--- AB. public_occupancy scope"
 $PSQL -q -d $DB -c "insert into clubs (name, slug, active) values ('Closed Club','closed', false); insert into courts (club_id, name, sport) select id, 'C1', 'padel' from clubs where slug='closed';
 insert into bookings (club_id, court_id, player_id, start_at, end_at, status, source, created_by, price_usd, fee_usd) select c.id, k.id, '$P1', (current_date + 2 + time '10:00') at time zone 'Asia/Beirut', (current_date + 2 + time '11:00') at time zone 'Asia/Beirut', 'confirmed','app','$P1',10,1 from clubs c join courts k on k.club_id=c.id where c.slug='closed';
 insert into bookings (club_id, court_id, player_id, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$CLUB','$COURT','$P1', (current_date - 30 + time '10:00') at time zone 'Asia/Beirut', (current_date - 30 + time '11:00') at time zone 'Asia/Beirut', 'confirmed','app','$P1',10,1);
-insert into bookings (club_id, court_id, player_id, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$CLUB','$COURT','$P1', (current_date + 400 + time '10:00') at time zone 'Asia/Beirut', (current_date + 400 + time '11:00') at time zone 'Asia/Beirut', 'confirmed','app','$P1',10,1);"
-$PSQL -At -d $DB -c "select 'fixtures: '||((select count(*) from bookings where club_id=(select id from clubs where slug='closed')) + (select count(*) from bookings where court_id='$COURT' and (start_at < now() - interval '20 day' or start_at > now() + interval '300 day')))||' (expect 3)'"
-{ echo "set role anon; select set_config('request.jwt.claims', '', true);"; cat <<EOF
-\echo '86. anon public_occupancy: inactive club -> 0 ; 30 days ago -> 0 ; 400 days ahead -> 0 ; within window -> rows'
-select count(*) from public_occupancy where club_id = (select id from clubs where slug='closed');
-select count(*) from public_occupancy where start_at < now() - interval '2 day';
-select count(*) from public_occupancy where start_at > now() + interval '100 day';
-select count(*) > 0 from public_occupancy where club_id='$CLUB';
-EOF
-} | $PSQL -d $DB 2>&1 | filter
+insert into bookings (club_id, court_id, player_id, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$CLUB','$COURT','$P1', (current_date + 400 + time '10:00') at time zone 'Asia/Beirut', (current_date + 400 + time '11:00') at time zone 'Asia/Beirut', 'confirmed','app','$P1',10,1);" 2>&1 | grep -v INSERT
+check service "86a fixtures inserted"                       "select (select count(*) from bookings where club_id=(select id from clubs where slug='closed')) + (select count(*) from bookings where court_id='$COURT' and (start_at < now() - interval '20 day' or start_at > now() + interval '300 day'));" 3
+check anon    "86b inactive club hidden"                    "select count(*) from public_occupancy where club_id = (select id from clubs where slug='closed');" 0
+check anon    "86c past (30 days ago) hidden"               "select count(*) from public_occupancy where start_at < now() - interval '2 day';" 0
+check anon    "86d beyond window (400 days) hidden"         "select count(*) from public_occupancy where start_at > now() + interval '100 day';" 0
+check anon    "86e within window visible"                   "select count(*) > 0 from public_occupancy where club_id='$CLUB';" t
+
+echo "--- INVARIANTS (re-asserted at the end of the run)"
+check service "I1 no two live bookings overlap on one court"  "select count(*) from bookings a join bookings b on a.court_id=b.court_id and a.id<b.id and a.period && b.period where a.status in ('confirmed','pending') and b.status in ('confirmed','pending');" 0
+check service "I2 at most one live match per booking"         "select count(*) from (select booking_id from matches where booking_id is not null and status<>'cancelled' group by 1 having count(*)>1) x;" 0
+check service "I3 no live match linked to a non-confirmed booking" "select count(*) from matches m join bookings b on b.id=m.booking_id where m.status<>'cancelled' and b.status<>'confirmed';" 0
+check service "I4 every live hold has a pending payment"      "select count(*) from bookings b where b.status='pending' and not exists (select 1 from payments p where p.booking_id=b.id and p.status='pending');" 0
+check service "I5 no player holds two live slots"             "select count(*) from (select player_id from bookings where status='pending' and hold_expires_at>now() group by 1 having count(*)>1) x;" 0
+check service "I6 no RPC executable by anon except the public set" "select count(*) from information_schema.routine_privileges where grantee='anon' and specific_schema='public' and routine_name not in ('club_discovery','next_free_slot','areas','club_sports','quote_price');" 0
+check service "I7 anon can read only the public tables"      "select string_agg(table_name, ',' order by table_name) from information_schema.tables t where t.table_schema='public' and has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'SELECT');" "clubs,courts,districts,governorates,price_rules,public_occupancy,sports"
+check service "I8 anon cannot write any table"                "select count(*) from information_schema.tables t where t.table_schema='public' and (has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'INSERT') or has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'UPDATE') or has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'DELETE'));" 0
+check service "I9 anon reads towns geography columns only"    "select string_agg(column_name, ',' order by column_name) from information_schema.columns c where table_name='towns' and has_column_privilege('anon', 'public.towns', column_name, 'SELECT');" "created_at,district_code,id,lat,lng,name_ar,name_en,seeded"
+
+echo
+echo "checks: $CHECKS, failures: $FAILS"
+[ "$FAILS" -eq 0 ] || { echo "SUITE FAILED"; exit 1; }
+echo "SUITE OK"

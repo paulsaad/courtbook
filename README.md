@@ -20,6 +20,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | `supabase/migrations/0032_public_browse.sql` | Public browsing: anon may read sports/geography, `public_occupancy` (taken/free only), `club_discovery`, `next_free_slot`, `areas`, `club_sports`, `quote_price`. Holds, matches, names stay signed-in |
 | `supabase/migrations/0033_my_agenda.sql` | `my_agenda()`: bookings + matches of the signed-in player (My CourtBook, Home play-next) |
 | `supabase/migrations/0034_public_occupancy_scope.sql` | `public_occupancy` limited to active clubs/courts, yesterday → booking window |
+| `supabase/migrations/0035_anon_grants.sql` | anon reads only clubs, courts, price_rules, sports, governorates, districts, towns (geography columns; `created_by` hidden), public_occupancy; default privileges stop granting anon on new tables |
 | `supabase/migrations/0024_match_board.sql` | Match board: `post_match` (optional booking link), `join_match` (atomic capacity, auto-close), `leave_match`, `set_match_status`, `match_board`, `match_participants` |
 | `supabase/migrations/0023_coach_exceptions.sql` | Exceptions per club; closed ranges split weekly windows |
 | `supabase/migrations/0022_coach_privacy.sql` | Availability readable only for listed coaches (or coach/staff); `coach_availability` enforces it; staff decide via RPC only, approve only pending |
@@ -89,3 +90,7 @@ npm run dev                  # http://localhost:3000
 ## Working method
 
 One phase at a time, in the spec's order. One PR per feature; ChatGPT reviews; Paul tests on his phone against the spec's test column. Secrets live in environment variables, never in the repo.
+
+## Test suite
+
+`supabase/tests/run.sh` applies every migration and the seed to a scratch database, prints the scenario sections (A–AB, for reading), then runs the **assertions** (sections Z, AA, AB and INVARIANTS): each `check`/`denied` compares an actual value or an expected error, and the script exits 1 if any fails. `SELFTEST=1 supabase/tests/run.sh` deliberately breaks two privacy rules and must exit 1 — run it after touching grants or policies to prove the assertions still bite.

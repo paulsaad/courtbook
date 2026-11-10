@@ -46,7 +46,9 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
     return Math.max(Math.round(club.min_booking_minutes / club.slot_minutes), Math.min(want, Math.round(club.max_booking_minutes / club.slot_minutes)));
   });
   const [notice, setNotice] = useState<string | null>(null);
-  const [price, setPrice] = useState<number | null>(null);
+  // quote: loading → ok(value) | error(message); Reserve needs ok
+  const [quote, setQuote] = useState<{ state: "loading" } | { state: "ok"; value: number } | { state: "error"; message: string }>({ state: "loading" });
+  const [quoteTick, setQuoteTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const stripRef = useRef<HTMLDivElement>(null);
@@ -115,12 +117,17 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
     const start = clubLocalToUtc(date, pick.time, club.timezone);
     const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
     createClient().rpc("quote_price", { p_court: pick.courtId, p_start: start.toISOString(), p_end: end.toISOString() })
-      .then(({ data, error }) => { if (!cancelled) setPrice(error ? null : Number(data)); });
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) setQuote({ state: "error", message: error.message.includes("no_price_rule") ? "No price is set for this time yet — the club has to add a price rule." : "Could not load the price." });
+        else if (data == null || Number.isNaN(Number(data))) setQuote({ state: "error", message: "Could not load the price." });
+        else setQuote({ state: "ok", value: Number(data) });
+      });
     return () => { cancelled = true; };
-  }, [pick, slots, date, club.timezone, club.slot_minutes]);
+  }, [pick, slots, date, club.timezone, club.slot_minutes, quoteTick]);
 
   async function reserve() {
-    if (!pick || !known || slots < minSlots || slots > maxSlotsHere) return;
+    if (!pick || !known || quote.state !== "ok" || slots < minSlots || slots > maxSlotsHere) return;
     const start = clubLocalToUtc(date, pick.time, club.timezone);
     if (!signedIn) {
       // sign in, then come back with this slot selected
@@ -200,7 +207,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
                   const bookable = known && !taken && !past && freeRun(c.id, t) >= minSlots;
                   return (
                     <button key={t} disabled={!bookable}
-                      onClick={() => { setPick({ courtId: c.id, time: t }); setSlots(Math.min(minSlots, freeRun(c.id, t))); setPrice(null); setError(null); setNotice(null); }}
+                      onClick={() => { setPick({ courtId: c.id, time: t }); setSlots(Math.min(minSlots, freeRun(c.id, t))); setQuote({ state: "loading" }); setError(null); setNotice(null); }}
                       className={`absolute inset-x-0 border-t text-xs first:border-t-0 ${i % labelEvery === 0 ? "border-grid" : "border-dashed border-grid/50"} ${
                         selected ? "bg-turf text-white" : taken ? "hatch bg-slate-soft text-muted" : past ? "bg-paper text-muted/60" : bookable ? "active:bg-turf-soft" : "text-muted/60"}`}
                       style={{ top: i * ROW_PX, height: ROW_PX }}>
@@ -224,14 +231,18 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
           <p className="text-sm text-muted">{date === today ? "Today" : formatInTimeZone(dayOf(date), club.timezone, "EEEE d MMMM")}</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {Array.from({ length: maxSlotsHere }, (_, i) => i + 1).filter((n) => n >= minSlots).map((n) => (
-              <button key={n} onClick={() => { setSlots(n); setPrice(null); }} className={`rounded-xl border px-3 py-2 text-sm ${slots === n ? "border-ink bg-ink text-white" : "border-grid"}`}>{fmtDur(n * club.slot_minutes)}</button>
+              <button key={n} onClick={() => { setSlots(n); setQuote({ state: "loading" }); }} className={`rounded-xl border px-3 py-2 text-sm ${slots === n ? "border-ink bg-ink text-white" : "border-grid"}`}>{fmtDur(n * club.slot_minutes)}</button>
             ))}
           </div>
-          <div className="mt-4 flex items-center justify-between text-sm">
-            <span className="text-muted">Court {price === null ? "…" : `$${price.toFixed(2)}`} + booking fee ${Number(club.service_fee_usd).toFixed(2)}</span>
-            <span className="text-lg font-semibold">{price === null ? "…" : `$${(price + Number(club.service_fee_usd)).toFixed(2)}`}</span>
-          </div>
-          <button disabled={busy || price === null || !known || slots < minSlots || slots > maxSlotsHere} onClick={reserve} className="mt-3 w-full rounded-xl bg-action py-3.5 font-medium text-white disabled:opacity-50">
+          {quote.state === "error" ? (
+            <p className="mt-4 flex items-center justify-between rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{quote.message}{quote.message.startsWith("Could") && <button onClick={() => { setQuote({ state: "loading" }); setQuoteTick((n) => n + 1); }} className="font-medium underline">Retry</button>}</p>
+          ) : (
+            <div className="mt-4 flex items-center justify-between text-sm">
+              <span className="text-muted">Court {quote.state === "ok" ? `$${quote.value.toFixed(2)}` : "…"} + booking fee ${Number(club.service_fee_usd).toFixed(2)}</span>
+              <span className="text-lg font-semibold">{quote.state === "ok" ? `$${(quote.value + Number(club.service_fee_usd)).toFixed(2)}` : "…"}</span>
+            </div>
+          )}
+          <button disabled={busy || quote.state !== "ok" || !known || slots < minSlots || slots > maxSlotsHere} onClick={reserve} className="mt-3 w-full rounded-xl bg-action py-3.5 font-medium text-white disabled:opacity-50">
             {busy ? "Reserving…" : signedIn ? "Reserve and pay" : "Sign in to reserve"}
           </button>
           <p className="mt-2 text-center text-xs text-muted">Slot is held for {club.hold_minutes} minutes while you pay. Free cancellation up to {club.cancel_cutoff_hours} h before.</p>
