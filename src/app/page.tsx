@@ -1,84 +1,67 @@
 import Link from "next/link";
+import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
+import { loadRefData } from "@/lib/geo";
 import InstallHint from "@/components/InstallHint";
+import Discover, { type ClubCard, type OpenMatch } from "@/components/Discover";
+
+const TZ = "Asia/Beirut";
 
 export default async function Home() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  let isStaff = false;
-  let isAdmin = false;
-  let isCoach = false;
-  let unread = 0;
-  if (user) {
-    const [{ data: profile }, { count }, { count: coachCount }, { count: unreadCount }] = await Promise.all([
-      supabase.from("profiles").select("roles").eq("id", user.id).single(),
-      supabase.from("club_staff").select("*", { count: "exact", head: true }).eq("profile_id", user.id),
-      supabase.from("coaches").select("*", { count: "exact", head: true }).eq("profile_id", user.id),
-      supabase.from("notifications").select("*", { count: "exact", head: true }).eq("profile_id", user.id).is("read_at", null),
-    ]);
-    unread = unreadCount ?? 0;
-    isCoach = (coachCount ?? 0) > 0;
-    isAdmin = profile?.roles?.includes("admin") ?? false;
-    isStaff = isAdmin || (count ?? 0) > 0;
+  if (!user) {
+    const { data: clubs } = await supabase.from("clubs").select("id, name, slug").eq("active", true).order("name");
+    return (
+      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 p-6">
+        <h1 className="text-3xl font-semibold tracking-tight">CourtBook</h1>
+        <p className="text-muted">Book courts, find players and coaches across Lebanon.</p>
+        <Link href="/login" className="rounded-2xl bg-action px-4 py-3.5 text-center font-medium text-white">Sign in</Link>
+        <ul className="divide-y divide-grid rounded-2xl border border-grid bg-white">
+          {clubs?.map((c) => <li key={c.id}><Link href={`/club/${c.slug}`} className="block px-4 py-3">{c.name}</Link></li>)}
+        </ul>
+      </main>
+    );
   }
 
-  const { data: clubs, error } = await supabase
-    .from("clubs")
-    .select("id, name, slug, slot_minutes, open_time, close_time, courts(id, name, sport, surface, sort)")
-    .eq("active", true)
-    .order("name");
+  const [{ data: me }, ref, { data: clubs }, { data: matches }, { data: nextBooking }, { data: myMatches }] = await Promise.all([
+    supabase.from("profiles").select("name").eq("id", user.id).single(),
+    loadRefData(supabase),
+    supabase.rpc("club_discovery"),
+    supabase.rpc("open_matches", { p_limit: 3 }),
+    supabase.from("bookings").select("id, start_at, end_at, clubs(name, slug), courts!bookings_court_id_fkey(name)").eq("player_id", user.id).eq("status", "confirmed").gt("end_at", new Date().toISOString()).order("start_at").limit(1),
+    supabase.rpc("match_board", { p_club: null, p_days: 14 }),
+  ]);
+  const firstName = me?.name?.split(" ")[0];
+  const nb = (nextBooking as unknown as { id: string; start_at: string; end_at: string; clubs: { name: string; slug: string } | null; courts: { name: string } | null }[] | null)?.[0] ?? null;
+  const nm = ((myMatches ?? []) as { match_id: string; start_at: string; club_name: string; sport: string; i_joined: boolean; i_organize: boolean; status: string }[])
+    .filter((m) => (m.i_joined || m.i_organize) && m.status !== "cancelled")[0] ?? null;
+  const next = nb && (!nm || nb.start_at <= nm.start_at)
+    ? { href: `/bookings/${nb.id}`, when: nb.start_at, title: `${nb.clubs?.name} · ${nb.courts?.name}`, kind: "Your booking" }
+    : nm ? { href: `/matches/${nm.match_id}`, when: nm.start_at, title: `${nm.sport} match · ${nm.club_name}`, kind: nm.i_organize ? "Your match" : "You're playing" } : null;
 
   return (
-    <main className="mx-auto flex max-w-md flex-col gap-6 p-6">
+    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5">
       <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">CourtBook</h1>
-        {user ? (
-          <form action="/auth/signout" method="post" className="flex items-center gap-3 text-sm">
-            <span className="text-muted">{user.email ?? user.phone}</span>
-            <button className="underline">Sign out</button>
-          </form>
-        ) : (
-          <Link href="/login" className="text-sm underline">Sign in</Link>
-        )}
+        <h1 className="text-2xl font-semibold tracking-tight">{firstName ? `Hi ${firstName}` : "CourtBook"}</h1>
+        <Link href="/notifications" className="text-sm text-muted">Activity</Link>
       </header>
       <InstallHint />
-
-      {error && <p className="text-sm text-red-600">Could not load clubs: {error.message}</p>}
-
-      {user && (
-        <div className="flex gap-4 text-sm">
-          <Link href="/notifications" className="text-action underline">Activity{unread > 0 && <span className="ml-1 rounded-full bg-danger px-1.5 text-xs text-white">{unread}</span>}</Link>
-          <Link href="/bookings" className="text-action underline">My bookings</Link>
-          <Link href="/profile" className="text-action underline">Profile</Link>
-          <Link href="/coach" className="text-action underline">{isCoach ? "Coach profile" : "I'm a coach"}</Link>
-        </div>
-      )}
-
-      {isStaff && (
-        <Link href="/staff" className="rounded-2xl bg-action px-4 py-3.5 text-center font-medium text-white">
-          Staff calendar
+      {next && (
+        <Link href={next.href} className="flex items-center gap-4 rounded-2xl bg-ink p-4 text-white active:opacity-90">
+          <div className="text-center">
+            <div className="text-xs uppercase tracking-wide opacity-70">{formatInTimeZone(new Date(next.when), TZ, "EEE")}</div>
+            <div className="text-2xl font-semibold leading-none">{formatInTimeZone(new Date(next.when), TZ, "d")}</div>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs opacity-70">{next.kind} · {formatInTimeZone(new Date(next.when), TZ, "HH:mm")}</div>
+            <div className="truncate font-medium">{next.title}</div>
+          </div>
+          <span className="opacity-70">›</span>
         </Link>
       )}
-      {isAdmin && <Link href="/admin" className="text-sm text-action underline">Admin: clubs & payments</Link>}
-
-      {clubs?.map((club) => (
-        <Link key={club.id} href={`/club/${club.slug}`} className="block rounded-2xl border border-grid bg-white p-5 active:bg-paper">
-          <h2 className="text-lg font-medium">{club.name}</h2>
-          <p className="text-sm text-muted">
-            {club.open_time.slice(0, 5)}–{club.close_time.slice(0, 5)} · {club.slot_minutes}-min steps
-          </p>
-          <ul className="mt-3 flex flex-col gap-1 text-sm">
-            {[...club.courts].sort((a, b) => a.sort - b.sort).map((c) => (
-              <li key={c.id} className="flex justify-between">
-                <span>{c.name}</span>
-                <span className="text-muted">{c.sport}{c.surface ? ` · ${c.surface}` : ""}</span>
-              </li>
-            ))}
-          </ul>
-          <div className="mt-4 text-sm font-medium text-action">See availability ›</div>
-        </Link>
-      ))}
+      <Discover areas={ref.areas} sports={ref.sports} initialClubs={(clubs ?? []) as ClubCard[]} initialMatches={(matches ?? []) as OpenMatch[]} />
     </main>
   );
 }

@@ -621,3 +621,38 @@ update courts set active=false where name='Pitch 1';
 select club_sports('$CLUB');
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+
+echo "--- Y. Phase 6 (b): discovery"
+{ as_user $P1; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '78. club_discovery all Lebanon -> batroun club with town Batroun / North, sports contain padel, price_from 20'
+select slug, town, governorate, 'padel' = any(sports), price_from from club_discovery();
+\echo '79. filters: district batroun -> 1+ ; district tyre -> 0 ; sport football -> 0 (pitch inactive) ; query "bat" -> 1+ ; query arabic -> 1+'
+select count(*) from club_discovery(null, null, 'batroun');
+select count(*) from club_discovery(null, null, 'tyre');
+select count(*) from club_discovery('football');
+select count(*) > 0 from club_discovery(null, null, null, 'bat');
+select count(*) > 0 from club_discovery(null, null, null, 'البترون');
+EOF
+} | $PSQL -d $DB 2>&1 | filter
+$PSQL -q -d $DB -c "update clubs set open_time='00:00', close_time='24:00', slot_minutes=30, min_booking_minutes=30, max_booking_minutes=180 where slug='other'; delete from price_rules where club_id=(select id from clubs where slug='other');"
+{ as_user $P1; cat <<EOF
+\echo '80. next_free_slot (other club, open 24h, 30-min grid): slot found, on grid, >= now ; no price rules -> price_from null  [fails only if Beirut time >= 23:25]'
+select start_at >= now() and extract(minute from start_at at time zone 'Asia/Beirut')::int % 30 = 0 from next_free_slot((select id from clubs where slug='other'));
+select next_free_at is not null and price_from is null from club_discovery(null,null,null,'other');
+EOF
+} | $PSQL -d $DB 2>&1 | filter
+$PSQL -q -d $DB -c "insert into price_rules (club_id, weekday_mask, start_time, end_time, price_usd) select id, 127, '00:00', '24:00', 10 from clubs where slug='other';"
+{ as_user $P1; cat <<EOF
+\echo '80b. book that slot -> next free moves later'
+select start_at as nf1 from next_free_slot((select id from clubs where slug='other')) \gset
+select booking_id from hold_slot((select id from clubs where slug='other'), (select id from courts where name='Other 1'), :'nf1', :'nf1'::timestamptz + interval '30 min') \gset
+select start_at > :'nf1' from next_free_slot((select id from clubs where slug='other'));
+select release_hold(:'booking_id');
+\echo '81. open_matches excludes my own matches and non-open ones; includes others'' open future matches'
+select count(*) from open_matches() where organizer_name = 'Player One';
+EOF
+as_user $P2; cat <<EOF
+select count(*) > 0 from open_matches('padel');
+EOF
+} | $PSQL -d $DB 2>&1 | filter

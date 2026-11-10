@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { formatInTimeZone } from "date-fns-tz";
 import { dayBounds, todayIn } from "@/lib/time";
 import type { Club, Court } from "@/lib/types";
 import PlayerGrid, { type Occ } from "./PlayerGrid";
@@ -10,10 +11,10 @@ export default async function ClubPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ date?: string }>;
+  searchParams: Promise<{ date?: string; at?: string }>;
 }) {
   const { slug } = await params;
-  const { date: qDate } = await searchParams;
+  const { date: qDate0, at } = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?next=/club/${slug}`);
@@ -28,6 +29,8 @@ export default async function ClubPage({
     .single<Club & { booking_window_days: number; service_fee_usd: number; location_url: string | null; hold_minutes: number }>();
   if (!club) notFound();
 
+  const atDate = at && !Number.isNaN(Date.parse(at)) ? formatInTimeZone(new Date(at), club.timezone, "yyyy-MM-dd") : null;
+  const qDate = qDate0 ?? atDate ?? undefined;
   const date = qDate && /^\d{4}-\d{2}-\d{2}$/.test(qDate) ? qDate : todayIn(club.timezone);
   const { dayStart, dayEnd } = dayBounds(date, club.timezone);
 
@@ -42,7 +45,7 @@ export default async function ClubPage({
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col">
       <div className="flex items-center justify-between px-4 pt-3 text-sm">
         <Link href="/" className="text-muted">‹ Clubs</Link>
-        <div className="flex gap-4"><Link href={`/club/${slug}/matches`} className="text-action">Find players</Link><Link href={`/club/${slug}/coaches`} className="text-action">Coaches</Link><Link href="/bookings" className="text-action">My bookings</Link></div>
+        <div className="flex gap-4"><Link href={`/club/${slug}/matches`} className="text-action">Find players</Link><Link href={`/club/${slug}/coaches`} className="text-action">Coaches</Link></div>
       </div>
       <PlayerGrid club={club} courts={(courts ?? []) as Court[]} occ={(occ ?? []) as Occ[]} date={date} hold={hold} key={date} />
     </main>
