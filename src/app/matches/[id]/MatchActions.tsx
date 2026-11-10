@@ -55,6 +55,8 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
             <button disabled={busy} onClick={() => run("set_match_status", { p_match: m.match_id, p_status: "cancelled" })} className="py-2 text-sm text-danger">Cancel the match</button>
           </>
         ) : <p className="text-sm text-muted">Cancelled.</p>
+      ) : m.status === "cancelled" ? (
+        <p className="text-sm text-muted">The organizer cancelled this match.</p>
       ) : m.my_status === "accepted" ? (
         <button disabled={busy} onClick={() => run("leave_match", { p_match: m.match_id })} className={secondary}>Leave</button>
       ) : m.my_status === "pending" ? (
