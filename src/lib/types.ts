@@ -45,6 +45,7 @@ export const ERRORS: Record<string, string> = {
   no_price_rule: "No price set for this time. Ask the club.",
   price_rule_overlap: "Overlaps an existing rule for the same courts and days. Delete or narrow one of them.",
   not_payable: "This booking is no longer waiting for payment.",
+  not_pending: "Only a pending request can be approved.",
   user_not_found: "No account with that email. They need to sign in once first.",
   clubs_booking_minutes_check: "Min/max must be multiples of the grid step, and max ≥ min.",
   clubs_slot_minutes_check: "Grid step must be 30, 60 or 90.",

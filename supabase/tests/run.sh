@@ -376,3 +376,23 @@ insert into coach_clubs (coach_id, club_id) values (my_coach_id(), '$CLUB');
 select status from coach_clubs where coach_id = my_coach_id() and club_id = '$CLUB';
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+
+echo "--- R. coach privacy (review Phase 4)"
+{ as_user $P2; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '46. coach is pending (not listed): player reads rules -> 0 ; coach_availability -> 0'
+select count(*) from availability_rules where club_id='$CLUB';
+select count(*) from coach_availability((select id from coaches limit 1), '$CLUB', current_date, 7);
+EOF
+as_user $ADMIN; cat <<EOF
+\echo '47. staff updates coach_clubs directly -> UPDATE 0 ; approves pending via RPC -> ok ; approving again -> ERROR not_pending'
+update coach_clubs set status='approved' where club_id='$CLUB';
+select decide_coach_club((select id from coaches limit 1), '$CLUB', true);
+select decide_coach_club((select id from coaches limit 1), '$CLUB', true);
+EOF
+as_user $P2; cat <<EOF
+\echo '48. now listed: player reads rules -> 2 ; availability over 14 days -> > 0'
+select count(*) from availability_rules where club_id='$CLUB';
+select count(*) > 0 from coach_availability((select id from coaches limit 1), '$CLUB', current_date, 14);
+EOF
+} | $PSQL -d $DB 2>&1 | filter
