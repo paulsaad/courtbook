@@ -82,7 +82,7 @@ function ClubsSection({ coach, clubs, links, busy, run }: { coach: NonNullable<C
               <span>{c.name}</span>
               {st === "approved" ? <span className="rounded-full bg-turf-soft px-2 py-0.5 text-xs text-turf">listed</span>
                 : st === "pending" ? <button disabled={busy} onClick={() => run(() => createClient().from("coach_clubs").delete().eq("coach_id", coach.id).eq("club_id", c.id))} className="text-xs text-muted underline">requested · withdraw</button>
-                : st === "removed" ? <span className="text-xs text-muted">removed by club</span>
+                : st === "removed" || st === "declined" ? <button disabled={busy} onClick={() => run(async () => { const sb = createClient(); await sb.from("coach_clubs").delete().eq("coach_id", coach.id).eq("club_id", c.id); return sb.from("coach_clubs").insert({ coach_id: coach.id, club_id: c.id }); })} className="text-xs text-muted underline">{st} by club · request again</button>
                 : <button disabled={busy} onClick={() => run(() => createClient().from("coach_clubs").insert({ coach_id: coach.id, club_id: c.id }))} className="text-action underline">Request listing</button>}
             </li>
           );

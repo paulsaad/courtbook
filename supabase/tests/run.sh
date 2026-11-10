@@ -366,3 +366,13 @@ select count(*) from availability_rules where club_id='$CLUB';
 select count(*) from coach_card((select coach_id from coaches_at_club('$CLUB') limit 1));
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+
+echo "--- Q. coach removed by club can request again"
+{ as_user $ADMIN; echo "select decide_coach_club((select coach_id from club_coach_requests('$CLUB') limit 1), '$CLUB', false);"; as_user $P1; cat <<EOF
+\set ON_ERROR_STOP off
+delete from coach_clubs where coach_id = my_coach_id() and club_id = '$CLUB';
+insert into coach_clubs (coach_id, club_id) values (my_coach_id(), '$CLUB');
+\echo '45. status after re-request -> pending'
+select status from coach_clubs where coach_id = my_coach_id() and club_id = '$CLUB';
+EOF
+} | $PSQL -d $DB 2>&1 | filter
