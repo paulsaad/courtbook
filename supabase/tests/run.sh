@@ -588,3 +588,36 @@ echo "72. post_match races booking cancellation -> either booking_not_found, or 
 sleep 0.3; { as_user $P1; echo "select post_match(null,'padel',null,null,null,3,'late post','$BK');"; } | $PSQL -d $DB > /tmp/cb_lp.log 2>&1; wait
 grep -h "ERROR" /tmp/cb_lp.log | sort | uniq -c
 $PSQL -At -d $DB -c "select 'matches still linked to cancelled booking = '||count(*)||' (expect 0)' from matches m join bookings b on b.id=m.booking_id where b.id='$BK' and b.status<>'confirmed' and m.status<>'cancelled'"
+
+echo "--- X. Phase 6 (a): sports table, geography, add_town"
+{ as_user $P1; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '73. reference data readable: 7 sports, 9 governorates, 26 districts, towns > 250, Keserwan-Jbeil legacy parent = mount-lebanon'
+select (select count(*) from sports), (select count(*) from governorates), (select count(*) from districts), (select count(*) > 250 from towns), (select legacy_parent from governorates where code='keserwan-jbeil');
+\echo '74. player cannot add a town -> ERROR forbidden ; cannot insert directly -> 0 rows'
+select add_town('batroun','Newtown');
+insert into towns (district_code, name_en) values ('batroun','Hack');
+select count(*) from towns where name_en='Hack';
+EOF
+as_user $STAFF_B; cat <<EOF
+\echo '75. staff adds a town -> id ; same name different case -> same id, still one row ; bad district -> ERROR'
+select add_town('batroun','Bziza', 'بزيزا') as t1 \gset
+select add_town('batroun','  bziza ') = :'t1';
+select count(*) from towns where district_code='batroun' and lower(name_en)='bziza';
+select add_town('nowhere','X');
+\echo '76a. staff of another club cannot set this club -> ERROR forbidden'
+select update_club_settings('$CLUB','08:00','23:00',30,60,180,6,10,14,'', (select id from towns where name_en='Batroun'), 34.2553, 35.6586);
+EOF
+as_user $ADMIN; cat <<EOF
+\echo '76. admin/staff sets club town + coords; bad town -> ERROR ; areas() has 9 entries'
+select update_club_settings('$CLUB','08:00','23:00',30,60,180,6,10,14,'', (select id from towns where name_en='Batroun'), 34.2553, 35.6586);
+select t.name_en, d.name_en, g.name_en from clubs c join towns t on t.id=c.town_id join districts d on d.code=t.district_code join governorates g on g.code=d.governorate_code where c.id='$CLUB';
+select update_club_settings('$CLUB','08:00','23:00',30,60,180,6,10,14,'', '00000000-0000-4000-8000-000000000000', null, null);
+select jsonb_array_length(areas());
+\echo '77. club_sports derived from active courts: add football pitch -> {football,padel}; deactivate -> {padel}'
+insert into courts (club_id, name, sport, sort) values ('$CLUB','Pitch 1','football',99);
+select club_sports('$CLUB');
+update courts set active=false where name='Pitch 1';
+select club_sports('$CLUB');
+EOF
+} | $PSQL -d $DB 2>&1 | filter

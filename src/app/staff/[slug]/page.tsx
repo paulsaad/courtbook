@@ -10,10 +10,10 @@ export default async function StaffClubPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ date?: string; view?: string }>;
+  searchParams: Promise<{ date?: string; view?: string; sport?: string }>;
 }) {
   const { slug } = await params;
-  const { date: qDate, view } = await searchParams;
+  const { date: qDate, view, sport } = await searchParams;
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -46,7 +46,7 @@ export default async function StaffClubPage({
   const date = qDate && /^\d{4}-\d{2}-\d{2}$/.test(qDate) ? qDate : todayIn(club.timezone);
   const { dayStart, dayEnd } = dayBounds(date, club.timezone);
 
-  const [{ data: courts }, { data: bookings }, { data: blocks }] = await Promise.all([
+  const [{ data: courts }, { data: bookings }, { data: blocks }, { data: sportRows }] = await Promise.all([
     supabase.from("courts").select("id, name, sport, surface, sort, active").eq("club_id", club.id).eq("active", true).order("sort"),
     supabase
       .from("bookings")
@@ -63,7 +63,9 @@ export default async function StaffClubPage({
       .eq("club_id", club.id)
       .lt("start_at", dayEnd)
       .gt("end_at", dayStart),
+    supabase.from("sports").select("code, name_en"),
   ]);
+  const sportNames = Object.fromEntries(((sportRows ?? []) as { code: string; name_en: string }[]).map((s) => [s.code, s.name_en]));
 
   // Names for app bookings (player_public has no phone)
   const playerIds = [...new Set((bookings ?? []).map((b) => b.player_id).filter(Boolean))] as string[];
@@ -86,6 +88,8 @@ export default async function StaffClubPage({
       blocks={(blocks ?? []) as Block[]}
       date={date}
       view={view === "list" ? "list" : "grid"}
+      sport={sport && /^[a-z_]+$/.test(sport) ? sport : null}
+      sportNames={sportNames}
     />
   );
 }

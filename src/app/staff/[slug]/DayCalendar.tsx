@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { clubLocalToUtc, dayBounds, hhmm, shiftDate, slotTimes, todayIn, toMin } from "@/lib/time";
 import { friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
 
-type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: "grid" | "list" };
+type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: "grid" | "list"; sport: string | null; sportNames: Record<string, string> };
 
 type Sheet =
   | { kind: "add"; courtId: string; time: string }
@@ -18,7 +18,10 @@ type Sheet =
   | null;
 
 
-export default function DayCalendar({ club, courts, bookings: initialBookings, blocks: initialBlocks, date, view }: Props) {
+export default function DayCalendar({ club, courts: allCourts, bookings: initialBookings, blocks: initialBlocks, date, view, sport, sportNames }: Props) {
+  // multi-sport clubs get a sport filter; single-sport clubs never see it
+  const sports = [...new Set(allCourts.map((c) => c.sport))];
+  const courts = sport && sports.includes(sport) ? allCourts.filter((c) => c.sport === sport) : allCourts;
   const [bookings, setBookings] = useState(initialBookings);
   const [blocks, setBlocks] = useState(initialBlocks);
   const [sheet, setSheet] = useState<Sheet>(null);
@@ -85,7 +88,8 @@ export default function DayCalendar({ club, courts, bookings: initialBookings, b
     return { row, span: Math.max(1, endRow - row) };
   }
 
-  const nav = (d: string) => `/staff/${club.slug}?date=${d}&view=${view}`;
+  const q = (d: string, v: string, sp: string | null) => `/staff/${club.slug}?date=${d}&view=${v}${sp ? `&sport=${sp}` : ""}`;
+  const nav = (d: string) => q(d, view, sport);
   const dayNum = formatInTimeZone(clubLocalToUtc(date, "12:00", club.timezone), club.timezone, "d");
   const dayName = formatInTimeZone(clubLocalToUtc(date, "12:00", club.timezone), club.timezone, "EEEE");
   const monthName = formatInTimeZone(clubLocalToUtc(date, "12:00", club.timezone), club.timezone, "MMMM yyyy");
@@ -114,14 +118,22 @@ export default function DayCalendar({ club, courts, bookings: initialBookings, b
         </div>
         <div className="flex items-center justify-between px-4 pb-2">
           <div className="flex rounded-full border border-grid bg-white p-0.5 text-sm">
-            <Link href={`/staff/${club.slug}?date=${date}&view=grid`} className={`rounded-full px-4 py-1.5 ${view === "grid" ? "bg-ink text-white" : ""}`}>Courts</Link>
-            <Link href={`/staff/${club.slug}?date=${date}&view=list`} className={`rounded-full px-4 py-1.5 ${view === "list" ? "bg-ink text-white" : ""}`}>List</Link>
+            <Link href={q(date, "grid", sport)} className={`rounded-full px-4 py-1.5 ${view === "grid" ? "bg-ink text-white" : ""}`}>Courts</Link>
+            <Link href={q(date, "list", sport)} className={`rounded-full px-4 py-1.5 ${view === "list" ? "bg-ink text-white" : ""}`}>List</Link>
           </div>
           <div className="flex items-center gap-3 text-xs text-muted">
             <span className="flex items-center gap-1"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-turf" />app</span>
             <span className="flex items-center gap-1"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-sand" />desk</span>
           </div>
         </div>
+        {sports.length > 1 && (
+          <div className="flex gap-1.5 overflow-x-auto px-4 pb-3">
+            <Link href={q(date, view, null)} className={`shrink-0 rounded-full border px-3 py-1 text-xs ${!sport ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>All sports</Link>
+            {sports.map((sp) => (
+              <Link key={sp} href={q(date, view, sp)} className={`shrink-0 rounded-full border px-3 py-1 text-xs ${sport === sp ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>{sportNames[sp] ?? sp}</Link>
+            ))}
+          </div>
+        )}
       </header>
 
       {view === "grid" ? (
@@ -138,7 +150,7 @@ export default function DayCalendar({ club, courts, bookings: initialBookings, b
               {courts.map((c) => (
                 <div key={c.id} className="h-9 px-1 text-center text-sm">
                   <div className="font-medium leading-tight">{c.name}</div>
-                  <div className="text-xs text-muted">{c.sport}</div>
+                  <div className="text-xs text-muted">{sportNames[c.sport] ?? c.sport}</div>
                 </div>
               ))}
               {courts.map((c) => (
@@ -234,7 +246,7 @@ export default function DayCalendar({ club, courts, bookings: initialBookings, b
 
             {sheet.kind === "booking" && (
               <BookingSheet
-                club={club} courts={courts} booking={sheet.booking} times={times} busy={busy}
+                club={club} courts={allCourts} booking={sheet.booking} times={times} busy={busy}
                 onMove={(courtId, time, slots) =>
                   run(() => {
                     const start = clubLocalToUtc(date, time, club.timezone);

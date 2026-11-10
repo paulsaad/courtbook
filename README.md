@@ -13,6 +13,8 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | `supabase/migrations/0025_match_social.sql` | Join approval (`join_mode`, `decide_join`), in-app `notifications` (+ email fan-out route), match chat (`match_messages`, members only) |
 | `supabase/migrations/0026_match_review.sql` | Phase 5 review: participation privacy (`is_accepted_in_match`), idempotent `join_match`, sport check + one live match per booking, `bookings_sync_matches` trigger, `closed_reason` (only auto-closed matches reopen), `decide_join` only on open future matches, atomic `claim_notifications_to_email` |
 | `supabase/migrations/0027_linked_match_lock.sql` | `post_match` locks the booking row (`for update`); partial unique index `matches_one_live_per_booking` — one live match per booking, race-safe |
+| `supabase/migrations/0028_sports_enum.sql` | Enum: football, basketball, volleyball, squash (run alone) |
+| `supabase/migrations/0029_sports_geography.sql` | `sports` table (EN/AR labels); Lebanon `governorates` (9, legacy parent) → `districts` (26) → `towns` (seeded main towns); `add_town` (staff, duplicate-safe), `areas()`, `club_sports()`; `clubs.town_id/lat/lng/cover_url`; `update_club_settings` takes town + coords |
 | `supabase/migrations/0024_match_board.sql` | Match board: `post_match` (optional booking link), `join_match` (atomic capacity, auto-close), `leave_match`, `set_match_status`, `match_board`, `match_participants` |
 | `supabase/migrations/0023_coach_exceptions.sql` | Exceptions per club; closed ranges split weekly windows |
 | `supabase/migrations/0022_coach_privacy.sql` | Availability readable only for listed coaches (or coach/staff); `coach_availability` enforces it; staff decide via RPC only, approve only pending |

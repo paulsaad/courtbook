@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/types";
+import type { Governorate, Sport, Town, TownWithArea } from "@/lib/geo";
 
 type ClubRow = {
   id: string; name: string; slug: string; active: boolean; timezone: string; location_url: string | null;
   open_time: string; close_time: string; slot_minutes: number; min_booking_minutes: number; max_booking_minutes: number;
   cancel_cutoff_hours: number; hold_minutes: number; booking_window_days: number; service_fee_usd: number;
+  town_id: string | null; lat: number | null; lng: number | null;
 };
 type CourtRow = { id: string; name: string; sport: string; surface: string | null; active: boolean; sort: number };
 type RuleRow = { id: string; court_id: string | null; weekday_mask: number; start_time: string; end_time: string; price_usd: number; label: string | null };
@@ -22,7 +24,7 @@ const primary = "rounded-xl bg-action px-4 py-2.5 font-medium text-white disable
 const hhmm = (t: string) => t.slice(0, 5);
 const section = "flex flex-col gap-3 rounded-2xl border border-grid bg-white p-4";
 
-export default function ClubSettings({ club, courts, rules, staff, coaches, isAdmin, backHref }: { club: ClubRow; courts: CourtRow[]; rules: RuleRow[]; staff: StaffRow[]; coaches: CoachReq[]; isAdmin: boolean; backHref: string }) {
+export default function ClubSettings({ club, courts, rules, staff, coaches, isAdmin, backHref, areas, sports, town }: { club: ClubRow; courts: CourtRow[]; rules: RuleRow[]; staff: StaffRow[]; coaches: CoachReq[]; isAdmin: boolean; backHref: string; areas: Governorate[]; sports: Sport[]; town: TownWithArea | null }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -37,6 +39,18 @@ export default function ClubSettings({ club, courts, rules, staff, coaches, isAd
     return true;
   }
 
+  const [f, setF] = useState<Settings>({
+    open: hhmm(club.open_time), close: club.close_time.startsWith("24") ? "24:00" : hhmm(club.close_time),
+    slot: club.slot_minutes, min: club.min_booking_minutes, max: club.max_booking_minutes,
+    cutoff: club.cancel_cutoff_hours, hold: club.hold_minutes, window: club.booking_window_days, location: club.location_url ?? "",
+    town: club.town_id, lat: club.lat == null ? "" : String(club.lat), lng: club.lng == null ? "" : String(club.lng),
+  });
+  const save = () => run(() => createClient().rpc("update_club_settings", {
+    p_club: club.id, p_open: f.open, p_close: f.close === "24:00" ? "24:00:00" : f.close, p_slot: f.slot, p_min: f.min, p_max: f.max,
+    p_cutoff: f.cutoff, p_hold: f.hold, p_window: f.window, p_location: f.location,
+    p_town: f.town, p_lat: f.lat.trim() === "" ? null : Number(f.lat), p_lng: f.lng.trim() === "" ? null : Number(f.lng),
+  }));
+
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5 pb-16">
       <Link href={backHref} className="text-sm text-muted">‹ Back</Link>
@@ -44,8 +58,9 @@ export default function ClubSettings({ club, courts, rules, staff, coaches, isAd
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
 
       {isAdmin && <AdminBasics club={club} busy={busy} run={run} />}
-      <Hours club={club} busy={busy} run={run} />
-      <Courts clubId={club.id} courts={courts} busy={busy} run={run} />
+      <Location f={f} setF={setF} areas={areas} town={town} busy={busy} save={save} />
+      <Hours f={f} setF={setF} busy={busy} save={save} />
+      <Courts clubId={club.id} courts={courts} sports={sports} busy={busy} run={run} />
       <Prices clubId={club.id} courts={courts} rules={rules} busy={busy} run={run} />
       <Coaches clubId={club.id} coaches={coaches} busy={busy} run={run} />
       {isAdmin && <Staff clubId={club.id} staff={staff} busy={busy} run={run} />}
@@ -54,6 +69,8 @@ export default function ClubSettings({ club, courts, rules, staff, coaches, isAd
 }
 
 type Run = (fn: () => PromiseLike<{ error: { message: string } | null }>, after?: () => void) => Promise<boolean>;
+type Settings = { open: string; close: string; slot: number; min: number; max: number; cutoff: number; hold: number; window: number; location: string; town: string | null; lat: string; lng: string };
+type SetF = (f: Settings) => void;
 
 function AdminBasics({ club, busy, run }: { club: ClubRow; busy: boolean; run: Run }) {
   const [name, setName] = useState(club.name);
@@ -70,13 +87,8 @@ function AdminBasics({ club, busy, run }: { club: ClubRow; busy: boolean; run: R
   );
 }
 
-function Hours({ club, busy, run }: { club: ClubRow; busy: boolean; run: Run }) {
-  const [f, setF] = useState({
-    open: hhmm(club.open_time), close: club.close_time.startsWith("24") ? "24:00" : hhmm(club.close_time),
-    slot: club.slot_minutes, min: club.min_booking_minutes, max: club.max_booking_minutes,
-    cutoff: club.cancel_cutoff_hours, hold: club.hold_minutes, window: club.booking_window_days, location: club.location_url ?? "",
-  });
-  const set = (k: keyof typeof f, v: string | number) => setF({ ...f, [k]: v });
+function Hours({ f, setF, busy, save }: { f: Settings; setF: SetF; busy: boolean; save: () => Promise<boolean> }) {
+  const set = (k: keyof Settings, v: string | number) => setF({ ...f, [k]: v });
   const num = (k: "slot" | "min" | "max" | "cutoff" | "hold" | "window", label: string, opts?: number[]) => (
     <label className="flex items-center justify-between gap-3 text-sm">{label}
       {opts ? (
@@ -99,19 +111,76 @@ function Hours({ club, busy, run }: { club: ClubRow; busy: boolean; run: Run }) 
       {num("cutoff", "Free cancellation until (hours before)")}
       {num("hold", "Payment hold (minutes)")}
       {num("window", "Players can book ahead (days)")}
-      <label className="flex flex-col gap-1 text-sm">Map link<input className={input} placeholder="https://maps.google.com/…" value={f.location} onChange={(e) => set("location", e.target.value)} /></label>
       <p className="text-xs text-muted">Min/max must be multiples of the grid step. 23:59 means midnight.</p>
-      <button disabled={busy} onClick={() => run(() => createClient().rpc("update_club_settings", {
-        p_club: club.id, p_open: f.open, p_close: f.close === "24:00" ? "24:00:00" : f.close, p_slot: f.slot, p_min: f.min, p_max: f.max,
-        p_cutoff: f.cutoff, p_hold: f.hold, p_window: f.window, p_location: f.location,
-      }))} className={primary}>Save</button>
+      <button disabled={busy} onClick={save} className={primary}>Save</button>
     </section>
   );
 }
 
-function Courts({ clubId, courts, busy, run }: { clubId: string; courts: CourtRow[]; busy: boolean; run: Run }) {
+function Location({ f, setF, areas, town, busy, save }: { f: Settings; setF: SetF; areas: Governorate[]; town: TownWithArea | null; busy: boolean; save: () => Promise<boolean> }) {
+  const [gov, setGov] = useState(town?.governorate_code ?? "");
+  const [district, setDistrict] = useState(town?.district_code ?? "");
+  const [towns, setTowns] = useState<Town[]>(town ? [{ id: town.id, district_code: town.district_code, name_en: town.name_en, name_ar: town.name_ar }] : []);
+  const [newTown, setNewTown] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const districts = areas.find((g) => g.code === gov)?.districts ?? [];
+
+  async function loadTowns(d: string) {
+    const { data } = await createClient().from("towns").select("id, district_code, name_en, name_ar").eq("district_code", d).order("name_en");
+    setTowns((data ?? []) as Town[]);
+  }
+  function pickGov(code: string) { setGov(code); setDistrict(""); setTowns([]); setF({ ...f, town: null }); }
+  function pickDistrict(code: string) { setDistrict(code); setF({ ...f, town: null }); if (code) loadTowns(code); else setTowns([]); }
+  async function addTown() {
+    setAdding(true); setAddError(null);
+    const { data, error } = await createClient().rpc("add_town", { p_district: district, p_name_en: newTown.trim() });
+    setAdding(false);
+    if (error) { setAddError(friendlyError(error.message)); return; }
+    await loadTowns(district);
+    setF({ ...f, town: data as string }); setNewTown("");
+  }
+
+  return (
+    <section className={section}>
+      <h2 className="font-medium">Location</h2>
+      <label className="flex flex-col gap-1 text-sm">Governorate
+        <select className={input} value={gov} onChange={(e) => pickGov(e.target.value)}>
+          <option value="">—</option>{areas.map((g) => <option key={g.code} value={g.code}>{g.name_en}</option>)}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-sm">District
+        <select className={input} value={district} disabled={!gov} onChange={(e) => pickDistrict(e.target.value)}>
+          <option value="">—</option>{districts.map((d) => <option key={d.code} value={d.code}>{d.name_en}</option>)}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-sm">Town
+        <select className={input} value={f.town ?? ""} disabled={!district} onFocus={() => { if (district && towns.length <= 1) loadTowns(district); }} onChange={(e) => setF({ ...f, town: e.target.value || null })}>
+          <option value="">—</option>{towns.map((t) => <option key={t.id} value={t.id}>{t.name_en}</option>)}
+        </select>
+      </label>
+      {district && (
+        <div className="flex gap-2">
+          <input className={`${input} flex-1`} placeholder="Town missing? Type its name" value={newTown} onChange={(e) => setNewTown(e.target.value)} />
+          <button type="button" disabled={adding || newTown.trim().length < 2} onClick={addTown} className="rounded-xl border border-grid px-4 disabled:opacity-50">Add</button>
+        </div>
+      )}
+      {addError && <p className="text-xs text-danger">{addError}</p>}
+      <div className="flex gap-3">
+        <label className="flex flex-1 flex-col gap-1 text-sm">Latitude<input className={input} inputMode="decimal" placeholder="34.2553" value={f.lat} onChange={(e) => setF({ ...f, lat: e.target.value })} /></label>
+        <label className="flex flex-1 flex-col gap-1 text-sm">Longitude<input className={input} inputMode="decimal" placeholder="35.6586" value={f.lng} onChange={(e) => setF({ ...f, lng: e.target.value })} /></label>
+      </div>
+      <label className="flex flex-col gap-1 text-sm">Map link<input className={input} placeholder="https://maps.google.com/…" value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} /></label>
+      <p className="text-xs text-muted">Players find the club by area and town. Coordinates are optional (used for distance later).</p>
+      <button disabled={busy} onClick={save} className={primary}>Save</button>
+    </section>
+  );
+}
+
+function Courts({ clubId, courts, sports, busy, run }: { clubId: string; courts: CourtRow[]; sports: Sport[]; busy: boolean; run: Run }) {
   const [name, setName] = useState("");
-  const [sport, setSport] = useState("padel");
+  const [sport, setSport] = useState(sports[0]?.code ?? "other");
+  const sportName = (code: string) => sports.find((s) => s.code === code)?.name_en ?? code;
   const [surface, setSurface] = useState("");
   return (
     <section className={section}>
@@ -119,7 +188,7 @@ function Courts({ clubId, courts, busy, run }: { clubId: string; courts: CourtRo
       <ul className="divide-y divide-grid">
         {courts.map((c) => (
           <li key={c.id} className="flex items-center justify-between py-2 text-sm">
-            <div><span className={c.active ? "" : "text-muted line-through"}>{c.name}</span> <span className="text-muted">· {c.sport}{c.surface ? ` · ${c.surface}` : ""}</span></div>
+            <div><span className={c.active ? "" : "text-muted line-through"}>{c.name}</span> <span className="text-muted">· {sportName(c.sport)}{c.surface ? ` · ${c.surface}` : ""}</span></div>
             <button disabled={busy} onClick={() => run(() => createClient().from("courts").update({ active: !c.active }).eq("id", c.id))} className="text-action underline">{c.active ? "Deactivate" : "Activate"}</button>
           </li>
         ))}
@@ -127,7 +196,7 @@ function Courts({ clubId, courts, busy, run }: { clubId: string; courts: CourtRo
       <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); run(() => createClient().from("courts").insert({ club_id: clubId, name: name.trim(), sport, surface: surface.trim() || null, sort: courts.length + 1 }), () => { setName(""); setSurface(""); }); }}>
         <div className="flex gap-2">
           <input className={`${input} flex-1`} placeholder="Court name" required value={name} onChange={(e) => setName(e.target.value)} />
-          <select className={input} value={sport} onChange={(e) => setSport(e.target.value)}><option value="padel">padel</option><option value="tennis">tennis</option><option value="other">other</option></select>
+          <select className={input} value={sport} onChange={(e) => setSport(e.target.value)}>{sports.map((s) => <option key={s.code} value={s.code}>{s.name_en}</option>)}</select>
         </div>
         <input className={input} placeholder="Surface (optional)" value={surface} onChange={(e) => setSurface(e.target.value)} />
         <button disabled={busy} className="rounded-xl border border-grid py-2.5">Add court</button>
