@@ -656,3 +656,21 @@ as_user $P2; cat <<EOF
 select count(*) > 0 from open_matches('padel');
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+
+echo "--- Z. public browsing (Phase 6 review) — anon sees availability and prices, never names, holds or matches"
+{ echo "set role anon; select set_config('request.jwt.claims', '', true);"; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '82. anon: club_discovery -> rows ; areas -> 9 ; public_occupancy -> rows, no id/mine columns ; quote_price works'
+select count(*) > 0 from club_discovery();
+select jsonb_array_length(areas());
+select count(*) >= 0 from public_occupancy;
+select count(*) from information_schema.columns where table_name='public_occupancy' and column_name in ('id','mine','status');
+select quote_price('$COURT', (current_date + 12 + time '10:00') at time zone 'Asia/Beirut', (current_date + 12 + time '11:00') at time zone 'Asia/Beirut');
+\echo '83. anon: occupancy, hold_slot, open_matches, player_names, profiles -> all permission denied'
+select count(*) from occupancy;
+select * from hold_slot('$CLUB','$COURT', (current_date + 12 + time '10:00') at time zone 'Asia/Beirut', (current_date + 12 + time '11:00') at time zone 'Asia/Beirut');
+select count(*) from open_matches();
+select count(*) from player_names(array['$P1'::uuid]);
+select count(*) from profiles;
+EOF
+} | $PSQL -d $DB 2>&1 | filter

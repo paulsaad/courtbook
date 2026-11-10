@@ -12,15 +12,16 @@ export default async function Home() {
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
-    const { data: clubs } = await supabase.from("clubs").select("id, name, slug").eq("active", true).order("name");
+    const [ref, { data: clubs }] = await Promise.all([loadRefData(supabase), supabase.rpc("club_discovery")]);
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 p-6">
-        <h1 className="text-3xl font-semibold tracking-tight">CourtBook</h1>
-        <p className="text-muted">Book courts, find players and coaches across Lebanon.</p>
-        <Link href="/login" className="rounded-2xl bg-action px-4 py-3.5 text-center font-medium text-white">Sign in</Link>
-        <ul className="divide-y divide-grid rounded-2xl border border-grid bg-white">
-          {clubs?.map((c) => <li key={c.id}><Link href={`/club/${c.slug}`} className="block px-4 py-3">{c.name}</Link></li>)}
-        </ul>
+      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5">
+        <header className="flex items-center justify-between">
+          <h1 className="text-2xl font-semibold tracking-tight">CourtBook</h1>
+          <Link href="/login" className="rounded-full bg-action px-4 py-2 text-sm font-medium text-white">Sign in</Link>
+        </header>
+        <p className="text-sm text-muted">Book sports courts, find players and coaches across Lebanon. Browse freely; sign in when you reserve.</p>
+        <InstallHint />
+        <Discover areas={ref.areas} sports={ref.sports} initialClubs={(clubs ?? []) as ClubCard[]} initialMatches={[]} signedIn={false} />
       </main>
     );
   }
@@ -61,7 +62,7 @@ export default async function Home() {
           <span className="opacity-70">›</span>
         </Link>
       )}
-      <Discover areas={ref.areas} sports={ref.sports} initialClubs={(clubs ?? []) as ClubCard[]} initialMatches={(matches ?? []) as OpenMatch[]} />
+      <Discover areas={ref.areas} sports={ref.sports} initialClubs={(clubs ?? []) as ClubCard[]} initialMatches={(matches ?? []) as OpenMatch[]} signedIn />
     </main>
   );
 }

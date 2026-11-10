@@ -1,4 +1,4 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { loadClubHead } from "@/lib/clubHead";
 import ClubHeader from "../ClubHeader";
@@ -8,8 +8,6 @@ const fmtDur = (m: number) => (m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 
 export default async function ClubInfo({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect(`/login?next=/club/${slug}/info`);
   const { data: club } = await supabase.from("clubs")
     .select("id, name, slug, open_time, close_time, location_url, town_id, slot_minutes, min_booking_minutes, max_booking_minutes, cancel_cutoff_hours, hold_minutes, booking_window_days, service_fee_usd, lat, lng")
     .eq("slug", slug).eq("active", true).single();

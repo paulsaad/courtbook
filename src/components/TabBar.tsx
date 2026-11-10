@@ -32,7 +32,7 @@ export default function TabBar() {
     return () => { alive = false; };
   }, [path]);
 
-  if (!signedIn || HIDDEN.some((h) => path.startsWith(h))) return null;
+  if (!signedIn || HIDDEN.some((h) => path === h || path.startsWith(h + "/"))) return null;
   return (
     <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-grid bg-white/95 backdrop-blur" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
       <div className="mx-auto grid max-w-md grid-cols-4">

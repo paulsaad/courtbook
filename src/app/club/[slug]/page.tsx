@@ -14,9 +14,10 @@ export default async function ClubPage({ params, searchParams }: { params: Promi
   const { date: qDate, at, court } = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect(`/login?next=/club/${slug}`);
-  const { data: me } = await supabase.from("profiles").select("name").eq("id", user.id).single();
-  if (!me?.name) redirect(`/profile?next=/club/${slug}`);
+  if (user) {
+    const { data: me } = await supabase.from("profiles").select("name").eq("id", user.id).single();
+    if (!me?.name) redirect(`/profile?next=/club/${slug}`);
+  }
 
   const { data: club } = await supabase
     .from("clubs")
@@ -32,8 +33,10 @@ export default async function ClubPage({ params, searchParams }: { params: Promi
 
   const [{ data: courts }, { data: occ }, { data: holdRows }, head, { data: sportRows }] = await Promise.all([
     supabase.from("courts").select("id, name, sport, surface, sort, active").eq("club_id", club.id).eq("active", true).order("sort"),
-    supabase.from("occupancy").select("id, court_id, start_at, end_at, status, mine, kind").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart),
-    supabase.rpc("my_active_hold"),
+    user
+      ? supabase.from("occupancy").select("id, court_id, start_at, end_at, status, mine, kind").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart)
+      : supabase.from("public_occupancy").select("court_id, start_at, end_at, kind").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart),
+    user ? supabase.rpc("my_active_hold") : Promise.resolve({ data: [] }),
     loadClubHead(supabase, club),
     supabase.from("sports").select("code, name_en"),
   ]);
@@ -43,7 +46,7 @@ export default async function ClubPage({ params, searchParams }: { params: Promi
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col">
       <ClubHeader club={head} tab="" />
-      <PlayerGrid club={club} courts={(courts ?? []) as Court[]} occ={(occ ?? []) as Occ[]} date={date} hold={hold} preselect={preselect} sportNames={sportNames} />
+      <PlayerGrid signedIn={!!user} club={club} courts={(courts ?? []) as Court[]} occ={(occ ?? []) as Occ[]} date={date} hold={hold} preselect={preselect} sportNames={sportNames} />
     </main>
   );
 }

@@ -21,16 +21,19 @@ export type OpenMatch = {
 const TZ = "Asia/Beirut";
 const chip = (on: boolean) => `shrink-0 rounded-full border px-3.5 py-1.5 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
 
-export default function Discover({ areas, sports, initialClubs, initialMatches }: { areas: Governorate[]; sports: Sport[]; initialClubs: ClubCard[]; initialMatches: OpenMatch[] }) {
+export default function Discover({ areas, sports, initialClubs, initialMatches, signedIn }: { areas: Governorate[]; sports: Sport[]; initialClubs: ClubCard[]; initialMatches: OpenMatch[]; signedIn: boolean }) {
   const [prefs, setPrefs] = useState<Prefs>(EMPTY);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
   const [clubs, setClubs] = useState(initialClubs);
   const [matches, setMatches] = useState(initialMatches);
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [tick, setTick] = useState(0); // bumped by Retry
+  // sport chips come from the area/search result *without* the sport filter, so other sports stay reachable
+  const [facets, setFacets] = useState<string[]>([...new Set(initialClubs.flatMap((c) => c.sports))]);
   const sportName = (code: string) => sports.find((s) => s.code === code)?.name_en ?? code;
 
-  // restore remembered filters once, then fetch whenever they change
   // restore remembered filters after hydration (deferred so server and first client render match)
   useEffect(() => { const t = setTimeout(() => { setPrefs(readPrefs()); setLoaded(true); }, 0); return () => clearTimeout(t); }, []);
   useEffect(() => {
@@ -38,24 +41,30 @@ export default function Discover({ areas, sports, initialClubs, initialMatches }
     const isDefault = !prefs.gov && !prefs.district && !prefs.sport && query.trim() === "";
     let alive = true;
     const t = setTimeout(async () => {
-      if (isDefault) { setClubs(initialClubs); setMatches(initialMatches); return; }
+      if (isDefault) { setClubs(initialClubs); setMatches(initialMatches); setFacets([...new Set(initialClubs.flatMap((c) => c.sports))]); setBusy(false); setFailed(false); return; }
       setBusy(true);
       const supabase = createClient();
-      const args = { p_sport: prefs.sport, p_governorate: prefs.gov, p_district: prefs.district };
-      const [{ data: c }, { data: m }] = await Promise.all([
-        supabase.rpc("club_discovery", { ...args, p_query: query.trim() || null }),
-        supabase.rpc("open_matches", { ...args, p_limit: 3 }),
+      const area = { p_governorate: prefs.gov, p_district: prefs.district };
+      const q = query.trim() || null;
+      const [c, f, m] = await Promise.all([
+        supabase.rpc("club_discovery", { ...area, p_sport: prefs.sport, p_query: q }),
+        prefs.sport ? supabase.rpc("club_discovery", { ...area, p_sport: null, p_query: q }) : Promise.resolve({ data: null, error: null }),
+        signedIn ? supabase.rpc("open_matches", { ...area, p_sport: prefs.sport, p_limit: 3 }) : Promise.resolve({ data: [], error: null }),
       ]);
       if (!alive) return;
-      setClubs((c ?? []) as ClubCard[]); setMatches((m ?? []) as OpenMatch[]); setBusy(false);
+      setBusy(false);
+      if (c.error || m.error || f.error) { setFailed(true); return; } // keep what was on screen
+      setFailed(false);
+      const list = (c.data ?? []) as ClubCard[];
+      setClubs(list);
+      setFacets([...new Set(((f.data ?? list) as ClubCard[]).flatMap((x) => x.sports))]);
+      setMatches((m.data ?? []) as OpenMatch[]);
     }, query ? 250 : 0);
     return () => { alive = false; clearTimeout(t); };
-  }, [prefs, query, loaded, initialClubs, initialMatches]);
+  }, [prefs, query, loaded, initialClubs, initialMatches, signedIn, tick]);
 
   const update = (p: Prefs) => { setPrefs(p); writePrefs(p); };
-  // sports chips: only sports present in the current club list (or all when searching)
-  const present = new Set(clubs.flatMap((c) => c.sports));
-  const chips = sports.filter((s) => present.has(s.code) || s.code === prefs.sport);
+  const chips = sports.filter((s) => facets.includes(s.code) || s.code === prefs.sport);
 
   return (
     <div className="flex flex-col gap-5">
@@ -71,8 +80,11 @@ export default function Discover({ areas, sports, initialClubs, initialMatches }
         </div>
       )}
 
+      {failed && (
+        <p className="flex items-center justify-between rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">Could not load clubs. <button onClick={() => setTick((n) => n + 1)} className="font-medium underline">Retry</button></p>
+      )}
       <section className={`flex flex-col gap-3 ${busy ? "opacity-60" : ""}`}>
-        {clubs.length === 0 && <p className="rounded-2xl border border-dashed border-grid p-6 text-center text-sm text-muted">No clubs here yet. Try a wider area or another sport.</p>}
+        {!failed && clubs.length === 0 && <p className="rounded-2xl border border-dashed border-grid p-6 text-center text-sm text-muted">No clubs here yet. Try a wider area or another sport.</p>}
         {clubs.map((c) => (
           <article key={c.club_id} className="overflow-hidden rounded-2xl border border-grid bg-white">
             <Link href={`/club/${c.slug}`} className="block p-4 active:bg-paper">
@@ -97,7 +109,7 @@ export default function Discover({ areas, sports, initialClubs, initialMatches }
         ))}
       </section>
 
-      <section className="flex flex-col gap-3">
+      {signedIn && <section className="flex flex-col gap-3">
         <div className="flex items-baseline justify-between">
           <h2 className="font-medium">Open matches</h2>
           <Link href="/play" className="text-sm text-action">All ›</Link>
@@ -119,7 +131,7 @@ export default function Discover({ areas, sports, initialClubs, initialMatches }
             </Link>
           );
         })}
-      </section>
+      </section>}
     </div>
   );
 }

@@ -9,15 +9,15 @@ import { clubLocalToUtc, dayBounds, hhmm, shiftDate, slotTimes, todayIn, toMin }
 import { friendlyError, type Club, type Court } from "@/lib/types";
 import { readPrefs } from "@/lib/prefs";
 
-export type Occ = { id: string | null; court_id: string; start_at: string; end_at: string; status: string; mine: boolean; kind: "booking" | "block" };
+export type Occ = { id?: string | null; court_id: string; start_at: string; end_at: string; status?: string; mine?: boolean; kind: "booking" | "block" };
 type ClubX = Club & { booking_window_days: number; service_fee_usd: number; location_url: string | null; hold_minutes: number };
 type Hold = { booking_id: string; court_name: string; start_at: string; end_at: string; hold_expires_at: string } | null;
 type Preselect = { date: string; time: string; courtId: string } | null;
 
 const chip = (on: boolean) => `shrink-0 rounded-full border px-3.5 py-1.5 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
 
-export default function PlayerGrid({ club, courts: allCourts, occ: initialOcc, date: initialDate, hold, preselect, sportNames }: {
-  club: ClubX; courts: Court[]; occ: Occ[]; date: string; hold: Hold; preselect: Preselect; sportNames: Record<string, string>;
+export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: initialOcc, date: initialDate, hold, preselect, sportNames }: {
+  signedIn: boolean; club: ClubX; courts: Court[]; occ: Occ[]; date: string; hold: Hold; preselect: Preselect; sportNames: Record<string, string>;
 }) {
   const router = useRouter();
   const times = slotTimes(club.open_time, club.close_time, club.slot_minutes);
@@ -55,11 +55,14 @@ export default function PlayerGrid({ club, courts: allCourts, occ: initialOcc, d
     let alive = true;
     (async () => {
       const { dayStart, dayEnd } = dayBounds(date, club.timezone);
-      const { data } = await createClient().from("occupancy").select("id, court_id, start_at, end_at, status, mine, kind").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart);
+      const sb = createClient();
+      const { data } = signedIn
+        ? await sb.from("occupancy").select("id, court_id, start_at, end_at, status, mine, kind").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart)
+        : await sb.from("public_occupancy").select("court_id, start_at, end_at, kind").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart);
       if (alive) setFetched({ date, occ: (data ?? []) as Occ[] });
     })();
     return () => { alive = false; };
-  }, [date, initialDate, club.id, club.timezone]);
+  }, [date, initialDate, club.id, club.timezone, signedIn]);
 
   useEffect(() => {
     const el = stripRef.current?.querySelector<HTMLElement>("[data-on=true]");
@@ -97,8 +100,13 @@ export default function PlayerGrid({ club, courts: allCourts, occ: initialOcc, d
 
   async function reserve() {
     if (!pick) return;
-    setBusy(true); setError(null);
     const start = clubLocalToUtc(date, pick.time, club.timezone);
+    if (!signedIn) {
+      // sign in, then come back with this slot selected
+      router.push(`/login?next=${encodeURIComponent(`/club/${club.slug}?at=${start.toISOString()}&court=${pick.courtId}`)}`);
+      return;
+    }
+    setBusy(true); setError(null);
     const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
     const { data, error } = await createClient().rpc("hold_slot", { p_club: club.id, p_court: pick.courtId, p_start: start.toISOString(), p_end: end.toISOString() });
     if (error) { setBusy(false); setError(friendlyError(error.message)); router.refresh(); return; }
@@ -201,7 +209,7 @@ export default function PlayerGrid({ club, courts: allCourts, occ: initialOcc, d
             <span className="text-lg font-semibold">{price === null ? "…" : `$${(price + Number(club.service_fee_usd)).toFixed(2)}`}</span>
           </div>
           <button disabled={busy || price === null} onClick={reserve} className="mt-3 w-full rounded-xl bg-action py-3.5 font-medium text-white disabled:opacity-50">
-            {busy ? "Reserving…" : "Reserve and pay"}
+            {busy ? "Reserving…" : signedIn ? "Reserve and pay" : "Sign in to reserve"}
           </button>
           <p className="mt-2 text-center text-xs text-muted">Slot is held for {club.hold_minutes} minutes while you pay. Free cancellation up to {club.cancel_cutoff_hours} h before.</p>
         </div>
