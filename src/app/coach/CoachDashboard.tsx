@@ -4,12 +4,13 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/types";
+import { normalizePhone } from "@/lib/phone";
 
 type Coach = { id: string; sports: string[]; levels: string[]; price_usd: number; bio: string | null; whatsapp: string | null; active: boolean } | null;
 type ClubRow = { id: string; name: string; slug: string; timezone: string };
 type LinkRow = { club_id: string; status: string };
 type Rule = { id: string; club_id: string; weekday: number; start_time: string; end_time: string };
-type Exc = { id: string; date: string; start_time: string | null; end_time: string | null; available: boolean };
+type Exc = { id: string; club_id: string; date: string; start_time: string | null; end_time: string | null; available: boolean };
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const input = "rounded-xl border border-grid bg-white px-3 py-2.5 text-base outline-none focus:border-action";
@@ -47,11 +48,15 @@ type Run = (fn: () => PromiseLike<{ error: { message: string } | null }>) => Pro
 function ProfileSection({ coach, busy, run }: { coach: Coach; busy: boolean; run: Run }) {
   const [f, setF] = useState({ sports: coach?.sports ?? ["padel"], levels: coach?.levels ?? [], price: coach ? String(coach.price_usd) : "", bio: coach?.bio ?? "", whatsapp: coach?.whatsapp ?? "", active: coach?.active ?? true });
   const toggle = (k: "sports" | "levels", v: string) => setF({ ...f, [k]: f[k].includes(v) ? f[k].filter((x) => x !== v) : [...f[k], v] });
+  const [phoneError, setPhoneError] = useState<string | null>(null);
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    const phone = f.whatsapp.trim() ? normalizePhone(f.whatsapp) : null;
+    if (f.whatsapp.trim() && !phone) { setPhoneError("Enter a Lebanese number like 03 123 456 or an international one like +961 3 123 456."); return; }
+    setPhoneError(null);
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    const row = { sports: f.sports, levels: f.levels, price_usd: Number(f.price), bio: f.bio.trim() || null, whatsapp: f.whatsapp.trim() || null, active: f.active };
+    const row = { sports: f.sports, levels: f.levels, price_usd: Number(f.price), bio: f.bio.trim() || null, whatsapp: phone, active: f.active };
     run(() => coach ? supabase.from("coaches").update(row).eq("id", coach.id) : supabase.from("coaches").insert({ ...row, profile_id: user!.id }));
   }
   return (
@@ -60,7 +65,8 @@ function ProfileSection({ coach, busy, run }: { coach: Coach; busy: boolean; run
       <div className="text-sm">Sports<div className="mt-1 flex gap-2">{["padel", "tennis"].map((s) => <button type="button" key={s} onClick={() => toggle("sports", s)} className={chip(f.sports.includes(s))}>{s}</button>)}</div></div>
       <div className="text-sm">Levels you coach<div className="mt-1 flex gap-2">{["beginner", "intermediate", "advanced"].map((s) => <button type="button" key={s} onClick={() => toggle("levels", s)} className={chip(f.levels.includes(s))}>{s}</button>)}</div></div>
       <label className="flex flex-col gap-1 text-sm">Price per hour ($)<input className={input} inputMode="decimal" required value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} /></label>
-      <label className="flex flex-col gap-1 text-sm">WhatsApp number (players will message this)<input className={input} inputMode="tel" placeholder="+961 70 000 000" value={f.whatsapp} onChange={(e) => setF({ ...f, whatsapp: e.target.value })} /></label>
+      <label className="flex flex-col gap-1 text-sm">WhatsApp number (players will message this)<input className={input} inputMode="tel" placeholder="03 123 456 or +961 3 123 456" value={f.whatsapp} onChange={(e) => setF({ ...f, whatsapp: e.target.value })} />
+        {phoneError ? <span className="text-xs text-danger">{phoneError}</span> : f.whatsapp.trim() && normalizePhone(f.whatsapp) && <span className="text-xs text-muted">Saved as {normalizePhone(f.whatsapp)}</span>}</label>
       <label className="flex flex-col gap-1 text-sm">About you<textarea className={input} rows={3} value={f.bio} onChange={(e) => setF({ ...f, bio: e.target.value })} /></label>
       {coach && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /> Listed (uncheck to pause)</label>}
       <button disabled={busy || f.sports.length === 0} className={primary}>{coach ? "Save" : "Create coach profile"}</button>
@@ -116,16 +122,16 @@ function AvailabilitySection({ coach, clubs, rules, exceptions, busy, run }: { c
         <button disabled={busy} className="rounded-xl border border-grid px-4 py-2.5 text-sm">Add weekly hours</button>
       </form>
 
-      <h3 className="mt-2 text-sm font-medium">Exceptions (days off, extra days)</h3>
+      <h3 className="mt-2 text-sm font-medium">Exceptions at this club (days off, extra hours)</h3>
       <ul className="divide-y divide-grid text-sm">
-        {exceptions.map((e) => (
+        {exceptions.filter((e) => e.club_id === clubId).map((e) => (
           <li key={e.id} className="flex items-center justify-between py-2">
             <span>{e.date} · {e.available ? "extra" : "off"}{e.start_time ? ` ${hhmm(e.start_time)}–${hhmm(e.end_time!)}` : " all day"}</span>
             <button disabled={busy} onClick={() => run(() => createClient().from("availability_exceptions").delete().eq("id", e.id))} className="text-danger underline">Delete</button>
           </li>
         ))}
       </ul>
-      <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); run(() => createClient().from("availability_exceptions").insert({ coach_id: coach.id, date: x.date, available: x.available, start_time: x.whole ? null : x.start, end_time: x.whole ? null : x.end })); }}>
+      <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); run(() => createClient().from("availability_exceptions").insert({ coach_id: coach.id, club_id: clubId, date: x.date, available: x.available, start_time: x.whole ? null : x.start, end_time: x.whole ? null : x.end })); }}>
         <div className="flex gap-2">
           <input className={`${input} flex-1`} type="date" required value={x.date} onChange={(e) => setX({ ...x, date: e.target.value })} />
           <select className={input} value={x.available ? "extra" : "off"} onChange={(e) => setX({ ...x, available: e.target.value === "extra", whole: e.target.value === "extra" ? false : x.whole })}><option value="off">Day off</option><option value="extra">Extra hours</option></select>

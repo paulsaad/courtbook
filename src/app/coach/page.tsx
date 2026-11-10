@@ -14,7 +14,7 @@ export default async function CoachPage() {
     ? await Promise.all([
         supabase.from("coach_clubs").select("club_id, status").eq("coach_id", coach.id),
         supabase.from("availability_rules").select("id, club_id, weekday, start_time, end_time").eq("coach_id", coach.id).order("weekday").order("start_time"),
-        supabase.from("availability_exceptions").select("id, date, start_time, end_time, available").eq("coach_id", coach.id).gte("date", new Date().toISOString().slice(0, 10)).order("date"),
+        supabase.from("availability_exceptions").select("id, club_id, date, start_time, end_time, available").eq("coach_id", coach.id).gte("date", new Date().toISOString().slice(0, 10)).order("date"),
       ])
     : [{ data: [] }, { data: [] }, { data: [] }];
 

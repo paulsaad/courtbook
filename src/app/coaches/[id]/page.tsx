@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
 import { todayIn } from "@/lib/time";
+import { normalizePhone, waNumber } from "@/lib/phone";
 
 type Card = { coach_id: string; name: string | null; sports: string[]; levels: string[]; price_usd: number; bio: string | null; whatsapp: string | null; clubs: { id: string; name: string; slug: string; timezone: string }[] };
 type Win = { day: string; start_time: string; end_time: string; source: string };
@@ -22,7 +23,8 @@ export default async function CoachPage({ params, searchParams }: { params: Prom
   const windows = (win ?? []) as Win[];
   const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(`${from}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + i); return d.toISOString().slice(0, 10); });
   const { data: me } = await supabase.from("profiles").select("name").eq("id", user.id).single();
-  const waNumber = card.whatsapp?.replace(/[^\d]/g, "");
+  const e164 = card.whatsapp ? normalizePhone(card.whatsapp) : null;
+  const waNum = e164 ? waNumber(e164) : null;
   const waText = encodeURIComponent(`Hi ${card.name ?? ""}, I found you on CourtBook${club ? ` (${club.name})` : ""}. I'd like to book a session. — ${me?.name ?? ""}`);
 
   return (
@@ -58,8 +60,8 @@ export default async function CoachPage({ params, searchParams }: { params: Prom
       )}
 
       <div className="fixed inset-x-0 bottom-0 mx-auto max-w-md p-4">
-        {waNumber ? (
-          <a href={`https://wa.me/${waNumber}?text=${waText}`} target="_blank" rel="noreferrer" className="block rounded-xl bg-[#25D366] py-3.5 text-center font-medium text-white shadow-lg">Message on WhatsApp</a>
+        {waNum ? (
+          <a href={`https://wa.me/${waNum}?text=${waText}`} target="_blank" rel="noreferrer" className="block rounded-xl bg-[#25D366] py-3.5 text-center font-medium text-white shadow-lg">Message on WhatsApp</a>
         ) : (
           <p className="rounded-xl border border-grid bg-white p-3 text-center text-sm text-muted">This coach has not shared a contact number yet.</p>
         )}

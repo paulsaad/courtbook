@@ -396,3 +396,26 @@ select count(*) from availability_rules where club_id='$CLUB';
 select count(*) > 0 from coach_availability((select id from coaches limit 1), '$CLUB', current_date, 14);
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+
+echo "--- S. exceptions per club; partial closure splits a window"
+NEXT_TUE="(current_date + ((8 - extract(isodow from current_date)::int) % 7 + 1))::date"
+{ as_user $P1; cat <<EOF
+\set ON_ERROR_STOP off
+delete from availability_exceptions where coach_id = my_coach_id();
+delete from availability_rules where coach_id = my_coach_id();
+insert into availability_rules (coach_id, club_id, weekday, start_time, end_time) values (my_coach_id(), '$CLUB', 1, '09:00', '17:00');
+insert into availability_exceptions (coach_id, club_id, date, start_time, end_time, available) values (my_coach_id(), '$CLUB', $NEXT_TUE, '12:00', '13:00', false);
+\echo '49. Tuesday 09-17 minus 12-13 -> expect 09:00-12:00 and 13:00-17:00'
+select start_time, end_time from coach_availability(my_coach_id(), '$CLUB', $NEXT_TUE, 1);
+\echo '50. extra hours at the OTHER club do not show at Batroun -> rows still 2'
+insert into coach_clubs (coach_id, club_id) values (my_coach_id(), '$CLUB_B');
+EOF
+as_user $STAFF_B; cat <<EOF
+select decide_coach_club((select id from coaches limit 1), '$CLUB_B', true);
+EOF
+as_user $P1; cat <<EOF
+insert into availability_exceptions (coach_id, club_id, date, start_time, end_time, available) values (my_coach_id(), '$CLUB_B', $NEXT_TUE, '19:00', '21:00', true);
+select count(*) from coach_availability(my_coach_id(), '$CLUB', $NEXT_TUE, 1);
+select count(*) from coach_availability(my_coach_id(), '$CLUB_B', $NEXT_TUE, 1);
+EOF
+} | $PSQL -d $DB 2>&1 | filter

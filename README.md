@@ -10,6 +10,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | Path | What |
 | --- | --- |
 | `supabase/migrations/0001_init.sql` | Full schema: tables, enums, double-booking guards, `book_slot` / `cancel_booking`, RLS |
+| `supabase/migrations/0023_coach_exceptions.sql` | Exceptions per club; closed ranges split weekly windows |
 | `supabase/migrations/0022_coach_privacy.sql` | Availability readable only for listed coaches (or coach/staff); `coach_availability` enforces it; staff decide via RPC only, approve only pending |
 | `supabase/migrations/0021_coach_rerequest.sql` | Removed/declined coach may request again |
 | `supabase/migrations/0020_coaches.sql` | Coach discovery: `coach_clubs` (club-approved listings), per-club availability rules, `coaches_at_club`, `coach_card`, `coach_availability`, `decide_coach_club` |
