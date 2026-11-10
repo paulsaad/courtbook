@@ -571,3 +571,20 @@ echo "69. two concurrent email claims -> disjoint batches"
 $PSQL -q -d $DB -c "update auth.users set email = 'u' || phone || '@example.com'; update profiles set email_notifications = true;"
 { as_service; echo "select count(*) from claim_notifications_to_email(50);"; } | $PSQL -At -d $DB 2>&1 | tail -1 | sed 's/^/first claim: /'
 { as_service; echo "select count(*) from claim_notifications_to_email(50);"; } | $PSQL -At -d $DB 2>&1 | tail -1 | sed 's/^/second claim (expect 0): /'
+
+echo "--- W. linked match vs concurrency (review Phase 5 round 2)"
+BK=88888888-8888-4888-8888-888888888888
+$PSQL -q -d $DB -c "insert into bookings (id, club_id, court_id, player_id, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$BK','$CLUB','$COURT2','$P1', (current_date + 10 + time '09:30') at time zone 'Asia/Beirut', (current_date + 10 + time '11:00') at time zone 'Asia/Beirut', 'confirmed','app','$P1',30,1)"
+echo "70. two concurrent post_match on one booking -> one match, other booking_already_posted"
+pm() { { as_user $P1; echo "begin; select post_match(null,'padel',null,null,null,3,'race $2','$BK'); select pg_sleep(1); commit;"; } | $PSQL -d $DB > /tmp/cb_pm$2.log 2>&1; }
+pm x 1 & sleep 0.3; pm x 2 & wait
+grep -h "ERROR" /tmp/cb_pm1.log /tmp/cb_pm2.log | sort | uniq -c
+$PSQL -At -d $DB -c "select 'live matches on booking = '||count(*)||' (expect 1)' from matches where booking_id='$BK' and status<>'cancelled'"
+echo "71. cancel the match, repost -> allowed (index is partial)"
+{ as_user $P1; echo "select set_match_status((select id from matches where booking_id='$BK'),'cancelled'); select post_match(null,'padel',null,null,null,3,'repost','$BK') is not null;"; } | $PSQL -At -d $DB 2>&1 | tail -1
+echo "72. post_match races booking cancellation -> either booking_not_found, or match created then unlinked by trigger (never a live link to a cancelled booking)"
+{ as_user $P1; echo "select set_match_status((select id from matches where booking_id='$BK' and status<>'cancelled'),'cancelled');"; } | $PSQL -q -d $DB
+{ as_user $P1; echo "begin; select cancel_booking('$BK'); select pg_sleep(1); commit;"; } | $PSQL -d $DB > /tmp/cb_cx.log 2>&1 &
+sleep 0.3; { as_user $P1; echo "select post_match(null,'padel',null,null,null,3,'late post','$BK');"; } | $PSQL -d $DB > /tmp/cb_lp.log 2>&1; wait
+grep -h "ERROR" /tmp/cb_lp.log | sort | uniq -c
+$PSQL -At -d $DB -c "select 'matches still linked to cancelled booking = '||count(*)||' (expect 0)' from matches m join bookings b on b.id=m.booking_id where b.id='$BK' and b.status<>'confirmed' and m.status<>'cancelled'"
