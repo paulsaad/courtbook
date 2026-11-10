@@ -516,3 +516,58 @@ as_user $P2; cat <<EOF
 select count(*) from notifications where match_id='$MA' and kind='match_cancelled';
 EOF
 } | $PSQL -d $DB 2>&1 | filter
+
+echo "--- V. Phase 5 review fixes"
+MB=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '5 day', now()+interval '5 day 90 min', null, 2, 'two spots', null, 'approval');"; } | $PSQL -At -d $DB | tail -1)
+{ as_user $P2; cat <<EOF
+\set ON_ERROR_STOP off
+\echo '63. player2 asks to join twice -> pending, pending (one request, one notification)'
+select join_match('$MB'); select join_match('$MB');
+EOF
+as_user $P1; cat <<EOF
+select count(*) from notifications where match_id='$MB' and kind='join_request';
+EOF
+as_user $P3; cat <<EOF
+\echo '64. player3 (pending too) cannot read player2 participation -> 0 ; cannot resolve player2 name -> 0'
+select join_match('$MB');
+select count(*) from match_players where match_id='$MB' and profile_id='$P2';
+select count(*) from player_names(array['$P2'::uuid]);
+EOF
+as_user $P1; cat <<EOF
+\echo '65. organizer resolves applicant names -> 2 ; accepts player2 ; replay of player2 join -> accepted, still open (needed 2)'
+select count(*) from player_names(array['$P2'::uuid,'$P3'::uuid]);
+select decide_join('$MB','$P2', true);
+EOF
+as_user $P2; cat <<EOF
+select join_match('$MB');
+select status from match_board('$CLUB', 14) where match_id='$MB';
+EOF
+as_user $P1; cat <<EOF
+\echo '66. organizer closes manually ; player2 leaves -> stays closed'
+select set_match_status('$MB','closed');
+EOF
+as_user $P2; cat <<EOF
+select leave_match('$MB');
+EOF
+as_user $P1; cat <<EOF
+select status from match_board('$CLUB', 14) where match_id='$MB';
+\echo '67. organizer cancels ; accepting player3 pending request -> ERROR match_closed'
+select set_match_status('$MB','cancelled');
+select decide_join('$MB','$P3', true);
+\echo '68. linked booking: sport mismatch -> ERROR ; staff moves booking -> match time follows + booking_moved notice ; cancel -> unlinked + notice'
+select post_match(null,'tennis',null,null,null,2,'x','99999999-9999-4999-8999-999999999999');
+EOF
+as_user $ADMIN; cat <<EOF
+select move_booking('99999999-9999-4999-8999-999999999999','$COURT3', (current_date + 9 + time '12:30') at time zone 'Asia/Beirut', (current_date + 9 + time '14:00') at time zone 'Asia/Beirut');
+EOF
+as_user $P1; cat <<EOF
+select start_at = (current_date + 9 + time '12:30') at time zone 'Asia/Beirut' from matches where booking_id='99999999-9999-4999-8999-999999999999';
+select cancel_booking('99999999-9999-4999-8999-999999999999');
+select booking_id is null from matches where note='from booking';
+select kind from notifications where profile_id=auth.uid() and kind in ('booking_moved','booking_unlinked') order by created_at;
+EOF
+} | $PSQL -d $DB 2>&1 | filter
+echo "69. two concurrent email claims -> disjoint batches"
+$PSQL -q -d $DB -c "update auth.users set email = 'u' || phone || '@example.com'; update profiles set email_notifications = true;"
+{ as_service; echo "select count(*) from claim_notifications_to_email(50);"; } | $PSQL -At -d $DB 2>&1 | tail -1 | sed 's/^/first claim: /'
+{ as_service; echo "select count(*) from claim_notifications_to_email(50);"; } | $PSQL -At -d $DB 2>&1 | tail -1 | sed 's/^/second claim (expect 0): /'

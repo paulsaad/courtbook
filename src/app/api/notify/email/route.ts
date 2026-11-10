@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   if (!smtpUser || !smtpPass) return NextResponse.json({ sent: 0, reason: "email not configured" });
 
   const admin = createAdminClient();
-  const { data: rows } = await admin.rpc("notifications_to_email", { p_limit: 20 });
+  const { data: rows } = await admin.rpc("claim_notifications_to_email", { p_limit: 20 });
   const list = (rows ?? []) as { id: string; email: string; name: string | null; body: string; kind: string; match_id: string | null }[];
   if (list.length === 0) return NextResponse.json({ sent: 0 });
 
