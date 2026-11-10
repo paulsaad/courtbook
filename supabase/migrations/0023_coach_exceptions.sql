@@ -1,6 +1,14 @@
 -- Phase 4 review #3/#4: exceptions are per club; closed ranges split weekly windows instead of removing them.
 
-alter table availability_exceptions add column club_id uuid references clubs(id) on delete cascade;
+alter table availability_exceptions add column if not exists club_id uuid references clubs(id) on delete cascade;
+-- preserve existing exceptions where the club is unambiguous (coach approved at exactly one club)
+update availability_exceptions e set club_id = one.club_id
+from (
+  select coach_id, min(club_id::text)::uuid as club_id
+  from coach_clubs where status = 'approved' group by coach_id having count(*) = 1
+) one
+where e.club_id is null and e.coach_id = one.coach_id;
+-- multi-club or unlisted coaches: no safe assignment; dropped (demo data; re-enter per club)
 delete from availability_exceptions where club_id is null;
 alter table availability_exceptions alter column club_id set not null;
 
