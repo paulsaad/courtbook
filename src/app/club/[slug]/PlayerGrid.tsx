@@ -120,7 +120,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
   }, [pick, slots, date, club.timezone, club.slot_minutes]);
 
   async function reserve() {
-    if (!pick) return;
+    if (!pick || !known || slots < minSlots || slots > maxSlotsHere) return;
     const start = clubLocalToUtc(date, pick.time, club.timezone);
     if (!signedIn) {
       // sign in, then come back with this slot selected
@@ -231,7 +231,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
             <span className="text-muted">Court {price === null ? "…" : `$${price.toFixed(2)}`} + booking fee ${Number(club.service_fee_usd).toFixed(2)}</span>
             <span className="text-lg font-semibold">{price === null ? "…" : `$${(price + Number(club.service_fee_usd)).toFixed(2)}`}</span>
           </div>
-          <button disabled={busy || price === null} onClick={reserve} className="mt-3 w-full rounded-xl bg-action py-3.5 font-medium text-white disabled:opacity-50">
+          <button disabled={busy || price === null || !known || slots < minSlots || slots > maxSlotsHere} onClick={reserve} className="mt-3 w-full rounded-xl bg-action py-3.5 font-medium text-white disabled:opacity-50">
             {busy ? "Reserving…" : signedIn ? "Reserve and pay" : "Sign in to reserve"}
           </button>
           <p className="mt-2 text-center text-xs text-muted">Slot is held for {club.hold_minutes} minutes while you pay. Free cancellation up to {club.cancel_cutoff_hours} h before.</p>
