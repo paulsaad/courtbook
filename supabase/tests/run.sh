@@ -827,13 +827,15 @@ AFTER=$($PSQL -At -q -d $DB -c "select max(created_at) from match_messages where
 check $P1 "91q incremental read after the last message carries nothing" "select count(*) from match_messages_list('$PM', '$AFTER');" 0
 check $P1 "91r full read shows player2's message as deleted"        "select deleted from match_messages_list('$PM', null) where id='$MSG';" "t"
 
-# the migration must survive being run twice (a half-applied run has to be recoverable)
-CHECKS=$((CHECKS+1))
-if $PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0042_delete_and_open_booking.sql >/tmp/cb_0042.log 2>&1; then
-  echo "  ok    91s 0042 re-applies cleanly"
-else
-  echo "  FAIL  91s 0042 cannot be re-applied — $(tail -2 /tmp/cb_0042.log | tr '\n' ' ')"; FAILS=$((FAILS+1))
-fi
+# the phase 8 migrations must survive being run twice (a half-applied run has to be recoverable)
+for f in supabase/migrations/0040_badminton_enum.sql supabase/migrations/0041_player_levels.sql supabase/migrations/0042_delete_and_open_booking.sql; do
+  CHECKS=$((CHECKS+1))
+  if $PSQL -q -d $DB -v ON_ERROR_STOP=1 -f "$f" >/tmp/cb_reapply.log 2>&1; then
+    echo "  ok    91s $(basename $f) re-applies cleanly"
+  else
+    echo "  FAIL  91s $(basename $f) cannot be re-applied — $(grep -m1 ERROR /tmp/cb_reapply.log)"; FAILS=$((FAILS+1))
+  fi
+done
 check $P1 "91t chat still works after the re-apply"                "select count(*) from match_messages_list('$PM', null);" 2
 
 echo

@@ -14,7 +14,7 @@ language sql immutable as $$
   select case p_level when 'beginner' then array[1,3] when 'intermediate' then array[4,6] when 'advanced' then array[7,10] else null end;
 $$;
 
-create table player_levels (
+create table if not exists player_levels (
   profile_id    uuid not null references profiles(id) on delete cascade,
   sport         sport not null,
   level         int not null check (level between 1 and 10),
@@ -23,6 +23,7 @@ create table player_levels (
   primary key (profile_id, sport)
 );
 alter table player_levels enable row level security;
+drop policy if exists "player_levels: read own" on player_levels;
 create policy "player_levels: read own" on player_levels for select to authenticated using (profile_id = auth.uid());
 -- writes go through the RPC only (no insert/update/delete policies)
 
@@ -51,10 +52,11 @@ revoke execute on function my_levels() from public, anon;
 grant execute on function my_levels() to authenticated;
 
 -- Matches: range --------------------------------------------------------------
-alter table matches
-  add column level_min int check (level_min between 1 and 10),
-  add column level_max int check (level_max between 1 and 10),
-  add constraint matches_level_range check ((level_min is null) = (level_max is null) and (level_min is null or level_min <= level_max));
+alter table matches add column if not exists level_min int check (level_min between 1 and 10);
+alter table matches add column if not exists level_max int check (level_max between 1 and 10);
+alter table matches drop constraint if exists matches_level_range;
+alter table matches add constraint matches_level_range
+  check ((level_min is null) = (level_max is null) and (level_min is null or level_min <= level_max));
 
 drop function if exists post_match(uuid, sport, timestamptz, timestamptz, player_level, int, text, uuid, text);
 create or replace function post_match(
