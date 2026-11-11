@@ -20,13 +20,17 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "not_authenticated" }, { status: 401 });
 
-  const { data: payment } = await supabase
+  const { data: payment, error: lookupError } = await supabase
     .from("payments")
     .select("id, total_usd, status, provider, session_ref, session_url, bookings!inner(status, hold_expires_at)")
     .eq("id", paymentId)
     .eq("profile_id", user.id)
     .single();
-  if (!payment) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  if (!payment) {
+    // surface the database reason (RLS/privilege problems look like "not found" otherwise)
+    console.error("pay/simulate lookup failed", { paymentId, user: user.id, error: lookupError });
+    return NextResponse.json({ error: "not_found", detail: lookupError?.message ?? "no row" }, { status: 404 });
+  }
   const booking = payment.bookings as unknown as { status: string; hold_expires_at: string | null };
   if (payment.status !== "pending" || booking.status !== "pending") {
     return NextResponse.json({ error: "not_payable", status: payment.status, booking: booking.status }, { status: 409 });

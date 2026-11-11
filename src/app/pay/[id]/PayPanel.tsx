@@ -1,5 +1,7 @@
 "use client";
 
+import { friendlyError } from "@/lib/types";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -34,8 +36,8 @@ export default function PayPanel(p: Props) {
   async function pay() {
     setBusy(true); setError(null);
     const res = await fetch("/api/pay/simulate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ paymentId: p.paymentId }) });
-    const json = (await res.json()) as { outcome?: string; error?: string; redirect?: string };
-    if (!res.ok) { setBusy(false); setError(json.error ?? "Payment failed."); return; }
+    const json = (await res.json()) as { outcome?: string; error?: string; detail?: string; redirect?: string };
+    if (!res.ok) { setBusy(false); setError(`${friendlyError(json.error ?? "Payment failed.")}${json.detail ? ` (${json.detail})` : ""}`); return; }
     if (json.redirect) { window.location.href = json.redirect; return; }
     if (json.outcome === "confirmed" || json.outcome === "already_paid") { router.replace(`/bookings/${p.bookingId}?new=1`); return; }
     setBusy(false);

@@ -59,6 +59,7 @@ export const ERRORS: Record<string, string> = {
   bad_town: "That town does not exist.",
   too_long: "That booking is longer than the club allows.",
   club_not_found: "This club is not available.",
+  not_found: "Payment not found — the hold may have expired. Go back and pick the slot again.",
   user_not_found: "No account with that email. They need to sign in once first.",
   clubs_booking_minutes_check: "Min/max must be multiples of the grid step, and max ≥ min.",
   clubs_slot_minutes_check: "Grid step must be 30, 60 or 90.",
