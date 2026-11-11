@@ -17,7 +17,7 @@
   --color-slate-soft: #e9ebe8;
   --color-action: #0f7a47;
   --color-danger: #b42318;      /* errors: always with wording, never bare colour */
-  --font-sans: var(--font-inter), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --radius-card: 20px;
 }
 
