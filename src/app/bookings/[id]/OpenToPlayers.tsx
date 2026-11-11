@@ -8,7 +8,7 @@ import { friendlyError } from "@/lib/types";
 import LevelRange from "@/components/LevelRange";
 import { rangeLabel } from "@/lib/levels";
 
-export type BookingMatch = { match_id: string; status: string; players_needed: number; joined: number; pending: number; level_min: number | null; level_max: number | null; join_mode: string } | null;
+export type BookingMatch = { match_id: string; status: string; closed_reason: string | null; players_needed: number; joined: number; pending: number; level_min: number | null; level_max: number | null; join_mode: string } | null;
 
 /** On a booking: keep it private, or open it so other players can join (a match linked to this booking). */
 export default function OpenToPlayers({ bookingId, sport, sportName, match }: { bookingId: string; sport: string; sportName: string; match: BookingMatch }) {
@@ -37,12 +37,18 @@ export default function OpenToPlayers({ bookingId, sport, sportName, match }: { 
 
   if (match) {
     const spots = Math.max(0, match.players_needed - match.joined);
+    // a match closes itself the moment it fills up — that is not the same as the organizer hiding it
+    const full = match.status !== "open" && match.closed_reason === "full";
+    const hidden = match.status !== "open" && !full;
+    const state = match.status === "open"
+      ? `${spots} spot${spots === 1 ? "" : "s"} left`
+      : full ? "Full — your players have joined" : "Private — nobody new can see it";
     return (
       <section className="card flex flex-col gap-3 p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-cedar" aria-hidden="true" /><h2 className="font-bold">Open to other players</h2></div>
-            <p className="mt-1 text-sm text-muted">{rangeLabel(match.level_min, match.level_max)} · {match.status === "open" ? `${spots} spot${spots === 1 ? "" : "s"} left` : match.joined >= match.players_needed ? "Full" : "Private — nobody new can see it"}{match.pending > 0 ? ` · ${match.pending} waiting for your answer` : ""}</p>
+            <div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${match.status === "open" ? "bg-cedar" : "bg-slate-soft"}`} aria-hidden="true" /><h2 className="font-bold">{match.status === "open" ? "Open to other players" : full ? "Your match is full" : "Private match"}</h2></div>
+            <p className="mt-1 text-sm text-muted">{rangeLabel(match.level_min, match.level_max)} · {state}{match.pending > 0 ? ` · ${match.pending} waiting for your answer` : ""}</p>
           </div>
           <Link href={`/matches/${match.match_id}`} className="shrink-0 text-sm font-semibold text-turf">Open ›</Link>
         </div>
@@ -51,17 +57,19 @@ export default function OpenToPlayers({ bookingId, sport, sportName, match }: { 
           confirmPrivate
             ? <div className="flex gap-2"><button disabled={busy} onClick={() => setStatus("cancelled")} className="btn btn-primary flex-1">Make it private</button><button onClick={() => setConfirmPrivate(false)} className="btn btn-secondary px-5">Keep</button></div>
             : <button onClick={() => setConfirmPrivate(true)} className="btn btn-secondary">Make it private again</button>
-        ) : match.status === "open" ? (
-          <button disabled={busy} onClick={() => setStatus("closed")} className="btn btn-secondary">Make it private</button>
-        ) : (
+        ) : hidden ? (
           <button disabled={busy} onClick={() => setStatus("open")} className="btn btn-secondary">Open it to players again</button>
+        ) : (
+          <button disabled={busy} onClick={() => setStatus("closed")} className="btn btn-secondary">Make it private</button>
         )}
         {match.joined > 0 && (
           <p className="text-xs text-muted">
             {match.joined} player{match.joined === 1 ? " has" : "s have"} joined.{" "}
             {match.status === "open"
               ? "Make it private and they stay in — it just disappears from the match board, and anyone still waiting is told."
-              : "They are still in. To cancel on them, open the match and cancel it there — they are notified."}
+              : full
+                ? "It left the board on its own when the last spot went. Want one more player? Open the match and add a spot. Make it private and it stays off the board even if someone drops out."
+                : "They are still in. To cancel on them, open the match and cancel it there — they are notified."}
           </p>
         )}
       </section>

@@ -79,7 +79,14 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
           </>
         ) : m.status === "closed" ? (
           <>
-            <button disabled={busy} onClick={() => run("set_match_status", { p_match: m.match_id, p_status: "open" })} className={secondary}>Open it to players again</button>
+            {m.closed_reason === "full" ? (
+              <>
+                <p className="text-sm text-muted">Full, so it is off the match board. Want one more player? Edit it above and add a spot.</p>
+                <button disabled={busy} onClick={() => run("set_match_status", { p_match: m.match_id, p_status: "closed" })} className={secondary}>Make it private — keep it off the board</button>
+              </>
+            ) : (
+              <button disabled={busy} onClick={() => run("set_match_status", { p_match: m.match_id, p_status: "open" })} className={secondary}>Open it to players again</button>
+            )}
             <button disabled={busy} onClick={() => run("set_match_status", { p_match: m.match_id, p_status: "cancelled" })} className="py-2 text-sm text-danger">Cancel the match</button>
           </>
         ) : <p className="text-sm text-muted">Cancelled.</p>

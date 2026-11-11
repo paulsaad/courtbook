@@ -36,7 +36,8 @@ revoke execute on function delete_match_message(uuid) from public, anon;
 grant execute on function delete_match_message(uuid) to authenticated;
 
 -- Booking page: the live match linked to one of my bookings (or none)
-create or replace function booking_match(p_booking uuid)
+drop function if exists booking_match(uuid);
+create function booking_match(p_booking uuid)
 returns table (match_id uuid, status match_status, players_needed int, joined int, pending int, level_min int, level_max int, join_mode text)
 language sql stable security definer set search_path = public as $$
   select m.id, m.status, m.players_needed,

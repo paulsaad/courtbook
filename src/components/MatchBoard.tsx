@@ -12,7 +12,7 @@ import { friendlyError } from "@/lib/types";
 
 export type MatchRow = {
   match_id: string; club_id: string; club_name: string; club_slug: string; sport: string; start_at: string; end_at: string | null;
-  level_min: number | null; level_max: number | null; level_legacy: boolean; my_level: number | null; players_needed: number; joined: number; pending: number; status: string; note: string | null; join_mode: string;
+  level_min: number | null; level_max: number | null; level_legacy: boolean; my_level: number | null; players_needed: number; joined: number; pending: number; status: string; closed_reason: string | null; note: string | null; join_mode: string;
   organizer_id: string; organizer_name: string | null; my_status: string | null; i_organize: boolean; booking_id: string | null; court_name: string | null;
 };
 type ClubX = { id: string; name: string; slug: string; timezone: string; open_time: string; close_time: string; slot_minutes: number };
@@ -27,7 +27,7 @@ export function MatchCard({ m, tz }: { m: MatchRow; tz: string }) {
     <Link href={`/matches/${m.match_id}`} className="block rounded-2xl border border-grid bg-white p-4 active:bg-paper">
       <div className="flex items-baseline justify-between">
         <span className="font-medium">{formatInTimeZone(new Date(m.start_at), tz, "EEE d MMM · HH:mm")}{m.end_at ? `–${hhmm(m.end_at, tz)}` : ""}</span>
-        <span className={`rounded-full px-2 py-0.5 text-xs ${m.status === "open" ? "bg-turf-soft text-turf" : "bg-slate-soft text-muted"}`}>{m.status === "open" ? `${spots} spot${spots === 1 ? "" : "s"} left` : m.status === "cancelled" ? "Cancelled" : m.joined >= m.players_needed ? "Full" : "Not accepting players"}</span>
+        <span className={`rounded-full px-2 py-0.5 text-xs ${m.status === "open" ? "bg-turf-soft text-turf" : "bg-slate-soft text-muted"}`}>{m.status === "open" ? `${spots} spot${spots === 1 ? "" : "s"} left` : m.status === "cancelled" ? "Cancelled" : m.closed_reason === "full" ? "Full" : "Private"}</span>
       </div>
       <div className="mt-1 text-sm text-muted">{m.sport} · {rangeLabel(m.level_min, m.level_max, m.level_legacy)}{m.court_name ? ` · ${m.court_name} booked` : ""} · by {m.organizer_name ?? "player"}{m.i_organize ? " (you)" : m.my_status === "accepted" ? " · you're in" : m.my_status === "pending" ? " · requested" : ""}{m.i_organize && m.pending > 0 ? ` · ${m.pending} waiting` : ""}</div>
       {!m.i_organize && m.level_min != null && (() => { const f = fitLabel(m.my_level, m.level_min, m.level_max); return <div className={`mt-1 text-xs ${f.tone === "ok" ? "text-turf" : f.tone === "warn" ? "text-sand" : "text-muted"}`}>{f.text}</div>; })()}

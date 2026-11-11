@@ -862,6 +862,18 @@ sleep 0.2
 wait
 check service "92x a request racing the switch never survives as pending" "select status||'/'||(select count(*) from match_players where match_id='$PL' and status='pending') from matches where id='$PL';" "closed/0"
 
+# --- full is not private (Paul on the phone, 11 Nov): a match closes itself when the last spot goes
+FU=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '10 day', now()+interval '10 day 90 min', null, null, 1, 'one spot', null, 'approval');"; } | $PSQL -At -d $DB | tail -1)
+{ as_user $P2; echo "select join_match('$FU');"; } | $PSQL -q -d $DB >/dev/null
+check $P1 "93a before the organizer accepts: still open"            "select status||'/'||coalesce(closed_reason,'-') from match_board(null, 30) where match_id='$FU';" "open/-"
+check $P1 "93b accepting the last player closes it as full, not private" "select decide_join('$FU','$P2', true); select status||'/'||closed_reason from match_board(null, 30) where match_id='$FU';" "closed/full"
+denied $P1 "93c a full match cannot be put back on the board"       "select set_match_status('$FU','open');"
+check $P1 "93d adding a spot is how you reopen it"                  "select update_match('$FU', 2, null, null, null, 'approval'); select status||'/'||coalesce(closed_reason,'-') from match_board(null, 30) where match_id='$FU';" "open/-"
+check $P1 "93e full again, then made private -> reason changes"      "select update_match('$FU', 1, null, null, null, 'approval'); select set_match_status('$FU','closed'); select status||'/'||closed_reason from match_board(null, 30) where match_id='$FU';" "closed/organizer"
+{ as_user $P2; echo "select leave_match('$FU');"; } | $PSQL -q -d $DB >/dev/null
+check $P1 "93g still private after he left"                         "select status||'/'||closed_reason from match_board(null, 30) where match_id='$FU';" "closed/organizer"
+check $P1 "93h now that there is room again it can go back on the board" "select set_match_status('$FU','open'); select status from match_board(null, 30) where match_id='$FU';" "open"
+
 check  $P2 "91j both messages are still listed (one marked deleted)" "select count(*) from match_messages_list('$PM', null);" 2
 check  $P2 "91k remove the finished conversation -> empty for me"  "select hide_match('$PM'); select count(*) from match_messages_list('$PM', null);" 0
 check  $P2 "91l removed match is out of my history"                "select count(*) from my_agenda() where id='$PM';" 0
@@ -879,7 +891,7 @@ check $P1 "91q incremental read after the last message carries nothing" "select 
 check $P1 "91r full read shows player2's message as deleted"        "select deleted from match_messages_list('$PM', null) where id='$MSG';" "t"
 
 # the phase 8 migrations must survive being run twice (a half-applied run has to be recoverable)
-for f in supabase/migrations/0040_badminton_enum.sql supabase/migrations/0041_player_levels.sql supabase/migrations/0042_delete_and_open_booking.sql; do
+for f in $(ls supabase/migrations/004*.sql | sort); do
   CHECKS=$((CHECKS+1))
   if $PSQL -q -d $DB -v ON_ERROR_STOP=1 -f "$f" >/tmp/cb_reapply.log 2>&1; then
     echo "  ok    91s $(basename $f) re-applies cleanly"
