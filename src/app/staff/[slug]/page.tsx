@@ -50,7 +50,7 @@ export default async function StaffClubPage({
     supabase.from("courts").select("id, name, sport, surface, sort, active").eq("club_id", club.id).eq("active", true).order("sort"),
     supabase
       .from("bookings")
-      .select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id")
+      .select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id, price_usd, fee_usd, hold_expires_at")
       .eq("club_id", club.id)
       .or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`)
       .not("court_id", "is", null)
@@ -87,7 +87,7 @@ export default async function StaffClubPage({
       bookings={bookingsWithNames}
       blocks={(blocks ?? []) as Block[]}
       date={date}
-      view={view === "list" ? "list" : "grid"}
+      view={view === "list" ? "list" : view === "grid" ? "grid" : date === todayIn(club.timezone) ? "now" : "grid"}
       sport={sport && /^[a-z_]+$/.test(sport) ? sport : null}
       sportNames={sportNames}
     />

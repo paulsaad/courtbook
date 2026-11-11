@@ -24,6 +24,9 @@ export type Booking = {
   status: "confirmed" | "cancelled" | "no_show" | "pending" | "expired";
   source: "app" | "staff";
   credit_tx_id: string | null;
+  price_usd?: number | null;
+  fee_usd?: number | null;
+  hold_expires_at?: string | null;
   player_name?: string | null;
 };
 
@@ -36,7 +39,9 @@ export const ERRORS: Record<string, string> = {
   overlaps_existing_block: "That range is already blocked.",
   outside_opening_hours: "Outside opening hours.",
   not_on_grid: "Start time must be on the slot grid.",
-  bad_duration: "Duration must be whole slots.",
+  bad_duration: "Duration must be whole slots, within what the club allows.",
+  name_required: "Enter a name for the booking.",
+  court_not_found: "That court is not available at this club.",
   forbidden: "You are not allowed to do that.",
   not_started: "The booking has not started yet.",
   not_confirmed: "This booking is no longer active.",

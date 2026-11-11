@@ -901,6 +901,40 @@ for f in $(ls supabase/migrations/004*.sql | sort); do
 done
 check $P1 "91t chat still works after the re-apply"                "select count(*) from match_messages_list('$PM', null);" 2
 
+echo "--- AG. staff calendar (Phase 9a): walk-in entry, suggestions, free now"
+SD="(current_date + 12 + time '09:00') at time zone 'Asia/Beirut'"
+SD2="(current_date + 12 + time '10:00') at time zone 'Asia/Beirut'"
+check $ADMIN "94a admin books a walk-in -> confirmed, desk source, priced, no fee" "select staff_book('$CLUB','$COURT', $SD, $SD2, 'Walk In', '03 111 222') is not null; select status||'/'||source||'/'||price_usd||'/'||fee_usd from bookings where club_id='$CLUB' and guest_name='Walk In';" "confirmed/staff/20.00/0.00"
+check service "94b no payment row was created, so nothing reads as collected" "select count(*) from payments p join bookings b on b.id=p.booking_id where b.guest_name='Walk In';" 0
+denied $ADMIN "94c the same court and time again -> slot_taken"       "select staff_book('$CLUB','$COURT', $SD, $SD2, 'Second', null);"
+denied $P1 "94d a player is not staff"                                "select staff_book('$CLUB','$COURT', (current_date + 12 + time '14:00') at time zone 'Asia/Beirut', (current_date + 12 + time '15:00') at time zone 'Asia/Beirut', 'Nope', null);"
+denied $STAFF_B "94e staff of another club cannot book here"          "select staff_book('$CLUB','$COURT', (current_date + 12 + time '14:00') at time zone 'Asia/Beirut', (current_date + 12 + time '15:00') at time zone 'Asia/Beirut', 'Nope', null);"
+denied $ADMIN "94f a court from another club is refused"              "select staff_book('$CLUB',(select id from courts where name='Other 1'), (current_date + 12 + time '14:00') at time zone 'Asia/Beirut', (current_date + 12 + time '15:00') at time zone 'Asia/Beirut', 'Nope', null);"
+denied $ADMIN "94g no name"                                           "select staff_book('$CLUB','$COURT', (current_date + 12 + time '14:00') at time zone 'Asia/Beirut', (current_date + 12 + time '15:00') at time zone 'Asia/Beirut', '   ', null);"
+denied $ADMIN "94h 30 min is below the club minimum"                  "select staff_book('$CLUB','$COURT', (current_date + 12 + time '14:00') at time zone 'Asia/Beirut', (current_date + 12 + time '14:30') at time zone 'Asia/Beirut', 'Short', null);"
+denied $ADMIN "94i 4 h is above the club maximum"                     "select staff_book('$CLUB','$COURT', (current_date + 12 + time '14:00') at time zone 'Asia/Beirut', (current_date + 12 + time '18:00') at time zone 'Asia/Beirut', 'Long', null);"
+denied $ADMIN "94j a start off the slot grid"                         "select staff_book('$CLUB','$COURT', (current_date + 12 + time '14:07') at time zone 'Asia/Beirut', (current_date + 12 + time '15:07') at time zone 'Asia/Beirut', 'Off grid', null);"
+denied $ADMIN "94k before opening time"                               "select staff_book('$CLUB','$COURT', (current_date + 12 + time '06:00') at time zone 'Asia/Beirut', (current_date + 12 + time '07:00') at time zone 'Asia/Beirut', 'Too early', null);"
+denied $ADMIN "94l an inactive court"                                 "select staff_book('$CLUB',(select id from courts where club_id='$CLUB' and not active limit 1), $SD, $SD2, 'Inactive', null);"
+check $ADMIN "94m suggestions find that customer by part of the name" "select name||'/'||coalesce(phone,'-') from club_recent_guests('$CLUB','Walk I');" "Walk In/03 111 222"
+check $ADMIN "94n suggestions are scoped to this club"               "select count(*) from club_recent_guests('$CLUB_B','walk');" 0
+denied $P1 "94o a player gets no customer list"                      "select count(*) from club_recent_guests('$CLUB', null);"
+check $ADMIN "94o2 a suggestion carries a name and phone only, never a player id" "select count(*) from information_schema.routines r join information_schema.parameters p on p.specific_name=r.specific_name where r.routine_name='club_recent_guests' and p.parameter_mode='TABLE' and p.parameter_name in ('profile_id','player_id');" 0
+check $ADMIN "94p common duration is a whole number of slots within the club's range" "select (club_common_duration('$CLUB') % slot_minutes = 0 and club_common_duration('$CLUB') between min_booking_minutes and max_booking_minutes) from clubs where id='$CLUB';" t
+check $ADMIN "94q free-now lists every active court once"            "select count(*) = (select count(*) from courts where club_id='$CLUB' and active) from club_courts_free_now('$CLUB');" t
+# "busy right now" fixtures have to sit on the club's grid, so open the club round the clock for them
+$PSQL -q -d $DB -c "update clubs set open_time='00:00', close_time='24:00' where id='$CLUB';" >/dev/null
+H="(date_trunc('hour', now()) + case when extract(minute from now()) >= 30 then interval '30 min' else interval '0 min' end)"
+$PSQL -q -d $DB -c "insert into bookings (club_id, court_id, guest_name, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$CLUB','$COURT2','Now Playing', $H - interval '30 min', $H + interval '30 min', 'confirmed','staff','$ADMIN',30,0);" >/dev/null
+$PSQL -q -d $DB -c "insert into blocks (club_id, court_id, start_at, end_at, reason, created_by) values ('$CLUB','$COURT3', $H, $H + interval '30 min', 'maintenance','$ADMIN');" >/dev/null
+check $ADMIN "94r the booked court reads busy, and frees when it ends" "select busy||'/'||(free_at > now()) from club_courts_free_now('$CLUB') where court_id='$COURT2';" "true/true"
+check $ADMIN "94s a blocked court reads busy too"                     "select busy from club_courts_free_now('$CLUB') where court_id='$COURT3';" "t"
+# an expired hold must not keep a court busy
+$PSQL -q -d $DB -c "insert into bookings (club_id, court_id, player_id, start_at, end_at, status, source, created_by, hold_expires_at, price_usd, fee_usd) values ('$CLUB','$COURT', '$P1', $H, $H + interval '60 min', 'pending','app','$P1', now() - interval '1 min', 30, 1);" >/dev/null
+check $ADMIN "94t an expired hold does not hold a court"              "select busy from club_courts_free_now('$CLUB') where court_id='$COURT';" "f"
+denied $P1 "94u a player cannot read the club's free-now list"        "select count(*) from club_courts_free_now('$CLUB');"
+$PSQL -q -d $DB -c "update clubs set open_time='08:00', close_time='23:00' where id='$CLUB';" >/dev/null
+
 echo
 echo "checks: $CHECKS, failures: $FAILS"
 [ "$FAILS" -eq 0 ] || { echo "SUITE FAILED"; exit 1; }

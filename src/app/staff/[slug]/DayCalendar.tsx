@@ -8,7 +8,11 @@ import { createClient } from "@/lib/supabase/client";
 import { clubLocalToUtc, dayBounds, hhmm, shiftDate, slotTimes, todayIn, toMin } from "@/lib/time";
 import { friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
 
-type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: "grid" | "list"; sport: string | null; sportNames: Record<string, string> };
+type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; sportNames: Record<string, string> };
+
+export type StaffView = "now" | "grid" | "list";
+/** One active court's state at this moment: busy by a booking, an unexpired hold or a block. */
+type FreeNow = { court_id: string; court_name: string; sport: string; busy: boolean; free_at: string | null };
 
 type Sheet =
   | { kind: "add"; courtId: string; time: string }
@@ -28,6 +32,9 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [nowMin, setNowMin] = useState<number | null>(null);
+  const [freeNow, setFreeNow] = useState<FreeNow[] | null>(null);
+  const [showLater, setShowLater] = useState(false);
+  const [commonMins, setCommonMins] = useState<number | null>(null);
 
   const times = slotTimes(club.open_time, club.close_time, club.slot_minutes);
   const openMin = toMin(club.open_time);
@@ -49,7 +56,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     const supabase = createClient();
     const { dayStart, dayEnd } = dayBounds(date, club.timezone);
     const [{ data: b }, { data: k }] = await Promise.all([
-      supabase.from("bookings").select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id")
+      supabase.from("bookings").select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id, price_usd, fee_usd, hold_expires_at")
         .eq("club_id", club.id).or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`).not("court_id", "is", null).lt("start_at", dayEnd).gt("end_at", dayStart).order("start_at"),
       supabase.from("blocks").select("id, court_id, start_at, end_at, reason").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart),
     ]);
@@ -62,6 +69,30 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     setBookings((b ?? []).map((x) => ({ ...x, player_name: x.player_id ? names.get(x.player_id) ?? null : null })) as Booking[]);
     setBlocks((k ?? []) as Block[]);
   }, [club.id, club.timezone, date]);
+
+  // Now view: which courts are usable this minute, refreshed with the clock. The server decides what
+  // "busy" means (booking, unexpired hold or block) so the rule lives in one place.
+  useEffect(() => {
+    if (view !== "now") return;
+    let alive = true;
+    const load = async () => {
+      const { data } = await createClient().rpc("club_courts_free_now", { p_club: club.id });
+      if (alive && data) setFreeNow(data as FreeNow[]);
+      if (alive) await reload();
+    };
+    load();
+    const id = setInterval(load, 60_000);
+    return () => { alive = false; clearInterval(id); };
+  }, [view, club.id, reload]);
+
+  // the duration this club books most often, so the walk-in sheet opens on it
+  useEffect(() => {
+    let alive = true;
+    createClient().rpc("club_common_duration", { p_club: club.id }).then(({ data }) => {
+      if (alive && typeof data === "number") setCommonMins(data);
+    });
+    return () => { alive = false; };
+  }, [club.id]);
 
   async function run(fn: () => PromiseLike<{ error: { message: string } | null }>) {
     setBusy(true);
@@ -118,6 +149,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         </div>
         <div className="flex items-center justify-between px-4 pb-2">
           <div className="flex rounded-full border border-grid bg-white p-0.5 text-sm">
+            <Link href={q(todayIn(club.timezone), "now", sport)} className={`rounded-full px-4 py-1.5 ${view === "now" ? "bg-ink text-white" : ""}`}>Now</Link>
             <Link href={q(date, "grid", sport)} className={`rounded-full px-4 py-1.5 ${view === "grid" ? "bg-ink text-white" : ""}`}>Courts</Link>
             <Link href={q(date, "list", sport)} className={`rounded-full px-4 py-1.5 ${view === "list" ? "bg-ink text-white" : ""}`}>List</Link>
           </div>
@@ -136,7 +168,13 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         )}
       </header>
 
-      {view === "grid" ? (
+      {view === "now" ? (
+        <NowPanel
+          club={club} courts={courts} bookings={bookings} freeNow={freeNow} sportNames={sportNames}
+          showLater={showLater} onToggleLater={() => setShowLater((v) => !v)}
+          onOpen={(b) => setSheet({ kind: "booking", booking: b })}
+        />
+      ) : view === "grid" ? (
         <div className="flex-1 overflow-x-auto px-2 pb-24">
           <div className="flex min-w-max">
             {/* time axis */}
@@ -229,16 +267,22 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
             {sheet.kind === "add" && (
               <AddSheet
                 club={club} court={courts.find((c) => c.id === sheet.courtId)!} time={sheet.time} times={times} busy={busy}
+                defaultMinutes={commonMins}
                 onSave={(name, phone, slots, asBlock) =>
                   run(async () => {
                     const supabase = createClient();
                     const start = clubLocalToUtc(date, sheet.time, club.timezone);
                     const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
-                    const { data: { user } } = await supabase.auth.getUser();
                     if (asBlock) {
+                      const { data: { user } } = await supabase.auth.getUser();
                       return supabase.from("blocks").insert({ club_id: club.id, court_id: sheet.courtId, start_at: start.toISOString(), end_at: end.toISOString(), reason: name || "Blocked", created_by: user!.id });
                     }
-                    return supabase.from("bookings").insert({ club_id: club.id, court_id: sheet.courtId, guest_name: name, guest_phone: phone || null, start_at: start.toISOString(), end_at: end.toISOString(), source: "staff", created_by: user!.id });
+                    // the database checks staff rights, the court, the hours, the grid and the duration, and prices it
+                    return supabase.rpc("staff_book", {
+                      p_club: club.id, p_court: sheet.courtId,
+                      p_start: start.toISOString(), p_end: end.toISOString(),
+                      p_name: name, p_phone: phone || null,
+                    });
                   })
                 }
               />
@@ -304,14 +348,99 @@ function closeMinutes(club: Club) {
   return club.close_time.startsWith("24:") ? 1440 : toMin(club.close_time);
 }
 
-function AddSheet({ club, court, time, times, busy, onSave }: {
-  club: Club; court: Court; time: string; times: string[]; busy: boolean;
+/** What the desk sees when it opens the calendar: on court now, next three hours, then the rest. */
+function NowPanel({ club, courts, bookings, freeNow, sportNames, showLater, onToggleLater, onOpen }: {
+  club: Club; courts: Court[]; bookings: Booking[]; freeNow: FreeNow[] | null; sportNames: Record<string, string>;
+  showLater: boolean; onToggleLater: () => void; onOpen: (b: Booking) => void;
+}) {
+  const now = Date.now();
+  const live = bookings.filter((b) => Date.parse(b.start_at) <= now && Date.parse(b.end_at) > now);
+  const soon = bookings.filter((b) => Date.parse(b.start_at) > now && Date.parse(b.start_at) <= now + 3 * 3600_000);
+  const later = bookings.filter((b) => Date.parse(b.start_at) > now + 3 * 3600_000);
+  const shown = new Set(courts.map((c) => c.id));
+  const mine = (freeNow ?? []).filter((f) => shown.has(f.court_id));
+  const free = mine.filter((f) => !f.busy);
+  const name = (b: Booking) => (b.status === "pending" ? "Paying…" : b.guest_name ?? b.player_name ?? "Player");
+  const courtName = (id: string | null) => courts.find((c) => c.id === id)?.name ?? "";
+  const mins = (ms: number) => Math.max(0, Math.round(ms / 60000));
+
+  const row = (b: Booking, trailing: React.ReactNode) => (
+    <li key={b.id}>
+      <button onClick={() => onOpen(b)} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+        <span className={`h-10 w-1 shrink-0 rounded ${b.source === "app" ? "bg-turf" : "bg-sand"}`} />
+        <div className="w-24 shrink-0">
+          <div className="font-medium">{hhmm(b.start_at, club.timezone)}–{hhmm(b.end_at, club.timezone)}</div>
+          <div className="text-sm text-muted">{courtName(b.court_id)}</div>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium">{name(b)}</div>
+          {b.guest_phone && <span className="text-sm text-action underline">{b.guest_phone}</span>}
+        </div>
+        <span className="shrink-0 text-xs text-muted">{trailing}</span>
+      </button>
+    </li>
+  );
+
+  return (
+    <div className="mx-4 mb-24 flex flex-col gap-4">
+      <section className="card p-4">
+        {mine.length === 0 ? (
+          <p className="text-sm text-muted">No active courts.</p>
+        ) : (
+          <>
+            <div className="text-lg font-bold">{free.length} of {mine.length} court{mine.length === 1 ? "" : "s"} free right now</div>
+            <p className="mt-0.5 text-xs text-muted">Right this minute — a court counts as busy if it has a booking, a booking still being paid for, or a block.</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {mine.map((f) => (
+                <span key={f.court_id} className={`rounded-full border px-3 py-1 text-xs ${f.busy ? "border-grid bg-paper text-muted" : "border-turf bg-turf-soft text-turf"}`}>
+                  {f.court_name}{f.busy ? ` · free ${f.free_at ? hhmm(f.free_at, club.timezone) : "later"}` : " · free"}
+                </span>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
+
+      <section>
+        <h2 className="mb-1.5 px-1 text-sm font-semibold uppercase tracking-wide text-muted">On court now</h2>
+        <ul className="divide-y divide-grid rounded-xl border border-grid bg-white">
+          {live.length === 0 && <li className="px-4 py-6 text-center text-sm text-muted">Nothing on court.</li>}
+          {live.map((b) => row(b, `${mins(Date.parse(b.end_at) - now)} min left`))}
+        </ul>
+      </section>
+
+      <section>
+        <h2 className="mb-1.5 px-1 text-sm font-semibold uppercase tracking-wide text-muted">Next three hours</h2>
+        <ul className="divide-y divide-grid rounded-xl border border-grid bg-white">
+          {soon.length === 0 && <li className="px-4 py-6 text-center text-sm text-muted">Nothing booked in the next three hours.</li>}
+          {soon.map((b) => row(b, `in ${mins(Date.parse(b.start_at) - now)} min`))}
+        </ul>
+      </section>
+
+      {later.length > 0 && (
+        <section>
+          <button onClick={onToggleLater} className="w-full px-1 py-2 text-left text-sm font-semibold uppercase tracking-wide text-muted">
+            Later today ({later.length}) {showLater ? "▴" : "▾"}
+          </button>
+          {showLater && (
+            <ul className="divide-y divide-grid rounded-xl border border-grid bg-white">
+              {later.map((b) => row(b, sportNames[courts.find((c) => c.id === b.court_id)?.sport ?? ""] ?? ""))}
+            </ul>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function AddSheet({ club, court, time, times, busy, defaultMinutes, onSave }: {
+  club: Club; court: Court; time: string; times: string[]; busy: boolean; defaultMinutes: number | null;
   onSave: (name: string, phone: string, slots: number, asBlock: boolean) => void;
 }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const remaining = times.length - times.indexOf(time);
-  const [slots, setSlots] = useState(Math.min(remaining, Math.max(1, Math.round(club.min_booking_minutes / club.slot_minutes))));
+  const [slots, setSlots] = useState(Math.min(remaining, Math.max(1, Math.round((defaultMinutes ?? club.min_booking_minutes) / club.slot_minutes))));
   const endTime = (n: number) => {
     const m = toMin(time) + n * club.slot_minutes;
     return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
@@ -358,6 +487,12 @@ function BookingSheet({ club, courts, booking: b, times, busy, onMove, onCancel,
           {court?.name}, {hhmm(b.start_at, club.timezone)}–{hhmm(b.end_at, club.timezone)} · {b.source === "app" ? "booked in the app" : "desk booking"}
         </p>
         {b.guest_phone && <a href={`tel:${b.guest_phone}`} className="text-sm text-action underline">{b.guest_phone}</a>}
+        {b.price_usd != null && (
+          <p className="mt-1 text-sm">
+            ${Number(b.price_usd).toFixed(2)}
+            <span className="text-muted">{b.source === "app" ? ` + $${Number(b.fee_usd ?? 0).toFixed(2)} fee · paid in the app` : " · take payment at the desk, not through CourtBook"}</span>
+          </p>
+        )}
       </div>
 
       {mode === "view" && (
