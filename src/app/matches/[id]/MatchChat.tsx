@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 
-type Msg = { id: string; profile_id: string; name: string | null; body: string; created_at: string };
+type Msg = { id: string; profile_id: string; name: string | null; body: string; created_at: string; deleted?: boolean };
 
-export default function MatchChat({ matchId, meId, tz, initial }: { matchId: string; meId: string; tz: string; initial: Msg[] }) {
+export default function MatchChat({ matchId, meId, tz, initial, finished, hidden }: { matchId: string; meId: string; tz: string; initial: Msg[]; finished: boolean; hidden: boolean }) {
+  const [gone, setGone] = useState(hidden);
   const [msgs, setMsgs] = useState<Msg[]>(initial);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -23,6 +24,16 @@ export default function MatchChat({ matchId, meId, tz, initial }: { matchId: str
   }, [matchId, msgs]);
   useEffect(() => { bottom.current?.scrollIntoView({ block: "nearest" }); }, [msgs.length]);
 
+  async function removeMessage(id: string) {
+    setMsgs((cur) => cur.map((m) => (m.id === id ? { ...m, body: "", deleted: true } : m)));
+    const { error } = await createClient().rpc("delete_match_message", { p_id: id });
+    if (error) setMsgs(initial);
+  }
+  async function removeConversation() {
+    const { error } = await createClient().rpc("hide_match", { p_match: matchId, p_hidden: true });
+    if (!error) { setGone(true); setMsgs([]); }
+  }
+
   async function send(e: React.FormEvent) {
     e.preventDefault();
     const body = text.trim();
@@ -34,15 +45,25 @@ export default function MatchChat({ matchId, meId, tz, initial }: { matchId: str
     if (!error && data) { setMsgs((cur) => [...cur, { ...data, name: "You" }]); setText(""); fetch("/api/notify/email", { method: "POST" }).catch(() => {}); }
   }
 
+  if (gone) return (
+    <section className="card p-4 text-center text-sm text-muted">
+      You removed this conversation. <button onClick={async () => { await createClient().rpc("hide_match", { p_match: matchId, p_hidden: false }); location.reload(); }} className="font-semibold text-turf">Undo</button>
+    </section>
+  );
+
   return (
-    <section className="rounded-2xl border border-grid bg-white p-4">
-      <h2 className="mb-2 font-medium">Chat</h2>
+    <section className="card p-4">
+      <div className="mb-2 flex items-baseline justify-between">
+        <h2 className="font-medium">Chat</h2>
+        {finished && <button onClick={removeConversation} className="text-sm text-cedar">Delete conversation</button>}
+      </div>
       <div className="flex max-h-72 flex-col gap-2 overflow-y-auto text-sm">
         {msgs.length === 0 && <p className="text-muted">No messages yet. Agree on balls, who brings what, where to meet.</p>}
         {msgs.map((x) => (
-          <div key={x.id} className={`max-w-[85%] rounded-2xl px-3 py-2 ${x.profile_id === meId ? "self-end bg-turf text-white" : "self-start bg-paper"}`}>
-            {x.profile_id !== meId && <div className="text-xs font-medium opacity-70">{x.name ?? "Player"}</div>}
-            <div>{x.body}</div>
+          <div key={x.id} className={`group max-w-[85%] rounded-2xl px-3 py-2 ${x.deleted ? "self-start border border-dashed border-grid bg-white text-muted" : x.profile_id === meId ? "self-end bg-turf text-white" : "self-start bg-paper"}`}>
+            {x.profile_id !== meId && !x.deleted && <div className="text-xs font-medium opacity-70">{x.name ?? "Player"}</div>}
+            {x.deleted ? <div className="text-xs italic">Message deleted</div> : <div>{x.body}</div>}
+            {!x.deleted && x.profile_id === meId && <button onClick={() => removeMessage(x.id)} className="mt-0.5 text-[10px] text-white/80 underline">Delete</button>}
             <div className={`mt-0.5 text-[10px] ${x.profile_id === meId ? "text-white/70" : "text-muted"}`}>{formatInTimeZone(new Date(x.created_at), tz, "EEE HH:mm")}</div>
           </div>
         ))}

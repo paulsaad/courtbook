@@ -4,6 +4,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
 import { hhmm, nowMs } from "@/lib/time";
 import CancelButton from "./CancelButton";
+import OpenToPlayers, { type BookingMatch } from "./OpenToPlayers";
 
 export default async function BookingPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ new?: string }> }) {
   const { id } = await params;
@@ -21,7 +22,13 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
   if (!b) notFound();
   if (b.status === "pending") redirect(`/pay/${id}`);
 
-  const { data: pay } = await supabase.from("payments").select("status, total_usd").eq("booking_id", id).maybeSingle();
+  const [{ data: pay }, { data: bm }, { data: sportRows }] = await Promise.all([
+    supabase.from("payments").select("status, total_usd").eq("booking_id", id).maybeSingle(),
+    supabase.rpc("booking_match", { p_booking: id }),
+    supabase.from("sports").select("code, name_en"),
+  ]);
+  const match = ((bm ?? []) as NonNullable<BookingMatch>[])[0] ?? null;
+  const sportLabel = new Map(((sportRows ?? []) as { code: string; name_en: string }[]).map((x) => [x.code, x.name_en]));
   const club = b.clubs as unknown as { name: string; slug: string; timezone: string; cancel_cutoff_hours: number; location_url: string | null };
   const court = b.courts as unknown as { name: string; sport: string };
   const tz = club.timezone;
@@ -51,6 +58,8 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
         {pay?.status === "refund_due" && <p className="mt-2 text-muted">Refund on its way.</p>}
         {pay?.status === "refunded" && <p className="mt-2 text-muted">Refunded.</p>}
       </div>
+
+      {upcoming && <OpenToPlayers bookingId={b.id} sport={court.sport} sportName={sportLabel.get(court.sport) ?? court.sport} match={match} />}
 
       {upcoming && (
         <>

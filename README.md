@@ -27,6 +27,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | `supabase/migrations/0039_day_slots_window.sql` | `club_day_slots` uses the same rolling booking-window cutoff as `hold_slot` |
 | `supabase/migrations/0040_badminton_enum.sql` | Enum: badminton (run alone) |
 | `supabase/migrations/0041_player_levels.sql` | Player levels 1–10 per sport (`player_levels`, `set_player_level`, `my_levels`, `level_group`), match level ranges (`level_min/max`; `post_match`/`update_match` new signatures), `open_matches(p_fit)`, `match_board`/`match_participants` return numeric levels; legacy enum kept read-only |
+| `supabase/migrations/0042_delete_and_open_booking.sql` | Activity delete/clear (own rows), own chat message soft-delete, remove a finished conversation (`match_hidden`, `hide_match`), `booking_match` for the booking page |
 | `supabase/migrations/0024_match_board.sql` | Match board: `post_match` (optional booking link), `join_match` (atomic capacity, auto-close), `leave_match`, `set_match_status`, `match_board`, `match_participants` |
 | `supabase/migrations/0023_coach_exceptions.sql` | Exceptions per club; closed ranges split weekly windows |
 | `supabase/migrations/0022_coach_privacy.sql` | Availability readable only for listed coaches (or coach/staff); `coach_availability` enforces it; staff decide via RPC only, approve only pending |

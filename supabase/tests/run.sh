@@ -789,6 +789,36 @@ check $P1 "90n organizer edits range to 3–8 -> stored"             "select upd
 check $P2 "90o participants show numeric level for the sport"      "select join_match('$MR'); select level from match_participants('$MR') where profile_id='$P2';" 5
 check service "90p badminton is a sport"                           "select count(*) from sports where code='badminton';" 1
 
+
+echo "--- AF. delete activity / chat, open a booking"
+$PSQL -q -d $DB -c "insert into notifications (profile_id, kind, body) values ('$P1','test','a'),('$P1','test','b'),('$P2','test','c');"
+NID=$($PSQL -At -d $DB -c "select id from notifications where profile_id='$P1' and kind='test' limit 1")
+{ as_user $P2; echo "select delete_notification('$NID');"; } | $PSQL -q -d $DB >/dev/null
+check service "91a player2 cannot delete player1's notification (still there)" "select count(*) from notifications where id='$NID';" 1
+{ as_user $P1; echo "select delete_notification('$NID'); select clear_notifications();"; } | $PSQL -q -d $DB >/dev/null
+check service "91b player1 deletes one and clears the rest -> none of his, player2's untouched" "select (select count(*) from notifications where profile_id='$P1')||'/'||(select count(*) from notifications where profile_id='$P2' and kind='test');" "0/1"
+# fixture: a finished match P1 organised, P2 accepted, one message each
+PM=$($PSQL -At -q -d $DB -c "insert into matches (club_id, sport, organizer_id, start_at, end_at, players_needed, status) values ('$CLUB','padel','$P1', now() - interval '2 day', now() - interval '2 day' + interval '90 min', 1, 'closed') returning id" | head -1)
+$PSQL -q -d $DB -c "insert into match_players (match_id, profile_id, status) values ('$PM','$P2','accepted'); insert into match_messages (match_id, profile_id, body) values ('$PM','$P1','from p1'), ('$PM','$P2','from p2');" > /dev/null
+MSG=$($PSQL -At -q -d $DB -c "select id from match_messages where match_id='$PM' and profile_id='$P2'" | head -1)
+denied $P1 "91c player1 cannot delete player2's message"           "select delete_match_message('$MSG');"
+check  $P2 "91d player2 deletes own message -> listed as deleted with empty body" "select delete_match_message('$MSG'); select deleted||'/'||coalesce(body,'') from match_messages_list((select match_id from match_messages where id='$MSG'), null) where id='$MSG';" "true/"
+denied $P2 "91e deleting it again -> not_found"                     "select delete_match_message('$MSG');"
+BK2=$({ as_user $P1; echo "select booking_id from hold_slot('$CLUB','$COURT3', (current_date + 11 + time '09:00') at time zone 'Asia/Beirut', (current_date + 11 + time '10:30') at time zone 'Asia/Beirut');"; } | $PSQL -At -d $DB | tail -1)
+{ as_service; echo "select confirm_payment((select id from payments where booking_id='$BK2'), 'ref-bk2', (select total_usd from payments where booking_id='$BK2'));"; } | $PSQL -q -d $DB >/dev/null
+check $P1 "91f booking is private: booking_match -> no row"        "select count(*) from booking_match('$BK2');" 0
+check $P1 "91g open it to players (range 4–6, approval) -> public"  "select post_match(null, 'padel', null, null, 4, 6, 2, 'open from booking', '$BK2', 'approval'); select status||'/'||level_min||'-'||level_max||'/'||join_mode from booking_match('$BK2');" "open/4-6/approval"
+check $P2 "91h player2 cannot see it via booking_match (not their booking)" "select count(*) from booking_match('$BK2');" 0
+check $P1 "91i make private again -> no live match"                 "select set_match_status((select match_id from booking_match('$BK2')), 'cancelled'); select count(*) from booking_match('$BK2');" 0
+
+check  $P2 "91j both messages are still listed (one marked deleted)" "select count(*) from match_messages_list('$PM', null);" 2
+check  $P2 "91k remove the finished conversation -> empty for me"  "select hide_match('$PM'); select count(*) from match_messages_list('$PM', null);" 0
+check  $P2 "91l removed match is out of my history"                "select count(*) from my_agenda() where id='$PM';" 0
+check  $P1 "91m the organizer still sees it"                       "select (select count(*) from match_messages_list('$PM', null))||'/'||(select count(*) from my_agenda() where id='$PM');" "2/1"
+check  $P2 "91n undo restores it"                                  "select hide_match('$PM', false); select count(*) from my_agenda() where id='$PM';" 1
+FM=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '9 day', now()+interval '9 day 90 min', null, null, 2, 'future', null, 'open');"; } | $PSQL -At -d $DB | tail -1)
+denied $P1 "91o cannot remove a match that has not happened yet"   "select hide_match('$FM');"
+
 echo
 echo "checks: $CHECKS, failures: $FAILS"
 [ "$FAILS" -eq 0 ] || { echo "SUITE FAILED"; exit 1; }
