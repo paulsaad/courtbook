@@ -8,7 +8,7 @@ import HomeClient from "@/components/HomeClient";
 import { Cedar } from "@/components/Brand";
 import { IconBell } from "@/components/Icons";
 import type { OpenMatch } from "@/components/Discover";
-import type { AgendaRow } from "@/app/me/page";
+import type { AgendaRow } from "@/lib/agenda";
 
 const TZ = "Asia/Beirut";
 

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import { hhmm } from "@/lib/time";
-import { agendaPill, type AgendaRow } from "./page";
+import { agendaPill, type AgendaRow } from "@/lib/agenda";
 
 const initialsOf = (name: string) => name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 
