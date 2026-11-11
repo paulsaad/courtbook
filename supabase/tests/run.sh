@@ -836,6 +836,32 @@ check $P3 "92j and he was told why"                                 "select coun
 { as_user $P1; echo "select set_match_status('$PV','open');"; } | $PSQL -q -d $DB >/dev/null
 check $P4 "92k opened to players again -> strangers see it again"   "select count(*) from open_matches('padel') where match_id='$PV';" 1
 
+# --- a private match is private everywhere, not only on the board (0044)
+{ as_user $P1; echo "select set_match_status('$PV','closed');"; } | $PSQL -q -d $DB >/dev/null
+check $P4 "92l stranger cannot read the row itself"                 "select count(*) from matches where id='$PV';" 0
+check $P3 "92m former requester cannot read the row either"         "select count(*) from matches where id='$PV';" 0
+check $P2 "92n the player in it still can"                          "select count(*) from matches where id='$PV';" 1
+check $P1 "92o the organizer still can"                             "select count(*) from matches where id='$PV';" 1
+check $P4 "92p stranger gets no participant list"                   "select count(*) from match_participants('$PV');" 0
+check $P4 "92q stranger cannot read the chat"                       "select count(*) from match_messages_list('$PV', null);" 0
+check $P4 "92r stranger cannot read who is in it from the table"    "select count(*) from match_players where match_id='$PV';" 0
+denied $P4 "92s stranger cannot join a private match"               "select join_match('$PV');"
+check $ADMIN "92t an admin can still see it"                        "select count(*) from matches where id='$PV';" 1
+
+# cancellation is final: not even through 'closed' (the two-step bypass)
+{ as_user $P1; echo "select set_match_status('$PV','cancelled');"; } | $PSQL -q -d $DB >/dev/null
+denied $P1 "92u cancelled -> closed is refused"                     "select set_match_status('$PV','closed');"
+denied $P1 "92v cancelled -> open is refused"                       "select set_match_status('$PV','open');"
+check service "92w it is still cancelled"                           "select status from matches where id='$PV';" "cancelled"
+
+# joining and going private take the same row lock, so one cannot slip past the other
+PL=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '8 day', now()+interval '8 day 90 min', null, null, 3, 'race', null, 'approval');"; } | $PSQL -At -d $DB | tail -1)
+{ as_user $P4; echo "begin; select join_match('$PL'); select pg_sleep(0.6); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
+sleep 0.2
+{ as_user $P1; echo "select set_match_status('$PL','closed');"; } | $PSQL -q -d $DB >/dev/null 2>&1
+wait
+check service "92x a request racing the switch never survives as pending" "select status||'/'||(select count(*) from match_players where match_id='$PL' and status='pending') from matches where id='$PL';" "closed/0"
+
 check  $P2 "91j both messages are still listed (one marked deleted)" "select count(*) from match_messages_list('$PM', null);" 2
 check  $P2 "91k remove the finished conversation -> empty for me"  "select hide_match('$PM'); select count(*) from match_messages_list('$PM', null);" 0
 check  $P2 "91l removed match is out of my history"                "select count(*) from my_agenda() where id='$PM';" 0
