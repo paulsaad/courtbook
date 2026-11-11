@@ -42,7 +42,7 @@ export default function OpenToPlayers({ bookingId, sport, sportName, match }: { 
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-cedar" aria-hidden="true" /><h2 className="font-bold">Open to other players</h2></div>
-            <p className="mt-1 text-sm text-muted">{rangeLabel(match.level_min, match.level_max)} · {match.status === "open" ? `${spots} spot${spots === 1 ? "" : "s"} left` : match.joined >= match.players_needed ? "Full" : "Not accepting players"}{match.pending > 0 ? ` · ${match.pending} waiting for your answer` : ""}</p>
+            <p className="mt-1 text-sm text-muted">{rangeLabel(match.level_min, match.level_max)} · {match.status === "open" ? `${spots} spot${spots === 1 ? "" : "s"} left` : match.joined >= match.players_needed ? "Full" : "Private — nobody new can see it"}{match.pending > 0 ? ` · ${match.pending} waiting for your answer` : ""}</p>
           </div>
           <Link href={`/matches/${match.match_id}`} className="shrink-0 text-sm font-semibold text-turf">Open ›</Link>
         </div>
@@ -52,11 +52,18 @@ export default function OpenToPlayers({ bookingId, sport, sportName, match }: { 
             ? <div className="flex gap-2"><button disabled={busy} onClick={() => setStatus("cancelled")} className="btn btn-primary flex-1">Make it private</button><button onClick={() => setConfirmPrivate(false)} className="btn btn-secondary px-5">Keep</button></div>
             : <button onClick={() => setConfirmPrivate(true)} className="btn btn-secondary">Make it private again</button>
         ) : match.status === "open" ? (
-          <button disabled={busy} onClick={() => setStatus("closed")} className="btn btn-secondary">Stop accepting players</button>
+          <button disabled={busy} onClick={() => setStatus("closed")} className="btn btn-secondary">Make it private</button>
         ) : (
-          <button disabled={busy} onClick={() => setStatus("open")} className="btn btn-secondary">Accept players again</button>
+          <button disabled={busy} onClick={() => setStatus("open")} className="btn btn-secondary">Open it to players again</button>
         )}
-        {match.joined > 0 && <p className="text-xs text-muted">{match.joined} player{match.joined === 1 ? " has" : "s have"} joined. To cancel on them, open the match and cancel it there — they are notified.</p>}
+        {match.joined > 0 && (
+          <p className="text-xs text-muted">
+            {match.joined} player{match.joined === 1 ? " has" : "s have"} joined.{" "}
+            {match.status === "open"
+              ? "Make it private and they stay in — it just disappears from the match board, and anyone still waiting is told."
+              : "They are still in. To cancel on them, open the match and cancel it there — they are notified."}
+          </p>
+        )}
       </section>
     );
   }

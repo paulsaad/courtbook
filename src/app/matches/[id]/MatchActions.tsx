@@ -74,12 +74,12 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
       )}
       {m.i_organize ? (!manage ? null : m.status === "open" ? (
           <>
-            <button disabled={busy} onClick={() => run("set_match_status", { p_match: m.match_id, p_status: "closed" })} className={primary}>Close — I have my players</button>
+            <button disabled={busy} onClick={() => run("set_match_status", { p_match: m.match_id, p_status: "closed" })} className={primary}>Make it private — I have my players</button>
             <button disabled={busy} onClick={() => run("set_match_status", { p_match: m.match_id, p_status: "cancelled" })} className="py-2 text-sm text-danger">Cancel the match</button>
           </>
         ) : m.status === "closed" ? (
           <>
-            <button disabled={busy} onClick={() => run("set_match_status", { p_match: m.match_id, p_status: "open" })} className={secondary}>Reopen</button>
+            <button disabled={busy} onClick={() => run("set_match_status", { p_match: m.match_id, p_status: "open" })} className={secondary}>Open it to players again</button>
             <button disabled={busy} onClick={() => run("set_match_status", { p_match: m.match_id, p_status: "cancelled" })} className="py-2 text-sm text-danger">Cancel the match</button>
           </>
         ) : <p className="text-sm text-muted">Cancelled.</p>

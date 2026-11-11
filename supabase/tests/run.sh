@@ -691,6 +691,9 @@ echo "--- AA. my_agenda"
 check $P1 "84a P1 agenda has bookings"                      "select count(*) > 0 from my_agenda() where kind='booking';" t
 check $P1 "84b P1 agenda has matches"                       "select count(*) > 0 from my_agenda() where kind='match';" t
 check $P1 "84c P1's matches are all organized by P1"        "select count(*) from my_agenda() where kind='match' and role <> 'organizer';" 0
+# P3's earlier request was cleared when that organizer made his match private (section 66), so make a live one
+MP3=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '5 day', now()+interval '5 day 90 min', null, null, 2, 'agenda pending', null, 'approval');"; } | $PSQL -At -d $DB | tail -1)
+{ as_user $P3; echo "select join_match('$MP3');"; } | $PSQL -q -d $DB >/dev/null
 check $P3 "85a P3 agenda: one accepted"                     "select count(*) from my_agenda() where role='accepted';" 1
 check $P3 "85b P3 agenda: one pending"                      "select count(*) from my_agenda() where role='pending';" 1
 check $P3 "85c P3 agenda: no bookings (P3 never booked)"    "select count(*) from my_agenda() where kind='booking';" 0
@@ -810,6 +813,28 @@ check $P1 "91f booking is private: booking_match -> no row"        "select count
 check $P1 "91g open it to players (range 4–6, approval) -> public"  "select post_match(null, 'padel', null, null, 4, 6, 2, 'open from booking', '$BK2', 'approval'); select status||'/'||level_min||'-'||level_max||'/'||join_mode from booking_match('$BK2');" "open/4-6/approval"
 check $P2 "91h player2 cannot see it via booking_match (not their booking)" "select count(*) from booking_match('$BK2');" 0
 check $P1 "91i make private again -> no live match"                 "select set_match_status((select match_id from booking_match('$BK2')), 'cancelled'); select count(*) from booking_match('$BK2');" 0
+
+# --- going private with players already in (Paul, 11 Nov): they stay, the match leaves everyone else's board
+P4=66666666-aaaa-4aaa-8aaa-666666666666
+$PSQL -q -d $DB -c "insert into auth.users (id, phone) values ('$P4','+9616') on conflict do nothing; insert into profiles (id, name) values ('$P4','Fourth') on conflict do nothing;"
+PV=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '7 day', now()+interval '7 day 90 min', null, null, 3, 'going private later', null, 'approval');"; } | $PSQL -At -d $DB | tail -1)
+{ as_user $P2; echo "select join_match('$PV');"; } | $PSQL -q -d $DB >/dev/null
+{ as_user $P1; echo "select decide_join('$PV','$P2', true);"; } | $PSQL -q -d $DB >/dev/null
+{ as_user $P3; echo "select join_match('$PV');"; } | $PSQL -q -d $DB >/dev/null
+$PSQL -q -d $DB -c "insert into match_messages (match_id, profile_id, body) values ('$PV','$P1','see you there');" >/dev/null
+check $P2 "92a before: the accepted player sees it"                 "select count(*) from match_board(null, 30) where match_id='$PV';" 1
+check $P4 "92b before: a stranger sees it on the open board"        "select count(*) from open_matches('padel') where match_id='$PV';" 1
+{ as_user $P1; echo "select set_match_status('$PV','closed');"; } | $PSQL -q -d $DB >/dev/null
+check service "92c organizer makes it private -> closed by the organizer, not cancelled" "select status||'/'||closed_reason from matches where id='$PV';" "closed/organizer"
+check service "92d the accepted player is still in"                 "select status from match_players where match_id='$PV' and profile_id='$P2';" "accepted"
+check $P4 "92e after: strangers no longer see it"                   "select count(*) from open_matches('padel') where match_id='$PV';" 0
+check $P2 "92f after: the player who joined keeps it, still accepted" "select count(*)||'/'||coalesce(max(my_status),'-') from match_board(null, 30) where match_id='$PV';" "1/accepted"
+check $P2 "92g after: he can still read the chat"                   "select count(*) from match_messages_list('$PV', null);" 1
+check service "92h the waiting list is cleared, so he may ask again later" "select count(*) from match_players where match_id='$PV' and profile_id='$P3';" 0
+check $P3 "92i the declined player no longer sees the match"        "select count(*) from match_board(null, 30) where match_id='$PV';" 0
+check $P3 "92j and he was told why"                                 "select count(*) from notifications where match_id='$PV' and profile_id='$P3' and kind='join_declined';" 1
+{ as_user $P1; echo "select set_match_status('$PV','open');"; } | $PSQL -q -d $DB >/dev/null
+check $P4 "92k opened to players again -> strangers see it again"   "select count(*) from open_matches('padel') where match_id='$PV';" 1
 
 check  $P2 "91j both messages are still listed (one marked deleted)" "select count(*) from match_messages_list('$PM', null);" 2
 check  $P2 "91k remove the finished conversation -> empty for me"  "select hide_match('$PM'); select count(*) from match_messages_list('$PM', null);" 0
