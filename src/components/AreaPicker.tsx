@@ -13,19 +13,21 @@ export function areaLabel(areas: Governorate[], a: Area) {
 }
 
 /** "All Lebanon ▾" button + bottom sheet: governorate, then its districts. */
-export default function AreaPicker({ areas, value, onChange }: { areas: Governorate[]; value: Area; onChange: (a: Area) => void }) {
+export default function AreaPicker({ areas, value, onChange, trigger }: { areas: Governorate[]; value: Area; onChange: (a: Area) => void; trigger?: (open: () => void, label: string) => React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [gov, setGov] = useState<string | null>(value.gov);
   const g = areas.find((x) => x.code === gov);
   const pick = (a: Area) => { onChange(a); setOpen(false); };
   return (
     <>
-      <button onClick={() => { setGov(value.gov); setOpen(true); }} className="flex max-w-[60%] items-center gap-1 truncate text-left text-sm font-medium">
-        <span className="text-turf">◉</span><span className="truncate">{areaLabel(areas, value)}</span><span className="text-muted">▾</span>
-      </button>
+      {trigger ? trigger(() => { setGov(value.gov); setOpen(true); }, areaLabel(areas, value)) : (
+        <button onClick={() => { setGov(value.gov); setOpen(true); }} className="flex max-w-[60%] items-center gap-1 truncate text-left text-sm font-medium">
+          <span className="text-turf">◉</span><span className="truncate">{areaLabel(areas, value)}</span><span className="text-muted">▾</span>
+        </button>
+      )}
       {open && (
         <div className="fixed inset-0 z-30 flex items-end bg-ink/40" onClick={() => setOpen(false)}>
-          <div className="sheet-enter max-h-[80vh] w-full overflow-y-auto rounded-t-3xl bg-paper p-5 pb-8" onClick={(e) => e.stopPropagation()}>
+          <div className="sheet-enter max-h-[80vh] w-full overflow-y-auto rounded-t-3xl bg-paper p-5 pb-8" style={{ paddingBottom: "calc(2rem + env(safe-area-inset-bottom))" }} onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-lg font-semibold">{g ? g.name_en : "Where do you want to play?"}</h2>
               {g ? <button onClick={() => setGov(null)} className="text-sm text-action">‹ Governorates</button> : <button onClick={() => setOpen(false)} className="text-sm text-muted">Close</button>}

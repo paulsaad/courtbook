@@ -712,7 +712,7 @@ check service "I2 at most one live match per booking"         "select count(*) f
 check service "I3 no live match linked to a non-confirmed booking" "select count(*) from matches m join bookings b on b.id=m.booking_id where m.status<>'cancelled' and b.status<>'confirmed';" 0
 check service "I4 every live hold has a pending payment"      "select count(*) from bookings b where b.status='pending' and not exists (select 1 from payments p where p.booking_id=b.id and p.status='pending');" 0
 check service "I5 no player holds two live slots"             "select count(*) from (select player_id from bookings where status='pending' and hold_expires_at>now() group by 1 having count(*)>1) x;" 0
-check service "I6 anon can execute only the public RPCs (effective, incl. PUBLIC)" "select string_agg(distinct p.proname, ',' order by p.proname) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and not exists (select 1 from pg_depend d where d.objid=p.oid and d.deptype='e') and has_function_privilege('anon', p.oid, 'EXECUTE');" "areas,club_discovery,club_sports,next_free_slot,quote_price"
+check service "I6 anon can execute only the public RPCs (effective, incl. PUBLIC)" "select string_agg(distinct p.proname, ',' order by p.proname) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and not exists (select 1 from pg_depend d where d.objid=p.oid and d.deptype='e') and has_function_privilege('anon', p.oid, 'EXECUTE');" "areas,club_day_slots,club_discovery,club_sports,next_free_slot,quote_price"
 $PSQL -q -d $DB -c "create function _probe_fn() returns int language sql as 'select 1';"
 denied anon    "I6b a new function without grants is not executable by anon" "select _probe_fn();"
 check  service "I6c ...nor by authenticated (explicit grant needed)" "select has_function_privilege('authenticated', '_probe_fn()', 'EXECUTE');" f
@@ -739,6 +739,20 @@ check  $P1 "87c organizer edits to 3 players, approval"    "select update_match(
 check  $P1 "87d edit to 2 players -> closes as full"       "select update_match('$ME', 2, null, null, 'open'); select status||'/'||closed_reason from matches where id='$ME';" "closed/full"
 check  $P1 "87e edit back to 3 -> reopens"                 "select update_match('$ME', 3, null, null, 'open'); select status||'/'||coalesce(closed_reason,'-') from matches where id='$ME';" "open/-"
 check  $P1 "87f manual close then edit stays closed"       "select set_match_status('$ME','closed'); select update_match('$ME', 4, null, null, 'open'); select status||'/'||closed_reason from matches where id='$ME';" "closed/organizer"
+
+
+echo "--- AD. club_day_slots"
+$PSQL -q -d $DB -c "update clubs set open_time='08:00', close_time='23:00', slot_minutes=30, min_booking_minutes=60, max_booking_minutes=180 where slug='batroun';"
+D12=$(date -d "+12 days" +%F)
+check anon "88a day slots: batroun court1 has slots on day+12"     "select count(*) > 0 from club_day_slots('$D12') where court_id='$COURT';" t
+check anon "88b first slot is 08:00 local, free run 180 (max)"     "select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'/'||free_minutes from club_day_slots('$D12') where court_id='$COURT' order by start_at limit 1;" "08:00/180"
+check anon "88c last slot starts 22:00 (close 23:00, min 60) run 60" "select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'/'||free_minutes from club_day_slots('$D12') where court_id='$COURT' order by start_at desc limit 1;" "22:00/60"
+check anon "88d sport filter football -> 0 (pitch inactive)"        "select count(*) from club_day_slots('$D12','football');" 0
+check anon "88e district tyre -> 0"                                 "select count(*) from club_day_slots('$D12', null, null, 'tyre');" 0
+check anon "88f beyond booking window (day+20) -> 0 rows"           "select count(*) from club_day_slots((current_date + 20)::date) where slug='batroun';" 0
+check anon "88g yesterday -> 0 rows"                                "select count(*) from club_day_slots((current_date - 1)::date);" 0
+{ as_user $P1; echo "select booking_id from hold_slot('$CLUB','$COURT', ('$D12'::date + time '10:00') at time zone 'Asia/Beirut', ('$D12'::date + time '11:30') at time zone 'Asia/Beirut');"; } | $PSQL -q -d $DB > /dev/null
+check anon "88h after a 10:00–11:30 hold: 09:00 run 60, 09:30 gone (needs 60), 11:30 present" "select string_agg(to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'/'||free_minutes, ',' order by start_at) from club_day_slots('$D12') where court_id='$COURT' and start_at >= (('$D12'::date + time '09:00') at time zone 'Asia/Beirut') and start_at <= (('$D12'::date + time '11:30') at time zone 'Asia/Beirut');" "09:00/60,11:30/180"
 
 echo
 echo "checks: $CHECKS, failures: $FAILS"
