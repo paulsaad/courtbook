@@ -19,12 +19,16 @@ export type DaySlot = {
 };
 type Resume = { at: string; court: string; dur: number | null } | null;
 
-export default function CourtsDay({ areas, sports, today, date, query, initial, initialError, signedIn, resume }: {
+export default function CourtsDay({ areas, sports, today, date: initialDate, query: initialQuery, initial, initialError, signedIn, resume }: {
   areas: Governorate[]; sports: Sport[]; today: string; date: string; query: string; initial: DaySlot[]; initialError: boolean; signedIn: boolean; resume: Resume;
 }) {
   const router = useRouter();
-  const [prefs, setPrefs] = useState<Prefs>(EMPTY);
+  // remembered sport/area are read synchronously on the client so the chips never flash back to the default
+  const [prefs, setPrefs] = useState<Prefs>(() => (typeof window === "undefined" ? EMPTY : readPrefs()));
   const [loaded, setLoaded] = useState(false);
+  const [date, setDate] = useState(initialDate);
+  const [query, setQuery] = useState(initialQuery);
+  const [typed, setTyped] = useState(initialQuery);
   const [rows, setRows] = useState<DaySlot[] | null>(initialError ? null : initial);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
@@ -35,12 +39,20 @@ export default function CourtsDay({ areas, sports, today, date, query, initial, 
   const dayOf = (d: string) => new Date(`${d}T12:00:00+02:00`);
 
   useEffect(() => { const t = setTimeout(() => { setPrefs(readPrefs()); setLoaded(true); }, 0); return () => clearTimeout(t); }, []);
+  // keep the address bar honest without a navigation (back/forward and refresh land on the same day)
+  useEffect(() => {
+    if (!loaded) return;
+    const u = new URL(window.location.href);
+    u.searchParams.set("date", date); if (query) u.searchParams.set("q", query); else u.searchParams.delete("q");
+    u.searchParams.delete("at"); u.searchParams.delete("court"); u.searchParams.delete("dur");
+    window.history.replaceState(null, "", u.toString());
+  }, [date, query, loaded]);
   useEffect(() => { stripRef.current?.querySelector<HTMLElement>("[data-on=true]")?.scrollIntoView({ inline: "center", block: "nearest" }); }, [date]);
 
   // refetch when area / sport / retry change (date and search are in the URL → server fetch)
   useEffect(() => {
     if (!loaded) return;
-    const isDefault = !prefs.gov && !prefs.district && !prefs.sport && tick === 0 && !initialError;
+    const isDefault = !prefs.gov && !prefs.district && !prefs.sport && tick === 0 && !initialError && date === initialDate && query === initialQuery;
     let alive = true;
     (async () => {
       if (isDefault) { await Promise.resolve(); if (alive) setRows(initial); return; }
@@ -52,7 +64,7 @@ export default function CourtsDay({ areas, sports, today, date, query, initial, 
       setRows(data as DaySlot[]);
     })();
     return () => { alive = false; };
-  }, [prefs, loaded, date, query, tick, initial, initialError]);
+  }, [prefs, loaded, date, query, tick, initial, initialError, initialDate, initialQuery]);
   const update = (p: Prefs) => { setPrefs(p); writePrefs(p); };
 
   // group by club → distinct start times
@@ -80,7 +92,7 @@ export default function CourtsDay({ areas, sports, today, date, query, initial, 
       const r = rows.find((x) => x.court_id === resume.court && x.start_at === resume.at);
       const c = clubs.find((x) => x.club.id === r?.club_id);
       if (r && c) setSheet({ club: c.club, at: r.start_at, courts: c.times.get(r.start_at) ?? [], courtId: r.court_id, minutes: resume.dur });
-      else router.replace(`/courts?date=${date}`);
+      else router.replace(`/courts?date=${initialDate}`);
     }, 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -99,10 +111,10 @@ export default function CourtsDay({ areas, sports, today, date, query, initial, 
         {days.map((d) => {
           const on = d === date;
           return (
-            <Link key={d} data-on={on} href={`/courts?date=${d}${query ? `&q=${encodeURIComponent(query)}` : ""}`} className="flex w-[50px] shrink-0 flex-col items-center gap-1.5 text-xs font-semibold">
+            <button key={d} data-on={on} onClick={() => { setDate(d); setSheet(null); }} className="flex w-[50px] shrink-0 flex-col items-center gap-1.5 text-xs font-semibold">
               <span className="text-[#8a918e]">{d === today ? "Today" : formatInTimeZone(dayOf(d), "Asia/Beirut", "EEEEE")}</span>
               <span className={`flex h-10 w-10 items-center justify-center rounded-full text-[17px] font-bold ${on ? "bg-cedar text-white" : ""}`}>{formatInTimeZone(dayOf(d), "Asia/Beirut", "d")}</span>
-            </Link>
+            </button>
           );
         })}
       </div>
@@ -114,7 +126,12 @@ export default function CourtsDay({ areas, sports, today, date, query, initial, 
         <div className="text-lg font-bold">{date === today ? "Today" : formatInTimeZone(dayOf(date), "Asia/Beirut", "EEEE, d MMMM")}</div>
         <div className="text-[13px] text-muted">{prefs.sport ? `${sportName(prefs.sport)} · ` : ""}{clubs.length} club{clubs.length === 1 ? "" : "s"}</div>
       </div>
-      {query && <form action="/courts" className="mx-5 mt-2 flex items-center gap-2 rounded-full border border-grid bg-white px-4 py-2 text-sm"><IconSearch size={18} className="text-muted" /><input name="q" defaultValue={query} className="flex-1 bg-transparent outline-none" /><input type="hidden" name="date" value={date} /><Link href={`/courts?date=${date}`} className="text-muted">✕</Link></form>}
+      <form onSubmit={(e) => { e.preventDefault(); setQuery(typed.trim()); }} className="mx-5 mt-2 flex items-center gap-2 rounded-full border border-grid bg-white px-4 py-2 text-sm">
+        <IconSearch size={18} className="text-muted" />
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Club or town" className="flex-1 bg-transparent text-base outline-none" />
+        {typed && <button type="button" onClick={() => { setTyped(""); setQuery(""); }} aria-label="Clear" className="px-1 text-muted">✕</button>}
+      </form>
+      {query && <div className="px-5 pt-2 text-[13px] text-muted">Showing clubs matching “{query}”</div>}
 
       <div className={`flex flex-col gap-3.5 px-5 pb-28 pt-3.5 ${busy ? "opacity-60" : ""}`}>
         {rows === null && <p className="flex items-center justify-between rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">Could not load availability. <button onClick={() => setTick((n) => n + 1)} className="font-semibold underline">Retry</button></p>}

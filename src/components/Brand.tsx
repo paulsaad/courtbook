@@ -1,8 +1,17 @@
-/** CourtBook mark: an original stylised cedar in red. Used in headers and the sign-in page. */
+/**
+ * CourtBook mark: an original Lebanese-cedar silhouette — broad, flat, layered tiers on a short trunk — in cedar green.
+ * (Not the flag's artwork; drawn from the tree's shape.)
+ */
 export function Cedar({ size = 22, className = "" }: { size?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={`text-cedar ${className}`} aria-hidden="true">
-      <path d="M12 2 4 11h3l-3 4h4l-2 3h5v4h2v-4h5l-2-3h4l-3-4h3z" />
+    <svg width={size} height={size * 0.8} viewBox="0 0 40 32" fill="currentColor" className={`text-turf ${className}`} aria-hidden="true">
+      {/* trunk */}
+      <rect x="18.6" y="23" width="2.8" height="9" rx="0.8" />
+      {/* four flat layers, the cedar's signature silhouette */}
+      <path d="M17.5 2.0h5.0l4.5 5.0H13.0z" />
+      <path d="M14.0 7.8h12.0l5.5 4.8H8.5z" />
+      <path d="M10.0 13.4h20.0l5.5 4.8H4.5z" />
+      <path d="M6.0 19.0h28.0l5.0 4.6H1.0z" />
     </svg>
   );
 }
