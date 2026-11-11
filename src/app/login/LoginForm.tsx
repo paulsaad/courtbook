@@ -59,11 +59,11 @@ export default function LoginForm() {
         <div className="flex flex-col gap-4">
           <div className="rounded-2xl border border-grid bg-white p-4 text-sm">
             <p className="font-medium">Email sent to {email.trim()}</p>
-            <p className="mt-1 text-muted">Tap the link <b>in the same browser you are using now</b>, or type the 6-digit code from the email here.</p>
+            <p className="mt-1 text-muted">Tap the link <b>in the same browser you are using now</b>, or type the code from the email here.</p>
           </div>
           <form onSubmit={verify} className="flex gap-2">
-            <input className={`${input} flex-1 tracking-widest`} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" placeholder="123456" value={code} onChange={(e) => setCode(e.target.value)} />
-            <button disabled={verifying || code.trim().length !== 6} className={primary}>{verifying ? "…" : "Continue"}</button>
+            <input className={`${input} flex-1 tracking-widest`} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6,10}" placeholder="12345678" value={code} onChange={(e) => setCode(e.target.value)} />
+            <button disabled={verifying || !/^[0-9]{6,10}$/.test(code.trim())} className={primary}>{verifying ? "…" : "Continue"}</button>
           </form>
           <div className="flex items-center justify-between text-sm">
             <button onClick={() => send()} disabled={cooldown > 0 || state !== "sent"} className="text-action underline disabled:text-muted disabled:no-underline">{cooldown > 0 ? `Resend in ${cooldown}s` : "Resend email"}</button>
