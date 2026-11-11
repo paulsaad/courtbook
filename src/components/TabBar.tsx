@@ -39,7 +39,7 @@ export default function TabBar() {
         {TABS.map((t) => {
           const on = t.match(path);
           return (
-            <Link key={t.href} href={t.href} className={`relative flex h-14 flex-col items-center justify-center gap-0.5 text-[11px] ${on ? "text-ink" : "text-muted"}`}>
+            <Link key={t.href} href={t.href === "/profile" && unread > 0 ? "/notifications" : t.href} className={`relative flex h-14 flex-col items-center justify-center gap-0.5 text-[11px] ${on ? "text-ink" : "text-muted"}`}>
               <span className={`text-xl leading-none ${on ? "text-turf" : ""}`}>{t.icon}</span>
               <span className={on ? "font-medium" : ""}>{t.label}</span>
               {t.href === "/profile" && unread > 0 && <span className="absolute right-[calc(50%-18px)] top-2 min-w-4 rounded-full bg-danger px-1 text-center text-[10px] leading-4 text-white">{unread}</span>}

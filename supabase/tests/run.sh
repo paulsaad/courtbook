@@ -728,6 +728,18 @@ check service "I7 anon can read only the public tables"      "select string_agg(
 check service "I8 anon cannot write any table"                "select count(*) from information_schema.tables t where t.table_schema='public' and (has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'INSERT') or has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'UPDATE') or has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'DELETE'));" 0
 check service "I9 anon reads towns geography columns only"    "select string_agg(column_name, ',' order by column_name) from information_schema.columns c where table_name='towns' and has_column_privilege('anon', 'public.towns', column_name, 'SELECT');" "created_at,district_code,id,lat,lng,name_ar,name_en,seeded"
 
+
+echo "--- AC. update_match"
+ME=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '6 day', now()+interval '6 day 90 min', null, 4, 'edit me', null, 'open');"; } | $PSQL -At -d $DB | tail -1)
+{ as_user $P2; echo "select join_match('$ME');"; } | $PSQL -q -d $DB >/dev/null
+{ as_user $P3; echo "select join_match('$ME');"; } | $PSQL -q -d $DB >/dev/null
+denied $P2 "87a non-organizer cannot edit"                  "select update_match('$ME', 3, null, 'x', 'open');"
+denied $P1 "87b cannot go below accepted count (2)"        "select update_match('$ME', 1, null, 'x', 'open');"
+check  $P1 "87c organizer edits to 3 players, approval"    "select update_match('$ME', 3, 'intermediate', 'now three', 'approval'); select players_needed||'/'||join_mode||'/'||level||'/'||note from matches where id='$ME';" "3/approval/intermediate/now three"
+check  $P1 "87d edit to 2 players -> closes as full"       "select update_match('$ME', 2, null, null, 'open'); select status||'/'||closed_reason from matches where id='$ME';" "closed/full"
+check  $P1 "87e edit back to 3 -> reopens"                 "select update_match('$ME', 3, null, null, 'open'); select status||'/'||coalesce(closed_reason,'-') from matches where id='$ME';" "open/-"
+check  $P1 "87f manual close then edit stays closed"       "select set_match_status('$ME','closed'); select update_match('$ME', 4, null, null, 'open'); select status||'/'||closed_reason from matches where id='$ME';" "closed/organizer"
+
 echo
 echo "checks: $CHECKS, failures: $FAILS"
 [ "$FAILS" -eq 0 ] || { echo "SUITE FAILED"; exit 1; }

@@ -16,13 +16,21 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
     setBusy(true); setError(null);
     const { error } = await createClient().rpc(fn, args);
     setBusy(false);
-    if (error) { setError(friendlyError(error.message)); return; }
+    if (error) { setError(friendlyError(error.message)); return false; }
     fetch("/api/notify/email", { method: "POST" }).catch(() => {});   // best-effort email fan-out
     router.refresh();
+    return true;
   }
   const primary = "rounded-xl bg-action py-3.5 font-medium text-white disabled:opacity-50";
   const secondary = "rounded-xl border border-grid bg-white py-3.5";
   const pending = participants.filter((p) => p.status === "pending");
+  const [editing, setEditing] = useState(false);
+  const [f, setF] = useState({ needed: m.players_needed, level: m.level ?? "", note: m.note ?? "", joinMode: m.join_mode });
+  const chip = (on: boolean) => `rounded-full border px-3 py-1.5 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
+  const input = "rounded-xl border border-grid bg-white px-3 py-2 text-base outline-none focus:border-action";
+  const save = async () => {
+    if (await run("update_match", { p_match: m.match_id, p_players_needed: f.needed, p_level: f.level || null, p_note: f.note, p_join_mode: f.joinMode })) setEditing(false);
+  };
 
   return (
     <div className="flex flex-col gap-2">
@@ -42,6 +50,23 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
             ))}
           </ul>
         </section>
+      )}
+      {m.i_organize && m.status !== "cancelled" && (
+        editing ? (
+          <section className="flex flex-col gap-3 rounded-2xl border border-grid bg-white p-4">
+            <h2 className="font-medium">Edit match</h2>
+            <label className="flex items-center justify-between text-sm">Players needed (besides you)
+              <input className={`${input} w-20 text-right`} inputMode="numeric" value={f.needed} onChange={(e) => setF({ ...f, needed: Number(e.target.value) || 0 })} />
+            </label>
+            <div className="text-sm">Level<div className="mt-1 flex flex-wrap gap-2">{[["", "any"], ["beginner", "beginner"], ["intermediate", "intermediate"], ["advanced", "advanced"]].map(([v, l]) => <button type="button" key={v} onClick={() => setF({ ...f, level: v })} className={chip(f.level === v)}>{l}</button>)}</div></div>
+            <div className="text-sm">Who can join<div className="mt-1 flex gap-2"><button type="button" onClick={() => setF({ ...f, joinMode: "open" })} className={chip(f.joinMode === "open")}>Anyone</button><button type="button" onClick={() => setF({ ...f, joinMode: "approval" })} className={chip(f.joinMode === "approval")}>I approve</button></div></div>
+            <textarea className={input} rows={2} maxLength={300} placeholder="Note" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
+            <p className="text-xs text-muted">Time and club can&apos;t be changed — cancel and post a new match for that.</p>
+            <div className="flex gap-2"><button disabled={busy} onClick={save} className={`${primary} flex-1`}>Save</button><button onClick={() => setEditing(false)} className={`${secondary} px-5`}>Cancel</button></div>
+          </section>
+        ) : (
+          <button onClick={() => setEditing(true)} className={secondary}>Edit players, level, note</button>
+        )
       )}
       {m.i_organize ? (
         m.status === "open" ? (

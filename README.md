@@ -22,6 +22,7 @@ Stack: Next.js (TypeScript) · Supabase (Postgres, RLS, auth) · Vercel · GitHu
 | `supabase/migrations/0034_public_occupancy_scope.sql` | `public_occupancy` limited to active clubs/courts, yesterday → booking window |
 | `supabase/migrations/0035_anon_grants.sql` | anon reads only clubs, courts, price_rules, sports, governorates, districts, towns (geography columns; `created_by` hidden), public_occupancy; default privileges stop granting anon on new tables |
 | `supabase/migrations/0036_function_privileges.sql` | `quote_price` validates range/max/active; EXECUTE revoked from PUBLIC and anon on all own functions; defaults: new functions get no PUBLIC/anon/authenticated execute (explicit grants only) |
+| `supabase/migrations/0037_update_match.sql` | `update_match`: organizer edits players needed / level / note / join mode; closes as full or reopens auto-closed |
 | `supabase/migrations/0024_match_board.sql` | Match board: `post_match` (optional booking link), `join_match` (atomic capacity, auto-close), `leave_match`, `set_match_status`, `match_board`, `match_participants` |
 | `supabase/migrations/0023_coach_exceptions.sql` | Exceptions per club; closed ranges split weekly windows |
 | `supabase/migrations/0022_coach_privacy.sql` | Availability readable only for listed coaches (or coach/staff); `coach_availability` enforces it; staff decide via RPC only, approve only pending |
