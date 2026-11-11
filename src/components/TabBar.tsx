@@ -4,13 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { IconCalendar, IconCourt, IconHome, IconUser } from "./Icons";
 
 const HIDDEN = ["/login", "/auth", "/staff", "/admin", "/pay", "/coach"];
 const TABS = [
-  { href: "/", label: "Home", match: (p: string) => p === "/" || p.startsWith("/club") || p.startsWith("/coaches"), icon: "⌂" },
-  { href: "/play", label: "Play", match: (p: string) => p.startsWith("/play") || p.startsWith("/matches"), icon: "◎" },
-  { href: "/me", label: "My CourtBook", match: (p: string) => p.startsWith("/me") || p.startsWith("/bookings"), icon: "▤" },
-  { href: "/profile", label: "Profile", match: (p: string) => p.startsWith("/profile") || p.startsWith("/notifications"), icon: "◯" },
+  { href: "/", label: "Home", Icon: IconHome, match: (p: string) => p === "/" || p.startsWith("/matches") || p.startsWith("/coaches") || p.startsWith("/play") },
+  { href: "/courts", label: "Courts", Icon: IconCourt, match: (p: string) => p.startsWith("/courts") || p.startsWith("/club") },
+  { href: "/me", label: "Bookings", Icon: IconCalendar, match: (p: string) => p.startsWith("/me") || p.startsWith("/bookings") },
+  { href: "/profile", label: "Profile", Icon: IconUser, match: (p: string) => p.startsWith("/profile") || p.startsWith("/notifications") },
 ];
 
 /** Bottom navigation for player screens. Hidden on staff/admin/auth/pay routes and when signed out. */
@@ -36,13 +37,14 @@ export default function TabBar() {
   return (
     <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-grid bg-white/95 backdrop-blur" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
       <div className="mx-auto grid max-w-md grid-cols-4">
-        {TABS.map((t) => {
-          const on = t.match(path);
+        {TABS.map(({ href, label, Icon, match }) => {
+          const on = match(path);
           return (
-            <Link key={t.href} href={t.href === "/profile" && unread > 0 ? "/notifications" : t.href} className={`relative flex h-14 flex-col items-center justify-center gap-0.5 text-[11px] ${on ? "text-ink" : "text-muted"}`}>
-              <span className={`text-xl leading-none ${on ? "text-turf" : ""}`}>{t.icon}</span>
-              <span className={on ? "font-medium" : ""}>{t.label}</span>
-              {t.href === "/profile" && unread > 0 && <span className="absolute right-[calc(50%-18px)] top-2 min-w-4 rounded-full bg-danger px-1 text-center text-[10px] leading-4 text-white">{unread}</span>}
+            <Link key={href} href={href === "/profile" && unread > 0 ? "/notifications" : href} className={`relative flex h-16 flex-col items-center justify-center gap-1 text-[11px] ${on ? "font-bold text-ink" : "font-medium text-[#8a918e]"}`}>
+              {on && <span className="absolute top-1.5 h-[3px] w-[18px] rounded-full bg-cedar" />}
+              <Icon size={26} className={on ? "text-turf" : ""} />
+              {label}
+              {href === "/profile" && unread > 0 && <span className="absolute right-[calc(50%-20px)] top-2 min-w-[18px] rounded-full bg-cedar px-1 text-center text-[10px] font-bold leading-[18px] text-white">{unread}</span>}
             </Link>
           );
         })}

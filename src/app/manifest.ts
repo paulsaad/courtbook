@@ -7,8 +7,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Book sports courts, find players and coaches across Lebanon",
     start_url: "/",
     display: "standalone",
-    background_color: "#f7f5f0",
-    theme_color: "#1f7a4d",
+    background_color: "#f6f6f4",
+    theme_color: "#0f7a47",
     icons: [
       { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
       { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
