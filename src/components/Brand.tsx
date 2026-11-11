@@ -4,14 +4,12 @@
  */
 export function Cedar({ size = 22, className = "" }: { size?: number; className?: string }) {
   return (
-    <svg width={size} height={size * 0.8} viewBox="0 0 40 32" fill="currentColor" className={`text-turf ${className}`} aria-hidden="true">
-      {/* trunk */}
-      <rect x="18.6" y="23" width="2.8" height="9" rx="0.8" />
-      {/* four flat layers, the cedar's signature silhouette */}
-      <path d="M17.5 2.0h5.0l4.5 5.0H13.0z" />
-      <path d="M14.0 7.8h12.0l5.5 4.8H8.5z" />
-      <path d="M10.0 13.4h20.0l5.5 4.8H4.5z" />
-      <path d="M6.0 19.0h28.0l5.0 4.6H1.0z" />
+<svg width={size} height={size * 0.83} viewBox="0 0 48 40" fill="currentColor" className={`text-turf ${className}`} aria-hidden="true">
+      <path d="M21.6 21.0 L26.4 21.0 L27.8 40.0 L20.2 40.0z" />
+      <rect x="12.0" y="2.2" width="24.0" height="4.0" rx="1.6" />
+      <rect x="1.0" y="7.8" width="46.0" height="5.2" rx="1.6" />
+      <rect x="5.0" y="14.6" width="38.0" height="4.8" rx="1.6" />
+      <rect x="11.0" y="20.9" width="26.0" height="4.2" rx="1.6" />
     </svg>
   );
 }
