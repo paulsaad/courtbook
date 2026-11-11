@@ -15,6 +15,9 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage }
   const [f, setF] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(firstTime);
+  const levelName = (v: string) => LEVELS.find(([k]) => k === v)?.[1] ?? "level not set";
+  const sportName = (code: string) => sports.find((s) => s.code === code)?.name_en ?? code;
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -25,17 +28,56 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage }
       .update({ name: f.name.trim(), phone: f.phone.trim() || null, level: f.level || null, sports: f.sports, email_notifications: f.email_notifications })
       .eq("id", user!.id);
     if (error) { setBusy(false); setError(error.message); return; }
-    router.replace(next);
-    router.refresh();
+    setBusy(false);
+    if (firstTime) { router.replace(next); router.refresh(); return; }
+    setEditing(false); router.refresh();
   }
 
   const toggleSport = (s: string) => setF({ ...f, sports: f.sports.includes(s) ? f.sports.filter((x) => x !== s) : [...f.sports, s] });
   const input = "rounded-xl border border-grid bg-white px-4 py-3 text-base outline-none focus:border-action";
 
+  const row = (label: React.ReactNode, href: string) => (
+    <Link href={href} className="flex items-center justify-between border-t border-grid px-4 py-4 text-base">{label}<span className="text-[#8a918e]">›</span></Link>
+  );
+  const initials = (initial.name || manage.email || "?").split(/[\s@]+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+
+  if (!editing) return (
+    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5 pt-12">
+      <div className="flex flex-col items-center gap-2">
+        <span className="flex h-28 w-28 items-center justify-center rounded-full border-4 border-white bg-turf text-[40px] font-extrabold text-white shadow-[0_0_0_1px_#e6e8e5]" aria-hidden="true">{initials}</span>
+        <div className="text-2xl font-extrabold tracking-tight">{initial.name}</div>
+        <div className="text-sm text-muted">{manage.email}{initial.phone ? ` · ${initial.phone}` : ""}</div>
+        <button onClick={() => setEditing(true)} className="chip mt-1">Edit name, phone, level</button>
+      </div>
+      <section className="flex flex-col gap-2.5">
+        <h2 className="text-xl font-bold">Your sports</h2>
+        <div className="flex flex-wrap gap-2">
+          {initial.sports.map((sp) => <button key={sp} onClick={() => setEditing(true)} className="chip gap-2">{sportName(sp)} <span className="text-[#8a918e]">·</span> <b className="text-turf">{levelName(initial.level)}</b></button>)}
+          <button onClick={() => setEditing(true)} className="chip border-dashed border-cedar font-semibold text-cedar">+ Add a sport</button>
+        </div>
+      </section>
+      <section className="card overflow-hidden">
+        <div className="eyebrow px-4 pb-1.5 pt-3.5">Account</div>
+        {row("Activity", "/notifications")}
+        {row("Your bookings and matches", "/me")}
+      </section>
+      {(manage.staffHref || manage.isAdmin || manage.isCoach) && (
+        <section className="card overflow-hidden">
+          <div className="eyebrow px-4 pb-1.5 pt-3.5">You manage</div>
+          {manage.staffHref && row("Staff calendar", manage.staffHref)}
+          {manage.isAdmin && row("Admin: clubs & payments", "/admin")}
+          {manage.isCoach && row("Coach profile", "/coach")}
+        </section>
+      )}
+      {!manage.isCoach && <Link href="/coach" className="text-center text-sm text-muted">Are you a coach? <span className="font-semibold text-turf">Set up your coach profile</span></Link>}
+      <form action="/auth/signout" method="post" className="text-center"><button className="py-2 text-[15px] font-semibold text-cedar">Sign out</button></form>
+    </main>
+  );
+
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5">
+    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5 pt-12">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{firstTime ? "Welcome. Who are you?" : "Your profile"}</h1>
+        <h1 className="text-2xl font-extrabold tracking-tight">{firstTime ? "Welcome. Who are you?" : "Edit profile"}</h1>
         <p className="mt-1 text-sm text-muted">Clubs see your name on bookings. Your phone is only shown to club staff.</p>
       </div>
       <form onSubmit={save} className="flex flex-col gap-4">
@@ -62,21 +104,9 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage }
           </div>
         </fieldset>
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
-        <button type="submit" disabled={busy} className="rounded-xl bg-action py-3.5 font-medium text-white disabled:opacity-50">{busy ? "Saving…" : firstTime ? "Continue" : "Save"}</button>
+        <button type="submit" disabled={busy} className="btn btn-primary">{busy ? "Saving…" : firstTime ? "Continue" : "Save"}</button>
+        {!firstTime && <button type="button" onClick={() => setEditing(false)} className="btn btn-secondary">Cancel</button>}
       </form>
-      {!firstTime && (
-        <section className="flex flex-col gap-1 rounded-2xl border border-grid bg-white p-4 text-sm">
-          <h2 className="mb-1 font-medium">More</h2>
-          <Link href="/notifications" className="py-2 text-action">Activity</Link>
-          {manage.staffHref && <Link href={manage.staffHref} className="py-2 text-action">Staff calendar</Link>}
-          {manage.isAdmin && <Link href="/admin" className="py-2 text-action">Admin: clubs &amp; payments</Link>}
-          <Link href="/coach" className="py-2 text-action">{manage.isCoach ? "Coach profile" : "Are you a coach? Set up your coach profile"}</Link>
-          <form action="/auth/signout" method="post" className="flex items-center justify-between border-t border-grid pt-3">
-            <span className="text-muted">{manage.email}</span>
-            <button className="text-danger">Sign out</button>
-          </form>
-        </section>
-      )}
     </main>
   );
 }
