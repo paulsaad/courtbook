@@ -743,25 +743,29 @@ check  $P1 "87f manual close then edit stays closed"       "select set_match_sta
 
 echo "--- AD. club_day_slots"
 $PSQL -q -d $DB -c "update clubs set open_time='08:00', close_time='23:00', slot_minutes=30, min_booking_minutes=60, max_booking_minutes=180 where slug='batroun';"
-D12=$(date -d "+12 days" +%F)
+D12=$($PSQL -At -d $DB -c "select ((now() at time zone 'Asia/Beirut')::date + 12)::text")
 check anon "88a day slots: batroun court1 has slots on day+12"     "select count(*) > 0 from club_day_slots('$D12') where court_id='$COURT';" t
 check anon "88b first slot is 08:00 local, free run 180 (max)"     "select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'/'||free_minutes from club_day_slots('$D12') where court_id='$COURT' order by start_at limit 1;" "08:00/180"
 check anon "88c last slot starts 22:00 (close 23:00, min 60) run 60" "select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'/'||free_minutes from club_day_slots('$D12') where court_id='$COURT' order by start_at desc limit 1;" "22:00/60"
 check anon "88d sport filter football -> 0 (pitch inactive)"        "select count(*) from club_day_slots('$D12','football');" 0
 check anon "88e district tyre -> 0"                                 "select count(*) from club_day_slots('$D12', null, null, 'tyre');" 0
-check anon "88f beyond booking window (day+20) -> 0 rows"           "select count(*) from club_day_slots((current_date + 20)::date) where slug='batroun';" 0
-check anon "88f2 last day: no slot starts after the rolling cutoff"  "select count(*) from club_day_slots((current_date + 14)::date) where slug='batroun' and start_at > now() + interval '14 days';" 0
-check anon "88f3 last day: slots before the cutoff are offered"      "select count(*) > 0 from club_day_slots(((now() at time zone 'Asia/Beirut')::date + 14)) where slug='batroun' and start_at <= now() + interval '14 days';" t
+check anon "88f beyond booking window (day+20) -> 0 rows"           "select count(*) from club_day_slots(((now() at time zone 'Asia/Beirut')::date + 20)) where slug='batroun';" 0
+# boundary fixture: 'other' club is open 00:00–24:00 on a 30-min grid (set in test 80) with a 20-day window, so on the
+# last day the slots before the rolling cutoff are exactly the half-hours from 00:00 up to the current Beirut time.
+$PSQL -q -d $DB -c "update clubs set booking_window_days = 20 where slug='other';"
+check anon "88f2 last day: no slot starts after the rolling cutoff"  "select count(*) from club_day_slots(((now() at time zone 'Asia/Beirut')::date + 20)) where slug='other' and start_at > now() + interval '20 days';" 0
+check anon "88f3 last day: every half-hour up to the cutoff is offered (count = floor(local minutes/30)+1, per court)" "select count(*) = (floor(extract(epoch from (now() at time zone 'Asia/Beirut')::time) / 1800)::int + 1) * (select count(*) from courts where club_id=(select id from clubs where slug='other') and active) from club_day_slots(((now() at time zone 'Asia/Beirut')::date + 20)) where slug='other';" t
 check anon "88g yesterday -> 0 rows"                                "select count(*) from club_day_slots((current_date - 1)::date);" 0
 { as_user $P1; echo "select booking_id from hold_slot('$CLUB','$COURT', ('$D12'::date + time '10:00') at time zone 'Asia/Beirut', ('$D12'::date + time '11:30') at time zone 'Asia/Beirut');"; } | $PSQL -q -d $DB > /dev/null
 check anon "88h after a 10:00–11:30 hold: 09:00 run 60, 09:30 gone (needs 60), 11:30 present" "select string_agg(to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'/'||free_minutes, ',' order by start_at) from club_day_slots('$D12') where court_id='$COURT' and start_at >= (('$D12'::date + time '09:00') at time zone 'Asia/Beirut') and start_at <= (('$D12'::date + time '11:30') at time zone 'Asia/Beirut');" "09:00/60,11:30/180"
 
 
 echo "--- AE. booking-window boundary: discovery agrees with hold_slot"
-D14=$(date -d "+14 days" +%F)
-check anon "89a last day: every listed start is <= now()+14d"  "select count(*) from club_day_slots('$D14') where start_at > now() + interval '14 days';" 0
-check anon "89b last day: starts before the cutoff are listed"  "select count(*) > 0 from club_day_slots('$D14') where slug='batroun';" t
-check $P1  "89c hold at the last listed start succeeds"         "select (hold_slot('$CLUB', court_id, start_at, start_at + interval '60 min')).booking_id is not null from (select court_id, start_at from club_day_slots('$D14') where court_id='$COURT' order by start_at desc limit 1) s;" t
+D14=$($PSQL -At -d $DB -c "select ((now() at time zone 'Asia/Beirut')::date + 14)::text")
+check anon "89a last day (batroun, 14-day window): no start after now()+14d" "select count(*) from club_day_slots('$D14') where slug='batroun' and start_at > now() + interval '14 days';" 0
+# batroun: 08:00–23:00, 30-min grid, min 60 → starts are half-hours 16..44 of the day, and on the last day only those <= local now
+check anon "89b last day (batroun): count = active courts × starts between 08:00 and min(now, 22:00)" "select count(*) = (select count(*) from courts where club_id='$CLUB' and active) * greatest(0, least(floor(extract(epoch from (now() at time zone 'Asia/Beirut')::time) / 1800)::int, 44) - 16 + 1) from club_day_slots('$D14') where slug='batroun';" t
+check $P1  "89c hold at the last listed start succeeds (true when nothing is listed yet today)" "select coalesce((select (hold_slot('$CLUB', court_id, start_at, start_at + interval '60 min')).booking_id is not null from (select court_id, start_at from club_day_slots('$D14') where court_id='$COURT' order by start_at desc limit 1) s), true);" t
 
 echo
 echo "checks: $CHECKS, failures: $FAILS"

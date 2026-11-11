@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
@@ -26,7 +25,6 @@ const reqKey = (d: string, q: string, p: Prefs) => `${d}|${q}|${p.gov ?? ""}|${p
 export default function CourtsDay({ areas, sports, today, date: initialDate, query: initialQuery, initial, initialError, signedIn, resume }: {
   areas: Governorate[]; sports: Sport[]; today: string; date: string; query: string; initial: DaySlot[]; initialError: boolean; signedIn: boolean; resume: Resume;
 }) {
-  const router = useRouter();
   // remembered sport/area are read synchronously on the client so the chips never flash back to the default
   const [prefs, setPrefs] = useState<Prefs>(() => (typeof window === "undefined" ? EMPTY : readPrefs()));
   const [loaded, setLoaded] = useState(false);
@@ -97,19 +95,23 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
   const sportsPresent = useMemo(() => new Set((rows ?? []).flatMap((r) => r.sports)), [rows]);
   const chips = sports.filter((s) => sportsPresent.has(s.code) || s.code === prefs.sport || (prefs.sport === null && sportsPresent.size === 0));
 
-  // coming back from sign-in: reopen the panel on the slot the player had chosen (compare instants, not strings)
+  // coming back from sign-in: reopen the panel on the slot the player had chosen — once, when the first answer arrives
+  const [resumed, setResumed] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
-    if (!resume || !rows) return;
+    if (!resume || resumed || rows === undefined) return;
     const want = Date.parse(resume.at);
     const t = setTimeout(() => {
+      setResumed(true);
+      if (rows === null) { setNotice("Could not check that slot — pick a time below."); return; }
       const r = rows.find((x) => x.court_id === resume.court && Date.parse(x.start_at) === want);
       const c = clubs.find((x) => x.club.id === r?.club_id);
       if (r && c) setSheet({ club: c.club, at: r.start_at, courts: c.times.get(r.start_at) ?? [], courtId: r.court_id, minutes: resume.dur });
-      else router.replace(`/courts?date=${initialDate}`);
+      else setNotice("That slot is no longer free — pick another time.");
     }, 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows]);
+  }, [rows, resumed]);
 
   const chip = (on: boolean) => `chip ${on ? "chip-on" : ""}`;
 
@@ -144,6 +146,7 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
         {typed && <button type="button" onClick={() => { setTyped(""); setQuery(""); }} aria-label="Clear" className="px-1 text-muted">✕</button>}
       </form>
       {query && <div className="px-5 pt-2 text-[13px] text-muted">Showing clubs matching “{query}”</div>}
+      {notice && <p className="mx-5 mt-3 flex items-center justify-between rounded-xl bg-sand-soft px-3 py-2 text-sm">{notice}<button onClick={() => setNotice(null)} aria-label="Dismiss" className="px-1 text-muted">✕</button></p>}
 
       <div className={`flex flex-col gap-3.5 px-5 pb-28 pt-3.5 ${busy || loading ? "opacity-60" : ""}`}>
         {rows === null && <p className="flex items-center justify-between rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">Could not load availability. <button onClick={() => setRetry((n) => n + 1)} className="font-semibold underline">Retry</button></p>}
