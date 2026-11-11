@@ -17,7 +17,9 @@ export default async function MatchPage({ params }: { params: Promise<{ id: stri
   const { data: tzRow } = await supabase.from("clubs").select("timezone").eq("id", m.club_id).single();
   const tz = tzRow?.timezone ?? "Asia/Beirut";
   const member = m.i_organize || m.my_status === "accepted";
-  const finished = new Date(m.start_at).getTime() < nowMs();
+  // finished means the match has ended, not merely started (same rule as hide_match)
+  const endsAt = m.end_at ? new Date(m.end_at).getTime() : new Date(m.start_at).getTime() + 3 * 60 * 60 * 1000;
+  const finished = endsAt < nowMs();
   const [{ data: people }, { data: msgs }, { data: hidden }] = await Promise.all([
     supabase.rpc("match_participants", { p_match: id }),
     member ? supabase.rpc("match_messages_list", { p_match: id, p_after: null }) : Promise.resolve({ data: [] }),

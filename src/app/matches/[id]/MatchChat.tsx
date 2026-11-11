@@ -6,6 +6,9 @@ import { createClient } from "@/lib/supabase/client";
 
 type Msg = { id: string; profile_id: string; name: string | null; body: string; created_at: string; deleted?: boolean };
 
+// what the thread looks like right now, so we only re-render when it really changed
+const signature = (rows: Msg[]) => rows.map((r) => `${r.id}:${r.deleted ? 1 : 0}`).join(",");
+
 export default function MatchChat({ matchId, meId, tz, initial, finished, hidden }: { matchId: string; meId: string; tz: string; initial: Msg[]; finished: boolean; hidden: boolean }) {
   const [gone, setGone] = useState(hidden);
   const [msgs, setMsgs] = useState<Msg[]>(initial);
@@ -13,15 +16,18 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
   const [busy, setBusy] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
 
-  // poll for new messages every 5 s (boring and reliable; realtime can replace it later)
+  // poll the whole thread every 5 s, not just what is newer: a message deleted further up
+  // would never come back through an incremental read (boring and reliable; realtime can replace it later)
   useEffect(() => {
+    let alive = true;
     const id = setInterval(async () => {
-      const last = msgs[msgs.length - 1]?.created_at ?? null;
-      const { data } = await createClient().rpc("match_messages_list", { p_match: matchId, p_after: last });
-      if (data && (data as Msg[]).length) setMsgs((cur) => [...cur, ...(data as Msg[]).filter((d) => !cur.some((c) => c.id === d.id))]);
+      const { data, error } = await createClient().rpc("match_messages_list", { p_match: matchId, p_after: null });
+      if (!alive || error || !data) return;
+      const rows = data as Msg[];
+      setMsgs((cur) => (signature(cur) === signature(rows) ? cur : rows));
     }, 5000);
-    return () => clearInterval(id);
-  }, [matchId, msgs]);
+    return () => { alive = false; clearInterval(id); };
+  }, [matchId]);
   useEffect(() => { bottom.current?.scrollIntoView({ block: "nearest" }); }, [msgs.length]);
 
   async function removeMessage(id: string) {

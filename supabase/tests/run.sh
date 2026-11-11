@@ -818,6 +818,23 @@ check  $P1 "91m the organizer still sees it"                       "select (sele
 check  $P2 "91n undo restores it"                                  "select hide_match('$PM', false); select count(*) from my_agenda() where id='$PM';" 1
 FM=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '9 day', now()+interval '9 day 90 min', null, null, 2, 'future', null, 'open');"; } | $PSQL -At -d $DB | tail -1)
 denied $P1 "91o cannot remove a match that has not happened yet"   "select hide_match('$FM');"
+# a match under way has started but not ended: it is not finished
+OM=$($PSQL -At -q -d $DB -c "insert into matches (club_id, sport, organizer_id, start_at, end_at, players_needed, status) values ('$CLUB','padel','$P1', now() - interval '30 min', now() + interval '60 min', 1, 'open') returning id" | head -1)
+denied $P1 "91p cannot remove a match that is under way"           "select hide_match('$OM');"
+
+# deletion must reach the other player's open screen: an incremental read cannot carry it, a full read can
+AFTER=$($PSQL -At -q -d $DB -c "select max(created_at) from match_messages where match_id='$PM'" | head -1)
+check $P1 "91q incremental read after the last message carries nothing" "select count(*) from match_messages_list('$PM', '$AFTER');" 0
+check $P1 "91r full read shows player2's message as deleted"        "select deleted from match_messages_list('$PM', null) where id='$MSG';" "t"
+
+# the migration must survive being run twice (a half-applied run has to be recoverable)
+CHECKS=$((CHECKS+1))
+if $PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0042_delete_and_open_booking.sql >/tmp/cb_0042.log 2>&1; then
+  echo "  ok    91s 0042 re-applies cleanly"
+else
+  echo "  FAIL  91s 0042 cannot be re-applied — $(tail -2 /tmp/cb_0042.log | tr '\n' ' ')"; FAILS=$((FAILS+1))
+fi
+check $P1 "91t chat still works after the re-apply"                "select count(*) from match_messages_list('$PM', null);" 2
 
 echo
 echo "checks: $CHECKS, failures: $FAILS"

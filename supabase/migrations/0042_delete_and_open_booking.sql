@@ -1,4 +1,6 @@
--- Paul's phone feedback (11 Nov): delete Activity items, delete own chat messages, open a booking to other players.
+-- Paul's phone feedback (11 Nov): delete Activity items, delete own chat messages,
+-- remove a finished conversation, open a booking to other players.
+-- Written to be safe to re-run: every object is dropped or guarded first.
 
 -- Activity: delete one, clear all (own rows only; RLS has no delete policy, so via RPC)
 create or replace function delete_notification(p_id uuid) returns void
@@ -18,9 +20,11 @@ revoke execute on function delete_notification(uuid), clear_notifications() from
 grant execute on function delete_notification(uuid), clear_notifications() to authenticated;
 
 -- Chat: a player may delete their own message; others see "message deleted" (soft delete keeps the thread readable)
-alter table match_messages add column deleted_at timestamptz;
-alter table match_messages drop constraint match_messages_body_check;
-alter table match_messages add constraint match_messages_body_check check (deleted_at is not null or char_length(body) between 1 and 1000);
+alter table match_messages add column if not exists deleted_at timestamptz;
+alter table match_messages drop constraint if exists match_messages_body_check;
+alter table match_messages add constraint match_messages_body_check
+  check (deleted_at is not null or char_length(body) between 1 and 1000);
+
 create or replace function delete_match_message(p_id uuid) returns void
 language plpgsql security definer set search_path = public as $$
 begin
@@ -30,18 +34,6 @@ begin
 end $$;
 revoke execute on function delete_match_message(uuid) from public, anon;
 grant execute on function delete_match_message(uuid) to authenticated;
-
-drop function if exists match_messages_list(uuid, timestamptz);
-create or replace function match_messages_list(p_match uuid, p_after timestamptz)
-returns table (id uuid, profile_id uuid, name text, body text, created_at timestamptz, deleted boolean)
-language sql stable security definer set search_path = public as $$
-  select x.id, x.profile_id, p.name, case when x.deleted_at is null then x.body else '' end, x.created_at, x.deleted_at is not null
-  from match_messages x join profiles p on p.id = x.profile_id
-  where x.match_id = p_match and is_match_member(p_match) and (p_after is null or x.created_at > p_after)
-  order by x.created_at;
-$$;
-revoke execute on function match_messages_list(uuid, timestamptz) from public, anon;
-grant execute on function match_messages_list(uuid, timestamptz) to authenticated;
 
 -- Booking page: the live match linked to one of my bookings (or none)
 create or replace function booking_match(p_booking uuid)
@@ -59,15 +51,17 @@ revoke execute on function booking_match(uuid) from public, anon;
 grant execute on function booking_match(uuid) to authenticated;
 
 -- Remove a finished conversation from my own history (mine only; the match and the other players are untouched)
-create table match_hidden (
+create table if not exists match_hidden (
   profile_id uuid not null references profiles(id) on delete cascade,
   match_id   uuid not null references matches(id) on delete cascade,
   hidden_at  timestamptz not null default now(),
   primary key (profile_id, match_id)
 );
 alter table match_hidden enable row level security;
+drop policy if exists "match_hidden: own" on match_hidden;
 create policy "match_hidden: own" on match_hidden for select to authenticated using (profile_id = auth.uid());
 
+-- finished means the match has ended, not merely started
 create or replace function hide_match(p_match uuid, p_hidden boolean default true) returns void
 language plpgsql security definer set search_path = public as $$
 declare m matches%rowtype;
@@ -79,7 +73,9 @@ begin
     delete from match_hidden where profile_id = auth.uid() and match_id = p_match;
     return;
   end if;
-  if m.status <> 'cancelled' and m.start_at > now() then raise exception 'match_not_finished'; end if;
+  if m.status <> 'cancelled' and coalesce(m.end_at, m.start_at + interval '3 hours') > now() then
+    raise exception 'match_not_finished';
+  end if;
   insert into match_hidden (profile_id, match_id) values (auth.uid(), p_match) on conflict do nothing;
 end $$;
 revoke execute on function hide_match(uuid, boolean) from public, anon;
@@ -92,9 +88,10 @@ $$;
 revoke execute on function match_is_hidden(uuid) from public, anon;
 grant execute on function match_is_hidden(uuid) to authenticated;
 
--- a removed conversation reads as empty for that player only
+-- One definition only: deleted messages read as empty, a removed conversation reads as empty for that player.
+-- p_after stays for compatibility; the client reads the whole thread so deletions propagate.
 drop function if exists match_messages_list(uuid, timestamptz);
-create or replace function match_messages_list(p_match uuid, p_after timestamptz)
+create function match_messages_list(p_match uuid, p_after timestamptz)
 returns table (id uuid, profile_id uuid, name text, body text, created_at timestamptz, deleted boolean)
 language sql stable security definer set search_path = public as $$
   select x.id, x.profile_id, p.name, case when x.deleted_at is null then x.body else '' end, x.created_at, x.deleted_at is not null
