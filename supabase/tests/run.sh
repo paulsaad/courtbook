@@ -750,9 +750,18 @@ check anon "88c last slot starts 22:00 (close 23:00, min 60) run 60" "select to_
 check anon "88d sport filter football -> 0 (pitch inactive)"        "select count(*) from club_day_slots('$D12','football');" 0
 check anon "88e district tyre -> 0"                                 "select count(*) from club_day_slots('$D12', null, null, 'tyre');" 0
 check anon "88f beyond booking window (day+20) -> 0 rows"           "select count(*) from club_day_slots((current_date + 20)::date) where slug='batroun';" 0
+check anon "88f2 last day: no slot starts after the rolling cutoff"  "select count(*) from club_day_slots((current_date + 14)::date) where slug='batroun' and start_at > now() + interval '14 days';" 0
+check anon "88f3 last day: slots before the cutoff are offered"      "select count(*) > 0 from club_day_slots(((now() at time zone 'Asia/Beirut')::date + 14)) where slug='batroun' and start_at <= now() + interval '14 days';" t
 check anon "88g yesterday -> 0 rows"                                "select count(*) from club_day_slots((current_date - 1)::date);" 0
 { as_user $P1; echo "select booking_id from hold_slot('$CLUB','$COURT', ('$D12'::date + time '10:00') at time zone 'Asia/Beirut', ('$D12'::date + time '11:30') at time zone 'Asia/Beirut');"; } | $PSQL -q -d $DB > /dev/null
 check anon "88h after a 10:00–11:30 hold: 09:00 run 60, 09:30 gone (needs 60), 11:30 present" "select string_agg(to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'/'||free_minutes, ',' order by start_at) from club_day_slots('$D12') where court_id='$COURT' and start_at >= (('$D12'::date + time '09:00') at time zone 'Asia/Beirut') and start_at <= (('$D12'::date + time '11:30') at time zone 'Asia/Beirut');" "09:00/60,11:30/180"
+
+
+echo "--- AE. booking-window boundary: discovery agrees with hold_slot"
+D14=$(date -d "+14 days" +%F)
+check anon "89a last day: every listed start is <= now()+14d"  "select count(*) from club_day_slots('$D14') where start_at > now() + interval '14 days';" 0
+check anon "89b last day: starts before the cutoff are listed"  "select count(*) > 0 from club_day_slots('$D14') where slug='batroun';" t
+check $P1  "89c hold at the last listed start succeeds"         "select (hold_slot('$CLUB', court_id, start_at, start_at + interval '60 min')).booking_id is not null from (select court_id, start_at from club_day_slots('$D14') where court_id='$COURT' order by start_at desc limit 1) s;" t
 
 echo
 echo "checks: $CHECKS, failures: $FAILS"

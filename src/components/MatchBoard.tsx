@@ -25,7 +25,7 @@ export function MatchCard({ m, tz }: { m: MatchRow; tz: string }) {
     <Link href={`/matches/${m.match_id}`} className="block rounded-2xl border border-grid bg-white p-4 active:bg-paper">
       <div className="flex items-baseline justify-between">
         <span className="font-medium">{formatInTimeZone(new Date(m.start_at), tz, "EEE d MMM · HH:mm")}{m.end_at ? `–${hhmm(m.end_at, tz)}` : ""}</span>
-        <span className={`rounded-full px-2 py-0.5 text-xs ${m.status === "open" ? "bg-turf-soft text-turf" : "bg-slate-soft text-muted"}`}>{m.status === "open" ? `${spots} spot${spots === 1 ? "" : "s"} left` : m.status}</span>
+        <span className={`rounded-full px-2 py-0.5 text-xs ${m.status === "open" ? "bg-turf-soft text-turf" : "bg-slate-soft text-muted"}`}>{m.status === "open" ? `${spots} spot${spots === 1 ? "" : "s"} left` : m.status === "cancelled" ? "Cancelled" : m.joined >= m.players_needed ? "Full" : "Not accepting players"}</span>
       </div>
       <div className="mt-1 text-sm text-muted">{m.sport}{m.level ? ` · ${m.level}` : ""}{m.court_name ? ` · ${m.court_name} booked` : ""} · by {m.organizer_name ?? "player"}{m.i_organize ? " (you)" : m.my_status === "accepted" ? " · you're in" : m.my_status === "pending" ? " · requested" : ""}{m.i_organize && m.pending > 0 ? ` · ${m.pending} waiting` : ""}</div>
       {m.note && <p className="mt-2 text-sm">{m.note}</p>}

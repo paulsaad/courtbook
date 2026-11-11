@@ -30,16 +30,16 @@ export default function HomeClient({ areas, sports, initialMatches, signedIn }: 
   }, [prefs, loaded, signedIn, initialMatches]);
   const update = (p: Prefs) => { setPrefs(p); writePrefs(p); };
 
-  const action = "flex flex-col items-center gap-2.5 text-sm font-bold text-ink";
-  const circle = "flex h-[84px] w-[84px] items-center justify-center rounded-full";
+  const action = "flex flex-col items-center gap-2 text-[13px] font-bold text-ink";
+  const circle = "flex h-[68px] w-[68px] items-center justify-center rounded-full";
 
   return (
     <div className="flex flex-col gap-4">
       <AreaPicker areas={areas} value={{ gov: prefs.gov, district: prefs.district }} onChange={(a) => update({ ...prefs, gov: a.gov, district: a.district })}
         trigger={(open, label) => (
-          <button onClick={open} className="card flex w-full items-center justify-between px-4 py-3 text-left">
-            <span className="flex items-center gap-3"><IconPin size={22} className="text-cedar" /><span><span className="eyebrow block">Playing in</span><span className="text-base font-bold">{label}</span></span></span>
-            <span className="text-sm font-semibold text-turf">Change</span>
+          <button onClick={open} className="flex w-full items-center justify-between rounded-full border border-grid bg-white px-4 py-2.5 text-left">
+            <span className="flex min-w-0 items-center gap-2"><IconPin size={20} className="shrink-0 text-cedar" /><span className="truncate text-[15px] font-semibold"><span className="font-normal text-muted">Playing in </span>{label}</span></span>
+            <span className="shrink-0 text-sm font-semibold text-turf">Change</span>
           </button>
         )} />
 
@@ -48,10 +48,10 @@ export default function HomeClient({ areas, sports, initialMatches, signedIn }: 
         <input name="q" enterKeyHint="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clubs or towns" className="flex-1 bg-transparent text-base outline-none" />
       </form>
 
-      <div className="grid grid-cols-3 gap-3 py-1">
-        <Link href="/courts" className={action}><span className={`${circle} bg-turf-soft`}><IconCourt size={34} className="text-turf" /></span>Book a court</Link>
-        <Link href="/play" className={action}><span className={`${circle} bg-cedar-soft`}><IconUsers size={34} className="text-cedar" /></span>Find a game</Link>
-        <Link href="/coaches" className={action}><span className={`${circle} bg-sand-soft`}><IconRacket size={34} className="text-sand" /></span>Coaches</Link>
+      <div className="grid grid-cols-3 gap-3">
+        <Link href="/courts" className={action}><span className={`${circle} bg-turf-soft`}><IconCourt size={30} className="text-turf" /></span>Book a court</Link>
+        <Link href="/play" className={action}><span className={`${circle} bg-cedar-soft`}><IconUsers size={30} className="text-cedar" /></span>Find a game</Link>
+        <Link href="/coaches" className={action}><span className={`${circle} bg-sand-soft`}><IconRacket size={30} className="text-sand" /></span>Coaches</Link>
       </div>
 
       {signedIn && (

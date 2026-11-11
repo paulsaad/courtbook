@@ -44,9 +44,9 @@ export default async function Home() {
     .sort((a, b) => a.start_at.localeCompare(b.start_at))[0] ?? null;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 p-5 pt-12">
+    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-3.5 p-5 pt-10">
       <header className="flex items-center justify-between">
-        <h1 className="flex items-center gap-2 text-[30px] font-extrabold tracking-tight"><Cedar size={24} />{firstName ? `Hello ${firstName}` : "CourtBook"}</h1>
+        <h1 className="flex items-center gap-2 text-[28px] font-extrabold tracking-tight"><Cedar size={24} />{firstName ? `Hello ${firstName}` : "CourtBook"}</h1>
         <Link href="/notifications" aria-label="Activity" className="relative flex h-11 w-11 items-center justify-center rounded-full border border-grid bg-white">
           <IconBell size={24} />
           {(unread ?? 0) > 0 && <span className="absolute right-1.5 top-1.5 min-w-[18px] rounded-full bg-cedar px-1 text-center text-[11px] font-bold leading-[18px] text-white">{unread}</span>}
@@ -56,13 +56,18 @@ export default async function Home() {
       {nx && (
         <section className="flex flex-col gap-2.5">
           <h2 className="text-xl font-bold">Your next game</h2>
-          <Link href={nx.kind === "booking" ? `/bookings/${nx.id}` : `/matches/${nx.id}`} className="card flex items-center gap-3 p-4">
-            <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-turf-soft text-sm font-extrabold text-turf" aria-hidden="true">{nx.club_name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}</span>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-base font-bold">{nx.title ?? (nx.kind === "booking" ? "Court" : "Match")}</div>
-              <div className="truncate text-sm text-muted">{nx.club_name}{nx.kind === "match" ? (nx.role === "organizer" ? " · your match" : nx.role === "pending" ? " · requested" : " · you're in") : ""}</div>
+          <Link href={nx.kind === "booking" ? `/bookings/${nx.id}` : `/matches/${nx.id}`} className="card flex flex-col gap-2.5 p-4">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-turf-soft text-sm font-extrabold text-turf" aria-hidden="true">{nx.club_name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}</span>
+              <div className="min-w-0 flex-1">
+                <div className="text-base font-bold leading-tight">{nx.title ?? (nx.kind === "booking" ? "Court" : "Match")}</div>
+                <div className="text-[13px] text-muted">{nx.club_name}</div>
+              </div>
             </div>
-            <div className="text-right"><div className="text-base font-bold">{formatInTimeZone(new Date(nx.start_at), nx.timezone ?? TZ, "HH:mm")}{nx.end_at ? `–${formatInTimeZone(new Date(nx.end_at), nx.timezone ?? TZ, "HH:mm")}` : ""}</div><div className="text-[13px] text-muted">{formatInTimeZone(new Date(nx.start_at), nx.timezone ?? TZ, "EEE, d MMM")}</div></div>
+            <div className="flex items-center justify-between border-t border-grid pt-2.5 text-[15px]">
+              <span className="font-semibold">{formatInTimeZone(new Date(nx.start_at), nx.timezone ?? TZ, "EEE d MMM")} · {formatInTimeZone(new Date(nx.start_at), nx.timezone ?? TZ, "HH:mm")}{nx.end_at ? `–${formatInTimeZone(new Date(nx.end_at), nx.timezone ?? TZ, "HH:mm")}` : ""}</span>
+              <span className="rounded-full bg-turf-soft px-2 py-0.5 text-xs text-turf">{nx.kind === "booking" ? "booked" : nx.role === "organizer" ? "your match" : nx.role === "pending" ? "requested" : "you're in"}</span>
+            </div>
           </Link>
         </section>
       )}

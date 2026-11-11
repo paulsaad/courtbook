@@ -25,6 +25,7 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
   const secondary = "rounded-xl border border-grid bg-white py-3.5";
   const pending = participants.filter((p) => p.status === "pending");
   const [editing, setEditing] = useState(false);
+  const [manage, setManage] = useState(false);
   const [f, setF] = useState({ needed: m.players_needed, level: m.level ?? "", note: m.note ?? "", joinMode: m.join_mode });
   const chip = (on: boolean) => `rounded-full border px-3 py-1.5 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
   const input = "rounded-xl border border-grid bg-white px-3 py-2 text-base outline-none focus:border-action";
@@ -52,8 +53,10 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
         </section>
       )}
       {m.i_organize && m.status !== "cancelled" && (
-        editing ? (
-          <section className="flex flex-col gap-3 rounded-2xl border border-grid bg-white p-4">
+        <button onClick={() => { setManage(!manage); setEditing(false); }} className={secondary}>{manage ? "Hide match settings ▴" : "Manage match ▾"}</button>
+      )}
+      {m.i_organize && m.status !== "cancelled" && manage && (
+        editing ? (          <section className="flex flex-col gap-3 rounded-2xl border border-grid bg-white p-4">
             <h2 className="font-medium">Edit match</h2>
             <label className="flex items-center justify-between text-sm">Players needed (besides you)
               <input className={`${input} w-20 text-right`} inputMode="numeric" value={f.needed} onChange={(e) => setF({ ...f, needed: Number(e.target.value) || 0 })} />
@@ -68,8 +71,7 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
           <button onClick={() => setEditing(true)} className={secondary}>Edit players, level, note</button>
         )
       )}
-      {m.i_organize ? (
-        m.status === "open" ? (
+      {m.i_organize ? (!manage ? null : m.status === "open" ? (
           <>
             <button disabled={busy} onClick={() => run("set_match_status", { p_match: m.match_id, p_status: "closed" })} className={primary}>Close — I have my players</button>
             <button disabled={busy} onClick={() => run("set_match_status", { p_match: m.match_id, p_status: "cancelled" })} className="py-2 text-sm text-danger">Cancel the match</button>
@@ -93,7 +95,7 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
         <p className="text-sm text-muted">The organizer could not take you this time.</p>
       ) : m.status === "open" ? (
         <button disabled={busy} onClick={() => run("join_match", { p_match: m.match_id })} className={primary}>{m.join_mode === "approval" ? "Ask to join" : "Join"}</button>
-      ) : <p className="text-sm text-muted">This match is {m.status}.</p>}
+      ) : <p className="text-sm text-muted">{m.joined >= m.players_needed ? "This match is full." : "The organizer is not taking more players."}</p>}
     </div>
   );
 }

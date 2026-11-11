@@ -18,6 +18,10 @@ export type DaySlot = {
   court_id: string; court_name: string; court_sport: string; start_at: string; free_minutes: number;
 };
 type Resume = { at: string; court: string; dur: number | null } | null;
+type Sheet = { club: SheetClub; at: string; courts: { id: string; name: string; free: number }[]; courtId: string; minutes: number | null };
+
+const TZ = "Asia/Beirut";
+const reqKey = (d: string, q: string, p: Prefs) => `${d}|${q}|${p.gov ?? ""}|${p.district ?? ""}|${p.sport ?? ""}`;
 
 export default function CourtsDay({ areas, sports, today, date: initialDate, query: initialQuery, initial, initialError, signedIn, resume }: {
   areas: Governorate[]; sports: Sport[]; today: string; date: string; query: string; initial: DaySlot[]; initialError: boolean; signedIn: boolean; resume: Resume;
@@ -29,17 +33,24 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
   const [date, setDate] = useState(initialDate);
   const [query, setQuery] = useState(initialQuery);
   const [typed, setTyped] = useState(initialQuery);
-  const [rows, setRows] = useState<DaySlot[] | null>(initialError ? null : initial);
+  // results are tagged with the request they answer; anything else is "loading" and never tappable
+  const [result, setResult] = useState<{ key: string; rows: DaySlot[] | null }>({ key: reqKey(initialDate, initialQuery, EMPTY), rows: initialError ? null : initial });
   const [busy, setBusy] = useState(false);
-  const [tick, setTick] = useState(0);
-  const [sheet, setSheet] = useState<{ club: SheetClub; at: string; courts: { id: string; name: string; free: number }[]; courtId: string; minutes: number | null } | null>(null);
+  const [retry, setRetry] = useState(0);
+  const [sheet, setSheet] = useState<Sheet | null>(null);
+  const [showAll, setShowAll] = useState<Record<string, boolean>>({});
   const stripRef = useRef<HTMLDivElement>(null);
   const sportName = (code: string) => sports.find((s) => s.code === code)?.name_en ?? code;
   const days = Array.from({ length: 15 }, (_, i) => shiftDate(today, i));
   const dayOf = (d: string) => new Date(`${d}T12:00:00+02:00`);
 
+  const key = reqKey(date, query, prefs);
+  const rows: DaySlot[] | null | undefined = result.key === key ? result.rows : undefined;   // undefined = loading, null = failed
+  const loading = rows === undefined;
+
   useEffect(() => { const t = setTimeout(() => { setPrefs(readPrefs()); setLoaded(true); }, 0); return () => clearTimeout(t); }, []);
-  // keep the address bar honest without a navigation (back/forward and refresh land on the same day)
+  useEffect(() => { stripRef.current?.querySelector<HTMLElement>("[data-on=true]")?.scrollIntoView({ inline: "center", block: "nearest" }); }, [date]);
+  // keep the address bar honest without a navigation (refresh lands on the same day)
   useEffect(() => {
     if (!loaded) return;
     const u = new URL(window.location.href);
@@ -47,27 +58,28 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
     u.searchParams.delete("at"); u.searchParams.delete("court"); u.searchParams.delete("dur");
     window.history.replaceState(null, "", u.toString());
   }, [date, query, loaded]);
-  useEffect(() => { stripRef.current?.querySelector<HTMLElement>("[data-on=true]")?.scrollIntoView({ inline: "center", block: "nearest" }); }, [date]);
 
-  // refetch when area / sport / retry change (date and search are in the URL → server fetch)
+  // fetch whenever the request changes (or Retry); the answer is stored under its own key
   useEffect(() => {
     if (!loaded) return;
-    const isDefault = !prefs.gov && !prefs.district && !prefs.sport && tick === 0 && !initialError && date === initialDate && query === initialQuery;
+    if (result.key === key && retry === 0) return;
     let alive = true;
     (async () => {
-      if (isDefault) { await Promise.resolve(); if (alive) setRows(initial); return; }
       setBusy(true);
       const { data, error } = await createClient().rpc("club_day_slots", { p_date: date, p_sport: prefs.sport, p_governorate: prefs.gov, p_district: prefs.district, p_query: query.trim() || null });
       if (!alive) return;
       setBusy(false);
-      if (error) { setRows(null); return; }
-      setRows(data as DaySlot[]);
+      setResult({ key, rows: error ? null : (data as DaySlot[]) });
     })();
     return () => { alive = false; };
-  }, [prefs, loaded, date, query, tick, initial, initialError, initialDate, initialQuery]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, loaded, retry]);
+  // any change of day / area / sport / search closes an open booking panel
+  useEffect(() => { const t = setTimeout(() => setSheet(null), 0); return () => clearTimeout(t); }, [key]);
+
   const update = (p: Prefs) => { setPrefs(p); writePrefs(p); };
 
-  // group by club → distinct start times
+  // group by club → distinct start times → courts free at that time
   const clubs = useMemo(() => {
     const m = new Map<string, { club: SheetClub; town: string | null; district: string | null; price_from: number | null; sports: string[]; times: Map<string, { id: string; name: string; free: number }[]> }>();
     for (const r of rows ?? []) {
@@ -83,13 +95,14 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
     return [...m.values()];
   }, [rows]);
   const sportsPresent = useMemo(() => new Set((rows ?? []).flatMap((r) => r.sports)), [rows]);
-  const chips = sports.filter((s) => sportsPresent.has(s.code) || s.code === prefs.sport || prefs.sport === null && sportsPresent.size === 0);
+  const chips = sports.filter((s) => sportsPresent.has(s.code) || s.code === prefs.sport || (prefs.sport === null && sportsPresent.size === 0));
 
-  // coming back from sign-in: reopen the panel on the slot the player had chosen
+  // coming back from sign-in: reopen the panel on the slot the player had chosen (compare instants, not strings)
   useEffect(() => {
     if (!resume || !rows) return;
+    const want = Date.parse(resume.at);
     const t = setTimeout(() => {
-      const r = rows.find((x) => x.court_id === resume.court && x.start_at === resume.at);
+      const r = rows.find((x) => x.court_id === resume.court && Date.parse(x.start_at) === want);
       const c = clubs.find((x) => x.club.id === r?.club_id);
       if (r && c) setSheet({ club: c.club, at: r.start_at, courts: c.times.get(r.start_at) ?? [], courtId: r.court_id, minutes: resume.dur });
       else router.replace(`/courts?date=${initialDate}`);
@@ -98,22 +111,21 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
 
-  const [showAll, setShowAll] = useState<Record<string, boolean>>({});
   const chip = (on: boolean) => `chip ${on ? "chip-on" : ""}`;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col">
       <div className="flex items-center justify-between px-5 pt-12">
-        <div className="text-[13px] font-bold uppercase tracking-wider text-muted">{formatInTimeZone(dayOf(date), "Asia/Beirut", "MMM yyyy")}</div>
+        <div className="text-[13px] font-bold uppercase tracking-wider text-muted">{formatInTimeZone(dayOf(date), TZ, "MMM yyyy")}</div>
         <AreaPicker areas={areas} value={{ gov: prefs.gov, district: prefs.district }} onChange={(a) => update({ ...prefs, gov: a.gov, district: a.district })} />
       </div>
       <div ref={stripRef} className="flex gap-1 overflow-x-auto px-3 pb-3 pt-3">
         {days.map((d) => {
           const on = d === date;
           return (
-            <button key={d} data-on={on} onClick={() => { setDate(d); setSheet(null); }} className="flex w-[50px] shrink-0 flex-col items-center gap-1.5 text-xs font-semibold">
-              <span className="text-[#8a918e]">{d === today ? "Today" : formatInTimeZone(dayOf(d), "Asia/Beirut", "EEEEE")}</span>
-              <span className={`flex h-10 w-10 items-center justify-center rounded-full text-[17px] font-bold ${on ? "bg-cedar text-white" : ""}`}>{formatInTimeZone(dayOf(d), "Asia/Beirut", "d")}</span>
+            <button key={d} data-on={on} onClick={() => setDate(d)} className="flex w-[50px] shrink-0 flex-col items-center gap-1.5 text-xs font-semibold">
+              <span className="text-[#8a918e]">{d === today ? "Today" : formatInTimeZone(dayOf(d), TZ, "EEEEE")}</span>
+              <span className={`flex h-10 w-10 items-center justify-center rounded-full text-[17px] font-bold ${on ? "bg-cedar text-white" : ""}`}>{formatInTimeZone(dayOf(d), TZ, "d")}</span>
             </button>
           );
         })}
@@ -123,19 +135,20 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
         {chips.map((s) => <button key={s.code} onClick={() => update({ ...prefs, sport: prefs.sport === s.code ? null : s.code })} className={chip(prefs.sport === s.code)}>{s.name_en}</button>)}
       </div>
       <div className="flex items-baseline justify-between px-5 pt-1">
-        <div className="text-lg font-bold">{date === today ? "Today" : formatInTimeZone(dayOf(date), "Asia/Beirut", "EEEE, d MMMM")}</div>
-        <div className="text-[13px] text-muted">{prefs.sport ? `${sportName(prefs.sport)} · ` : ""}{clubs.length} club{clubs.length === 1 ? "" : "s"}</div>
+        <div className="text-lg font-bold">{date === today ? "Today" : formatInTimeZone(dayOf(date), TZ, "EEEE, d MMMM")}</div>
+        <div className="text-[13px] text-muted">{loading ? "loading…" : `${prefs.sport ? `${sportName(prefs.sport)} · ` : ""}${clubs.length} club${clubs.length === 1 ? "" : "s"}`}</div>
       </div>
       <form onSubmit={(e) => { e.preventDefault(); setQuery(typed.trim()); }} className="mx-5 mt-2 flex items-center gap-2 rounded-full border border-grid bg-white px-4 py-2 text-sm">
         <IconSearch size={18} className="text-muted" />
-        <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Club or town" className="flex-1 bg-transparent text-base outline-none" />
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} enterKeyHint="search" placeholder="Club or town" className="flex-1 bg-transparent text-base outline-none" />
         {typed && <button type="button" onClick={() => { setTyped(""); setQuery(""); }} aria-label="Clear" className="px-1 text-muted">✕</button>}
       </form>
       {query && <div className="px-5 pt-2 text-[13px] text-muted">Showing clubs matching “{query}”</div>}
 
-      <div className={`flex flex-col gap-3.5 px-5 pb-28 pt-3.5 ${busy ? "opacity-60" : ""}`}>
-        {rows === null && <p className="flex items-center justify-between rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">Could not load availability. <button onClick={() => setTick((n) => n + 1)} className="font-semibold underline">Retry</button></p>}
-        {rows !== null && clubs.length === 0 && <p className="card p-6 text-center text-sm text-muted">No free courts for this day{prefs.sport ? ` in ${sportName(prefs.sport)}` : ""}. Try another day, sport or area.</p>}
+      <div className={`flex flex-col gap-3.5 px-5 pb-28 pt-3.5 ${busy || loading ? "opacity-60" : ""}`}>
+        {rows === null && <p className="flex items-center justify-between rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">Could not load availability. <button onClick={() => setRetry((n) => n + 1)} className="font-semibold underline">Retry</button></p>}
+        {loading && <p className="py-6 text-center text-sm text-muted">Loading availability…</p>}
+        {rows && clubs.length === 0 && <p className="card p-6 text-center text-sm text-muted">No free courts for this day{prefs.sport ? ` in ${sportName(prefs.sport)}` : ""}. Try another day, sport or area.</p>}
         {clubs.map((c) => {
           const times = [...c.times.keys()].sort();
           const all = showAll[c.club.id];
@@ -145,23 +158,23 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
               <Link href={`/club/${c.club.slug}?date=${date}`} className="flex items-center gap-3 p-4">
                 <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-turf-soft text-sm font-extrabold text-turf" aria-hidden="true">{c.club.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}</span>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[17px] font-bold">{c.club.name}</div>
+                  <div className="text-[17px] font-bold leading-tight">{c.club.name}</div>
                   <div className="text-sm text-muted">{[c.town, c.district].filter(Boolean).join(" · ") || "Lebanon"}{c.price_from != null ? ` · from $${Number(c.price_from).toFixed(0)}/h` : ""}{!prefs.sport && c.sports.length > 1 ? ` · ${c.sports.map(sportName).join(", ")}` : ""}</div>
                 </div>
                 <span className="text-muted">›</span>
               </Link>
               <div className="flex flex-wrap gap-2 border-t border-grid bg-[#fafaf8] px-4 py-3.5">
                 {shown.map((at) => (
-                  <button key={at} onClick={() => setSheet({ club: c.club, at, courts: c.times.get(at)!, courtId: c.times.get(at)![0].id, minutes: null })} className="min-w-[72px] rounded-xl bg-turf-soft px-3 py-3 text-[15px] font-bold text-turf-deep">{formatInTimeZone(new Date(at), c.club.timezone, "HH:mm")}</button>
+                  <button key={at} disabled={loading} onClick={() => setSheet({ club: c.club, at, courts: c.times.get(at)!, courtId: c.times.get(at)![0].id, minutes: null })} className="min-w-[72px] rounded-xl bg-turf-soft px-3 py-3 text-[15px] font-bold text-turf-deep disabled:opacity-50">{formatInTimeZone(new Date(at), c.club.timezone, "HH:mm")}</button>
                 ))}
-                {times.length > 6 && <button onClick={() => setShowAll({ ...showAll, [c.club.id]: !all })} className="self-center px-2 text-sm font-semibold text-turf">{all ? "Less" : `+${times.length - 6}`}</button>}
+                {times.length > 6 && <button onClick={() => setShowAll({ ...showAll, [c.club.id]: !all })} className="self-center px-2 text-sm font-semibold text-turf">{all ? "Show fewer" : `${times.length - 6} more times`}</button>}
               </div>
             </article>
           );
         })}
       </div>
 
-      {sheet && <BookSheet club={sheet.club} date={date} at={sheet.at} courts={sheet.courts} initialCourtId={sheet.courtId} initialMinutes={sheet.minutes} signedIn={signedIn} onClose={() => setSheet(null)} />}
+      {sheet && !loading && <BookSheet club={sheet.club} date={date} at={sheet.at} courts={sheet.courts} initialCourtId={sheet.courtId} initialMinutes={sheet.minutes} signedIn={signedIn} onClose={() => setSheet(null)} />}
     </main>
   );
 }
