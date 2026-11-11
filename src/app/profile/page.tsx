@@ -7,12 +7,14 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login?next=/profile");
-  const [{ data: p }, { data: sports }, { count: staffCount }, { count: coachCount }] = await Promise.all([
+  const [{ data: p }, { data: sports }, { count: staffCount }, { count: coachCount }, { data: lv }] = await Promise.all([
     supabase.from("profiles").select("name, phone, level, sports, email_notifications, roles").eq("id", user.id).single(),
     supabase.from("sports").select("code, name_en").eq("active", true).order("sort_order"),
     supabase.from("club_staff").select("*", { count: "exact", head: true }).eq("profile_id", user.id),
     supabase.from("coaches").select("*", { count: "exact", head: true }).eq("profile_id", user.id),
+    supabase.rpc("my_levels"),
   ]);
+  const levels = Object.fromEntries(((lv ?? []) as { sport: string; level: number }[]).map((r) => [r.sport, r.level]));
   const isAdmin = p?.roles?.includes("admin") ?? false;
   const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
   return (
@@ -21,6 +23,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
       next={safeNext}
       firstTime={!p?.name}
       sports={sports ?? []}
+      levels={levels}
       manage={{ staffHref: isAdmin || (staffCount ?? 0) > 0 ? "/staff" : null, isAdmin, isCoach: (coachCount ?? 0) > 0, email: user.email ?? user.phone ?? "" }}
     />
   );

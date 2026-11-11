@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { Governorate, Sport } from "@/lib/geo";
 import { EMPTY, readPrefs, writePrefs, type Prefs } from "@/lib/prefs";
 import AreaPicker from "./AreaPicker";
+import { rangeLabel } from "@/lib/levels";
 
 export type ClubCard = {
   club_id: string; name: string; slug: string; town: string | null; district: string | null; governorate: string | null;
@@ -14,7 +15,7 @@ export type ClubCard = {
   open_time: string; close_time: string;
 };
 export type OpenMatch = {
-  match_id: string; club_name: string; club_slug: string; town: string | null; sport: string; start_at: string; level: string | null;
+  match_id: string; club_name: string; club_slug: string; town: string | null; sport: string; start_at: string; level_min: number | null; level_max: number | null; level_legacy: boolean; my_level: number | null;
   players_needed: number; joined: number; organizer_name: string | null; join_mode: string; i_joined: boolean;
 };
 
@@ -125,7 +126,7 @@ export default function Discover({ areas, sports, initialClubs, initialMatches, 
                 <div className="text-muted">{formatInTimeZone(new Date(m.start_at), TZ, "HH:mm")}</div>
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">{sportName(m.sport)}{m.level ? ` · ${m.level}` : ""} · {m.club_name}</div>
+                <div className="truncate font-medium">{sportName(m.sport)} · {rangeLabel(m.level_min, m.level_max, m.level_legacy)} · {m.club_name}</div>
                 <div className="truncate text-sm text-muted">{m.organizer_name ?? "player"}{m.town ? ` · ${m.town}` : ""}</div>
               </div>
               <span className="shrink-0 rounded-full bg-turf-soft px-2 py-0.5 text-xs text-turf">{m.i_joined ? "you're in" : `${spots} spot${spots === 1 ? "" : "s"}`}</span>

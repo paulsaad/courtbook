@@ -9,6 +9,7 @@ import { EMPTY, readPrefs, writePrefs, type Prefs } from "@/lib/prefs";
 import AreaPicker from "./AreaPicker";
 import { IconCourt, IconPin, IconRacket, IconSearch, IconUsers } from "./Icons";
 import type { OpenMatch } from "./Discover";
+import { fitLabel, rangeLabel } from "@/lib/levels";
 
 const TZ = "Asia/Beirut";
 
@@ -65,12 +66,13 @@ export default function HomeClient({ areas, sports, initialMatches, signedIn }: 
                 const spots = Math.max(0, m.players_needed - m.joined);
                 return (
                   <Link key={m.match_id} href={`/matches/${m.match_id}`} className={`card flex min-w-[230px] flex-col gap-3 p-3.5 ${spots > 0 && !m.i_joined ? "border-[#f3d4d9] bg-[#fff8f9]" : ""}`}>
-                    <div><div className="text-[15px] font-bold">{sportName(m.sport)}{m.level ? ` · ${m.level}` : " · any level"}</div><div className="text-[13px] text-muted">{m.club_name}{m.town ? ` · ${m.town}` : ""}</div></div>
+                    <div><div className="text-[15px] font-bold">{sportName(m.sport)} · {rangeLabel(m.level_min, m.level_max, m.level_legacy)}</div><div className="text-[13px] text-muted">{m.club_name}{m.town ? ` · ${m.town}` : ""}</div></div>
                     <div className="flex items-center gap-1">
                       {Array.from({ length: Math.min(m.joined + 1, 4) }, (_, i) => <span key={i} className="inline-flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-turf text-xs font-bold text-white shadow-[0_0_0_1px_#e6e8e5]" aria-hidden="true">{i === 0 ? (m.organizer_name ?? "P").slice(0, 1).toUpperCase() : "·"}</span>)}
                       {Array.from({ length: Math.min(spots, 3) }, (_, i) => <span key={`s${i}`} className="inline-flex h-9 w-9 items-center justify-center rounded-full border-2 border-dashed border-cedar font-bold text-cedar" aria-hidden="true">+</span>)}
                     </div>
                     <div className="text-sm font-semibold">{formatInTimeZone(new Date(m.start_at), TZ, "EEE d MMM · HH:mm")} {m.i_joined ? <span className="text-turf">· you&apos;re in</span> : <span className="text-cedar">· {spots} spot{spots === 1 ? "" : "s"}</span>}</div>
+                    {!m.i_joined && m.level_min != null && (() => { const f = fitLabel(m.my_level, m.level_min, m.level_max); return <div className={`text-xs ${f.tone === "ok" ? "text-turf" : f.tone === "warn" ? "text-sand" : "text-muted"}`}>{f.text}</div>; })()}
                   </Link>
                 );
               })}

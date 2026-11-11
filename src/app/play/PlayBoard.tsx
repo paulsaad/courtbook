@@ -8,15 +8,15 @@ import type { Governorate, Sport } from "@/lib/geo";
 import { EMPTY, readPrefs, writePrefs, type Prefs } from "@/lib/prefs";
 import AreaPicker from "@/components/AreaPicker";
 import type { OpenMatch } from "@/components/Discover";
+import { fitLabel, rangeLabel } from "@/lib/levels";
 
 const TZ = "Asia/Beirut";
-const LEVELS = ["beginner", "intermediate", "advanced"];
 const chip = (on: boolean) => `min-h-11 shrink-0 rounded-full border px-4 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
 
 export default function PlayBoard({ areas, sports, initial, clubs }: { areas: Governorate[]; sports: Sport[]; initial: OpenMatch[]; clubs: { id: string; name: string; slug: string }[] }) {
   const [prefs, setPrefs] = useState<Prefs>(EMPTY);
   const [loaded, setLoaded] = useState(false);
-  const [level, setLevel] = useState<string | null>(null);
+  const [fit, setFit] = useState<"mine" | null>(null);
   const [when, setWhen] = useState<"today" | "week" | "any">("any");
   const [rows, setRows] = useState(initial);
   const [busy, setBusy] = useState(false);
@@ -31,11 +31,11 @@ export default function PlayBoard({ areas, sports, initial, clubs }: { areas: Go
       setBusy(true);
       const now = new Date();
       const to = when === "today" ? new Date(now.getTime() + 24 * 3600e3) : when === "week" ? new Date(now.getTime() + 7 * 24 * 3600e3) : null;
-      const { data } = await createClient().rpc("open_matches", { p_sport: prefs.sport, p_level: level, p_to: to?.toISOString() ?? null, p_governorate: prefs.gov, p_district: prefs.district, p_limit: 50 });
+      const { data } = await createClient().rpc("open_matches", { p_sport: prefs.sport, p_fit: fit, p_to: to?.toISOString() ?? null, p_governorate: prefs.gov, p_district: prefs.district, p_limit: 50 });
       if (alive) { setRows((data ?? []) as OpenMatch[]); setBusy(false); }
     })();
     return () => { alive = false; };
-  }, [prefs, level, when, loaded]);
+  }, [prefs, fit, when, loaded]);
   const update = (p: Prefs) => { setPrefs(p); writePrefs(p); };
 
   return (
@@ -51,7 +51,7 @@ export default function PlayBoard({ areas, sports, initial, clubs }: { areas: Go
       <div className="-mx-5 flex gap-2 overflow-x-auto px-5">
         {(["today", "week", "any"] as const).map((w) => <button key={w} onClick={() => setWhen(w)} className={chip(when === w)}>{w === "today" ? "Today" : w === "week" ? "This week" : "Any day"}</button>)}
         <span className="w-px shrink-0 bg-grid" />
-        {LEVELS.map((l) => <button key={l} onClick={() => setLevel(level === l ? null : l)} className={chip(level === l)}>{l}</button>)}
+        <button onClick={() => setFit(fit ? null : "mine")} className={chip(!!fit)}>My level</button>
       </div>
 
       <section className={`flex flex-col gap-3 ${busy ? "opacity-60" : ""}`}>
@@ -64,7 +64,8 @@ export default function PlayBoard({ areas, sports, initial, clubs }: { areas: Go
                 <span className="font-medium">{formatInTimeZone(new Date(m.start_at), TZ, "EEE d MMM · HH:mm")}</span>
                 <span className="rounded-full bg-turf-soft px-2 py-0.5 text-xs text-turf">{m.i_joined ? "you're in" : `${spots} spot${spots === 1 ? "" : "s"} left`}</span>
               </div>
-              <div className="mt-1 text-sm">{sportName(m.sport)}{m.level ? ` · ${m.level}` : ""} · {m.club_name}{m.town ? ` · ${m.town}` : ""}</div>
+              <div className="mt-1 text-sm">{sportName(m.sport)} · {rangeLabel(m.level_min, m.level_max, m.level_legacy)} · {m.club_name}{m.town ? ` · ${m.town}` : ""}</div>
+              {!m.i_joined && m.level_min != null && (() => { const f = fitLabel(m.my_level, m.level_min, m.level_max); return <div className={`text-xs ${f.tone === "ok" ? "text-turf" : f.tone === "warn" ? "text-sand" : "text-muted"}`}>{f.text}</div>; })()}
               <div className="text-sm text-muted">by {m.organizer_name ?? "player"}{m.join_mode === "approval" ? " · organizer approves" : ""}</div>
             </Link>
           );

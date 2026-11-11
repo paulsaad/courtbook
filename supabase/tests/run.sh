@@ -435,7 +435,7 @@ EOF
 echo "--- T. match board"
 $PSQL -q -d $DB -c "insert into auth.users (id, phone) values ('55555555-aaaa-4aaa-8aaa-555555555555','+9615') on conflict do nothing; insert into profiles (id, name) values ('55555555-aaaa-4aaa-8aaa-555555555555','Third') on conflict do nothing; update profiles set name='Player One' where id='$P1'; update profiles set name='Player Two' where id='$P2';"
 P3=55555555-aaaa-4aaa-8aaa-555555555555
-M=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '2 day', now()+interval '2 day 90 min', 'intermediate', 2, 'Need 2 for doubles', null);"; } | $PSQL -At -d $DB | tail -1)
+M=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '2 day', now()+interval '2 day 90 min', 4, 6, 2, 'Need 2 for doubles', null);"; } | $PSQL -At -d $DB | tail -1)
 { as_user $P1; cat <<EOF
 \set ON_ERROR_STOP off
 \echo '51. organizer tries to join own match -> ERROR organizer_cannot_join ; direct insert into matches -> RLS'
@@ -480,16 +480,16 @@ $PSQL -q -d $DB -c "insert into bookings (id, club_id, court_id, player_id, star
 { as_user $P1; cat <<EOF
 \set ON_ERROR_STOP off
 \echo '57. post linked to own confirmed booking -> club/time copied (t) ; player2 linking that booking -> ERROR booking_not_found'
-select post_match(null,'padel',null,null,null,3,'from booking','99999999-9999-4999-8999-999999999999') as linked \gset
+select post_match(null,'padel',null,null,null,null,3,'from booking','99999999-9999-4999-8999-999999999999') as linked \gset
 select club_id = '$CLUB' and start_at = (select start_at from bookings where id='99999999-9999-4999-8999-999999999999') from matches where id = :'linked';
 EOF
 as_user $P2; cat <<EOF
-select post_match(null,'padel',null,null,null,3,'x','99999999-9999-4999-8999-999999999999');
+select post_match(null,'padel',null,null,null,null,3,'x','99999999-9999-4999-8999-999999999999');
 EOF
 } | $PSQL -d $DB 2>&1 | filter
 
 echo "--- U. join approval, notifications, chat"
-MA=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '4 day', now()+interval '4 day 90 min', null, 1, 'approval match', null, 'approval');"; } | $PSQL -At -d $DB | tail -1)
+MA=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '4 day', now()+interval '4 day 90 min', null, null, 1, 'approval match', null, 'approval');"; } | $PSQL -At -d $DB | tail -1)
 { as_user $P2; cat <<EOF
 \set ON_ERROR_STOP off
 \echo '58. join approval match -> pending ; board shows my_status pending, joined 0 ; participants hidden (not accepted) -> 0 ; chat insert -> RLS'
@@ -530,7 +530,7 @@ EOF
 } | $PSQL -d $DB 2>&1 | filter
 
 echo "--- V. Phase 5 review fixes"
-MB=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '5 day', now()+interval '5 day 90 min', null, 2, 'two spots', null, 'approval');"; } | $PSQL -At -d $DB | tail -1)
+MB=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '5 day', now()+interval '5 day 90 min', null, null, 2, 'two spots', null, 'approval');"; } | $PSQL -At -d $DB | tail -1)
 { as_user $P2; cat <<EOF
 \set ON_ERROR_STOP off
 \echo '63. player2 asks to join twice -> pending, pending (one request, one notification)'
@@ -567,7 +567,7 @@ select status from match_board('$CLUB', 14) where match_id='$MB';
 select set_match_status('$MB','cancelled');
 select decide_join('$MB','$P3', true);
 \echo '68. linked booking: sport mismatch -> ERROR ; staff moves booking -> match time follows + booking_moved notice ; cancel -> unlinked + notice'
-select post_match(null,'tennis',null,null,null,2,'x','99999999-9999-4999-8999-999999999999');
+select post_match(null,'tennis',null,null,null,null,2,'x','99999999-9999-4999-8999-999999999999');
 EOF
 as_user $ADMIN; cat <<EOF
 select move_booking('99999999-9999-4999-8999-999999999999','$COURT3', (current_date + 9 + time '12:30') at time zone 'Asia/Beirut', (current_date + 9 + time '14:00') at time zone 'Asia/Beirut');
@@ -588,16 +588,16 @@ echo "--- W. linked match vs concurrency (review Phase 5 round 2)"
 BK=88888888-8888-4888-8888-888888888888
 $PSQL -q -d $DB -c "insert into bookings (id, club_id, court_id, player_id, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$BK','$CLUB','$COURT2','$P1', (current_date + 10 + time '09:30') at time zone 'Asia/Beirut', (current_date + 10 + time '11:00') at time zone 'Asia/Beirut', 'confirmed','app','$P1',30,1)"
 echo "70. two concurrent post_match on one booking -> one match, other booking_already_posted"
-pm() { { as_user $P1; echo "begin; select post_match(null,'padel',null,null,null,3,'race $2','$BK'); select pg_sleep(1); commit;"; } | $PSQL -d $DB > /tmp/cb_pm$2.log 2>&1; }
+pm() { { as_user $P1; echo "begin; select post_match(null,'padel',null,null,null,null,3,'race $2','$BK'); select pg_sleep(1); commit;"; } | $PSQL -d $DB > /tmp/cb_pm$2.log 2>&1; }
 pm x 1 & sleep 0.3; pm x 2 & wait
 grep -h "ERROR" /tmp/cb_pm1.log /tmp/cb_pm2.log | sort | uniq -c
 $PSQL -At -d $DB -c "select 'live matches on booking = '||count(*)||' (expect 1)' from matches where booking_id='$BK' and status<>'cancelled'"
 echo "71. cancel the match, repost -> allowed (index is partial)"
-{ as_user $P1; echo "select set_match_status((select id from matches where booking_id='$BK'),'cancelled'); select post_match(null,'padel',null,null,null,3,'repost','$BK') is not null;"; } | $PSQL -At -d $DB 2>&1 | tail -1
+{ as_user $P1; echo "select set_match_status((select id from matches where booking_id='$BK'),'cancelled'); select post_match(null,'padel',null,null,null,null,3,'repost','$BK') is not null;"; } | $PSQL -At -d $DB 2>&1 | tail -1
 echo "72. post_match races booking cancellation -> either booking_not_found, or match created then unlinked by trigger (never a live link to a cancelled booking)"
 { as_user $P1; echo "select set_match_status((select id from matches where booking_id='$BK' and status<>'cancelled'),'cancelled');"; } | $PSQL -q -d $DB
 { as_user $P1; echo "begin; select cancel_booking('$BK'); select pg_sleep(1); commit;"; } | $PSQL -d $DB > /tmp/cb_cx.log 2>&1 &
-sleep 0.3; { as_user $P1; echo "select post_match(null,'padel',null,null,null,3,'late post','$BK');"; } | $PSQL -d $DB > /tmp/cb_lp.log 2>&1; wait
+sleep 0.3; { as_user $P1; echo "select post_match(null,'padel',null,null,null,null,3,'late post','$BK');"; } | $PSQL -d $DB > /tmp/cb_lp.log 2>&1; wait
 grep -h "ERROR" /tmp/cb_lp.log | sort | uniq -c
 $PSQL -At -d $DB -c "select 'matches still linked to cancelled booking = '||count(*)||' (expect 0)' from matches m join bookings b on b.id=m.booking_id where b.id='$BK' and b.status<>'confirmed' and m.status<>'cancelled'"
 
@@ -730,15 +730,15 @@ check service "I9 anon reads towns geography columns only"    "select string_agg
 
 
 echo "--- AC. update_match"
-ME=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '6 day', now()+interval '6 day 90 min', null, 4, 'edit me', null, 'open');"; } | $PSQL -At -d $DB | tail -1)
+ME=$({ as_user $P1; echo "select post_match('$CLUB','padel', now()+interval '6 day', now()+interval '6 day 90 min', null, null, 4, 'edit me', null, 'open');"; } | $PSQL -At -d $DB | tail -1)
 { as_user $P2; echo "select join_match('$ME');"; } | $PSQL -q -d $DB >/dev/null
 { as_user $P3; echo "select join_match('$ME');"; } | $PSQL -q -d $DB >/dev/null
-denied $P2 "87a non-organizer cannot edit"                  "select update_match('$ME', 3, null, 'x', 'open');"
-denied $P1 "87b cannot go below accepted count (2)"        "select update_match('$ME', 1, null, 'x', 'open');"
-check  $P1 "87c organizer edits to 3 players, approval"    "select update_match('$ME', 3, 'intermediate', 'now three', 'approval'); select players_needed||'/'||join_mode||'/'||level||'/'||note from matches where id='$ME';" "3/approval/intermediate/now three"
-check  $P1 "87d edit to 2 players -> closes as full"       "select update_match('$ME', 2, null, null, 'open'); select status||'/'||closed_reason from matches where id='$ME';" "closed/full"
-check  $P1 "87e edit back to 3 -> reopens"                 "select update_match('$ME', 3, null, null, 'open'); select status||'/'||coalesce(closed_reason,'-') from matches where id='$ME';" "open/-"
-check  $P1 "87f manual close then edit stays closed"       "select set_match_status('$ME','closed'); select update_match('$ME', 4, null, null, 'open'); select status||'/'||closed_reason from matches where id='$ME';" "closed/organizer"
+denied $P2 "87a non-organizer cannot edit"                  "select update_match('$ME', 3, null, null, 'x', 'open');"
+denied $P1 "87b cannot go below accepted count (2)"        "select update_match('$ME', 1, null, null, 'x', 'open');"
+check  $P1 "87c organizer edits to 3 players, approval"    "select update_match('$ME', 3, 4, 6, 'now three', 'approval'); select players_needed||'/'||join_mode||'/'||level_min||'-'||level_max||'/'||note from matches where id='$ME';" "3/approval/4-6/now three"
+check  $P1 "87d edit to 2 players -> closes as full"       "select update_match('$ME', 2, null, null, null, 'open'); select status||'/'||closed_reason from matches where id='$ME';" "closed/full"
+check  $P1 "87e edit back to 3 -> reopens"                 "select update_match('$ME', 3, null, null, null, 'open'); select status||'/'||coalesce(closed_reason,'-') from matches where id='$ME';" "open/-"
+check  $P1 "87f manual close then edit stays closed"       "select set_match_status('$ME','closed'); select update_match('$ME', 4, null, null, null, 'open'); select status||'/'||closed_reason from matches where id='$ME';" "closed/organizer"
 
 
 echo "--- AD. club_day_slots"
@@ -766,6 +766,28 @@ check anon "89a last day (batroun, 14-day window): no start after now()+14d" "se
 # batroun: 08:00–23:00, 30-min grid, min 60 → starts are half-hours 16..44 of the day, and on the last day only those <= local now
 check anon "89b last day (batroun): count = active courts × starts between 08:00 and min(now, 22:00)" "select count(*) = (select count(*) from courts where club_id='$CLUB' and active) * greatest(0, least(floor(extract(epoch from (now() at time zone 'Asia/Beirut')::time) / 1800)::int, 44) - 16 + 1) from club_day_slots('$D14') where slug='batroun';" t
 check $P1  "89c hold at the last listed start succeeds (true when nothing is listed yet today)" "select coalesce((select (hold_slot('$CLUB', court_id, start_at, start_at + interval '60 min')).booking_id is not null from (select court_id, start_at from club_day_slots('$D14') where court_id='$COURT' order by start_at desc limit 1) s), true);" t
+
+
+echo "--- AE. player levels (Phase 8)"
+check  $P1 "90a set tennis 7 and padel 3 -> both stored"            "select set_player_level('tennis', 7); select set_player_level('padel', 3); select string_agg(sport||'='||level, ',' order by sport) from my_levels();" "padel=3,tennis=7"
+denied $P1 "90b level 11 rejected"                                 "select set_player_level('padel', 11);"
+denied $P1 "90c level 0 rejected"                                  "select set_player_level('padel', 0);"
+check  $P1 "90d clear padel -> only tennis remains"                "select set_player_level('padel', null); select string_agg(sport||'='||level, ',') from my_levels();" "tennis=7"
+check  $P2 "90e player2 cannot read player1's levels"              "select count(*) from player_levels where profile_id='$P1';" 0
+denied $P2 "90f player2 cannot insert a level for player1"         "insert into player_levels (profile_id, sport, level) values ('$P1','padel',5);"
+check  service "90g level_group boundaries"                        "select level_group(1)||','||level_group(3)||','||level_group(4)||','||level_group(6)||','||level_group(7)||','||level_group(10);" "beginner,beginner,intermediate,intermediate,advanced,advanced"
+denied $P1 "90h post_match with min > max rejected"                "select post_match('$CLUB','tennis', now()+interval '7 day', now()+interval '7 day 1 hour', 6, 4, 2, null, null, 'open');"
+denied $P1 "90i post_match with only min rejected"                 "select post_match('$CLUB','tennis', now()+interval '7 day', now()+interval '7 day 1 hour', 4, null, null, 2, null, null, 'open');"
+MR=$({ as_user $P1; echo "select post_match('$CLUB','tennis', now()+interval '7 day', now()+interval '7 day 1 hour', 4, 6, 2, 'ranged', null, 'open');"; } | $PSQL -At -d $DB | tail -1)
+ML=$({ as_user $P1; echo "select post_match('$CLUB','tennis', now()+interval '7 day 2 hour', now()+interval '7 day 3 hour', null, null, 2, 'all levels', null, 'open');"; } | $PSQL -At -d $DB | tail -1)
+$PSQL -q -d $DB -c "update matches set level='advanced', level_min=null, level_max=null where id='$ML';"   # turn the second into a legacy post (7–10)
+check $P2 "90j player2 with tennis 5: fit=mine shows the 4–6 match, hides the legacy advanced one" "select set_player_level('tennis', 5); select string_agg(note, ',' order by note) from open_matches('tennis', 'mine');" "ranged"
+check $P2 "90k legacy post reports 7–10 and legacy flag"            "select level_min||'-'||level_max||'/'||level_legacy from open_matches('tennis') where match_id='$ML';" "7-10/true"
+check $P2 "90l my_level is returned for the match's sport"         "select my_level from open_matches('tennis') where match_id='$MR';" 5
+check $P3 "90m player3 with no tennis level sees both with fit=mine" "select count(*) from open_matches('tennis', 'mine') where match_id in ('$MR','$ML');" 2
+check $P1 "90n organizer edits range to 3–8 -> stored"             "select update_match('$MR', 2, 3, 8, 'ranged', 'open'); select level_min||'-'||level_max from matches where id='$MR';" "3-8"
+check $P2 "90o participants show numeric level for the sport"      "select join_match('$MR'); select level from match_participants('$MR') where profile_id='$P2';" 5
+check service "90p badminton is a sport"                           "select count(*) from sports where code='badminton';" 1
 
 echo
 echo "checks: $CHECKS, failures: $FAILS"

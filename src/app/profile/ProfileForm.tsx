@@ -4,19 +4,24 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import LevelSheet from "@/components/LevelSheet";
+import { levelLabel } from "@/lib/levels";
 
 type Initial = { name: string; phone: string; level: string; sports: string[]; email_notifications: boolean };
 const LEVELS = [["beginner", "Beginner"], ["intermediate", "Intermediate"], ["advanced", "Advanced"]] as const;
 
 type Manage = { staffHref: string | null; isAdmin: boolean; isCoach: boolean; email: string };
 
-export default function ProfileForm({ initial, next, firstTime, sports, manage }: { initial: Initial; next: string; firstTime: boolean; sports: { code: string; name_en: string }[]; manage: Manage }) {
+export default function ProfileForm({ initial, next, firstTime, sports, manage, levels: initialLevels }: { initial: Initial; next: string; firstTime: boolean; sports: { code: string; name_en: string }[]; manage: Manage; levels: Record<string, number> }) {
   const router = useRouter();
   const [f, setF] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(firstTime);
-  const levelName = (v: string) => LEVELS.find(([k]) => k === v)?.[1] ?? "level not set";
+  const [levels, setLevels] = useState<Record<string, number>>(initialLevels);
+  const [sheet, setSheet] = useState<string | null>(null);          // sport being rated
+  const [onboard, setOnboard] = useState<string[] | null>(null);   // first sign-in: sports still to rate
+  const legacyName = (v: string) => LEVELS.find(([k]) => k === v)?.[1] ?? null;
   const sportName = (code: string) => sports.find((s) => s.code === code)?.name_en ?? code;
 
   async function save(e: React.FormEvent) {
@@ -25,13 +30,31 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage }
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     const { error } = await supabase.from("profiles")
-      .update({ name: f.name.trim(), phone: f.phone.trim() || null, level: f.level || null, sports: f.sports, email_notifications: f.email_notifications })
+      .update({ name: f.name.trim(), phone: f.phone.trim() || null, sports: f.sports, email_notifications: f.email_notifications })
       .eq("id", user!.id);
     if (error) { setBusy(false); setError(error.message); return; }
     setBusy(false);
-    if (firstTime) { router.replace(next); router.refresh(); return; }
+    if (firstTime) {
+      const todo = f.sports.filter((sp) => levels[sp] == null);
+      if (todo.length === 0) { router.replace(next); router.refresh(); return; }
+      setOnboard(todo); setSheet(todo[0]); return;
+    }
     setEditing(false); router.refresh();
   }
+  function onSaved(sport: string, level: number | null) {
+    setLevels((l) => { const n = { ...l }; if (level == null) delete n[sport]; else n[sport] = level; return n; });
+    if (onboard) {
+      const rest = onboard.filter((x) => x !== sport);
+      setOnboard(rest.length ? rest : null);
+      if (rest.length) { setSheet(rest[0]); return; }
+      setSheet(null); router.replace(next); router.refresh(); return;
+    }
+    setSheet(null); router.refresh();
+  }
+  const sheetEl = sheet && (
+    <LevelSheet sport={sheet} sportName={sportName(sheet)} current={levels[sheet] ?? null} legacy={levels[sheet] == null ? legacyName(initial.level) : null}
+      onClose={() => { if (onboard) { onSaved(sheet, levels[sheet] ?? null); } else setSheet(null); }} onSaved={(lv) => onSaved(sheet, lv)} />
+  );
 
   const toggleSport = (s: string) => setF({ ...f, sports: f.sports.includes(s) ? f.sports.filter((x) => x !== s) : [...f.sports, s] });
   const input = "rounded-xl border border-grid bg-white px-4 py-3 text-base outline-none focus:border-action";
@@ -47,15 +70,22 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage }
         <span className="flex h-28 w-28 items-center justify-center rounded-full border-4 border-white bg-turf text-[40px] font-extrabold text-white shadow-[0_0_0_1px_#e6e8e5]" aria-hidden="true">{initials}</span>
         <div className="text-2xl font-extrabold tracking-tight">{initial.name}</div>
         <div className="text-sm text-muted">{manage.email}{initial.phone ? ` · ${initial.phone}` : ""}</div>
-        <button onClick={() => setEditing(true)} className="chip mt-1">Edit name, phone, level</button>
+        <button onClick={() => setEditing(true)} className="chip mt-1">Edit name, phone, sports</button>
       </div>
       <section className="flex flex-col gap-2.5">
         <h2 className="text-xl font-bold">Your sports</h2>
         <div className="flex flex-wrap gap-2">
-          {initial.sports.map((sp) => <button key={sp} onClick={() => setEditing(true)} className="chip gap-2">{sportName(sp)} <span className="text-[#8a918e]">·</span> <b className="text-turf">{levelName(initial.level)}</b></button>)}
+          {initial.sports.map((sp) => (
+            <button key={sp} onClick={() => setSheet(sp)} className="chip gap-2">
+              {sportName(sp)} <span className="text-[#8a918e]">·</span>
+              {levels[sp] != null ? <b className="text-turf">{levelLabel(levels[sp])}</b> : legacyName(initial.level) ? <b className="text-sand">{legacyName(initial.level)} · choose your number</b> : <b className="text-cedar">Set your level</b>}
+            </button>
+          ))}
           <button onClick={() => setEditing(true)} className="chip border-dashed border-cedar font-semibold text-cedar">+ Add a sport</button>
         </div>
+        <Link href="/levels" className="text-sm text-muted">How levels work · <span className="font-semibold text-turf">Find your playing level</span></Link>
       </section>
+      {sheetEl}
       <section className="card overflow-hidden">
         <div className="eyebrow px-4 pb-1.5 pt-3.5">Account</div>
         {row("Activity", "/notifications")}
@@ -88,14 +118,6 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage }
           <input className={input} inputMode="tel" autoComplete="tel" placeholder="03 123 456" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
         </label>
         <fieldset className="flex flex-col gap-2 text-sm">
-          <legend className="mb-1">Level</legend>
-          <div className="flex gap-2">
-            {LEVELS.map(([v, l]) => (
-              <button type="button" key={v} onClick={() => setF({ ...f, level: v })} className={`flex-1 rounded-xl border py-2 ${f.level === v ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>{l}</button>
-            ))}
-          </div>
-        </fieldset>
-        <fieldset className="flex flex-col gap-2 text-sm">
           <legend className="mb-1">Sports</legend>
           <div className="flex flex-wrap gap-2">
             {sports.map((sp) => (
@@ -106,7 +128,9 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage }
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
         <button type="submit" disabled={busy} className="btn btn-primary">{busy ? "Saving…" : firstTime ? "Continue" : "Save"}</button>
         {!firstTime && <button type="button" onClick={() => setEditing(false)} className="btn btn-secondary">Cancel</button>}
+        {firstTime && <p className="text-center text-xs text-muted">Next: your level for each sport (you can say “Not sure yet”).</p>}
       </form>
+      {sheetEl}
     </main>
   );
 }
