@@ -52,6 +52,8 @@ check() { CHECKS=$((CHECKS+1)); local got; got=$({ who_sql $1; echo "$3"; } | $P
 # denied <who> <label> <sql> : must raise (permission denied or a business error)
 denied() { CHECKS=$((CHECKS+1)); local out got; out=$({ who_sql $1; echo "$3"; } | $PSQL -At -d $DB 2>&1 | grep -v set_config); got=$(echo "$out" | grep -m1 ERROR)
   if [ -n "$got" ]; then echo "  ok    $2 ($got)"; else echo "  FAIL  $2 — expected an error, got [$(echo "$out" | tail -1)]"; FAILS=$((FAILS+1)); fi; }
+# claim <label> <0 for pass, anything else for fail> : for checks decided by reading a session's log
+claim() { CHECKS=$((CHECKS+1)); if [ "$2" = 0 ]; then echo "  ok    $1"; else echo "  FAIL  $1"; FAILS=$((FAILS+1)); fi; }
 
 echo "--- A. two players hold the same slot concurrently -> one hold, other slot_taken"
 hold() { { as_user $1; echo "begin; select booking_id from hold_slot('$CLUB','$2', $S, $E); select pg_sleep(1.5); commit;"; } | $PSQL -d $DB 2>&1; }
@@ -926,8 +928,13 @@ denied $P1 "94o a player gets no customer list"                      "select cou
 check $ADMIN "94o2 a suggestion carries a name and phone only, never a player id" "select count(*) from information_schema.routines r join information_schema.parameters p on p.specific_name=r.specific_name where r.routine_name='club_recent_guests' and p.parameter_mode='TABLE' and p.parameter_name in ('profile_id','player_id');" 0
 check $ADMIN "94p common duration is a whole number of slots within the club's range" "select (club_common_duration('$CLUB') % slot_minutes = 0 and club_common_duration('$CLUB') between min_booking_minutes and max_booking_minutes) from clubs where id='$CLUB';" t
 check $ADMIN "94q free-now lists every active court once"            "select count(*) = (select count(*) from courts where club_id='$CLUB' and active) from club_courts_free_now('$CLUB');" t
-# "busy right now" fixtures have to sit on the club's grid, so open the club round the clock for them
-$PSQL -q -d $DB -c "update clubs set open_time='00:00', close_time='24:00' where id='$CLUB';" >/dev/null
+# "busy right now" fixtures have to sit on the club's grid, so open the club round the clock for them.
+# Opening hours are not enough on their own: a slot around "now" must also stay inside one local day,
+# or the fixture's own insert is refused and the checks below test nothing. So park the club in a
+# fixed-offset zone where this moment is the middle of the day. Both this block and the free-now
+# checks further down use it.
+TZ_MID=$($PSQL -At -q -d $DB -c "select 'Etc/GMT' || case when h > 0 then '+' else '' end || h from (select extract(hour from now() at time zone 'UTC')::int - 12 h) t" | head -1)
+$PSQL -q -d $DB -c "update clubs set timezone='$TZ_MID', open_time='00:00', close_time='24:00' where id='$CLUB';" >/dev/null
 H="(date_trunc('hour', now()) + case when extract(minute from now()) >= 30 then interval '30 min' else interval '0 min' end)"
 $PSQL -q -d $DB -c "insert into bookings (club_id, court_id, guest_name, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$CLUB','$COURT2','Now Playing', $H - interval '30 min', $H + interval '30 min', 'confirmed','staff','$ADMIN',30,0);" >/dev/null
 $PSQL -q -d $DB -c "insert into blocks (club_id, court_id, start_at, end_at, reason, created_by) values ('$CLUB','$COURT3', $H, $H + interval '30 min', 'maintenance','$ADMIN');" >/dev/null
@@ -943,7 +950,7 @@ $PSQL -q -d $DB -c "insert into blocks (club_id, court_id, start_at, end_at, rea
 check $ADMIN "94v free-at follows the chain to the real end"          "select busy||'/'||(free_at = $H + interval '60 min') from club_courts_free_now('$CLUB') where court_id='$COURT3';" "true/true"
 COURT4=$($PSQL -At -q -d $DB -c "select id from courts where name='Tennis 2'" | head -1)
 check $ADMIN "94w a court with nothing on it has no free-at"          "select busy||'/'||(free_at is null) from club_courts_free_now('$CLUB') where court_id='$COURT4';" "false/true"
-$PSQL -q -d $DB -c "update clubs set open_time='08:00', close_time='23:00' where id='$CLUB';" >/dev/null
+$PSQL -q -d $DB -c "update clubs set timezone='Asia/Beirut', open_time='08:00', close_time='23:00' where id='$CLUB';" >/dev/null
 
 # 0047: the desk cannot insert a booking straight into the table any more — staff_book() or nothing
 # a perfectly valid slot, so only the missing policy can refuse it
@@ -972,7 +979,6 @@ check $STAFF_B "96e and asking under their own club returns nothing"   "select c
 # These checks book slots that contain "now", so the slot must not straddle the club's local midnight
 # — near midnight in Beirut the fixture's own inserts would be refused and the checks would pass or
 # fail by the hour. Park the club in a fixed-offset zone where this moment is the middle of the day.
-TZ_MID=$($PSQL -At -q -d $DB -c "select 'Etc/GMT' || case when h > 0 then '+' else '' end || h from (select extract(hour from now() at time zone 'UTC')::int - 12 h) t" | head -1)
 $PSQL -q -d $DB -c "update clubs set timezone='$TZ_MID', open_time='00:00', close_time='24:00' where id='$CLUB';" >/dev/null
 H2="(date_trunc('hour', now()) + case when extract(minute from now()) >= 30 then interval '30 min' else interval '0 min' end)"
 # the reviewer's case: a block ending soon, then a held slot whose hold dies before that slot starts
@@ -1209,10 +1215,20 @@ check service "104o and only one cover exists"                        "select co
 for i in 11 12 13 14 15 16; do { as_service; echo "select add_club_gallery('$ADMIN','$CLUB','$(mpath $CLUB $i)','shot $i',1200,900);"; } | $PSQL -q -d $DB >/dev/null; done
 check service "104p six photos"                                       "select count(*) from club_media where club_id='$CLUB' and kind='gallery';" 6
 denied service "104q a seventh is refused"                            "select add_club_gallery('$ADMIN','$CLUB','$(mpath $CLUB 17)',null,1200,900);"
-{ as_service; echo "begin; select pg_sleep(0.1); select add_club_gallery('$ADMIN','$CLUB','$(mpath $CLUB 18)',null,1200,900); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
-{ as_service; echo "begin; select pg_sleep(0.1); select add_club_gallery('$ADMIN','$CLUB','$(mpath $CLUB 19)',null,1200,900); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
+# Two requests racing for the LAST place. With six already there both would be refused whatever the
+# locking did, which tested nothing — so go back to five, and give each a path of its own. The first
+# transaction holds the club row while it works; the second must wait, then find the gallery full.
+{ as_service; echo "select remove_club_media('$ADMIN',(select id from club_media where club_id='$CLUB' and kind='gallery' order by sort desc limit 1));"; } | $PSQL -q -d $DB >/dev/null
+check service "104r five photos, one place left"                      "select count(*) from club_media where club_id='$CLUB' and kind='gallery';" 5
+{ as_service; echo "begin; select add_club_gallery('$ADMIN','$CLUB','$(mpath $CLUB 18)',null,1200,900); select pg_sleep(1.5); commit;"; } | $PSQL -d $DB > /tmp/cb_gal1.log 2>&1 &
+sleep 0.5
+{ as_service; echo "select add_club_gallery('$ADMIN','$CLUB','$(mpath $CLUB 19)',null,1200,900);"; } | $PSQL -d $DB > /tmp/cb_gal2.log 2>&1 &
 wait
-check service "104r two at once cannot both get in"                   "select count(*) from club_media where club_id='$CLUB' and kind='gallery';" 6
+if grep -q ERROR /tmp/cb_gal1.log; then claim "104ra the first of the two takes the last place" 1
+else claim "104ra the first of the two takes the last place" 0; fi
+if grep -q "ERROR:  gallery_full" /tmp/cb_gal2.log; then claim "104rb the second is refused as full, not by chance" 0
+else claim "104rb the second is refused as full, not by chance ($(grep -m1 ERROR /tmp/cb_gal2.log))" 1; fi
+check service "104rc and the club ends with six, not seven"           "select count(*) from club_media where club_id='$CLUB' and kind='gallery';" 6
 denied service "104s a caption over 80 characters is refused"         "select set_gallery_caption('$ADMIN',(select id from club_media where club_id='$CLUB' and kind='gallery' limit 1), repeat('x', 81));"
 denied $ADMIN  "104t staff cannot set a caption from the browser"     "select set_gallery_caption('$ADMIN',(select id from club_media where club_id='$CLUB' and kind='gallery' limit 1), 'hi');"
 # reordering against a stale screen must not silently drop a photo
