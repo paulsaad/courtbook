@@ -1074,6 +1074,44 @@ check service "100t only one reservation exists for that slot"      "select coun
 $PSQL -q -d $DB -c "select set_config('request.jwt.claim.sub','$ADMIN',false); select set_club_payment_mode('$CB','simulated');" >/dev/null 2>&1
 $PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
 
+# 0052: a token is a retry of one request, not a licence to reuse
+$PSQL -q -d $DB -c "update clubs set payment_mode='at_desk', max_upcoming_bookings=10 where id='$CB';" >/dev/null
+TK2=$($PSQL -At -q -d $DB -c "select gen_random_uuid()" | head -1)
+{ as_user $P4; echo "select book_at_desk('$COURT', (current_date + 10 + time '09:00') at time zone 'Asia/Beirut', (current_date + 10 + time '10:00') at time zone 'Asia/Beirut', '$TK2');"; } | $PSQL -q -d $DB >/dev/null
+denied $P4 "100u the same token with a different day is refused"     "select book_at_desk('$COURT', (current_date + 11 + time '09:00') at time zone 'Asia/Beirut', (current_date + 11 + time '10:00') at time zone 'Asia/Beirut', '$TK2');"
+denied $P4 "100v the same token with a different court is refused"   "select book_at_desk('$COURT2', (current_date + 10 + time '09:00') at time zone 'Asia/Beirut', (current_date + 10 + time '10:00') at time zone 'Asia/Beirut', '$TK2');"
+denied $P4 "100w the same token with a different length is refused"  "select book_at_desk('$COURT', (current_date + 10 + time '09:00') at time zone 'Asia/Beirut', (current_date + 10 + time '10:30') at time zone 'Asia/Beirut', '$TK2');"
+check service "100x and no second booking was made"                  "select count(*) from bookings where client_token='$TK2';" 1
+
+# 0052: a late confirmation must not invent money owed by a club that never took any
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
+LP=$({ as_user $P2; echo "select payment_id from hold_slot('$CB','$COURT3', (current_date + 10 + time '19:00') at time zone 'Asia/Beirut', (current_date + 10 + time '20:00') at time zone 'Asia/Beirut');"; } | $PSQL -At -d $DB | tail -1)
+{ as_user $ADMIN; echo "select set_club_payment_mode('$CB','at_desk');"; } | $PSQL -q -d $DB >/dev/null
+denied service "100y a stale confirm cannot create a refund"         "select confirm_payment('$LP','stale-ref', (select total_usd from payments where id='$LP'));"
+check service "100z the payment is still expired, owing nothing"     "select status from payments where id='$LP';" "expired"
+# but money actually taken can still be refunded after the switch
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
+PP=$({ as_user $P3; echo "select payment_id from hold_slot('$CB','$COURT3', (current_date + 11 + time '19:00') at time zone 'Asia/Beirut', (current_date + 11 + time '20:00') at time zone 'Asia/Beirut');"; } | $PSQL -At -d $DB | tail -1)
+$PSQL -q -d $DB -c "select confirm_payment('$PP','real-ref', (select total_usd from payments where id='$PP'));" >/dev/null
+{ as_user $ADMIN; echo "select set_club_payment_mode('$CB','at_desk');"; } | $PSQL -q -d $DB >/dev/null
+check service "101a a payment taken before the switch can be refunded" "update payments set status='refund_due' where id='$PP'; select status from payments where id='$PP';" "refund_due"
+
+# 0052: a mode switch and a reservation cannot interleave
+$PSQL -q -d $DB -c "update clubs set payment_mode='at_desk' where id='$CB';" >/dev/null
+{ as_user $ADMIN; echo "begin; select set_club_payment_mode('$CB','simulated'); select pg_sleep(1.5); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
+sleep 0.8
+{ as_user $P4; echo "select book_at_desk('$COURT', (current_date + 9 + time '21:00') at time zone 'Asia/Beirut', (current_date + 9 + time '22:00') at time zone 'Asia/Beirut', gen_random_uuid());"; } | $PSQL -q -d $DB >/dev/null 2>&1
+wait
+check service "101b a reservation racing a switch to in-app never lands" "select count(*) from bookings where court_id='$COURT' and start_at = (current_date + 9 + time '21:00') at time zone 'Asia/Beirut' and status='confirmed';" 0
+# and the reverse: a hold racing a switch to at-the-desk
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
+{ as_user $ADMIN; echo "begin; select set_club_payment_mode('$CB','at_desk'); select pg_sleep(1.5); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
+sleep 0.8
+{ as_user $P2; echo "select hold_slot('$CB','$COURT3', (current_date + 12 + time '19:00') at time zone 'Asia/Beirut', (current_date + 12 + time '20:00') at time zone 'Asia/Beirut');"; } | $PSQL -q -d $DB >/dev/null 2>&1
+wait
+check service "101c a hold racing a switch to at-the-desk leaves no payment" "select count(*) from payments p join bookings b on b.id=p.booking_id where b.court_id='$COURT3' and b.start_at = (current_date + 12 + time '19:00') at time zone 'Asia/Beirut' and p.status in ('pending','paid');" 0
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
+
 echo
 echo "checks: $CHECKS, failures: $FAILS"
 [ "$FAILS" -eq 0 ] || { echo "SUITE FAILED"; exit 1; }
