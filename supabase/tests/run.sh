@@ -1092,7 +1092,7 @@ check service "100z the payment is still expired, owing nothing"     "select sta
 # but money actually taken can still be refunded after the switch
 $PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
 PP=$({ as_user $P3; echo "select payment_id from hold_slot('$CB','$COURT3', (current_date + 11 + time '19:00') at time zone 'Asia/Beirut', (current_date + 11 + time '20:00') at time zone 'Asia/Beirut');"; } | $PSQL -At -d $DB | tail -1)
-$PSQL -q -d $DB -c "select confirm_payment('$PP','real-ref', (select total_usd from payments where id='$PP'));" >/dev/null
+$PSQL -q -d $DB -c "update payments set provider='whish' where id='$PP'; select confirm_payment('$PP','real-ref', (select total_usd from payments where id='$PP'));" >/dev/null
 { as_user $ADMIN; echo "select set_club_payment_mode('$CB','at_desk');"; } | $PSQL -q -d $DB >/dev/null
 check service "101a a payment taken before the switch can be refunded" "update payments set status='refund_due' where id='$PP'; select status from payments where id='$PP';" "refund_due"
 
@@ -1115,7 +1115,7 @@ $PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >
 # 0053: a refund must be able to finish, not just start
 $PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
 FP=$({ as_user $P2; echo "select payment_id from hold_slot('$CB','$COURT3', (current_date + 13 + time '19:00') at time zone 'Asia/Beirut', (current_date + 13 + time '20:00') at time zone 'Asia/Beirut');"; } | $PSQL -At -d $DB | tail -1)
-$PSQL -q -d $DB -c "select confirm_payment('$FP','lifecycle-ref', (select total_usd from payments where id='$FP'));" >/dev/null
+$PSQL -q -d $DB -c "update payments set provider='whish' where id='$FP'; select confirm_payment('$FP','lifecycle-ref', (select total_usd from payments where id='$FP'));" >/dev/null
 { as_user $ADMIN; echo "select set_club_payment_mode('$CB','at_desk');"; } | $PSQL -q -d $DB >/dev/null
 check service "101d paid -> refund_due after the switch"             "update payments set status='refund_due' where id='$FP'; select status from payments where id='$FP';" "refund_due"
 check service "101e refund_due -> refunded completes the refund"     "update payments set status='refunded' where id='$FP'; select status from payments where id='$FP';" "refunded"
@@ -1143,7 +1143,7 @@ $PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >
 $PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
 LT=$({ as_user $P2; echo "select payment_id from hold_slot('$CB','$COURT4', (current_date + 13 + time '19:00') at time zone 'Asia/Beirut', (current_date + 13 + time '20:00') at time zone 'Asia/Beirut');"; } | $PSQL -At -d $DB | tail -1)
 # the hold runs out before the gateway answers
-$PSQL -q -d $DB -c "update bookings set hold_expires_at = now() - interval '1 min' where id = (select booking_id from payments where id='$LT'); select expire_stale_holds('$COURT4');" >/dev/null
+$PSQL -q -d $DB -c "update payments set provider='whish' where id='$LT'; update bookings set hold_expires_at = now() - interval '1 min' where id = (select booking_id from payments where id='$LT'); select expire_stale_holds('$COURT4');" >/dev/null
 check service "102a a late receipt is recorded as owed back"          "select confirm_payment('$LT','late-ref', (select total_usd from payments where id='$LT'));" "refund_due"
 check service "102b and it carries evidence that money was collected" "select paid_at is not null from payments where id='$LT';" "t"
 check service "102c it is not counted as revenue"                     "select status from payments where id='$LT';" "refund_due"
@@ -1160,6 +1160,21 @@ $PSQL -q -d $DB -c "update payments set provider='whish' where id='$GW'; update 
 { as_user $ADMIN; echo "select set_club_payment_mode('$CB','at_desk');"; } | $PSQL -q -d $DB >/dev/null
 check service "102f a real gateway receipt is recorded even after the switch" "select confirm_payment('$GW','whish-late-ref', (select total_usd from payments where id='$GW'));" "refund_due"
 check service "102g and that refund can be completed"                 "update payments set status='refunded', refunded_at=now() where id='$GW'; select status from payments where id='$GW';" "refunded"
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
+
+# 0055: recovering old refund rows without inventing either the money or the moment
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
+R1=$({ as_user $P2; echo "select payment_id from hold_slot('$CB','$COURT4', (current_date + 11 + time '08:00') at time zone 'Asia/Beirut', (current_date + 11 + time '09:00') at time zone 'Asia/Beirut');"; } | $PSQL -At -d $DB | tail -1)
+R2=$({ as_user $P3; echo "select payment_id from hold_slot('$CB','$COURT4', (current_date + 11 + time '10:00') at time zone 'Asia/Beirut', (current_date + 11 + time '11:00') at time zone 'Asia/Beirut');"; } | $PSQL -At -d $DB | tail -1)
+# two legacy rows as the old code left them: owed back, no paid_at, one real gateway and one simulated
+$PSQL -q -d $DB -c "update payments set status='refund_due', provider='whish', provider_ref='legacy-whish', paid_at=null, collected=false where id='$R1'; update payments set status='refund_due', provider='simulated', provider_ref='legacy-sim', paid_at=null, collected=false where id='$R2';" >/dev/null
+$PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/migrations/0055_collection_evidence.sql >/dev/null 2>&1
+check service "103a a real gateway row is recovered as collected"     "select collected from payments where id='$R1';" "t"
+check service "103b without claiming a time it does not know"         "select paid_at is null from payments where id='$R1';" "t"
+check service "103c a simulated row is not treated as money"          "select collected from payments where id='$R2';" "f"
+{ as_user $ADMIN; echo "select set_club_payment_mode('$CB','at_desk');"; } | $PSQL -q -d $DB >/dev/null
+check service "103d the real one can still be refunded in desk mode"  "update payments set status='refunded', refunded_at=now() where id='$R1'; select status from payments where id='$R1';" "refunded"
+denied service "103e the simulated one cannot"                        "update payments set status='refunded' where id='$R2';"
 $PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
 
 echo
