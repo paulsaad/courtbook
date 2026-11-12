@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import ClubPhotos from "@/components/ClubPhotos";
+import type { ClubMedia } from "@/lib/media";
 import { friendlyError } from "@/lib/types";
 import type { Governorate, Sport, Town, TownWithArea } from "@/lib/geo";
 
@@ -25,7 +27,7 @@ const primary = "rounded-xl bg-action px-4 py-2.5 font-medium text-white disable
 const hhmm = (t: string) => t.slice(0, 5);
 const section = "flex flex-col gap-3 rounded-2xl border border-grid bg-white p-4";
 
-export default function ClubSettings({ club, courts, rules, staff, coaches, isAdmin, backHref, areas, sports, town }: { club: ClubRow; courts: CourtRow[]; rules: RuleRow[]; staff: StaffRow[]; coaches: CoachReq[]; isAdmin: boolean; backHref: string; areas: Governorate[]; sports: Sport[]; town: TownWithArea | null }) {
+export default function ClubSettings({ club, courts, rules, staff, coaches, isAdmin, backHref, areas, sports, town, media }: { club: ClubRow; courts: CourtRow[]; rules: RuleRow[]; staff: StaffRow[]; coaches: CoachReq[]; isAdmin: boolean; backHref: string; areas: Governorate[]; sports: Sport[]; town: TownWithArea | null; media: ClubMedia[] }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,6 +61,7 @@ export default function ClubSettings({ club, courts, rules, staff, coaches, isAd
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
 
       {isAdmin && <AdminBasics club={club} busy={busy} run={run} />}
+      <ClubPhotos clubId={club.id} initial={media} />
       <Location f={f} setF={setF} areas={areas} town={town} busy={busy} save={save} />
       <Hours f={f} setF={setF} busy={busy} save={save} />
       <Courts clubId={club.id} courts={courts} sports={sports} busy={busy} run={run} />

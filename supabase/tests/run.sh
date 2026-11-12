@@ -727,7 +727,7 @@ denied anon    "Q4 anon quote with end before start rejected"    "select quote_p
 denied anon    "Q5 anon quote above club max (4 h) rejected"     "select quote_price('$COURT', (current_date + 12 + time '10:00') at time zone 'Asia/Beirut', (current_date + 12 + time '14:00') at time zone 'Asia/Beirut');"
 denied anon    "Q6 expire_stale_holds not callable by anon"      "select expire_stale_holds('$COURT');"
 denied anon    "Q7 lock_courts not callable by anon"             "select lock_courts(array['$COURT'::uuid]);"
-check service "I7 anon can read only the public tables"      "select string_agg(table_name, ',' order by table_name) from information_schema.tables t where t.table_schema='public' and has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'SELECT');" "clubs,courts,districts,governorates,price_rules,public_occupancy,sports"
+check service "I7 anon can read only the public tables"      "select string_agg(table_name, ',' order by table_name) from information_schema.tables t where t.table_schema='public' and has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'SELECT');" "club_media,clubs,courts,districts,governorates,price_rules,public_occupancy,sports"
 check service "I8 anon cannot write any table"                "select count(*) from information_schema.tables t where t.table_schema='public' and (has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'INSERT') or has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'UPDATE') or has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'DELETE'));" 0
 check service "I9 anon reads towns geography columns only"    "select string_agg(column_name, ',' order by column_name) from information_schema.columns c where table_name='towns' and has_column_privilege('anon', 'public.towns', column_name, 'SELECT');" "created_at,district_code,id,lat,lng,name_ar,name_en,seeded"
 
@@ -1176,6 +1176,46 @@ check service "103c a simulated row is not treated as money"          "select co
 check service "103d the real one can still be refunded in desk mode"  "update payments set status='refunded', refunded_at=now() where id='$R1'; select status from payments where id='$R1';" "refunded"
 denied service "103e the simulated one cannot"                        "update payments set status='refunded' where id='$R2';"
 $PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
+
+echo "--- AJ. club images (Phase 11a)"
+check service "104a a club with no cover_url gets no media row"      "select count(*) from club_media where club_id='$CLUB';" 0
+check $ADMIN "104b staff of the club may add a cover"                "select media_id is not null from set_club_image('$CLUB','cover','clubs/$CLUB/a.webp',1600,600,null);" "t"
+check service "104c cover_url now points at the stored object"       "select cover_url like '%club-media/clubs/%' from clubs where id='$CLUB';" "t"
+denied $STAFF_B "104d staff of another club cannot"                  "select set_club_image('$CLUB','cover','clubs/$CLUB/b.webp',1600,600,null);"
+denied $P1 "104e a player cannot"                                    "select set_club_image('$CLUB','cover','clubs/$CLUB/b.webp',1600,600,null);"
+denied $ADMIN "104f replacing without naming the current image is refused" "select set_club_image('$CLUB','cover','clubs/$CLUB/c.webp',1600,600,null);"
+COV=$($PSQL -At -q -d $DB -c "select id from club_media where club_id='$CLUB' and kind='cover'" | head -1)
+check $ADMIN "104g replacing it, naming it, returns the old file to clean up" "select old_path from set_club_image('$CLUB','cover','clubs/$CLUB/c.webp',1600,600,'$COV');" "clubs/$CLUB/a.webp"
+check service "104h and only one cover exists"                       "select count(*) from club_media where club_id='$CLUB' and kind='cover';" 1
+# the gallery cap holds even when two uploads land together
+for i in 1 2 3 4 5 6; do { as_user $ADMIN; echo "select add_club_gallery('$CLUB','clubs/$CLUB/g$i.webp','shot $i',1200,900);"; } | $PSQL -q -d $DB >/dev/null; done
+check service "104i six photos"                                      "select count(*) from club_media where club_id='$CLUB' and kind='gallery';" 6
+denied $ADMIN "104j a seventh is refused"                            "select add_club_gallery('$CLUB','clubs/$CLUB/g7.webp',null,1200,900);"
+{ as_user $ADMIN; echo "begin; select pg_sleep(0.1); select add_club_gallery('$CLUB','clubs/$CLUB/x1.webp',null,1200,900); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
+{ as_user $ADMIN; echo "begin; select pg_sleep(0.1); select add_club_gallery('$CLUB','clubs/$CLUB/x2.webp',null,1200,900); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
+wait
+check service "104k two at once cannot both get in"                  "select count(*) from club_media where club_id='$CLUB' and kind='gallery';" 6
+denied $ADMIN "104l a caption over 80 characters is refused"         "select set_gallery_caption((select id from club_media where club_id='$CLUB' and kind='gallery' limit 1), repeat('x', 81));"
+# reordering against a stale screen must not silently drop a photo
+G=$($PSQL -At -q -d $DB -c "select array_agg(id order by sort) from club_media where club_id='$CLUB' and kind='gallery'" | head -1)
+denied $ADMIN "104m reordering with a photo missing is refused"      "select reorder_club_gallery('$CLUB', (select array_agg(id order by sort) from (select id, sort from club_media where club_id='$CLUB' and kind='gallery' limit 5) s));"
+check $ADMIN "104n reordering with all of them works"                "select reorder_club_gallery('$CLUB', '$G'::uuid[]); select string_agg(sort::text,',' order by sort) from club_media where club_id='$CLUB' and kind='gallery';" "0,1,2,3,4,5"
+# removing closes the gap
+RM=$($PSQL -At -q -d $DB -c "select id from club_media where club_id='$CLUB' and kind='gallery' order by sort limit 1" | head -1)
+check $ADMIN "104o removing returns the file to delete"              "select remove_club_media('$RM') like 'clubs/%';" "t"
+check service "104p and the remaining photos are numbered 0..4"      "select string_agg(sort::text,',' order by sort) from club_media where club_id='$CLUB' and kind='gallery';" "0,1,2,3,4"
+denied $ADMIN "104q a file still in use cannot be filed as unused"   "select record_media_orphan('$CLUB', (select path from club_media where club_id='$CLUB' and kind='gallery' limit 1), 'test');"
+{ as_user $ADMIN; echo "select record_media_orphan('$CLUB','clubs/$CLUB/gone.webp','test');"; } | $PSQL -q -d $DB >/dev/null
+check service "104r a file nothing points at is filed for cleanup"   "select count(*) from media_orphans where path='clubs/$CLUB/gone.webp';" 1
+denied $P1 "104s a player cannot list unused files"                  "select count(*) from media_orphans_list();"
+check $ADMIN "104t an admin can"                                     "select count(*) >= 1 from media_orphans_list();" "t"
+# venue information, with three states
+check $ADMIN "104u facilities start unconfirmed"                     "select facilities_confirmed_at is null from clubs where id='$CLUB_B';" "t"
+check $ADMIN "104v staff record yes, no and not-confirmed"           "select set_club_venue('$CLUB','A friendly club.','Gate on the main road.', true, true, null, false, null, true, true); select coalesce(has_parking::text,'?')||coalesce(has_showers::text,'?')||coalesce(has_equipment_rental::text,'?') from clubs where id='$CLUB';" "true?false"
+check service "104w and the answer is dated"                         "select facilities_confirmed_at is not null from clubs where id='$CLUB';" "t"
+denied $P1 "104x a player cannot change venue information"           "select set_club_venue('$CLUB','hack',null,null,null,null,null,null,null,null);"
+denied $ADMIN "104y a description over 600 characters is refused"    "select set_club_venue('$CLUB', repeat('x',601), null,null,null,null,null,null,null,null);"
+check service "104z anyone may read a club's images"                 "select count(*) >= 1 from club_media where club_id='$CLUB';" "t"
 
 echo
 echo "checks: $CHECKS, failures: $FAILS"

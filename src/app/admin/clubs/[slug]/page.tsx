@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import type { ClubMedia } from "@/lib/media";
 import ClubSettings from "@/components/ClubSettings";
 import { loadRefData, loadTown } from "@/lib/geo";
 
@@ -21,5 +22,8 @@ export default async function AdminClubPage({ params }: { params: Promise<{ slug
     loadRefData(supabase),
     loadTown(supabase, club.town_id ?? null),
   ]);
-  return <ClubSettings club={club} courts={courts ?? []} rules={rules ?? []} staff={(staff ?? []) as { profile_id: string; name: string | null; email: string }[]} coaches={(coachReqs ?? []) as { coach_id: string; name: string | null; sports: string[]; price_usd: number; status: string }[]} isAdmin backHref="/admin" areas={ref.areas} sports={ref.sports} town={town} />;
+  const { data: media } = await supabase.from("club_media")
+    .select("id, kind, path, external_url, caption, sort, width, height").eq("club_id", club.id).order("sort");
+
+  return <ClubSettings club={club} courts={courts ?? []} rules={rules ?? []} staff={(staff ?? []) as { profile_id: string; name: string | null; email: string }[]} coaches={(coachReqs ?? []) as { coach_id: string; name: string | null; sports: string[]; price_usd: number; status: string }[]} isAdmin backHref="/admin" areas={ref.areas} sports={ref.sports} town={town} media={(media ?? []) as ClubMedia[]} />;
 }
