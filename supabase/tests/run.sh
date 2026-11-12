@@ -727,7 +727,9 @@ denied anon    "Q4 anon quote with end before start rejected"    "select quote_p
 denied anon    "Q5 anon quote above club max (4 h) rejected"     "select quote_price('$COURT', (current_date + 12 + time '10:00') at time zone 'Asia/Beirut', (current_date + 12 + time '14:00') at time zone 'Asia/Beirut');"
 denied anon    "Q6 expire_stale_holds not callable by anon"      "select expire_stale_holds('$COURT');"
 denied anon    "Q7 lock_courts not callable by anon"             "select lock_courts(array['$COURT'::uuid]);"
-check service "I7 anon can read only the public tables"      "select string_agg(table_name, ',' order by table_name) from information_schema.tables t where t.table_schema='public' and has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'SELECT');" "club_media,clubs,courts,districts,governorates,price_rules,public_occupancy,sports"
+check service "I7 anon can read only the public tables"      "select string_agg(table_name, ',' order by table_name) from information_schema.tables t where t.table_schema='public' and has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'SELECT');" "clubs,courts,districts,governorates,price_rules,public_occupancy,sports"
+# club_media is read column by column instead, so the uploader's identity stays private
+check service "I7b and of a club's images, only the public columns" "select string_agg(column_name, ',' order by column_name) from information_schema.columns c where c.table_name='club_media' and has_column_privilege('anon','club_media',column_name,'SELECT');" "caption,club_id,external_url,height,id,kind,path,sort,width"
 check service "I8 anon cannot write any table"                "select count(*) from information_schema.tables t where t.table_schema='public' and (has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'INSERT') or has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'UPDATE') or has_table_privilege('anon', quote_ident(t.table_schema)||'.'||quote_ident(t.table_name), 'DELETE'));" 0
 check service "I9 anon reads towns geography columns only"    "select string_agg(column_name, ',' order by column_name) from information_schema.columns c where table_name='towns' and has_column_privilege('anon', 'public.towns', column_name, 'SELECT');" "created_at,district_code,id,lat,lng,name_ar,name_en,seeded"
 
@@ -967,7 +969,11 @@ denied $STAFF_B "96d staff of another club cannot either"              "select c
 check $STAFF_B "96e and asking under their own club returns nothing"   "select count(*) from club_booking_contacts('$CLUB_B', array['$APPB']::uuid[]);" 0
 
 # 0049: a hold only occupies its slot until the hold runs out
-$PSQL -q -d $DB -c "update clubs set open_time='00:00', close_time='24:00' where id='$CLUB';" >/dev/null
+# These checks book slots that contain "now", so the slot must not straddle the club's local midnight
+# — near midnight in Beirut the fixture's own inserts would be refused and the checks would pass or
+# fail by the hour. Park the club in a fixed-offset zone where this moment is the middle of the day.
+TZ_MID=$($PSQL -At -q -d $DB -c "select 'Etc/GMT' || case when h > 0 then '+' else '' end || h from (select extract(hour from now() at time zone 'UTC')::int - 12 h) t" | head -1)
+$PSQL -q -d $DB -c "update clubs set timezone='$TZ_MID', open_time='00:00', close_time='24:00' where id='$CLUB';" >/dev/null
 H2="(date_trunc('hour', now()) + case when extract(minute from now()) >= 30 then interval '30 min' else interval '0 min' end)"
 # the reviewer's case: a block ending soon, then a held slot whose hold dies before that slot starts
 $PSQL -q -d $DB -c "delete from blocks where club_id='$CLUB' and court_id='$COURT4'; delete from bookings where club_id='$CLUB' and court_id='$COURT4';" >/dev/null
@@ -986,7 +992,7 @@ check $ADMIN "97c an expired hold leaves the court free"              "select bu
 $PSQL -q -d $DB -c "delete from bookings where club_id='$CLUB' and court_id='$COURT4';" >/dev/null
 $PSQL -q -d $DB -c "insert into bookings (club_id, court_id, guest_name, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$CLUB','$COURT4','Confirmed', $H2, $H2 + interval '60 min', 'confirmed','staff','$ADMIN',30,0);" >/dev/null
 check $ADMIN "97d a confirmed booking is unaffected by the hold rule"  "select busy||'/'||(free_at = $H2 + interval '60 min') from club_courts_free_now('$CLUB') where court_id='$COURT4';" "true/true"
-$PSQL -q -d $DB -c "update clubs set open_time='08:00', close_time='23:00' where id='$CLUB';" >/dev/null
+$PSQL -q -d $DB -c "update clubs set timezone='Asia/Beirut', open_time='08:00', close_time='23:00' where id='$CLUB';" >/dev/null
 
 # moving a booking must land on the day it is given, not on whatever day the calendar happens to show
 $PSQL -q -d $DB -c "delete from bookings where club_id='$CLUB' and court_id='$COURT4';" >/dev/null
@@ -1178,45 +1184,73 @@ denied service "103e the simulated one cannot"                        "update pa
 $PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
 
 echo "--- AJ. club images (Phase 11a)"
-check service "104a a club with no cover_url gets no media row"      "select count(*) from club_media where club_id='$CLUB';" 0
-check $ADMIN "104b staff of the club may add a cover"                "select media_id is not null from set_club_image('$CLUB','cover','clubs/$CLUB/a.webp',1600,600,null);" "t"
-check service "104c cover_url now points at the stored object"       "select cover_url like '%club-media/clubs/%' from clubs where id='$CLUB';" "t"
-denied $STAFF_B "104d staff of another club cannot"                  "select set_club_image('$CLUB','cover','clubs/$CLUB/b.webp',1600,600,null);"
-denied $P1 "104e a player cannot"                                    "select set_club_image('$CLUB','cover','clubs/$CLUB/b.webp',1600,600,null);"
-denied $ADMIN "104f replacing without naming the current image is refused" "select set_club_image('$CLUB','cover','clubs/$CLUB/c.webp',1600,600,null);"
+# Publishing an image is a server-only operation. The upload route signs in the person, processes the
+# file and then asks the database to publish it, naming who asked. The database still decides whether
+# that person may touch the club, and whether the path is one the route could have produced.
+mpath() { printf 'clubs/%s/%08d-0000-4000-8000-000000000000.webp' "$1" "$2"; }
+MP1=$(mpath $CLUB 1); MP3=$(mpath $CLUB 3)
+check service "104a a club with no cover_url gets no media row"       "select count(*) from club_media where club_id='$CLUB';" 0
+check service "104b the server may publish a cover for club staff"    "select media_id is not null from set_club_image('$ADMIN','$CLUB','cover','$MP1',1600,600,null);" "t"
+check service "104c cover_url is absolute, not relative to the app"   "select cover_url like 'https://%/storage/v1/object/public/club-media/clubs/%' from clubs where id='$CLUB';" "t"
+denied $ADMIN  "104d staff cannot publish straight from the browser"  "select set_club_image('$ADMIN','$CLUB','cover','$MP3',1600,600,null);"
+denied $P1     "104e nor can a player"                                "select set_club_image('$P1','$CLUB','cover','$MP3',1600,600,null);"
+denied anon    "104f nor can a stranger"                              "select set_club_image('$ADMIN','$CLUB','cover','$MP3',1600,600,null);"
+denied service "104g the server cannot publish for other club's staff" "select set_club_image('$STAFF_B','$CLUB','cover','$MP3',1600,600,null);"
+denied service "104h nor on behalf of a player"                       "select set_club_image('$P1','$CLUB','cover','$MP3',1600,600,null);"
+denied service "104i nor for nobody at all"                           "select set_club_image(null,'$CLUB','cover','$MP3',1600,600,null);"
+denied service "104j a path belonging to another club is refused"     "select set_club_image('$ADMIN','$CLUB','cover','$(mpath $CLUB_B 9)',1600,600,null);"
+denied service "104k a file the route never produced is refused"      "select set_club_image('$ADMIN','$CLUB','cover','clubs/$CLUB/evil.php',1600,600,null);"
+denied service "104l a path climbing out of the folder is refused"    "select set_club_image('$ADMIN','$CLUB','cover','clubs/$CLUB/../x.webp',1600,600,null);"
+denied service "104m replacing without naming the current image"      "select set_club_image('$ADMIN','$CLUB','cover','$MP3',1600,600,null);"
 COV=$($PSQL -At -q -d $DB -c "select id from club_media where club_id='$CLUB' and kind='cover'" | head -1)
-check $ADMIN "104g replacing it, naming it, returns the old file to clean up" "select old_path from set_club_image('$CLUB','cover','clubs/$CLUB/c.webp',1600,600,'$COV');" "clubs/$CLUB/a.webp"
-check service "104h and only one cover exists"                       "select count(*) from club_media where club_id='$CLUB' and kind='cover';" 1
+check service "104n replacing it, naming it, returns the old file"    "select old_path from set_club_image('$ADMIN','$CLUB','cover','$MP3',1600,600,'$COV');" "$MP1"
+check service "104o and only one cover exists"                        "select count(*) from club_media where club_id='$CLUB' and kind='cover';" 1
 # the gallery cap holds even when two uploads land together
-for i in 1 2 3 4 5 6; do { as_user $ADMIN; echo "select add_club_gallery('$CLUB','clubs/$CLUB/g$i.webp','shot $i',1200,900);"; } | $PSQL -q -d $DB >/dev/null; done
-check service "104i six photos"                                      "select count(*) from club_media where club_id='$CLUB' and kind='gallery';" 6
-denied $ADMIN "104j a seventh is refused"                            "select add_club_gallery('$CLUB','clubs/$CLUB/g7.webp',null,1200,900);"
-{ as_user $ADMIN; echo "begin; select pg_sleep(0.1); select add_club_gallery('$CLUB','clubs/$CLUB/x1.webp',null,1200,900); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
-{ as_user $ADMIN; echo "begin; select pg_sleep(0.1); select add_club_gallery('$CLUB','clubs/$CLUB/x2.webp',null,1200,900); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
+for i in 11 12 13 14 15 16; do { as_service; echo "select add_club_gallery('$ADMIN','$CLUB','$(mpath $CLUB $i)','shot $i',1200,900);"; } | $PSQL -q -d $DB >/dev/null; done
+check service "104p six photos"                                       "select count(*) from club_media where club_id='$CLUB' and kind='gallery';" 6
+denied service "104q a seventh is refused"                            "select add_club_gallery('$ADMIN','$CLUB','$(mpath $CLUB 17)',null,1200,900);"
+{ as_service; echo "begin; select pg_sleep(0.1); select add_club_gallery('$ADMIN','$CLUB','$(mpath $CLUB 18)',null,1200,900); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
+{ as_service; echo "begin; select pg_sleep(0.1); select add_club_gallery('$ADMIN','$CLUB','$(mpath $CLUB 19)',null,1200,900); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
 wait
-check service "104k two at once cannot both get in"                  "select count(*) from club_media where club_id='$CLUB' and kind='gallery';" 6
-denied $ADMIN "104l a caption over 80 characters is refused"         "select set_gallery_caption((select id from club_media where club_id='$CLUB' and kind='gallery' limit 1), repeat('x', 81));"
+check service "104r two at once cannot both get in"                   "select count(*) from club_media where club_id='$CLUB' and kind='gallery';" 6
+denied service "104s a caption over 80 characters is refused"         "select set_gallery_caption('$ADMIN',(select id from club_media where club_id='$CLUB' and kind='gallery' limit 1), repeat('x', 81));"
+denied $ADMIN  "104t staff cannot set a caption from the browser"     "select set_gallery_caption('$ADMIN',(select id from club_media where club_id='$CLUB' and kind='gallery' limit 1), 'hi');"
 # reordering against a stale screen must not silently drop a photo
 G=$($PSQL -At -q -d $DB -c "select array_agg(id order by sort) from club_media where club_id='$CLUB' and kind='gallery'" | head -1)
-denied $ADMIN "104m reordering with a photo missing is refused"      "select reorder_club_gallery('$CLUB', (select array_agg(id order by sort) from (select id, sort from club_media where club_id='$CLUB' and kind='gallery' limit 5) s));"
-check $ADMIN "104n reordering with all of them works"                "select reorder_club_gallery('$CLUB', '$G'::uuid[]); select string_agg(sort::text,',' order by sort) from club_media where club_id='$CLUB' and kind='gallery';" "0,1,2,3,4,5"
+denied service "104u reordering with a photo missing is refused"      "select reorder_club_gallery('$ADMIN','$CLUB', ('$G'::uuid[])[1:5]);"
+denied service "104v reordering with one photo twice is refused"      "select reorder_club_gallery('$ADMIN','$CLUB', ('$G'::uuid[])[1:1] || ('$G'::uuid[])[1:5]);"
+denied service "104w reordering with a blank in it is refused"        "select reorder_club_gallery('$ADMIN','$CLUB', ('$G'::uuid[])[1:5] || array[null]::uuid[]);"
+denied service "104x reordering another club's photos is refused"     "select reorder_club_gallery('$STAFF_B','$CLUB', '$G'::uuid[]);"
+check service "104y reordering with all of them works"                "select reorder_club_gallery('$ADMIN','$CLUB', '$G'::uuid[]); select string_agg(sort::text,',' order by sort) from club_media where club_id='$CLUB' and kind='gallery';" "0,1,2,3,4,5"
 # removing closes the gap
 RM=$($PSQL -At -q -d $DB -c "select id from club_media where club_id='$CLUB' and kind='gallery' order by sort limit 1" | head -1)
-check $ADMIN "104o removing returns the file to delete"              "select remove_club_media('$RM') like 'clubs/%';" "t"
-check service "104p and the remaining photos are numbered 0..4"      "select string_agg(sort::text,',' order by sort) from club_media where club_id='$CLUB' and kind='gallery';" "0,1,2,3,4"
-denied $ADMIN "104q a file still in use cannot be filed as unused"   "select record_media_orphan('$CLUB', (select path from club_media where club_id='$CLUB' and kind='gallery' limit 1), 'test');"
-{ as_user $ADMIN; echo "select record_media_orphan('$CLUB','clubs/$CLUB/gone.webp','test');"; } | $PSQL -q -d $DB >/dev/null
-check service "104r a file nothing points at is filed for cleanup"   "select count(*) from media_orphans where path='clubs/$CLUB/gone.webp';" 1
-denied $P1 "104s a player cannot list unused files"                  "select count(*) from media_orphans_list();"
-check $ADMIN "104t an admin can"                                     "select count(*) >= 1 from media_orphans_list();" "t"
+check service "104z removing returns the file to delete"              "select remove_club_media('$ADMIN','$RM') like 'clubs/%';" "t"
+check service "104aa and the remaining photos are numbered 0..4"      "select string_agg(sort::text,',' order by sort) from club_media where club_id='$CLUB' and kind='gallery';" "0,1,2,3,4"
+denied service "104ab a file still in use cannot be filed as unused"  "select record_media_orphan('$ADMIN','$CLUB',(select path from club_media where club_id='$CLUB' and kind='gallery' limit 1), 'test');"
+denied service "104ac nor can another club's file be filed here"      "select record_media_orphan('$ADMIN','$CLUB','$(mpath $CLUB_B 21)','test');"
+{ as_service; echo "select record_media_orphan('$ADMIN','$CLUB','$(mpath $CLUB 22)','test');"; } | $PSQL -q -d $DB >/dev/null
+check service "104ad a file nothing points at is filed for cleanup"   "select count(*) from media_orphans where path='$(mpath $CLUB 22)';" 1
+denied $P1     "104ae a player cannot list unused files"              "select count(*) from media_orphans_list();"
+check $ADMIN   "104af an admin can"                                   "select count(*) >= 1 from media_orphans_list();" "t"
+# who uploaded a photo is the club's business, not the public's
+check anon     "104ag the photos themselves are public"               "select count(*) >= 1 from club_media where club_id='$CLUB';" "t"
+denied anon    "104ah the uploader's identity is not"                 "select created_by from club_media limit 1;"
+denied $P1     "104ai not even to a signed-in player"                 "select created_by from club_media limit 1;"
+# an existing broad write policy on the bucket must not let anything in
+denied $ADMIN  "104aj signed-in users cannot write to the bucket"     "insert into storage.objects (bucket_id, name) values ('club-media','clubs/$CLUB/x.webp');"
+denied anon    "104ak nor can strangers"                              "insert into storage.objects (bucket_id, name) values ('club-media','clubs/$CLUB/y.webp');"
+check $ADMIN   "104al and the broad policy still works elsewhere"     "insert into storage.objects (bucket_id, name) values ('avatars','me.png'); select count(*) from storage.objects where bucket_id='avatars';" 1
+$PSQL -q -d $DB -c "insert into storage.objects (bucket_id, name) values ('club-media','$MP3');" >/dev/null
+check $ADMIN   "104am deleting from the bucket removes nothing"       "delete from storage.objects where bucket_id='club-media'; select count(*) from storage.objects where bucket_id='club-media';" 1
+check $ADMIN   "104an renaming in the bucket changes nothing"         "update storage.objects set name='hacked' where bucket_id='club-media'; select count(*) from storage.objects where name='hacked';" 0
 # venue information, with three states
-check $ADMIN "104u facilities start unconfirmed"                     "select facilities_confirmed_at is null from clubs where id='$CLUB_B';" "t"
-check $ADMIN "104v staff record yes, no and not-confirmed"           "select set_club_venue('$CLUB','A friendly club.','Gate on the main road.', true, true, null, false, null, true, true); select coalesce(has_parking::text,'?')||coalesce(has_showers::text,'?')||coalesce(has_equipment_rental::text,'?') from clubs where id='$CLUB';" "true?false"
-check service "104w and the answer is dated"                         "select facilities_confirmed_at is not null from clubs where id='$CLUB';" "t"
-denied $P1 "104x a player cannot change venue information"           "select set_club_venue('$CLUB','hack',null,null,null,null,null,null,null,null);"
-denied $ADMIN "104y a description over 600 characters is refused"    "select set_club_venue('$CLUB', repeat('x',601), null,null,null,null,null,null,null,null);"
-check service "104z anyone may read a club's images"                 "select count(*) >= 1 from club_media where club_id='$CLUB';" "t"
-
+check $ADMIN "104ao facilities start unconfirmed"                     "select facilities_confirmed_at is null from clubs where id='$CLUB_B';" "t"
+check $ADMIN "104ap staff record yes, no and not-confirmed"           "select set_club_venue('$CLUB','A friendly club.','Gate on the main road.', true, true, null, false, null, true, true); select coalesce(has_parking::text,'?')||coalesce(has_showers::text,'?')||coalesce(has_equipment_rental::text,'?') from clubs where id='$CLUB';" "true?false"
+check service "104aq and the answer is dated"                         "select facilities_confirmed_at is not null from clubs where id='$CLUB';" "t"
+denied $P1 "104ar a player cannot change venue information"           "select set_club_venue('$CLUB','hack',null,null,null,null,null,null,null,null);"
+denied $ADMIN "104as a description over 600 characters is refused"    "select set_club_venue('$CLUB', repeat('x',601), null,null,null,null,null,null,null,null);"
+check $ADMIN "104at settings are not readable from a browser"         "select count(*) from app_settings;" 0
+check service "104au but the server has the storage address"          "select value like 'https://%' from app_settings where key='storage_base_url';" "t"
 echo
 echo "checks: $CHECKS, failures: $FAILS"
 [ "$FAILS" -eq 0 ] || { echo "SUITE FAILED"; exit 1; }

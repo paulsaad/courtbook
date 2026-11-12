@@ -48,6 +48,18 @@ export default function ClubPhotos({ clubId, initial }: { clubId: string; initia
     await refresh();
   }
 
+  /** Captions and order publish too, so they go through the same route as an upload. */
+  async function publish(body: Record<string, unknown>, fallback: string) {
+    const res = await fetch("/api/club-media", {
+      method: "PATCH", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clubId, ...body }),
+    });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) { setError(out.error ?? fallback); await refresh(); return false; }
+    await refresh();
+    return true;
+  }
+
   async function move(m: ClubMedia, by: number) {
     const ids = gallery.map((g) => g.id);
     const i = ids.indexOf(m.id);
@@ -55,16 +67,13 @@ export default function ClubPhotos({ clubId, initial }: { clubId: string; initia
     if (j < 0 || j >= ids.length) return;
     [ids[i], ids[j]] = [ids[j], ids[i]];
     setBusy(m.id); setError(null);
-    const { error } = await createClient().rpc("reorder_club_gallery", { p_club: clubId, p_ids: ids });
+    await publish({ action: "reorder", ids }, "Someone else changed these photos just now. Reload and try again.");
     setBusy(null);
-    if (error) { setError("Someone else changed these photos just now. Reload and try again."); await refresh(); return; }
-    await refresh();
   }
 
   async function caption(m: ClubMedia, text: string) {
-    const { error } = await createClient().rpc("set_gallery_caption", { p_id: m.id, p_caption: text });
-    if (error) { setError("Could not save that caption."); return; }
-    await refresh();
+    setError(null);
+    await publish({ action: "caption", mediaId: m.id, caption: text }, "Could not save that caption.");
   }
 
   return (
