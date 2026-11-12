@@ -1112,6 +1112,33 @@ wait
 check service "101c a hold racing a switch to at-the-desk leaves no payment" "select count(*) from payments p join bookings b on b.id=p.booking_id where b.court_id='$COURT3' and b.start_at = (current_date + 12 + time '19:00') at time zone 'Asia/Beirut' and p.status in ('pending','paid');" 0
 $PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
 
+# 0053: a refund must be able to finish, not just start
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
+FP=$({ as_user $P2; echo "select payment_id from hold_slot('$CB','$COURT3', (current_date + 13 + time '19:00') at time zone 'Asia/Beirut', (current_date + 13 + time '20:00') at time zone 'Asia/Beirut');"; } | $PSQL -At -d $DB | tail -1)
+$PSQL -q -d $DB -c "select confirm_payment('$FP','lifecycle-ref', (select total_usd from payments where id='$FP'));" >/dev/null
+{ as_user $ADMIN; echo "select set_club_payment_mode('$CB','at_desk');"; } | $PSQL -q -d $DB >/dev/null
+check service "101d paid -> refund_due after the switch"             "update payments set status='refund_due' where id='$FP'; select status from payments where id='$FP';" "refund_due"
+check service "101e refund_due -> refunded completes the refund"     "update payments set status='refunded' where id='$FP'; select status from payments where id='$FP';" "refunded"
+denied service "101f but a never-paid row still cannot be made to owe money" "update payments set status='refund_due' where id='$LP';"
+
+# 0053: a confirmation racing a mode switch must not deadlock, and must not take money
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
+RP=$({ as_user $P3; echo "select payment_id from hold_slot('$CB','$COURT2', (current_date + 13 + time '19:00') at time zone 'Asia/Beirut', (current_date + 13 + time '20:00') at time zone 'Asia/Beirut');"; } | $PSQL -At -d $DB | tail -1)
+{ as_user $ADMIN; echo "begin; select set_club_payment_mode('$CB','at_desk'); select pg_sleep(1.5); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
+sleep 0.8
+$PSQL -q -d $DB -c "select confirm_payment('$RP','race-ref', (select total_usd from payments where id='$RP'));" >/dev/null 2>&1
+wait
+check service "101g a confirmation racing the switch takes no money"  "select status from payments where id='$RP';" "expired"
+check service "101h and no deadlock left the club half-switched"      "select payment_mode from clubs where id='$CB';" "at_desk"
+
+# 0053: a missing time is not a time
+TK3=$($PSQL -At -q -d $DB -c "select gen_random_uuid()" | head -1)
+{ as_user $P4; echo "select book_at_desk('$COURT', (current_date + 13 + time '16:00') at time zone 'Asia/Beirut', (current_date + 13 + time '17:00') at time zone 'Asia/Beirut', '$TK3');"; } | $PSQL -q -d $DB >/dev/null
+denied $P4 "101i the same token with no start time is refused"        "select book_at_desk('$COURT', null, (current_date + 13 + time '17:00') at time zone 'Asia/Beirut', '$TK3');"
+denied $P4 "101j the same token with no end time is refused"          "select book_at_desk('$COURT', (current_date + 13 + time '16:00') at time zone 'Asia/Beirut', null, '$TK3');"
+check service "101k still just the one booking for that token"        "select count(*) from bookings where client_token='$TK3';" 1
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
+
 echo
 echo "checks: $CHECKS, failures: $FAILS"
 [ "$FAILS" -eq 0 ] || { echo "SUITE FAILED"; exit 1; }
