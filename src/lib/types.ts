@@ -28,6 +28,8 @@ export type Booking = {
   fee_usd?: number | null;
   hold_expires_at?: string | null;
   player_name?: string | null;
+  /** staff only: guest phone, or the player's own, from club_booking_contacts */
+  contact_phone?: string | null;
 };
 
 export type Block = { id: string; court_id: string; start_at: string; end_at: string; reason: string | null };

@@ -67,16 +67,18 @@ export default async function StaffClubPage({
   ]);
   const sportNames = Object.fromEntries(((sportRows ?? []) as { code: string; name_en: string }[]).map((s) => [s.code, s.name_en]));
 
-  // Names for app bookings (player_public has no phone)
-  const playerIds = [...new Set((bookings ?? []).map((b) => b.player_id).filter(Boolean))] as string[];
-  const names = new Map<string, string | null>();
-  if (playerIds.length) {
-    const { data } = await supabase.rpc("player_names", { p_ids: playerIds });
-    (data as { id: string; name: string | null }[] | null)?.forEach((p) => names.set(p.id, p.name));
+  // Who booked, and how the desk reaches them. Staff-only, scoped to this club's own bookings.
+  const ids = (bookings ?? []).map((b) => b.id);
+  const contacts = new Map<string, { name: string | null; phone: string | null }>();
+  if (ids.length) {
+    const { data } = await supabase.rpc("club_booking_contacts", { p_club: club.id, p_bookings: ids });
+    (data as { booking_id: string; name: string | null; phone: string | null }[] | null)
+      ?.forEach((c) => contacts.set(c.booking_id, { name: c.name, phone: c.phone }));
   }
   const bookingsWithNames: Booking[] = (bookings ?? []).map((b) => ({
     ...b,
-    player_name: b.player_id ? names.get(b.player_id) ?? null : null,
+    player_name: contacts.get(b.id)?.name ?? null,
+    contact_phone: contacts.get(b.id)?.phone ?? null,
   }));
 
   return (

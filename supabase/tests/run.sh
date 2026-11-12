@@ -955,6 +955,15 @@ check $ADMIN "95a staff read the week's rows for one court"           "select co
 check $STAFF_B "95b staff of another club read none of them"          "select count(*) from bookings where club_id='$CLUB' and court_id='$COURT' and $WK;" 0
 check $P1 "95c a player reads only their own in that range"           "select count(*) from bookings where club_id='$CLUB' and court_id='$COURT' and $WK and player_id is distinct from '$P1';" 0
 
+# 0048: the desk needs a phone number for an app booking too, and only for its own club
+$PSQL -q -d $DB -c "update profiles set phone='03 555 999' where id='$P1';" >/dev/null
+APPB=$($PSQL -At -q -d $DB -c "select id from bookings where player_id='$P1' and club_id='$CLUB' and status='confirmed' limit 1" | head -1)
+check $ADMIN "96a staff get the player's own phone for an app booking" "select name||'/'||phone from club_booking_contacts('$CLUB', array['$APPB']::uuid[]);" "Player One/03 555 999"
+check $ADMIN "96b a desk booking keeps its guest name and phone"       "select name||'/'||phone from club_booking_contacts('$CLUB', (select array_agg(id) from bookings where guest_name='Walk In'));" "Walk In/03 111 222"
+denied $P1 "96c a player cannot look up contacts"                      "select count(*) from club_booking_contacts('$CLUB', array['$APPB']::uuid[]);"
+denied $STAFF_B "96d staff of another club cannot either"              "select count(*) from club_booking_contacts('$CLUB', array['$APPB']::uuid[]);"
+check $STAFF_B "96e and asking under their own club returns nothing"   "select count(*) from club_booking_contacts('$CLUB_B', array['$APPB']::uuid[]);" 0
+
 echo
 echo "checks: $CHECKS, failures: $FAILS"
 [ "$FAILS" -eq 0 ] || { echo "SUITE FAILED"; exit 1; }

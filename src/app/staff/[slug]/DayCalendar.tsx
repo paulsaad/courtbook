@@ -25,6 +25,25 @@ type Sheet =
   | null;
 
 
+/** Staff see who booked and how to reach them: the desk's whole job is ringing people.
+ *  Scoped in the database to staff of this club and bookings at this club. */
+async function withContacts(
+  supabase: ReturnType<typeof createClient>,
+  clubId: string,
+  rows: Record<string, unknown>[],
+): Promise<Booking[]> {
+  const ids = rows.map((r) => r.id as string);
+  if (!ids.length) return [] as Booking[];
+  const { data } = await supabase.rpc("club_booking_contacts", { p_club: clubId, p_bookings: ids });
+  const by = new Map((data as { booking_id: string; name: string | null; phone: string | null }[] | null ?? [])
+    .map((c) => [c.booking_id, c] as const));
+  return rows.map((r) => ({
+    ...r,
+    player_name: by.get(r.id as string)?.name ?? null,
+    contact_phone: by.get(r.id as string)?.phone ?? null,
+  })) as unknown as Booking[];
+}
+
 export default function DayCalendar({ club, courts: allCourts, bookings: initialBookings, blocks: initialBlocks, date, view, sport, court: courtParam, sportNames }: Props) {
   // multi-sport clubs get a sport filter; single-sport clubs never see it
   const sports = [...new Set(allCourts.map((c) => c.sport))];
@@ -70,13 +89,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         .eq("club_id", club.id).or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`).not("court_id", "is", null).lt("start_at", dayEnd).gt("end_at", dayStart).order("start_at"),
       supabase.from("blocks").select("id, court_id, start_at, end_at, reason").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart),
     ]);
-    const ids = [...new Set((b ?? []).map((x) => x.player_id).filter(Boolean))] as string[];
-    const names = new Map<string, string | null>();
-    if (ids.length) {
-      const { data } = await supabase.rpc("player_names", { p_ids: ids });
-      (data as { id: string; name: string | null }[] | null)?.forEach((p) => names.set(p.id, p.name));
-    }
-    setBookings((b ?? []).map((x) => ({ ...x, player_name: x.player_id ? names.get(x.player_id) ?? null : null })) as Booking[]);
+    setBookings(await withContacts(supabase, club.id, b ?? []));
     setBlocks((k ?? []) as Block[]);
   }, [club.id, club.timezone, date]);
 
@@ -112,18 +125,9 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         supabase.from("blocks").select("id, court_id, start_at, end_at, reason")
           .eq("club_id", club.id).eq("court_id", weekCourt.id).lt("start_at", to).gt("end_at", from),
       ]);
-      const ids = [...new Set((b ?? []).map((x) => x.player_id).filter(Boolean))] as string[];
-      const names = new Map<string, string | null>();
-      if (ids.length) {
-        const { data } = await supabase.rpc("player_names", { p_ids: ids });
-        (data as { id: string; name: string | null }[] | null)?.forEach((p) => names.set(p.id, p.name));
-      }
+      const rows = await withContacts(supabase, club.id, b ?? []);
       if (!alive) return;
-      setWeek({
-        key,
-        bookings: (b ?? []).map((x) => ({ ...x, player_name: x.player_id ? names.get(x.player_id) ?? null : null })) as Booking[],
-        blocks: (k ?? []) as Block[],
-      });
+      setWeek({ key, bookings: rows, blocks: (k ?? []) as Block[] });
     })();
     return () => { alive = false; };
   }, [view, club.id, club.timezone, wkStart, weekCourt, refresh]);
@@ -529,7 +533,7 @@ function NowPanel({ club, courts, bookings, freeNow, sportNames, showLater, onTo
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate font-medium">{name(b)}</div>
-          {b.guest_phone && <span className="text-sm text-action underline">{b.guest_phone}</span>}
+          {(b.contact_phone ?? b.guest_phone) && <span className="text-sm text-action underline">{b.contact_phone ?? b.guest_phone}</span>}
         </div>
         <span className="shrink-0 text-xs text-muted">{trailing}</span>
       </button>
@@ -670,7 +674,9 @@ function BookingSheet({ club, courts, booking: b, times, busy, onMove, onCancel,
         <p className="text-sm text-muted">
           {court?.name}, {hhmm(b.start_at, club.timezone)}–{hhmm(b.end_at, club.timezone)} · {b.source === "app" ? "booked in the app" : "desk booking"}
         </p>
-        {b.guest_phone && <a href={`tel:${b.guest_phone}`} className="text-sm text-action underline">{b.guest_phone}</a>}
+        {(b.contact_phone ?? b.guest_phone)
+          ? <a href={`tel:${b.contact_phone ?? b.guest_phone}`} className="text-sm text-action underline">{b.contact_phone ?? b.guest_phone}</a>
+          : <p className="text-sm text-muted">No phone number on file</p>}
         {b.price_usd != null && (
           <p className="mt-1 text-sm">
             ${Number(b.price_usd).toFixed(2)}
