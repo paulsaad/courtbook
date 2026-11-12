@@ -5,12 +5,12 @@ import { useCallback, useEffect, useState } from "react";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
-import { clubLocalToUtc, dayBounds, hhmm, nowMs, shiftDate, slotTimes, todayIn, toMin } from "@/lib/time";
+import { clubLocalToUtc, dayBounds, hhmm, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
 import { friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
 
-type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; sportNames: Record<string, string> };
+type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; sportNames: Record<string, string> };
 
-export type StaffView = "now" | "grid" | "list";
+export type StaffView = "now" | "grid" | "week" | "list";
 /** One active court's state at this moment: busy by a booking, an unexpired hold or a block.
  *  free_at follows the chain of back-to-back bookings and blocks to when the court is really free. */
 type FreeNow = { court_id: string; court_name: string; sport: string; busy: boolean; free_at: string | null };
@@ -18,14 +18,14 @@ type FreeNow = { court_id: string; court_name: string; sport: string; busy: bool
 type Guest = { name: string; phone: string | null; last_at: string };
 
 type Sheet =
-  | { kind: "add"; courtId: string; time: string }
+  | { kind: "add"; courtId: string; time: string; date?: string }
   | { kind: "booking"; booking: Booking }
   | { kind: "block"; block: Block }
   | { kind: "close" }
   | null;
 
 
-export default function DayCalendar({ club, courts: allCourts, bookings: initialBookings, blocks: initialBlocks, date, view, sport, sportNames }: Props) {
+export default function DayCalendar({ club, courts: allCourts, bookings: initialBookings, blocks: initialBlocks, date, view, sport, court: courtParam, sportNames }: Props) {
   // multi-sport clubs get a sport filter; single-sport clubs never see it
   const sports = [...new Set(allCourts.map((c) => c.sport))];
   const courts = sport && sports.includes(sport) ? allCourts.filter((c) => c.sport === sport) : allCourts;
@@ -38,6 +38,13 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const [freeNow, setFreeNow] = useState<FreeNow[] | null>(null);
   const [showLater, setShowLater] = useState(false);
   const [commonMins, setCommonMins] = useState<number | null>(null);
+  const [week, setWeek] = useState<{ key: string; bookings: Booking[]; blocks: Block[] } | null>(null);
+  const [refresh, setRefresh] = useState(0);
+
+  // week view shows one court at a time: seven columns is all a phone has room for
+  const weekCourt = courts.find((c) => c.id === courtParam) ?? courts[0] ?? null;
+  const wkStart = weekStart(date);
+  const weekDays = Array.from({ length: 7 }, (_, i) => shiftDate(wkStart, i));
 
   const times = slotTimes(club.open_time, club.close_time, club.slot_minutes);
   const openMin = toMin(club.open_time);
@@ -88,6 +95,39 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     return () => { alive = false; clearInterval(id); };
   }, [view, club.id, reload]);
 
+  // week view: one query for the whole week, keyed so a stale answer can never be shown
+  useEffect(() => {
+    if (view !== "week" || !weekCourt) return;
+    const key = `${wkStart}|${weekCourt.id}`;
+    let alive = true;
+    (async () => {
+      const supabase = createClient();
+      const from = dayBounds(wkStart, club.timezone).dayStart;
+      const to = dayBounds(shiftDate(wkStart, 6), club.timezone).dayEnd;
+      const [{ data: b }, { data: k }] = await Promise.all([
+        supabase.from("bookings").select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id, price_usd, fee_usd, hold_expires_at")
+          .eq("club_id", club.id).eq("court_id", weekCourt.id)
+          .or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`)
+          .lt("start_at", to).gt("end_at", from).order("start_at"),
+        supabase.from("blocks").select("id, court_id, start_at, end_at, reason")
+          .eq("club_id", club.id).eq("court_id", weekCourt.id).lt("start_at", to).gt("end_at", from),
+      ]);
+      const ids = [...new Set((b ?? []).map((x) => x.player_id).filter(Boolean))] as string[];
+      const names = new Map<string, string | null>();
+      if (ids.length) {
+        const { data } = await supabase.rpc("player_names", { p_ids: ids });
+        (data as { id: string; name: string | null }[] | null)?.forEach((p) => names.set(p.id, p.name));
+      }
+      if (!alive) return;
+      setWeek({
+        key,
+        bookings: (b ?? []).map((x) => ({ ...x, player_name: x.player_id ? names.get(x.player_id) ?? null : null })) as Booking[],
+        blocks: (k ?? []) as Block[],
+      });
+    })();
+    return () => { alive = false; };
+  }, [view, club.id, club.timezone, wkStart, weekCourt, refresh]);
+
   // the duration this club books most often, so the walk-in sheet opens on it
   useEffect(() => {
     let alive = true;
@@ -107,6 +147,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
       return;
     }
     await reload();
+    setRefresh((n) => n + 1);   // the week view holds its own copy of the rows
     setBusy(false);
     setSheet(null);
   }
@@ -122,8 +163,9 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     return { row, span: Math.max(1, endRow - row) };
   }
 
-  const q = (d: string, v: string, sp: string | null) => `/staff/${club.slug}?date=${d}&view=${v}${sp ? `&sport=${sp}` : ""}`;
-  const nav = (d: string) => q(d, view, sport);
+  const q = (d: string, v: string, sp: string | null, ct?: string | null) =>
+    `/staff/${club.slug}?date=${d}&view=${v}${sp ? `&sport=${sp}` : ""}${ct ? `&court=${ct}` : ""}`;
+  const nav = (d: string) => q(d, view, sport, view === "week" ? weekCourt?.id : null);
   const dayNum = formatInTimeZone(clubLocalToUtc(date, "12:00", club.timezone), club.timezone, "d");
   const dayName = formatInTimeZone(clubLocalToUtc(date, "12:00", club.timezone), club.timezone, "EEEE");
   const monthName = formatInTimeZone(clubLocalToUtc(date, "12:00", club.timezone), club.timezone, "MMMM yyyy");
@@ -137,23 +179,31 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
           <div className="flex gap-4"><Link href={`/staff/${club.slug}/payments`} className="text-muted">Payments</Link><Link href={`/staff/${club.slug}/settings`} className="text-muted">Settings</Link><button onClick={() => setSheet({ kind: "close" })} className="text-danger">Close courts…</button></div>
         </div>
         <div className="flex items-end justify-between px-4 pb-3 pt-1">
-          <div className="flex items-end gap-3">
-            <span className="text-5xl font-semibold leading-none tracking-tight">{dayNum}</span>
-            <div className="pb-0.5 leading-tight">
-              <div className="font-medium">{dayName}</div>
-              <div className="text-sm text-muted">{monthName}</div>
+          {view === "week" ? (
+            <div className="leading-tight">
+              <div className="text-2xl font-semibold tracking-tight">Week of {formatInTimeZone(clubLocalToUtc(wkStart, "12:00", club.timezone), club.timezone, "d MMM")}</div>
+              <div className="text-sm text-muted">{weekCourt?.name ?? "No courts"}</div>
             </div>
-          </div>
+          ) : (
+            <div className="flex items-end gap-3">
+              <span className="text-5xl font-semibold leading-none tracking-tight">{dayNum}</span>
+              <div className="pb-0.5 leading-tight">
+                <div className="font-medium">{dayName}</div>
+                <div className="text-sm text-muted">{monthName}</div>
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-1">
-            <Link href={nav(shiftDate(date, -1))} aria-label="Previous day" className="grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-lg">‹</Link>
-            <Link href={nav(todayIn(club.timezone))} className={`h-10 rounded-full px-3 text-sm leading-10 ${isToday ? "text-muted" : "border border-grid bg-white"}`}>Today</Link>
-            <Link href={nav(shiftDate(date, 1))} aria-label="Next day" className="grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-lg">›</Link>
+            <Link href={nav(shiftDate(date, view === "week" ? -7 : -1))} aria-label={view === "week" ? "Previous week" : "Previous day"} className="grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-lg">‹</Link>
+            <Link href={nav(todayIn(club.timezone))} className={`h-10 rounded-full px-3 text-sm leading-10 ${isToday ? "text-muted" : "border border-grid bg-white"}`}>{view === "week" ? "This week" : "Today"}</Link>
+            <Link href={nav(shiftDate(date, view === "week" ? 7 : 1))} aria-label={view === "week" ? "Next week" : "Next day"} className="grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-lg">›</Link>
           </div>
         </div>
         <div className="flex items-center justify-between px-4 pb-2">
           <div className="flex rounded-full border border-grid bg-white p-0.5 text-sm">
             <Link href={q(todayIn(club.timezone), "now", sport)} className={`rounded-full px-4 py-1.5 ${view === "now" ? "bg-ink text-white" : ""}`}>Now</Link>
             <Link href={q(date, "grid", sport)} className={`rounded-full px-4 py-1.5 ${view === "grid" ? "bg-ink text-white" : ""}`}>Courts</Link>
+            <Link href={q(date, "week", sport, weekCourt?.id)} className={`rounded-full px-4 py-1.5 ${view === "week" ? "bg-ink text-white" : ""}`}>Week</Link>
             <Link href={q(date, "list", sport)} className={`rounded-full px-4 py-1.5 ${view === "list" ? "bg-ink text-white" : ""}`}>List</Link>
           </div>
           <div className="flex items-center gap-3 text-xs text-muted">
@@ -169,9 +219,25 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
             ))}
           </div>
         )}
+        {view === "week" && courts.length > 1 && (
+          <div className="flex gap-1.5 overflow-x-auto px-4 pb-3">
+            {courts.map((c) => (
+              <Link key={c.id} href={q(date, "week", sport, c.id)} className={`min-h-9 shrink-0 rounded-full border px-3 text-xs leading-9 ${weekCourt?.id === c.id ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>{c.name}</Link>
+            ))}
+          </div>
+        )}
       </header>
 
-      {view === "now" ? (
+      {view === "week" ? (
+        <WeekGrid
+          club={club} court={weekCourt} days={weekDays} times={times} today={todayIn(club.timezone)}
+          data={week && week.key === `${wkStart}|${weekCourt?.id}` ? week : null}
+          dayHref={(d) => q(d, "grid", sport)}
+          onOpenBooking={(b) => setSheet({ kind: "booking", booking: b })}
+          onOpenBlock={(bl) => setSheet({ kind: "block", block: bl })}
+          onAdd={(d, t) => { if (weekCourt) setSheet({ kind: "add", courtId: weekCourt.id, time: t, date: d }); }}
+        />
+      ) : view === "now" ? (
         <NowPanel
           club={club} courts={courts} bookings={bookings} freeNow={freeNow} sportNames={sportNames}
           showLater={showLater} onToggleLater={() => setShowLater((v) => !v)}
@@ -274,7 +340,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                 onSave={(name, phone, slots, asBlock) =>
                   run(async () => {
                     const supabase = createClient();
-                    const start = clubLocalToUtc(date, sheet.time, club.timezone);
+                    // in the week view the slot belongs to the column's day, not the page's date
+                    const start = clubLocalToUtc(sheet.date ?? date, sheet.time, club.timezone);
                     const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
                     if (asBlock) {
                       const { data: { user } } = await supabase.auth.getUser();
@@ -349,6 +416,91 @@ function fmtDur(m: number) {
 
 function closeMinutes(club: Club) {
   return club.close_time.startsWith("24:") ? 1440 : toMin(club.close_time);
+}
+
+/** One court, seven days. Days are columns because seven of them fit a phone and five courts do not.
+ *  Time labels stay in a sticky gutter, a cell opens the usual sheets, and a column header opens that
+ *  day in the Courts view, which is where names and controls are readable. */
+function WeekGrid({ club, court, days, times, today, data, dayHref, onOpenBooking, onOpenBlock, onAdd }: {
+  club: Club; court: Court | null; days: string[]; times: string[]; today: string;
+  data: { bookings: Booking[]; blocks: Block[] } | null;
+  dayHref: (d: string) => string;
+  onOpenBooking: (b: Booking) => void;
+  onOpenBlock: (b: Block) => void;
+  onAdd: (date: string, time: string) => void;
+}) {
+  if (!court) return <p className="px-4 py-10 text-center text-sm text-muted">No active courts for this sport.</p>;
+  const loading = data === null;
+  const rowPx = club.slot_minutes <= 30 ? 34 : 48;
+  const labelEvery = club.slot_minutes <= 30 ? 2 : 1;
+
+  // what sits on this court at this day and time, if anything
+  const at = (d: string, t: string) => {
+    if (!data) return null;
+    const ms = clubLocalToUtc(d, t, club.timezone).getTime();
+    const b = data.bookings.find((x) => Date.parse(x.start_at) <= ms && Date.parse(x.end_at) > ms);
+    if (b) return { kind: "booking" as const, b };
+    const k = data.blocks.find((x) => Date.parse(x.start_at) <= ms && Date.parse(x.end_at) > ms);
+    return k ? { kind: "block" as const, k } : null;
+  };
+  const isStart = (d: string, t: string, startAt: string) =>
+    Math.abs(clubLocalToUtc(d, t, club.timezone).getTime() - Date.parse(startAt)) < 60_000;
+  const busyCount = (d: string) => times.filter((t) => at(d, t) !== null).length;
+
+  return (
+    <div className={`mb-24 overflow-x-auto ${loading ? "pointer-events-none opacity-50" : ""}`}>
+      <div className="min-w-[340px] px-2">
+        <div className="grid" style={{ gridTemplateColumns: `3rem repeat(7, minmax(2.5rem, 1fr))` }}>
+          <div className="sticky left-0 z-10 bg-paper" />
+          {days.map((d) => (
+            <Link key={d} href={dayHref(d)} className={`border-b border-grid pb-1 text-center text-xs leading-tight ${d === today ? "font-semibold text-turf" : "text-muted"}`}>
+              <div>{formatInTimeZone(clubLocalToUtc(d, "12:00", club.timezone), club.timezone, "EEE")}</div>
+              <div className="text-sm text-ink">{formatInTimeZone(clubLocalToUtc(d, "12:00", club.timezone), club.timezone, "d")}</div>
+              <div className="tabular-nums">{loading ? "·" : `${busyCount(d)}/${times.length}`}</div>
+            </Link>
+          ))}
+
+          {times.map((t, i) => (
+            <div key={t} className="contents">
+              <div className="sticky left-0 z-10 bg-paper pr-1 text-right text-[11px] text-muted" style={{ height: rowPx }}>
+                {i % labelEvery === 0 ? t : ""}
+              </div>
+              {days.map((d) => {
+                const cell = at(d, t);
+                if (!cell) {
+                  return (
+                    <button key={d + t} onClick={() => onAdd(d, t)} aria-label={`Add a booking on ${d} at ${t}`}
+                            className="border-b border-l border-grid/60 bg-white" style={{ height: rowPx }} />
+                  );
+                }
+                if (cell.kind === "block") {
+                  return (
+                    <button key={d + t} onClick={() => onOpenBlock(cell.k)} aria-label={`Blocked on ${d} at ${t}`}
+                            className="border-b border-l border-grid/60 bg-[repeating-linear-gradient(45deg,#e7e5e4_0,#e7e5e4_3px,#fff_3px,#fff_6px)]" style={{ height: rowPx }} />
+                  );
+                }
+                const b = cell.b;
+                const head = isStart(d, t, b.start_at);
+                return (
+                  <button key={d + t} onClick={() => onOpenBooking(b)}
+                          aria-label={`${b.guest_name ?? b.player_name ?? "Player"} on ${d} at ${hhmm(b.start_at, club.timezone)}`}
+                          className={`relative border-l border-grid/60 ${head ? "border-t" : ""} ${b.status === "pending" ? "border-dashed bg-sand/40" : b.source === "app" ? "bg-turf-soft" : "bg-sand"}`}
+                          style={{ height: rowPx }}>
+                    {head && (
+                      <span className="absolute inset-x-0 top-0.5 truncate px-0.5 text-[10px] font-medium leading-tight">
+                        {b.status === "pending" ? "pay…" : (b.guest_name ?? b.player_name ?? "Player").split(" ")[0]}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+        <p className="px-2 py-3 text-xs text-muted">Tap a booking for its details, or a day at the top to open that day court by court.</p>
+      </div>
+    </div>
+  );
 }
 
 /** What the desk sees when it opens the calendar: on court now, next three hours, then the rest. */

@@ -51,6 +51,13 @@ export function toMin(t: string): number {
   return h * 60 + m;
 }
 
+/** The Monday of the week containing `date` (ISO yyyy-mm-dd). */
+export function weekStart(date: string): string {
+  const [y, m, d] = date.split("-").map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0 = Sunday
+  return shiftDate(date, -((dow + 6) % 7));
+}
+
 /** Current time in ms. Kept out of components so React's purity lint does not flag server renders. */
 export function nowMs(): number {
   return Date.now();

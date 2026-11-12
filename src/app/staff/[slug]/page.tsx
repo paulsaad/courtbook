@@ -10,10 +10,10 @@ export default async function StaffClubPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ date?: string; view?: string; sport?: string }>;
+  searchParams: Promise<{ date?: string; view?: string; sport?: string; court?: string }>;
 }) {
   const { slug } = await params;
-  const { date: qDate, view, sport } = await searchParams;
+  const { date: qDate, view, sport, court } = await searchParams;
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -87,7 +87,8 @@ export default async function StaffClubPage({
       bookings={bookingsWithNames}
       blocks={(blocks ?? []) as Block[]}
       date={date}
-      view={view === "list" ? "list" : view === "grid" ? "grid" : date === todayIn(club.timezone) ? "now" : "grid"}
+      view={view === "list" ? "list" : view === "week" ? "week" : view === "grid" ? "grid" : date === todayIn(club.timezone) ? "now" : "grid"}
+      court={court ?? null}
       sport={sport && /^[a-z_]+$/.test(sport) ? sport : null}
       sportNames={sportNames}
     />

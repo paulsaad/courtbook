@@ -949,6 +949,11 @@ check service "94y and nothing got through"                           "select co
 $PSQL -q -d $DB -c "insert into bookings (club_id, court_id, guest_name, guest_phone, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$CLUB','$COURT','Same Name','03 777 111', (current_date + 13 + time '09:00') at time zone 'Asia/Beirut', (current_date + 13 + time '10:00') at time zone 'Asia/Beirut', 'confirmed','staff','$ADMIN',20,0), ('$CLUB','$COURT','Same Name','03 888 222', (current_date + 13 + time '10:00') at time zone 'Asia/Beirut', (current_date + 13 + time '11:00') at time zone 'Asia/Beirut', 'confirmed','staff','$ADMIN',20,0), ('$CLUB','$COURT','Same Name',null, (current_date + 13 + time '11:00') at time zone 'Asia/Beirut', (current_date + 13 + time '12:00') at time zone 'Asia/Beirut', 'confirmed','staff','$ADMIN',20,0);" >/dev/null
 check $ADMIN "94z same name, different phones -> separate suggestions" "select count(*) from club_recent_guests('$CLUB','Same Name');" 3
 check $ADMIN "94z2 the one stored without a phone keeps no phone"      "select count(*) from club_recent_guests('$CLUB','Same Name') where phone is null;" 1
+# the week view reads a 7-day range for one court straight from the table, so RLS is what scopes it
+WK="start_at < (current_date + 20) and end_at > (current_date + 13)"
+check $ADMIN "95a staff read the week's rows for one court"           "select count(*) from bookings where club_id='$CLUB' and court_id='$COURT' and $WK;" 4
+check $STAFF_B "95b staff of another club read none of them"          "select count(*) from bookings where club_id='$CLUB' and court_id='$COURT' and $WK;" 0
+check $P1 "95c a player reads only their own in that range"           "select count(*) from bookings where club_id='$CLUB' and court_id='$COURT' and $WK and player_id is distinct from '$P1';" 0
 
 echo
 echo "checks: $CHECKS, failures: $FAILS"
