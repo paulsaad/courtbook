@@ -37,7 +37,12 @@ export default async function MatchPage({ params }: { params: Promise<{ id: stri
         <h2 className="mb-2 font-medium">Players {m.joined + 1}/{m.players_needed + 1}</h2>
         {accepted.length > 0 ? (
           <ul className="divide-y divide-grid text-sm">
-            {accepted.map((p) => <li key={p.profile_id} className="flex justify-between py-2"><span>{p.name ?? "Player"}{p.is_organizer ? " · organizer" : ""}</span><span className="text-muted">{p.level != null ? `Level ${p.level}` : p.level_legacy ?? ""}</span></li>)}
+            {accepted.map((p) => <li key={p.profile_id} className="flex justify-between py-2"><span>{p.name ?? "Player"}{p.is_organizer ? " · organizer" : ""}</span><span className="text-muted">
+              {p.level != null ? `Level ${p.level}`
+                : p.profile_id === user.id
+                  ? <Link href="/profile" className="text-action underline">Level not set — set yours</Link>
+                  : "Level not set"}
+            </span></li>)}
           </ul>
         ) : (
           <p className="text-sm text-muted">{m.join_mode === "approval" ? "Ask to join; the organizer approves." : "Join to see who's playing."}</p>

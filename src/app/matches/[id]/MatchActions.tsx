@@ -44,7 +44,7 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
           <ul className="flex flex-col gap-2">
             {pending.map((p) => (
               <li key={p.profile_id} className="flex items-center justify-between text-sm">
-                <span>{p.name ?? "Player"}{p.level != null ? ` · Level ${p.level}` : p.level_legacy ? ` · ${p.level_legacy}` : ""}</span>
+                <span>{p.name ?? "Player"}{p.level != null ? ` · Level ${p.level}` : " · level not set"}</span>
                 <span className="flex gap-3">
                   <button disabled={busy} onClick={() => run("decide_join", { p_match: m.match_id, p_profile: p.profile_id, p_accept: true })} className="font-medium text-action underline">Accept</button>
                   <button disabled={busy} onClick={() => run("decide_join", { p_match: m.match_id, p_profile: p.profile_id, p_accept: false })} className="text-muted underline">Decline</button>
