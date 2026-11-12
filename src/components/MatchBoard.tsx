@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import LevelRange from "./LevelRange";
+import PlayersNeeded from "./PlayersNeeded";
 import { fitLabel, rangeLabel } from "@/lib/levels";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
@@ -84,7 +85,7 @@ export default function MatchBoard({ club, rows, myBookings, sports }: { club: C
             </div>
           )}
           <div className="text-sm">Who is it for<div className="mt-1"><LevelRange value={f.range} onChange={(r) => setF({ ...f, range: r })} /></div></div>
-          <div className="text-sm">Players needed<div className="mt-1 flex gap-2">{[1, 2, 3].map((n) => <button type="button" key={n} onClick={() => setF({ ...f, needed: n })} className={chip(f.needed === n)}>{n}</button>)}</div></div>
+          <PlayersNeeded value={f.needed} onChange={(n) => setF({ ...f, needed: n })} />
           <div className="text-sm">Who can join<div className="mt-1 flex gap-2">{[["open", "anyone"], ["approval", "I approve each player"]].map(([v, l]) => <button type="button" key={v} onClick={() => setF({ ...f, joinMode: v })} className={chip(f.joinMode === v)}>{l}</button>)}</div></div>
           <input className={input} placeholder="Note (optional): e.g. friendly doubles, bring balls" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
           <button disabled={busy} className="rounded-xl bg-action py-3 font-medium text-white disabled:opacity-50">{busy ? "Posting…" : "Post"}</button>

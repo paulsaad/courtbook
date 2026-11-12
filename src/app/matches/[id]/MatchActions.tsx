@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import LevelRange from "@/components/LevelRange";
 import { createClient } from "@/lib/supabase/client";
+import PlayersNeeded from "@/components/PlayersNeeded";
 import { friendlyError } from "@/lib/types";
 import type { MatchRow } from "@/components/MatchBoard";
 
@@ -59,9 +60,7 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
       {m.i_organize && m.status !== "cancelled" && manage && (
         editing ? (          <section className="flex flex-col gap-3 rounded-2xl border border-grid bg-white p-4">
             <h2 className="font-medium">Edit match</h2>
-            <label className="flex items-center justify-between text-sm">Players needed (besides you)
-              <input className={`${input} w-20 text-right`} inputMode="numeric" value={f.needed} onChange={(e) => setF({ ...f, needed: Number(e.target.value) || 0 })} />
-            </label>
+            <PlayersNeeded value={f.needed} onChange={(n) => setF({ ...f, needed: n })} min={m.joined} accepted={m.joined} />
             <div className="text-sm">Who is it for<div className="mt-1"><LevelRange value={f.range} onChange={(r) => setF({ ...f, range: r })} /></div></div>
             <div className="text-sm">Who can join<div className="mt-1 flex gap-2"><button type="button" onClick={() => setF({ ...f, joinMode: "open" })} className={chip(f.joinMode === "open")}>Anyone</button><button type="button" onClick={() => setF({ ...f, joinMode: "approval" })} className={chip(f.joinMode === "approval")}>I approve</button></div></div>
             <textarea className={input} rows={2} maxLength={300} placeholder="Note" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />

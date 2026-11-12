@@ -6,6 +6,7 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/types";
 import LevelRange from "@/components/LevelRange";
+import PlayersNeeded from "@/components/PlayersNeeded";
 import { rangeLabel } from "@/lib/levels";
 
 export type BookingMatch = { match_id: string; status: string; closed_reason: string | null; players_needed: number; joined: number; pending: number; level_min: number | null; level_max: number | null; join_mode: string } | null;
@@ -87,11 +88,11 @@ export default function OpenToPlayers({ bookingId, sport, sportName, match }: { 
         <button onClick={() => setForm(true)} className="btn btn-primary">Open to other players</button>
       ) : (
         <>
-          <div className="text-sm">How many players do you need?<div className="mt-1 flex gap-2">{[1, 2, 3].map((n) => <button type="button" key={n} onClick={() => setF({ ...f, needed: n })} className={chip(f.needed === n)}>{n}</button>)}</div></div>
+          <PlayersNeeded value={f.needed} onChange={(n) => setF({ ...f, needed: n })} />
           <div className="text-sm">Who is it for<div className="mt-1"><LevelRange value={f.range} onChange={(r) => setF({ ...f, range: r })} /></div></div>
           <div className="text-sm">Who can join<div className="mt-1 flex gap-2"><button type="button" onClick={() => setF({ ...f, joinMode: "open" })} className={chip(f.joinMode === "open")}>Anyone</button><button type="button" onClick={() => setF({ ...f, joinMode: "approval" })} className={chip(f.joinMode === "approval")}>I approve each player</button></div></div>
           <input className="rounded-xl border border-grid px-3 py-2.5 text-base outline-none focus:border-action" maxLength={300} placeholder="Note (optional): friendly game, bring balls…" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
-          <div className="flex gap-2"><button disabled={busy} onClick={open} className="btn btn-primary flex-1">{busy ? "Opening…" : "Open to players"}</button><button onClick={() => setForm(false)} className="btn btn-secondary px-5">Cancel</button></div>
+          <div className="flex gap-2"><button disabled={busy} onClick={open} className="btn btn-primary flex-1 whitespace-nowrap">{busy ? "Opening…" : "Open to players"}</button><button onClick={() => setForm(false)} className="btn btn-secondary shrink-0 px-5">Cancel</button></div>
         </>
       )}
     </section>

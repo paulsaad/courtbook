@@ -891,7 +891,9 @@ check $P1 "91q incremental read after the last message carries nothing" "select 
 check $P1 "91r full read shows player2's message as deleted"        "select deleted from match_messages_list('$PM', null) where id='$MSG';" "t"
 
 # the phase 8 migrations must survive being run twice (a half-applied run has to be recoverable)
-for f in $(ls supabase/migrations/004*.sql | sort); do
+# re-apply the whole recent range, in order: stopping part-way would leave an older definition of a
+# function that a later migration has since replaced
+for f in $(ls supabase/migrations/00[45]*.sql | sort); do
   CHECKS=$((CHECKS+1))
   if $PSQL -q -d $DB -v ON_ERROR_STOP=1 -f "$f" >/tmp/cb_reapply.log 2>&1; then
     echo "  ok    91s $(basename $f) re-applies cleanly"
@@ -990,6 +992,42 @@ $PSQL -q -d $DB -c "update clubs set open_time='08:00', close_time='23:00' where
 $PSQL -q -d $DB -c "delete from bookings where club_id='$CLUB' and court_id='$COURT4';" >/dev/null
 MV=$($PSQL -At -q -d $DB -c "insert into bookings (club_id, court_id, guest_name, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$CLUB','$COURT4','Mover', (current_date + 16 + time '09:00') at time zone 'Asia/Beirut', (current_date + 16 + time '10:00') at time zone 'Asia/Beirut', 'confirmed','staff','$ADMIN',20,0) returning id" | head -1)
 check $ADMIN "98a a move lands on the day it was given, three days later" "select move_booking('$MV','$COURT4', (current_date + 19 + time '14:00') at time zone 'Asia/Beirut', (current_date + 19 + time '15:00') at time zone 'Asia/Beirut'); select ((start_at at time zone 'Asia/Beirut')::date - current_date)||'/'||to_char(start_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='$MV';" "19/14:00"
+
+echo "--- AH. how many players a match is looking for (1-30)"
+mk () { { as_user $P1; echo "select post_match('$CLUB','football', now()+interval '$2 day', now()+interval '$2 day 90 min', null, null, $1, 'squad', null, 'open');"; } | $PSQL -At -d $DB | tail -1; }
+for n in 6 10 18 24; do
+  M=$(mk $n 21)
+  check $P1 "99-$n a match can ask for $n players"                  "select players_needed from match_board(null, 30) where match_id='$M';" $n
+  { as_user $P1; echo "select set_match_status('$M','cancelled');"; } | $PSQL -q -d $DB >/dev/null
+done
+B30=$(mk 30 22)
+check $P1 "99a the upper boundary, 30, is allowed"                  "select players_needed from match_board(null, 30) where match_id='$B30';" 30
+denied $P1 "99b 31 is refused"                                      "select post_match('$CLUB','football', now()+interval '23 day', now()+interval '23 day 90 min', null, null, 31, 'too many', null, 'open');"
+denied $P1 "99c 0 is refused"                                       "select post_match('$CLUB','football', now()+interval '23 day', now()+interval '23 day 90 min', null, null, 0, 'none', null, 'open');"
+denied $P1 "99d a negative number is refused"                       "select post_match('$CLUB','football', now()+interval '23 day', now()+interval '23 day 90 min', null, null, -3, 'negative', null, 'open');"
+denied $P1 "99e no number at all is refused"                        "select post_match('$CLUB','football', now()+interval '23 day', now()+interval '23 day 90 min', null, null, null, 'null', null, 'open');"
+denied service "99f the table refuses 31 even behind the functions" "insert into matches (club_id, sport, organizer_id, start_at, end_at, players_needed, status) values ('$CLUB','football','$P1', now()+interval '23 day', now()+interval '23 day 90 min', 31, 'open');"
+
+# editing: up to 30, down to the number already accepted but no further
+ED=$(mk 6 24)
+check $P1 "99g edit 6 -> 24"                                        "select update_match('$ED', 24, null, null, 'bigger', 'open'); select players_needed from match_board(null, 30) where match_id='$ED';" 24
+check $P1 "99h edit 24 -> 30"                                       "select update_match('$ED', 30, null, null, 'bigger', 'open'); select players_needed from match_board(null, 30) where match_id='$ED';" 30
+denied $P1 "99i edit above 30 is refused"                           "select update_match('$ED', 31, null, null, 'nope', 'open');"
+{ as_user $P2; echo "select join_match('$ED');"; } | $PSQL -q -d $DB >/dev/null
+{ as_user $P3; echo "select join_match('$ED');"; } | $PSQL -q -d $DB >/dev/null
+check $P1 "99j two joined, so it can be cut to 2"                   "select update_match('$ED', 2, null, null, 'smaller', 'open'); select status||'/'||closed_reason from match_board(null, 30) where match_id='$ED';" "closed/full"
+denied $P1 "99k but not to 1, below the players already in"         "select update_match('$ED', 1, null, null, 'too small', 'open');"
+check $P1 "99l raising it again reopens the match"                  "select update_match('$ED', 5, null, null, 'room again', 'open'); select status||'/'||(5 - joined) from match_board(null, 30) where match_id='$ED';" "open/3"
+
+# the last spot, wanted by two people at once: the database decides, not the screen
+LS=$(mk 24 25)
+$PSQL -q -d $DB -c "insert into match_players (match_id, profile_id, status) select '$LS', id, 'accepted' from profiles where id in ('$P2','$P3');" >/dev/null
+{ as_user $P1; echo "select update_match('$LS', 3, null, null, 'one left', 'open');"; } | $PSQL -q -d $DB >/dev/null
+{ as_user $P4; echo "begin; select pg_sleep(0.1); select join_match('$LS'); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
+{ as_user $ADMIN; echo "begin; select pg_sleep(0.1); select join_match('$LS'); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
+wait
+check service "99m only one of the two got the last spot"           "select count(*) from match_players where match_id='$LS' and status='accepted';" 3
+check service "99n and the match closed itself as full"             "select status||'/'||closed_reason from matches where id='$LS';" "closed/full"
 
 echo
 echo "checks: $CHECKS, failures: $FAILS"
