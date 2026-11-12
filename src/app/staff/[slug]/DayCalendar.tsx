@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
@@ -66,6 +66,10 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const [weekError, setWeekError] = useState(false);
   const [dayLoading, setDayLoading] = useState(false);
   const [weekLoading, setWeekLoading] = useState(false);
+  // Day reads come from the Now timer, from Retry and from every action. Without a sequence number an
+  // older answer landing late would overwrite newer rows and clear the loading flag of a read still
+  // in flight — so only the newest request may touch state.
+  const dayReq = useRef(0);
 
   // week view shows one court at a time: seven columns is all a phone has room for
   const weekCourt = courts.find((c) => c.id === courtParam) ?? courts[0] ?? null;
@@ -93,6 +97,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
 
   // Refetch only the day's rows from the browser: faster than re-rendering the page.
   const reload = useCallback(async () => {
+    const seq = ++dayReq.current;
     setDayLoading(true);
     const supabase = createClient();
     const { dayStart, dayEnd } = dayBounds(date, club.timezone);
@@ -101,8 +106,11 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         .eq("club_id", club.id).or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`).not("court_id", "is", null).lt("start_at", dayEnd).gt("end_at", dayStart).order("start_at"),
       supabase.from("blocks").select("id, court_id, start_at, end_at, reason").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart),
     ]);
-    if (eb || ek) { setDayError(true); setDayLoading(false); return; }  // keep what we had rather than showing free slots
-    setBookings(await withContacts(supabase, club.id, b ?? []));
+    if (seq !== dayReq.current) return;                                  // a newer read owns the state now
+    if (eb || ek) { setDayError(true); setDayLoading(false); return; }   // keep what we had rather than showing free slots
+    const rows = await withContacts(supabase, club.id, b ?? []);
+    if (seq !== dayReq.current) return;                                  // and again, after the second await
+    setBookings(rows);
     setBlocks((k ?? []) as Block[]);
     setDayError(false);
     setDayLoading(false);
