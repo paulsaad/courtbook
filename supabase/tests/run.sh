@@ -1248,6 +1248,13 @@ denied service "104ac nor can another club's file be filed here"      "select re
 check service "104ad a file nothing points at is filed for cleanup"   "select count(*) from media_orphans where path='$(mpath $CLUB 22)';" 1
 denied $P1     "104ae a player cannot list unused files"              "select count(*) from media_orphans_list();"
 check $ADMIN   "104af an admin can"                                   "select count(*) >= 1 from media_orphans_list();" "t"
+# A file recorded while its outcome was unknown may turn out to be referenced after all. The sweep
+# list must not offer it for deletion, or the uncertainty just moves one step along.
+{ as_service; echo "select record_media_orphan('$ADMIN','$CLUB','$(mpath $CLUB 23)','outcome unknown');"; } | $PSQL -q -d $DB >/dev/null
+check $ADMIN   "104afa an unsure record is listed while nothing uses it" "select count(*) from media_orphans_list() where path='$(mpath $CLUB 23)';" 1
+$PSQL -q -d $DB -c "insert into club_media (club_id, kind, path, sort, created_by) values ('$CLUB','gallery','$(mpath $CLUB 23)', 9, '$ADMIN');" >/dev/null
+check $ADMIN   "104afb and drops off the list once something does"    "select count(*) from media_orphans_list() where path='$(mpath $CLUB 23)';" 0
+$PSQL -q -d $DB -c "delete from club_media where path='$(mpath $CLUB 23)'; delete from media_orphans where path='$(mpath $CLUB 23)';" >/dev/null
 # who uploaded a photo is the club's business, not the public's
 check anon     "104ag the photos themselves are public"               "select count(*) >= 1 from club_media where club_id='$CLUB';" "t"
 denied anon    "104ah the uploader's identity is not"                 "select created_by from club_media limit 1;"

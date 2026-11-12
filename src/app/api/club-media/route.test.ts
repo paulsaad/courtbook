@@ -2,26 +2,26 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
- * These tests are about what the route does when storage and the database disagree. Storing the file
- * and recording the row are two steps; the dangerous case is an error that is not a refusal, because
- * deleting the file then breaks an image that is already published.
+ * These tests are about what the route does when storage and the database disagree. Storing a file
+ * and recording a row are two steps, and the dangerous mistake is deleting a file on the strength of
+ * an error that is not proof the transaction ended. The mock table below is written so that a
+ * publication either happens completely or not at all, as a transaction does.
  */
 
 const storage = { upload: vi.fn(), remove: vi.fn() };
 const rpc = vi.fn();
-const rows = { "club_media": [] as Array<Record<string, unknown>> };
+let media: Array<Record<string, unknown>> = [];
 let selectFails = false;
 
 /** A small stand-in for the query builder, filtering the rows an eq() names. */
-function from(table: string) {
+function from() {
   const filters: Array<[string, unknown]> = [];
   const builder = {
     select: () => builder,
     eq: (col: string, val: unknown) => { filters.push([col, val]); return builder; },
     maybeSingle: async () => {
       if (selectFails) return { data: null, error: { message: "fetch failed" } };
-      const match = (rows[table as keyof typeof rows] ?? []).find((r) =>
-        filters.every(([c, v]) => r[c] === v));
+      const match = media.find((r) => filters.every(([c, v]) => r[c] === v));
       return { data: match ?? null, error: null };
     },
   };
@@ -49,9 +49,15 @@ vi.mock("sharp", () => {
   return { default: () => api };
 });
 
-const { POST } = await import("./route");
+const { POST, DELETE } = await import("./route");
 
 const CLUB = "11111111-1111-1111-1111-111111111111";
+const OLD_COVER = `clubs/${CLUB}/old-cover.webp`;
+
+/** A dropped connection or a gateway timeout: no SQLSTATE, so nothing is proven. */
+const NO_ANSWER = { message: "TypeError: fetch failed" };
+/** A refusal Postgres itself raised, which means the transaction is rolled back and gone. */
+const RAISED = (msg: string) => ({ message: msg, code: "P0001" });
 
 function upload(kind: "cover" | "gallery", expect_?: string) {
   const body = new FormData();
@@ -62,55 +68,88 @@ function upload(kind: "cover" | "gallery", expect_?: string) {
   return new Request("http://localhost/api/club-media", { method: "POST", body });
 }
 
+function del(mediaId: string) {
+  return new Request("http://localhost/api/club-media", {
+    method: "DELETE", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mediaId, clubId: CLUB }),
+  });
+}
+
 /** The path the route generated, taken from the upload call it made. */
 function uploadedPath() {
   return storage.upload.mock.calls[0][0] as string;
+}
+function removedPaths() {
+  return storage.remove.mock.calls.map((c) => (c[0] as string[])[0]);
+}
+function orphaned() {
+  return rpc.mock.calls.filter((c) => c[0] === "record_media_orphan").map((c) => c[1]);
 }
 
 beforeEach(() => {
   storage.upload.mockReset().mockResolvedValue({ error: null });
   storage.remove.mockReset().mockResolvedValue({ error: null });
-  rpc.mockReset();
-  rows.club_media = [];
+  rpc.mockReset().mockResolvedValue({ data: null, error: null });
+  media = [];
   selectFails = false;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("club-media publication when the answer is lost", () => {
+describe("publishing an image when the answer is lost", () => {
   it("keeps the file when the row was written but the reply failed", async () => {
-    // The commit landed. All the route sees is an error.
     rpc.mockImplementation(async (fn: string) => {
-      if (fn === "add_club_gallery") {
-        rows.club_media.push({ id: "m-1", path: uploadedPath() });
-        return { data: null, error: { message: "fetch failed" } };
-      }
-      return { data: null, error: null };
+      if (fn !== "add_club_gallery") return { data: null, error: null };
+      media.push({ id: "m-1", path: uploadedPath() });        // the commit landed
+      return { data: null, error: NO_ANSWER };                 // the reply did not
     });
 
     const res = await POST(upload("gallery"));
-    const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.ok).toBe(true);
+    expect((await res.json()).ok).toBe(true);
     expect(storage.remove).not.toHaveBeenCalled();
   });
 
-  it("deletes the file when the database really did refuse", async () => {
-    rpc.mockResolvedValue({ data: null, error: { message: "gallery_full" } });
+  it("keeps the file when the transaction may still be running", async () => {
+    // The connection dropped while the function was blocked on the club lock. Nothing is written
+    // yet, so the reconciling read finds nothing — and then the transaction commits.
+    rpc.mockImplementation(async (fn: string) => {
+      if (fn !== "add_club_gallery") return { data: null, error: null };
+      return { data: null, error: NO_ANSWER };
+    });
 
     const res = await POST(upload("gallery"));
-    const body = await res.json();
+    const path = uploadedPath();
 
     expect(res.status).toBe(409);
-    expect(body.error).toContain("six photos");
-    expect(storage.remove).toHaveBeenCalledWith([uploadedPath()]);
+    expect(storage.remove).not.toHaveBeenCalled();             // the file must survive
+    expect(orphaned()).toEqual([expect.objectContaining({
+      p_path: path, p_reason: "publication outcome unknown: verify before deleting",
+    })]);
+
+    // Now the in-flight transaction commits. Had the route deleted the file, this row would point
+    // at nothing. It points at a file that is still there.
+    media.push({ id: "m-late", path });
+    expect(removedPaths()).not.toContain(path);
   });
 
-  it("keeps the file when it cannot find out what happened", async () => {
-    rpc.mockResolvedValue({ data: null, error: { message: "fetch failed" } });
-    selectFails = true;                       // the reconciling read fails too
+  it("deletes the file only when Postgres itself refused", async () => {
+    rpc.mockImplementation(async (fn: string) =>
+      fn === "add_club_gallery" ? { data: null, error: RAISED("gallery_full") } : { data: null, error: null });
+
+    const res = await POST(upload("gallery"));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("six photos");
+    expect(removedPaths()).toEqual([uploadedPath()]);
+  });
+
+  it("keeps the file when the reconciling read fails too", async () => {
+    rpc.mockImplementation(async (fn: string) =>
+      fn === "add_club_gallery" ? { data: null, error: NO_ANSWER } : { data: null, error: null });
+    selectFails = true;
 
     const res = await POST(upload("gallery"));
 
@@ -119,36 +158,96 @@ describe("club-media publication when the answer is lost", () => {
   });
 
   it("records the file for cleanup when a refusal leaves it undeletable", async () => {
-    rpc.mockImplementation(async (fn: string) => {
-      if (fn === "add_club_gallery") return { data: null, error: { message: "gallery_full" } };
-      return { data: null, error: null };
-    });
+    rpc.mockImplementation(async (fn: string) =>
+      fn === "add_club_gallery" ? { data: null, error: RAISED("gallery_full") } : { data: null, error: null });
     storage.remove.mockResolvedValue({ error: { message: "503" } });
 
     const res = await POST(upload("gallery"));
-    const body = await res.json();
 
     expect(res.status).toBe(409);
-    expect(body.error).toContain("six photos");         // the user still hears the real reason
-    expect(rpc).toHaveBeenCalledWith("record_media_orphan", expect.objectContaining({
+    expect((await res.json()).error).toContain("six photos");   // the user still hears the real reason
+    expect(orphaned()).toEqual([expect.objectContaining({
       p_club: CLUB, p_path: uploadedPath(), p_reason: "rejected: delete failed",
-    }));
+    })]);
   });
 
-  it("still clears the old cover when the reply to a replacement is lost", async () => {
-    rows.club_media.push({ id: "old-1", path: `clubs/${CLUB}/old.webp` });
+  it("replaces a cover atomically, clearing only the file nothing points at", async () => {
+    media = [{ id: "old-1", path: OLD_COVER }];
     rpc.mockImplementation(async (fn: string) => {
-      if (fn === "set_club_image") {
-        rows.club_media.push({ id: "new-1", path: uploadedPath() });
-        return { data: null, error: { message: "fetch failed" } };
-      }
-      return { data: null, error: null };
+      if (fn !== "set_club_image") return { data: null, error: null };
+      // What the function really does: the old row goes and the new one arrives together.
+      media = [{ id: "new-1", path: uploadedPath() }];
+      return { data: null, error: NO_ANSWER };                  // ...and the reply is lost
     });
 
     const res = await POST(upload("cover", "old-1"));
 
     expect(res.status).toBe(200);
-    expect(storage.remove).toHaveBeenCalledWith([`clubs/${CLUB}/old.webp`]);
-    expect(storage.remove).not.toHaveBeenCalledWith([uploadedPath()]);
+    // The table now references the new file and nothing else.
+    expect(media).toEqual([{ id: "new-1", path: uploadedPath() }]);
+    // So exactly the old file is cleaned up, and the referenced one is untouched.
+    expect(removedPaths()).toEqual([OLD_COVER]);
+    expect(removedPaths()).not.toContain(uploadedPath());
+  });
+});
+
+describe("removing an image when the answer is lost", () => {
+  it("deletes the file when the row is gone but the reply failed", async () => {
+    media = [{ id: "m-1", path: OLD_COVER }];
+    rpc.mockImplementation(async (fn: string) => {
+      if (fn !== "remove_club_media") return { data: null, error: null };
+      media = [];                                               // the removal committed
+      return { data: null, error: NO_ANSWER };
+    });
+
+    const res = await DELETE(del("m-1"));
+
+    expect(res.status).toBe(200);
+    expect(removedPaths()).toEqual([OLD_COVER]);
+  });
+
+  it("leaves the file alone when Postgres refused", async () => {
+    media = [{ id: "m-1", path: OLD_COVER }];
+    rpc.mockImplementation(async (fn: string) =>
+      fn === "remove_club_media" ? { data: null, error: RAISED("forbidden") } : { data: null, error: null });
+
+    const res = await DELETE(del("m-1"));
+
+    expect(res.status).toBe(403);
+    expect(storage.remove).not.toHaveBeenCalled();
+  });
+
+  it("leaves the file alone when the row is still there, which may be a transaction in flight", async () => {
+    media = [{ id: "m-1", path: OLD_COVER }];
+    rpc.mockImplementation(async (fn: string) =>
+      fn === "remove_club_media" ? { data: null, error: NO_ANSWER } : { data: null, error: null });
+
+    const res = await DELETE(del("m-1"));
+
+    expect(res.status).toBe(502);
+    expect(storage.remove).not.toHaveBeenCalled();
+  });
+
+  it("leaves the file alone when it cannot find out", async () => {
+    media = [{ id: "m-1", path: OLD_COVER }];
+    rpc.mockImplementation(async (fn: string) =>
+      fn === "remove_club_media" ? { data: null, error: NO_ANSWER } : { data: null, error: null });
+    selectFails = true;
+
+    const res = await DELETE(del("m-1"));
+
+    expect(res.status).toBe(502);
+    expect(storage.remove).not.toHaveBeenCalled();
+  });
+
+  it("deletes the file on the ordinary path", async () => {
+    media = [{ id: "m-1", path: OLD_COVER }];
+    rpc.mockImplementation(async (fn: string) =>
+      fn === "remove_club_media" ? { data: OLD_COVER, error: null } : { data: null, error: null });
+
+    const res = await DELETE(del("m-1"));
+
+    expect(res.status).toBe(200);
+    expect(removedPaths()).toEqual([OLD_COVER]);
   });
 });

@@ -21,11 +21,22 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * must satisfy assert_club_editor, which runs as them. Then the database is told who asked, and
  * decides again — along with whether the path is one this route could have produced.
  *
- * Storing the file and recording the row are two steps, so they can disagree. The rule throughout:
- * **an error from the database is not evidence that it refused.** A commit can land and its response
- * be lost on the way back. So before deleting anything, this route asks the table what actually
- * happened, and when it cannot find out it keeps the file. A leftover file is a tidying problem; a
- * deleted file that a published row still points at is a broken image on a club's page.
+ * Storing the file and recording the row are two steps, so they can disagree, and the route must
+ * decide what to do with a file when it does not know whether the row was written.
+ *
+ * Deleting the file is only safe with proof that the transaction ended without it. There are exactly
+ * two kinds of proof, and nothing else counts:
+ *
+ *   - **the row is there.** It committed; only the reply was lost. Keep the file.
+ *   - **the error carries a SQLSTATE.** Postgres ran the statement and PostgREST rolled the
+ *     transaction back before answering, so there is no transaction left to commit. Delete the file.
+ *
+ * An absent row proves nothing: the transaction may still be running — blocked on the club lock, for
+ * instance — and about to commit a reference to the very file we were about to delete. A dropped
+ * connection or a gateway timeout proves nothing either. In that case the file stays and its path is
+ * recorded in `media_orphans`, where a later sweep can see the settled outcome and act on it. A
+ * leftover file is a tidying problem; a deleted file that a published row points at is a broken
+ * image on a club's page.
  */
 
 const TARGETS = {
@@ -39,7 +50,20 @@ const MAX_INPUT = 15 * 1024 * 1024;   // before re-encoding; the bucket caps the
 const MAX_OUTPUT = 1024 * 1024;
 
 type Admin = ReturnType<typeof createAdminClient>;
-type RpcError = { message?: string };
+type RpcError = { message?: string; code?: string };
+
+/**
+ * Did the transaction definitely roll back? A five-character SQLSTATE in the response says Postgres
+ * ran the statement and PostgREST rolled back before replying — our own `raise` arrives as P0001,
+ * a constraint as 23xxx. Nothing is left that could still commit.
+ *
+ * A dropped connection, a timeout, or a gateway error carries no SQLSTATE and proves nothing: the
+ * transaction may be in flight. PostgREST's own codes (PGRST…) are deliberately not accepted here —
+ * being conservative costs a leftover file, and being wrong costs a published image.
+ */
+function provesRollback(err: RpcError) {
+  return typeof err.code === "string" && /^[0-9A-Z]{5}$/.test(err.code);
+}
 
 /** Who is asking, and may they change this club? Returns the caller's id, or a response to send. */
 async function editorOf(clubId: string) {
@@ -52,13 +76,12 @@ async function editorOf(clubId: string) {
 }
 
 /**
- * Did the publication land? The path is unique to this upload, so the table itself is the answer —
- * which beats reading the error, because a lost response and a refusal can look alike.
- * "unknown" means the question could not be asked.
+ * Is the row there? The path is unique to this upload, so a hit is proof the publication committed.
+ * A miss is not proof of anything — see the note at the top of the file.
  */
-async function isPublished(admin: Admin, path: string): Promise<boolean | "unknown"> {
+async function isPublished(admin: Admin, path: string): Promise<boolean> {
   const { data, error } = await admin.from("club_media").select("id").eq("path", path).maybeSingle();
-  if (error) return "unknown";
+  if (error) return false;
   return data !== null;
 }
 
@@ -79,19 +102,23 @@ async function recordOrphan(admin: Admin, actor: string, clubId: string, path: s
 async function afterFailedPublish(
   admin: Admin, actor: string, clubId: string, path: string, err: RpcError,
 ) {
-  const landed = await isPublished(admin, path);
+  const refused = NextResponse.json({ error: dbMessage(err.message ?? "") }, { status: 409 });
 
-  if (landed === true) return null;        // it committed; only the answer was lost. The file stays.
-
-  if (landed === "unknown") {              // never delete on a guess
-    console.error(`club-media: could not establish whether ${path} was published (${err.message}). The object is kept for reconciliation.`);
-    return NextResponse.json({ error: dbMessage(err.message ?? "") }, { status: 409 });
+  // Proof of rollback, in the reply itself. No read needed, and nothing can commit afterwards.
+  if (provesRollback(err)) {
+    const { error: delErr } = await admin.storage.from("club-media").remove([path]);
+    if (delErr) await recordOrphan(admin, actor, clubId, path, "rejected: delete failed");
+    return refused;
   }
 
-  // A genuine refusal: nothing references the file, so clear it — and account for it if that fails.
-  const { error: delErr } = await admin.storage.from("club-media").remove([path]);
-  if (delErr) await recordOrphan(admin, actor, clubId, path, "rejected: delete failed");
-  return NextResponse.json({ error: dbMessage(err.message ?? "") }, { status: 409 });
+  // No proof either way. The row being there is proof it committed.
+  if (await isPublished(admin, path)) return null;
+
+  // Still no proof. The transaction may be running right now and about to reference this file, so it
+  // stays; a later sweep will see the settled outcome. This is also the path a failed read takes.
+  console.error(`club-media: could not establish whether ${path} was published (${err.message}). The object is kept for reconciliation.`);
+  await recordOrphan(admin, actor, clubId, path, "publication outcome unknown: verify before deleting");
+  return refused;
 }
 
 export async function POST(request: Request) {
@@ -238,13 +265,18 @@ export async function DELETE(request: Request) {
 
   let doomed: string | null = (returned as string | null) ?? null;
   if (error) {
+    // Proof of rollback: the row is untouched, so its file is still referenced. Leave both alone.
+    if (provesRollback(error)) return NextResponse.json({ error: dbMessage(error.message) }, { status: 403 });
+
+    // No proof. Here the row's *absence* is what settles it: the removal committed and the reply was
+    // lost, so the file it named is now unreferenced. A row still present means either a refusal or
+    // a transaction in flight, and in both cases the file must stay.
     const { data: still, error: checkErr } = await admin.from("club_media").select("id").eq("id", mediaId).maybeSingle();
-    if (checkErr) {
+    if (checkErr || still) {
       console.error(`club-media: could not establish whether ${mediaId} was removed (${error.message}). Nothing was deleted.`);
       return NextResponse.json({ error: "Could not remove that image. Try again in a moment." }, { status: 502 });
     }
-    if (still) return NextResponse.json({ error: dbMessage(error.message) }, { status: 403 });   // a real refusal
-    doomed = (before?.path as string | undefined) ?? null;      // it committed; the answer was lost
+    doomed = (before?.path as string | undefined) ?? null;
   }
 
   if (doomed) {
