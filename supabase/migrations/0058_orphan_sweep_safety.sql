@@ -12,12 +12,28 @@
 --                    how the publication ended. The path may be referenced a moment from now.
 --
 -- WHOEVER CLEANS THESE UP must establish a terminal outcome for an uncertain entry first. "Not
--- currently referenced" is not sufficient and neither is a list fetched a moment ago, because both
--- can be made stale by a transaction that is still running. The outcome available in practice is
--- age: no transaction outlives the server's statement and idle-in-transaction timeouts, so an entry
--- older than that by a comfortable margin has settled. A sweep must therefore re-check the reference
--- inside the same transaction that deletes, and only for entries old enough to have settled.
--- There is no sweep yet; this is the contract for the one that gets written.
+-- currently referenced" is not sufficient, and neither is a list fetched a moment ago: a transaction
+-- that is still running makes both stale.
+--
+-- UNTIL THEN, UNCERTAIN ENTRIES ARE LEFT ALONE. There is no sweep yet, and this is the contract for
+-- the one that gets written:
+--
+--   * A certain entry may be deleted after re-checking, in the same transaction as the delete, that
+--     nothing references the path.
+--   * An uncertain entry may not be deleted on age alone. Age looks like the outcome available —
+--     a transaction cannot outlive the server's own timeouts — but the limits that would make that
+--     argument hold have not been read off this project, and an argument from a figure nobody has
+--     checked is not proof. Before any sweep touches an uncertain entry, record what these actually
+--     are, and whether the pooler in front of Postgres changes them:
+--
+--       select name, setting from pg_settings
+--        where name in ('statement_timeout', 'idle_in_transaction_session_timeout', 'lock_timeout');
+--       select rolname, rolconfig from pg_roles
+--        where rolname in ('authenticated', 'service_role', 'anon');
+--
+--     If they turn out to be absent or unbounded, age proves nothing at all and the outcome has to
+--     come from somewhere else — asking the storage API what objects exist and reconciling against
+--     club_media as a whole, for instance, rather than entry by entry.
 alter table media_orphans add column if not exists certain boolean not null default false;
 
 -- Whoever records a file now has to say which kind it is. No default: the caller knows, and guessing
