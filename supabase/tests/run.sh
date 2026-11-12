@@ -1139,6 +1139,29 @@ denied $P4 "101j the same token with no end time is refused"          "select bo
 check service "101k still just the one booking for that token"        "select count(*) from bookings where client_token='$TK3';" 1
 $PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
 
+# 0054: a late payment is money that really arrived, so its refund must be able to finish
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
+LT=$({ as_user $P2; echo "select payment_id from hold_slot('$CB','$COURT4', (current_date + 13 + time '19:00') at time zone 'Asia/Beirut', (current_date + 13 + time '20:00') at time zone 'Asia/Beirut');"; } | $PSQL -At -d $DB | tail -1)
+# the hold runs out before the gateway answers
+$PSQL -q -d $DB -c "update bookings set hold_expires_at = now() - interval '1 min' where id = (select booking_id from payments where id='$LT'); select expire_stale_holds('$COURT4');" >/dev/null
+check service "102a a late receipt is recorded as owed back"          "select confirm_payment('$LT','late-ref', (select total_usd from payments where id='$LT'));" "refund_due"
+check service "102b and it carries evidence that money was collected" "select paid_at is not null from payments where id='$LT';" "t"
+check service "102c it is not counted as revenue"                     "select status from payments where id='$LT';" "refund_due"
+{ as_user $ADMIN; echo "select set_club_payment_mode('$CB','at_desk');"; } | $PSQL -q -d $DB >/dev/null
+check service "102d the refund can still be completed after the switch" "update payments set status='refunded', refunded_at=now() where id='$LT'; select status from payments where id='$LT';" "refunded"
+# and the thing this rule exists to stop is still stopped
+denied service "102e a confirmation with no money behind it is still refused" "select confirm_payment('$LP','another-stale-ref', (select total_usd from payments where id='$LP'));"
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
+
+# 0054: a real gateway's late receipt still lands at a desk-mode club, because the money did move
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
+GW=$({ as_user $P3; echo "select payment_id from hold_slot('$CB','$COURT4', (current_date + 12 + time '08:00') at time zone 'Asia/Beirut', (current_date + 12 + time '09:00') at time zone 'Asia/Beirut');"; } | $PSQL -At -d $DB | tail -1)
+$PSQL -q -d $DB -c "update payments set provider='whish' where id='$GW'; update bookings set hold_expires_at = now() - interval '1 min' where id = (select booking_id from payments where id='$GW'); select expire_stale_holds('$COURT4');" >/dev/null
+{ as_user $ADMIN; echo "select set_club_payment_mode('$CB','at_desk');"; } | $PSQL -q -d $DB >/dev/null
+check service "102f a real gateway receipt is recorded even after the switch" "select confirm_payment('$GW','whish-late-ref', (select total_usd from payments where id='$GW'));" "refund_due"
+check service "102g and that refund can be completed"                 "update payments set status='refunded', refunded_at=now() where id='$GW'; select status from payments where id='$GW';" "refunded"
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
+
 echo
 echo "checks: $CHECKS, failures: $FAILS"
 [ "$FAILS" -eq 0 ] || { echo "SUITE FAILED"; exit 1; }
