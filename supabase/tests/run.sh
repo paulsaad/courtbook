@@ -964,6 +964,28 @@ denied $P1 "96c a player cannot look up contacts"                      "select c
 denied $STAFF_B "96d staff of another club cannot either"              "select count(*) from club_booking_contacts('$CLUB', array['$APPB']::uuid[]);"
 check $STAFF_B "96e and asking under their own club returns nothing"   "select count(*) from club_booking_contacts('$CLUB_B', array['$APPB']::uuid[]);" 0
 
+# 0049: a hold only occupies its slot until the hold runs out
+$PSQL -q -d $DB -c "update clubs set open_time='00:00', close_time='24:00' where id='$CLUB';" >/dev/null
+H2="(date_trunc('hour', now()) + case when extract(minute from now()) >= 30 then interval '30 min' else interval '0 min' end)"
+# the reviewer's case: a block ending soon, then a held slot whose hold dies before that slot starts
+$PSQL -q -d $DB -c "delete from blocks where club_id='$CLUB' and court_id='$COURT4'; delete from bookings where club_id='$CLUB' and court_id='$COURT4';" >/dev/null
+$PSQL -q -d $DB -c "insert into blocks (club_id, court_id, start_at, end_at, reason, created_by) values ('$CLUB','$COURT4', $H2 - interval '30 min', $H2 + interval '30 min', 'ends soon','$ADMIN');" >/dev/null
+$PSQL -q -d $DB -c "insert into bookings (club_id, court_id, player_id, start_at, end_at, status, source, created_by, hold_expires_at, price_usd, fee_usd) values ('$CLUB','$COURT4','$P4', $H2 + interval '30 min', $H2 + interval '90 min', 'pending','app','$P2', now() + interval '5 min', 30, 1);" >/dev/null
+# the dead hold must not drag free_at out to its slot's end; whichever of the block or the hold dies last wins
+check $ADMIN "97a a hold that dies before its slot starts does not extend the chain" "select busy||'/'||(free_at <= greatest($H2 + interval '30 min', now() + interval '5 min')) from club_courts_free_now('$CLUB') where court_id='$COURT4';" "true/true"
+# a hold that runs out part-way through its own slot frees the court at that moment, not at the slot's end
+$PSQL -q -d $DB -c "delete from blocks where club_id='$CLUB' and court_id='$COURT4'; delete from bookings where club_id='$CLUB' and court_id='$COURT4';" >/dev/null
+$PSQL -q -d $DB -c "insert into bookings (club_id, court_id, player_id, start_at, end_at, status, source, created_by, hold_expires_at, price_usd, fee_usd) values ('$CLUB','$COURT4','$P4', $H2, $H2 + interval '60 min', 'pending','app','$P2', now() + interval '4 min', 30, 1);" >/dev/null
+check $ADMIN "97b a hold expiring mid-slot frees the court when it expires, not at the slot's end" "select busy||'/'||(free_at <= now() + interval '5 min') from club_courts_free_now('$CLUB') where court_id='$COURT4';" "true/true"
+# and a hold already dead holds nothing at all
+$PSQL -q -d $DB -c "update bookings set hold_expires_at = now() - interval '1 min' where club_id='$CLUB' and court_id='$COURT4' and status='pending';" >/dev/null
+check $ADMIN "97c an expired hold leaves the court free"              "select busy||'/'||(free_at is null) from club_courts_free_now('$CLUB') where court_id='$COURT4';" "false/true"
+# a paid booking behind the dead hold still occupies the court
+$PSQL -q -d $DB -c "delete from bookings where club_id='$CLUB' and court_id='$COURT4';" >/dev/null
+$PSQL -q -d $DB -c "insert into bookings (club_id, court_id, guest_name, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$CLUB','$COURT4','Confirmed', $H2, $H2 + interval '60 min', 'confirmed','staff','$ADMIN',30,0);" >/dev/null
+check $ADMIN "97d a confirmed booking is unaffected by the hold rule"  "select busy||'/'||(free_at = $H2 + interval '60 min') from club_courts_free_now('$CLUB') where court_id='$COURT4';" "true/true"
+$PSQL -q -d $DB -c "update clubs set open_time='08:00', close_time='23:00' where id='$CLUB';" >/dev/null
+
 echo
 echo "checks: $CHECKS, failures: $FAILS"
 [ "$FAILS" -eq 0 ] || { echo "SUITE FAILED"; exit 1; }
