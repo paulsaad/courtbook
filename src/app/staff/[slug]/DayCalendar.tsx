@@ -5,14 +5,17 @@ import { useCallback, useEffect, useState } from "react";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
-import { clubLocalToUtc, dayBounds, hhmm, shiftDate, slotTimes, todayIn, toMin } from "@/lib/time";
+import { clubLocalToUtc, dayBounds, hhmm, nowMs, shiftDate, slotTimes, todayIn, toMin } from "@/lib/time";
 import { friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; sportNames: Record<string, string> };
 
 export type StaffView = "now" | "grid" | "list";
-/** One active court's state at this moment: busy by a booking, an unexpired hold or a block. */
+/** One active court's state at this moment: busy by a booking, an unexpired hold or a block.
+ *  free_at follows the chain of back-to-back bookings and blocks to when the court is really free. */
 type FreeNow = { court_id: string; court_name: string; sport: string; busy: boolean; free_at: string | null };
+/** A past customer of this club. Name and phone only — never a player account. */
+type Guest = { name: string; phone: string | null; last_at: string };
 
 type Sheet =
   | { kind: "add"; courtId: string; time: string }
@@ -353,7 +356,7 @@ function NowPanel({ club, courts, bookings, freeNow, sportNames, showLater, onTo
   club: Club; courts: Court[]; bookings: Booking[]; freeNow: FreeNow[] | null; sportNames: Record<string, string>;
   showLater: boolean; onToggleLater: () => void; onOpen: (b: Booking) => void;
 }) {
-  const now = Date.now();
+  const now = nowMs();
   const live = bookings.filter((b) => Date.parse(b.start_at) <= now && Date.parse(b.end_at) > now);
   const soon = bookings.filter((b) => Date.parse(b.start_at) > now && Date.parse(b.start_at) <= now + 3 * 3600_000);
   const later = bookings.filter((b) => Date.parse(b.start_at) > now + 3 * 3600_000);
@@ -439,8 +442,22 @@ function AddSheet({ club, court, time, times, busy, defaultMinutes, onSave }: {
 }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [picked, setPicked] = useState(false);
+  const [hints, setHints] = useState<Guest[]>([]);
   const remaining = times.length - times.indexOf(time);
   const [slots, setSlots] = useState(Math.min(remaining, Math.max(1, Math.round((defaultMinutes ?? club.min_booking_minutes) / club.slot_minutes))));
+
+  // customers this club has booked before, matched on what the desk has typed so far
+  useEffect(() => {
+    let alive = true;
+    const t = setTimeout(async () => {
+      if (picked || name.trim().length < 2) { if (alive) setHints([]); return; }
+      const { data } = await createClient().rpc("club_recent_guests", { p_club: club.id, p_query: name.trim() });
+      if (alive) setHints(((data as Guest[] | null) ?? []).slice(0, 5));
+    }, 200);
+    return () => { alive = false; clearTimeout(t); };
+  }, [name, picked, club.id]);
+
   const endTime = (n: number) => {
     const m = toMin(time) + n * club.slot_minutes;
     return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
@@ -448,7 +465,22 @@ function AddSheet({ club, court, time, times, busy, defaultMinutes, onSave }: {
   return (
     <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); onSave(name.trim(), phone.trim(), slots, false); }}>
       <h2 className="text-lg font-semibold">{court.name}, {time}–{endTime(slots)}</h2>
-      <input className={input} placeholder="Name" required value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+      <input className={input} placeholder="Name" required value={name} autoFocus
+             onChange={(e) => { setName(e.target.value); setPicked(false); }} />
+      {hints.length > 0 && (
+        <ul className="-mt-1 divide-y divide-grid rounded-xl border border-grid bg-paper text-sm">
+          {hints.map((g) => (
+            <li key={`${g.name}|${g.phone ?? ""}`}>
+              {/* a suggestion fills this customer's own phone, or clears it when they have none */}
+              <button type="button" className="flex w-full items-center justify-between px-3 py-2 text-left"
+                      onClick={() => { setName(g.name); setPhone(g.phone ?? ""); setPicked(true); setHints([]); }}>
+                <span className="truncate">{g.name}</span>
+                <span className="ml-3 shrink-0 text-muted">{g.phone ?? "no phone"}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <input className={input} placeholder="Phone (optional)" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
       <div className="grid grid-cols-4 gap-2">
         {Array.from({ length: Math.min(Math.floor(240 / club.slot_minutes), remaining) }, (_, i) => i + 1).map((n) => (

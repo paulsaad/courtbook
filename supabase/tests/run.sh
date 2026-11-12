@@ -933,7 +933,22 @@ check $ADMIN "94s a blocked court reads busy too"                     "select bu
 $PSQL -q -d $DB -c "insert into bookings (club_id, court_id, player_id, start_at, end_at, status, source, created_by, hold_expires_at, price_usd, fee_usd) values ('$CLUB','$COURT', '$P1', $H, $H + interval '60 min', 'pending','app','$P1', now() - interval '1 min', 30, 1);" >/dev/null
 check $ADMIN "94t an expired hold does not hold a court"              "select busy from club_courts_free_now('$CLUB') where court_id='$COURT';" "f"
 denied $P1 "94u a player cannot read the club's free-now list"        "select count(*) from club_courts_free_now('$CLUB');"
+
+# 0047: back-to-back blocks must not report the court free in between
+$PSQL -q -d $DB -c "insert into blocks (club_id, court_id, start_at, end_at, reason, created_by) values ('$CLUB','$COURT3', $H + interval '30 min', $H + interval '60 min', 'more maintenance','$ADMIN');" >/dev/null
+check $ADMIN "94v free-at follows the chain to the real end"          "select busy||'/'||(free_at = $H + interval '60 min') from club_courts_free_now('$CLUB') where court_id='$COURT3';" "true/true"
+COURT4=$($PSQL -At -q -d $DB -c "select id from courts where name='Tennis 2'" | head -1)
+check $ADMIN "94w a court with nothing on it has no free-at"          "select busy||'/'||(free_at is null) from club_courts_free_now('$CLUB') where court_id='$COURT4';" "false/true"
 $PSQL -q -d $DB -c "update clubs set open_time='08:00', close_time='23:00' where id='$CLUB';" >/dev/null
+
+# 0047: the desk cannot insert a booking straight into the table any more — staff_book() or nothing
+# a perfectly valid slot, so only the missing policy can refuse it
+denied $ADMIN "94x a direct insert is refused by RLS, not by a trigger" "insert into bookings (club_id, court_id, guest_name, start_at, end_at, status, source, created_by) values ('$CLUB','$COURT','Sneaky', (current_date + 13 + time '14:00') at time zone 'Asia/Beirut', (current_date + 13 + time '15:00') at time zone 'Asia/Beirut', 'confirmed','staff','$ADMIN');"
+check service "94y and nothing got through"                           "select count(*) from bookings where guest_name='Sneaky';" 0
+# two different customers who happen to share a name stay two suggestions
+$PSQL -q -d $DB -c "insert into bookings (club_id, court_id, guest_name, guest_phone, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$CLUB','$COURT','Same Name','03 777 111', (current_date + 13 + time '09:00') at time zone 'Asia/Beirut', (current_date + 13 + time '10:00') at time zone 'Asia/Beirut', 'confirmed','staff','$ADMIN',20,0), ('$CLUB','$COURT','Same Name','03 888 222', (current_date + 13 + time '10:00') at time zone 'Asia/Beirut', (current_date + 13 + time '11:00') at time zone 'Asia/Beirut', 'confirmed','staff','$ADMIN',20,0), ('$CLUB','$COURT','Same Name',null, (current_date + 13 + time '11:00') at time zone 'Asia/Beirut', (current_date + 13 + time '12:00') at time zone 'Asia/Beirut', 'confirmed','staff','$ADMIN',20,0);" >/dev/null
+check $ADMIN "94z same name, different phones -> separate suggestions" "select count(*) from club_recent_guests('$CLUB','Same Name');" 3
+check $ADMIN "94z2 the one stored without a phone keeps no phone"      "select count(*) from club_recent_guests('$CLUB','Same Name') where phone is null;" 1
 
 echo
 echo "checks: $CHECKS, failures: $FAILS"
