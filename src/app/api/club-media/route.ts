@@ -81,7 +81,19 @@ async function editorOf(clubId: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: NextResponse.json({ error: "Sign in first." }, { status: 401 }) };
   const { error } = await supabase.rpc("assert_club_editor", { p_club: clubId });
-  if (error) return { error: NextResponse.json({ error: "You cannot change this club's images." }, { status: 403 }) };
+  if (error) {
+    // Only a `raise` from the function itself means this person is not staff of this club. Anything
+    // else — no permission to run the check, the function missing, the database unreachable — is
+    // this server being wrong, and saying "you cannot" would send them looking at their own account
+    // for a problem that is not there. It cost an evening once; it should not cost another.
+    if (error.code !== "P0001") {
+      console.error(`club-media: the permission check could not run for club ${clubId} (${error.code}: ${error.message})`);
+      return { error: NextResponse.json({
+        error: "Images cannot be changed right now because of a problem on our side, not with your account.",
+      }, { status: 500 }) };
+    }
+    return { error: NextResponse.json({ error: "You cannot change this club's images." }, { status: 403 }) };
+  }
   return { actor: user.id };
 }
 

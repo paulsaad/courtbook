@@ -1190,6 +1190,38 @@ denied service "103e the simulated one cannot"                        "update pa
 $PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
 
 echo "--- AJ. club images (Phase 11a)"
+# 0036 stopped new functions being executable by default, so every RPC a browser calls needs an
+# explicit grant. 0056 forgot one — assert_club_editor, the check the upload route runs before doing
+# anything — and the route reported it as the person not being staff. This check lists every RPC the
+# app calls that a signed-in user CANNOT execute, and that list must be exactly the ones meant to be
+# reachable only by the server. It fails in both directions: a missing grant appears here, and so
+# does a server-only function handed to everybody. Add to the list when a new RPC is server-only.
+check service "104! only the server-only RPCs are out of a signed-in user's reach" "
+  select coalesce(string_agg(p.proname, ',' order by p.proname), '(none)')
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public' and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+    and p.proname in (
+      'add_club_gallery','add_club_staff','add_town','areas','assert_club_editor','book_at_desk',
+      'booking_match','cancel_booking','claim_notifications_to_email','claim_payment_session',
+      'clear_notifications','close_club','club_balances','club_booking_contacts','club_coach_requests',
+      'club_common_duration','club_courts_free_now','club_day_slots','club_discovery','club_recent_guests',
+      'club_sports','club_staff_list','coach_availability','coach_card','coaches_at_club','coaches_directory',
+      'confirm_payment','decide_coach_club','delete_match_message','delete_notification','hide_match',
+      'hold_slot','mark_no_show','mark_notifications_emailed','mark_notifications_read','mark_refunded',
+      'match_board','match_is_hidden','match_messages_list','match_participants','move_booking',
+      'my_active_hold','my_agenda','my_levels','open_matches','payments_list','payments_summary','post_match',
+      'quote_price','record_media_orphan','refunds_due','release_hold','release_payment_session_claim',
+      'remove_club_media','remove_club_staff','reorder_club_gallery','set_club_image','set_club_payment_mode',
+      'set_gallery_caption','set_match_status','set_player_level','staff_book','update_club_settings');" \
+  "add_club_gallery,claim_notifications_to_email,claim_payment_session,confirm_payment,mark_notifications_emailed,record_media_orphan,release_payment_session_claim,remove_club_media,reorder_club_gallery,set_club_image,set_gallery_caption"
+# and the check itself, from each kind of caller
+# `select void_fn() is null` is false, and a void call in an unreferenced subquery is optimised away
+# entirely — both would pass without testing anything. Concatenating the result forces the call.
+check $ADMIN   "104@a an admin passes the editor check"               "select 'passed' || coalesce((select assert_club_editor('$CLUB'))::text, '');" "passed"
+check $STAFF_B "104@b staff pass it for their own club"               "select 'passed' || coalesce((select assert_club_editor('$CLUB_B'))::text, '');" "passed"
+denied $STAFF_B "104@c but not for someone else's"                    "select assert_club_editor('$CLUB');"
+denied $P1     "104@d a player is refused"                            "select assert_club_editor('$CLUB');"
+denied anon    "104@e and a stranger cannot even run it"              "select assert_club_editor('$CLUB');"
 # Publishing an image is a server-only operation. The upload route signs in the person, processes the
 # file and then asks the database to publish it, naming who asked. The database still decides whether
 # that person may touch the club, and whether the path is one the route could have produced.
