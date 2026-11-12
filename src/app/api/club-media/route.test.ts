@@ -126,11 +126,35 @@ describe("publishing an image when the answer is lost", () => {
     expect(res.status).toBe(409);
     expect(storage.remove).not.toHaveBeenCalled();             // the file must survive
     expect(orphaned()).toEqual([expect.objectContaining({
-      p_path: path, p_reason: "publication outcome unknown: verify before deleting",
+      p_path: path, p_reason: "publication outcome unknown: establish it before deleting",
+      p_certain: false,
     })]);
 
     // Now the in-flight transaction commits. Had the route deleted the file, this row would point
     // at nothing. It points at a file that is still there.
+    media.push({ id: "m-late", path });
+    expect(removedPaths()).not.toContain(path);
+  });
+
+  // A code can be perfectly well-formed and still say the outcome is unknown. These two do.
+  it.each([
+    ["08007", "transaction_resolution_unknown"],
+    ["40003", "statement_completion_unknown"],
+    ["53100", "a code this route has never considered"],
+  ])("keeps the file on %s (%s)", async (code) => {
+    rpc.mockImplementation(async (fn: string) =>
+      fn === "add_club_gallery"
+        ? { data: null, error: { message: "could not complete", code } }
+        : { data: null, error: null });
+
+    const res = await POST(upload("gallery"));
+    const path = uploadedPath();
+
+    expect(res.status).toBe(409);
+    expect(storage.remove).not.toHaveBeenCalled();
+    expect(orphaned()).toEqual([expect.objectContaining({ p_path: path, p_certain: false })]);
+
+    // And when the publication turns out to have committed, the file it references is still there.
     media.push({ id: "m-late", path });
     expect(removedPaths()).not.toContain(path);
   });
@@ -167,7 +191,7 @@ describe("publishing an image when the answer is lost", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error).toContain("six photos");   // the user still hears the real reason
     expect(orphaned()).toEqual([expect.objectContaining({
-      p_club: CLUB, p_path: uploadedPath(), p_reason: "rejected: delete failed",
+      p_club: CLUB, p_path: uploadedPath(), p_reason: "rejected: delete failed", p_certain: true,
     })]);
   });
 

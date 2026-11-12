@@ -53,16 +53,26 @@ type Admin = ReturnType<typeof createAdminClient>;
 type RpcError = { message?: string; code?: string };
 
 /**
- * Did the transaction definitely roll back? A five-character SQLSTATE in the response says Postgres
- * ran the statement and PostgREST rolled back before replying — our own `raise` arrives as P0001,
- * a constraint as 23xxx. Nothing is left that could still commit.
+ * SQLSTATEs that mean the transaction ended and wrote nothing. Only codes these RPCs can actually
+ * produce, and only ones whose meaning leaves no room for doubt.
  *
- * A dropped connection, a timeout, or a gateway error carries no SQLSTATE and proves nothing: the
- * transaction may be in flight. PostgREST's own codes (PGRST…) are deliberately not accepted here —
- * being conservative costs a leftover file, and being wrong costs a published image.
+ * Being SQLSTATE-shaped is not enough, which is the trap: `08007` (transaction_resolution_unknown)
+ * and `40003` (statement_completion_unknown) are well-formed codes that say, in as many words, that
+ * nobody knows whether the transaction committed. `40001` and `40P01` are left out as well — they
+ * are terminal, but admitting them buys nothing, since the caller simply tries again. Anything not
+ * on this list counts as uncertain, so a code nobody here thought about keeps the file rather than
+ * risking a published image that points at nothing.
  */
+const TERMINAL_REJECTIONS = new Set([
+  "P0001",                            // raise: gallery_full, changed_elsewhere, forbidden, bad_path…
+  "22001", "22023", "22P02",          // a value the function will not take, e.g. a malformed uuid
+  "23502", "23503", "23505", "23514", // a constraint refused the row
+  "42501", "42703", "42883", "42P01", // no permission, or the function or table is not there at all
+]);
+
+/** Did the transaction definitely roll back, writing nothing? Only the list above is proof. */
 function provesRollback(err: RpcError) {
-  return typeof err.code === "string" && /^[0-9A-Z]{5}$/.test(err.code);
+  return typeof err.code === "string" && TERMINAL_REJECTIONS.has(err.code);
 }
 
 /** Who is asking, and may they change this club? Returns the caller's id, or a response to send. */
@@ -85,10 +95,16 @@ async function isPublished(admin: Admin, path: string): Promise<boolean> {
   return data !== null;
 }
 
-/** Store a file for later reconciliation when it cannot be deleted. Failing that, say so in the log. */
-async function recordOrphan(admin: Admin, actor: string, clubId: string, path: string, reason: string) {
+/**
+ * Note a file the route could not delete. `certain` says whether the database's refusal was terminal:
+ * true means nothing can ever reference this path, false means a cleanup must establish that for
+ * itself before deleting. Failing to record it at all, say so in the log — there is nowhere else.
+ */
+async function recordOrphan(
+  admin: Admin, actor: string, clubId: string, path: string, reason: string, certain: boolean,
+) {
   const { error } = await admin.rpc("record_media_orphan", {
-    p_actor: actor, p_club: clubId, p_path: path, p_reason: reason,
+    p_actor: actor, p_club: clubId, p_path: path, p_reason: reason, p_certain: certain,
   });
   if (error) {
     console.error(`club-media: ${path} is unused, could not be deleted, and could not be recorded for cleanup (${error.message}). It must be removed by hand.`);
@@ -107,7 +123,7 @@ async function afterFailedPublish(
   // Proof of rollback, in the reply itself. No read needed, and nothing can commit afterwards.
   if (provesRollback(err)) {
     const { error: delErr } = await admin.storage.from("club-media").remove([path]);
-    if (delErr) await recordOrphan(admin, actor, clubId, path, "rejected: delete failed");
+    if (delErr) await recordOrphan(admin, actor, clubId, path, "rejected: delete failed", true);
     return refused;
   }
 
@@ -117,7 +133,7 @@ async function afterFailedPublish(
   // Still no proof. The transaction may be running right now and about to reference this file, so it
   // stays; a later sweep will see the settled outcome. This is also the path a failed read takes.
   console.error(`club-media: could not establish whether ${path} was published (${err.message}). The object is kept for reconciliation.`);
-  await recordOrphan(admin, actor, clubId, path, "publication outcome unknown: verify before deleting");
+  await recordOrphan(admin, actor, clubId, path, "publication outcome unknown: establish it before deleting", false);
   return refused;
 }
 
@@ -206,7 +222,7 @@ export async function POST(request: Request) {
   // failed replacement: record it for cleanup and tell the caller it worked.
   if (oldPath) {
     const { error: delErr } = await admin.storage.from("club-media").remove([oldPath]);
-    if (delErr) await recordOrphan(admin, actor, clubId, oldPath, "replace: delete failed");
+    if (delErr) await recordOrphan(admin, actor, clubId, oldPath, "replace: delete failed", true);
   }
   return NextResponse.json({ ok: true, path, width, height });
 }
@@ -281,7 +297,7 @@ export async function DELETE(request: Request) {
 
   if (doomed) {
     const { error: delErr } = await admin.storage.from("club-media").remove([doomed]);
-    if (delErr) await recordOrphan(admin, actor, clubId, doomed, "remove: delete failed");
+    if (delErr) await recordOrphan(admin, actor, clubId, doomed, "remove: delete failed", true);
   }
   return NextResponse.json({ ok: true });
 }

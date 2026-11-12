@@ -1242,16 +1242,19 @@ check service "104y reordering with all of them works"                "select re
 RM=$($PSQL -At -q -d $DB -c "select id from club_media where club_id='$CLUB' and kind='gallery' order by sort limit 1" | head -1)
 check service "104z removing returns the file to delete"              "select remove_club_media('$ADMIN','$RM') like 'clubs/%';" "t"
 check service "104aa and the remaining photos are numbered 0..4"      "select string_agg(sort::text,',' order by sort) from club_media where club_id='$CLUB' and kind='gallery';" "0,1,2,3,4"
-denied service "104ab a file still in use cannot be filed as unused"  "select record_media_orphan('$ADMIN','$CLUB',(select path from club_media where club_id='$CLUB' and kind='gallery' limit 1), 'test');"
-denied service "104ac nor can another club's file be filed here"      "select record_media_orphan('$ADMIN','$CLUB','$(mpath $CLUB_B 21)','test');"
-{ as_service; echo "select record_media_orphan('$ADMIN','$CLUB','$(mpath $CLUB 22)','test');"; } | $PSQL -q -d $DB >/dev/null
+denied service "104ab a file still in use cannot be filed as unused"  "select record_media_orphan('$ADMIN','$CLUB',(select path from club_media where club_id='$CLUB' and kind='gallery' limit 1), 'test', true);"
+denied service "104ac nor can another club's file be filed here"      "select record_media_orphan('$ADMIN','$CLUB','$(mpath $CLUB_B 21)','test', true);"
+{ as_service; echo "select record_media_orphan('$ADMIN','$CLUB','$(mpath $CLUB 22)','test', true);"; } | $PSQL -q -d $DB >/dev/null
 check service "104ad a file nothing points at is filed for cleanup"   "select count(*) from media_orphans where path='$(mpath $CLUB 22)';" 1
 denied $P1     "104ae a player cannot list unused files"              "select count(*) from media_orphans_list();"
 check $ADMIN   "104af an admin can"                                   "select count(*) >= 1 from media_orphans_list();" "t"
 # A file recorded while its outcome was unknown may turn out to be referenced after all. The sweep
 # list must not offer it for deletion, or the uncertainty just moves one step along.
-{ as_service; echo "select record_media_orphan('$ADMIN','$CLUB','$(mpath $CLUB 23)','outcome unknown');"; } | $PSQL -q -d $DB >/dev/null
+{ as_service; echo "select record_media_orphan('$ADMIN','$CLUB','$(mpath $CLUB 23)','outcome unknown', false);"; } | $PSQL -q -d $DB >/dev/null
 check $ADMIN   "104afa an unsure record is listed while nothing uses it" "select count(*) from media_orphans_list() where path='$(mpath $CLUB 23)';" 1
+check $ADMIN   "104afc and is labelled as needing verification"        "select certain from media_orphans_list() where path='$(mpath $CLUB 23)';" "f"
+check $ADMIN   "104afd while a terminal refusal is labelled safe"      "select certain from media_orphans_list() where path='$(mpath $CLUB 22)';" "t"
+denied service "104afe recording without saying which is refused"      "select record_media_orphan('$ADMIN','$CLUB','$(mpath $CLUB 24)','test', null);"
 $PSQL -q -d $DB -c "insert into club_media (club_id, kind, path, sort, created_by) values ('$CLUB','gallery','$(mpath $CLUB 23)', 9, '$ADMIN');" >/dev/null
 check $ADMIN   "104afb and drops off the list once something does"    "select count(*) from media_orphans_list() where path='$(mpath $CLUB 23)';" 0
 $PSQL -q -d $DB -c "delete from club_media where path='$(mpath $CLUB 23)'; delete from media_orphans where path='$(mpath $CLUB 23)';" >/dev/null
