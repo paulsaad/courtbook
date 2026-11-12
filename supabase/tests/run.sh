@@ -986,6 +986,11 @@ $PSQL -q -d $DB -c "insert into bookings (club_id, court_id, guest_name, start_a
 check $ADMIN "97d a confirmed booking is unaffected by the hold rule"  "select busy||'/'||(free_at = $H2 + interval '60 min') from club_courts_free_now('$CLUB') where court_id='$COURT4';" "true/true"
 $PSQL -q -d $DB -c "update clubs set open_time='08:00', close_time='23:00' where id='$CLUB';" >/dev/null
 
+# moving a booking must land on the day it is given, not on whatever day the calendar happens to show
+$PSQL -q -d $DB -c "delete from bookings where club_id='$CLUB' and court_id='$COURT4';" >/dev/null
+MV=$($PSQL -At -q -d $DB -c "insert into bookings (club_id, court_id, guest_name, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$CLUB','$COURT4','Mover', (current_date + 16 + time '09:00') at time zone 'Asia/Beirut', (current_date + 16 + time '10:00') at time zone 'Asia/Beirut', 'confirmed','staff','$ADMIN',20,0) returning id" | head -1)
+check $ADMIN "98a a move lands on the day it was given, three days later" "select move_booking('$MV','$COURT4', (current_date + 19 + time '14:00') at time zone 'Asia/Beirut', (current_date + 19 + time '15:00') at time zone 'Asia/Beirut'); select ((start_at at time zone 'Asia/Beirut')::date - current_date)||'/'||to_char(start_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='$MV';" "19/14:00"
+
 echo
 echo "checks: $CHECKS, failures: $FAILS"
 [ "$FAILS" -eq 0 ] || { echo "SUITE FAILED"; exit 1; }

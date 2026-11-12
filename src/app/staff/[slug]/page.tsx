@@ -46,7 +46,7 @@ export default async function StaffClubPage({
   const date = qDate && /^\d{4}-\d{2}-\d{2}$/.test(qDate) ? qDate : todayIn(club.timezone);
   const { dayStart, dayEnd } = dayBounds(date, club.timezone);
 
-  const [{ data: courts }, { data: bookings }, { data: blocks }, { data: sportRows }] = await Promise.all([
+  const [{ data: courts }, { data: bookings, error: bookingsError }, { data: blocks, error: blocksError }, { data: sportRows }] = await Promise.all([
     supabase.from("courts").select("id, name, sport, surface, sort, active").eq("club_id", club.id).eq("active", true).order("sort"),
     supabase
       .from("bookings")
@@ -91,6 +91,7 @@ export default async function StaffClubPage({
       date={date}
       view={view === "list" ? "list" : view === "week" ? "week" : view === "grid" ? "grid" : date === todayIn(club.timezone) ? "now" : "grid"}
       court={court ?? null}
+      loadFailed={Boolean(bookingsError || blocksError)}
       sport={sport && /^[a-z_]+$/.test(sport) ? sport : null}
       sportNames={sportNames}
     />

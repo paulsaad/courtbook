@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { clubLocalToUtc, dayBounds, hhmm, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
 import { friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
 
-type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; sportNames: Record<string, string> };
+type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string> };
 
 export type StaffView = "now" | "grid" | "week" | "list";
 /** One active court's state at this moment: busy by a booking, an unexpired hold or a block.
@@ -44,7 +44,7 @@ async function withContacts(
   })) as unknown as Booking[];
 }
 
-export default function DayCalendar({ club, courts: allCourts, bookings: initialBookings, blocks: initialBlocks, date, view, sport, court: courtParam, sportNames }: Props) {
+export default function DayCalendar({ club, courts: allCourts, bookings: initialBookings, blocks: initialBlocks, date, view, sport, court: courtParam, loadFailed, sportNames }: Props) {
   // multi-sport clubs get a sport filter; single-sport clubs never see it
   const sports = [...new Set(allCourts.map((c) => c.sport))];
   const courts = sport && sports.includes(sport) ? allCourts.filter((c) => c.sport === sport) : allCourts;
@@ -59,11 +59,18 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const [commonMins, setCommonMins] = useState<number | null>(null);
   const [week, setWeek] = useState<{ key: string; bookings: Booking[]; blocks: Block[] } | null>(null);
   const [refresh, setRefresh] = useState(0);
+  // a read that failed leaves the grid showing whatever it had: occupied slots could look free,
+  // so the view is marked unverified and adding is held back until a retry succeeds
+  const [stale, setStale] = useState(Boolean(loadFailed));
 
   // week view shows one court at a time: seven columns is all a phone has room for
   const weekCourt = courts.find((c) => c.id === courtParam) ?? courts[0] ?? null;
   const wkStart = weekStart(date);
   const weekDays = Array.from({ length: 7 }, (_, i) => shiftDate(wkStart, i));
+
+  // the sport filter must narrow the bookings too, not just which courts are drawn
+  const shownCourtIds = new Set(courts.map((c) => c.id));
+  const shownBookings = bookings.filter((b) => b.court_id && shownCourtIds.has(b.court_id));
 
   const times = slotTimes(club.open_time, club.close_time, club.slot_minutes);
   const openMin = toMin(club.open_time);
@@ -84,13 +91,15 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const reload = useCallback(async () => {
     const supabase = createClient();
     const { dayStart, dayEnd } = dayBounds(date, club.timezone);
-    const [{ data: b }, { data: k }] = await Promise.all([
+    const [{ data: b, error: eb }, { data: k, error: ek }] = await Promise.all([
       supabase.from("bookings").select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id, price_usd, fee_usd, hold_expires_at")
         .eq("club_id", club.id).or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`).not("court_id", "is", null).lt("start_at", dayEnd).gt("end_at", dayStart).order("start_at"),
       supabase.from("blocks").select("id, court_id, start_at, end_at, reason").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart),
     ]);
+    if (eb || ek) { setStale(true); return; }          // keep what we had rather than showing free slots
     setBookings(await withContacts(supabase, club.id, b ?? []));
     setBlocks((k ?? []) as Block[]);
+    setStale(false);
   }, [club.id, club.timezone, date]);
 
   // Now view: which courts are usable this minute, refreshed with the clock. The server decides what
@@ -117,7 +126,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
       const supabase = createClient();
       const from = dayBounds(wkStart, club.timezone).dayStart;
       const to = dayBounds(shiftDate(wkStart, 6), club.timezone).dayEnd;
-      const [{ data: b }, { data: k }] = await Promise.all([
+      const [{ data: b, error: eb }, { data: k, error: ek }] = await Promise.all([
         supabase.from("bookings").select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id, price_usd, fee_usd, hold_expires_at")
           .eq("club_id", club.id).eq("court_id", weekCourt.id)
           .or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`)
@@ -125,9 +134,11 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         supabase.from("blocks").select("id, court_id, start_at, end_at, reason")
           .eq("club_id", club.id).eq("court_id", weekCourt.id).lt("start_at", to).gt("end_at", from),
       ]);
+      if (eb || ek) { if (alive) setStale(true); return; }
       const rows = await withContacts(supabase, club.id, b ?? []);
       if (!alive) return;
       setWeek({ key, bookings: rows, blocks: (k ?? []) as Block[] });
+      setStale(false);
     })();
     return () => { alive = false; };
   }, [view, club.id, club.timezone, wkStart, weekCourt, refresh]);
@@ -232,10 +243,18 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         )}
       </header>
 
+      {stale && (
+        <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-danger/40 bg-red-50 px-3 py-2 text-sm text-danger">
+          <span className="flex-1">Couldn&apos;t load the latest bookings. What you see may be out of date, so adding is off until this works.</span>
+          <button onClick={() => { setStale(false); setRefresh((n) => n + 1); void reload(); }} className="shrink-0 rounded-lg border border-danger/40 px-3 py-1">Retry</button>
+        </div>
+      )}
+
       {view === "week" ? (
         <WeekGrid
           club={club} court={weekCourt} days={weekDays} times={times} today={todayIn(club.timezone)}
           data={week && week.key === `${wkStart}|${weekCourt?.id}` ? week : null}
+          canAdd={!stale}
           dayHref={(d) => q(d, "grid", sport)}
           onOpenBooking={(b) => setSheet({ kind: "booking", booking: b })}
           onOpenBlock={(bl) => setSheet({ kind: "block", block: bl })}
@@ -243,7 +262,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         />
       ) : view === "now" ? (
         <NowPanel
-          club={club} courts={courts} bookings={bookings} freeNow={freeNow} sportNames={sportNames}
+          club={club} courts={courts} bookings={shownBookings} freeNow={freeNow} sportNames={sportNames}
           showLater={showLater} onToggleLater={() => setShowLater((v) => !v)}
           onOpen={(b) => setSheet({ kind: "booking", booking: b })}
         />
@@ -271,6 +290,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                     <button
                       key={t}
                       onClick={() => setSheet({ kind: "add", courtId: c.id, time: t })}
+                      disabled={stale}
                       aria-label={`Add booking ${c.name} ${t}`}
                       className={`absolute inset-x-0 border-t first:border-t-0 active:bg-slate-soft ${i % labelEvery === 0 ? "border-grid" : "border-grid/50 border-dashed"}`}
                       style={{ top: i * ROW_PX, height: ROW_PX }}
@@ -312,8 +332,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         </div>
       ) : (
         <ul className="mx-4 mb-24 divide-y divide-grid rounded-xl border border-grid bg-white">
-          {bookings.length === 0 && <li className="p-8 text-center text-muted">No bookings this day. Tap a court slot in Courts view to add one.</li>}
-          {bookings.map((b) => (
+          {shownBookings.length === 0 && <li className="p-8 text-center text-muted">No bookings this day. Tap a court slot in Courts view to add one.</li>}
+          {shownBookings.map((b) => (
             <li key={b.id}>
               <button onClick={() => setSheet({ kind: "booking", booking: b })} className="flex w-full items-center gap-3 px-4 py-3 text-left">
                 <span className={`h-10 w-1 rounded ${b.source === "app" ? "bg-turf" : "bg-sand"}`} />
@@ -367,7 +387,9 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                 club={club} courts={allCourts} booking={sheet.booking} times={times} busy={busy}
                 onMove={(courtId, time, slots) =>
                   run(() => {
-                    const start = clubLocalToUtc(date, time, club.timezone);
+                    // the sheet can be opened from the week view, where the booking's day is not the page's date
+                    const bookingDate = formatInTimeZone(parseISO(sheet.booking.start_at), club.timezone, "yyyy-MM-dd");
+                    const start = clubLocalToUtc(bookingDate, time, club.timezone);
                     const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
                     return createClient().rpc("move_booking", { p_booking: sheet.booking.id, p_court: courtId, p_start: start.toISOString(), p_end: end.toISOString() });
                   })
@@ -425,9 +447,10 @@ function closeMinutes(club: Club) {
 /** One court, seven days. Days are columns because seven of them fit a phone and five courts do not.
  *  Time labels stay in a sticky gutter, a cell opens the usual sheets, and a column header opens that
  *  day in the Courts view, which is where names and controls are readable. */
-function WeekGrid({ club, court, days, times, today, data, dayHref, onOpenBooking, onOpenBlock, onAdd }: {
+function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOpenBooking, onOpenBlock, onAdd }: {
   club: Club; court: Court | null; days: string[]; times: string[]; today: string;
   data: { bookings: Booking[]; blocks: Block[] } | null;
+  canAdd: boolean;
   dayHref: (d: string) => string;
   onOpenBooking: (b: Booking) => void;
   onOpenBlock: (b: Block) => void;
@@ -473,8 +496,8 @@ function WeekGrid({ club, court, days, times, today, data, dayHref, onOpenBookin
                 const cell = at(d, t);
                 if (!cell) {
                   return (
-                    <button key={d + t} onClick={() => onAdd(d, t)} aria-label={`Add a booking on ${d} at ${t}`}
-                            className="border-b border-l border-grid/60 bg-white" style={{ height: rowPx }} />
+                    <button key={d + t} onClick={() => onAdd(d, t)} disabled={!canAdd} aria-label={`Add a booking on ${d} at ${t}`}
+                            className="border-b border-l border-grid/60 bg-white disabled:cursor-not-allowed" style={{ height: rowPx }} />
                   );
                 }
                 if (cell.kind === "block") {
@@ -672,7 +695,7 @@ function BookingSheet({ club, courts, booking: b, times, busy, onMove, onCancel,
       <div>
         <h2 className="text-lg font-semibold">{b.guest_name ?? b.player_name ?? "Player"}</h2>
         <p className="text-sm text-muted">
-          {court?.name}, {hhmm(b.start_at, club.timezone)}–{hhmm(b.end_at, club.timezone)} · {b.source === "app" ? "booked in the app" : "desk booking"}
+          {court?.name}, {formatInTimeZone(parseISO(b.start_at), club.timezone, "EEE d MMM")}, {hhmm(b.start_at, club.timezone)}–{hhmm(b.end_at, club.timezone)} · {b.status === "pending" ? "booked in the app, still paying" : b.source === "app" ? "booked in the app" : "desk booking"}
         </p>
         {(b.contact_phone ?? b.guest_phone)
           ? <a href={`tel:${b.contact_phone ?? b.guest_phone}`} className="text-sm text-action underline">{b.contact_phone ?? b.guest_phone}</a>
@@ -680,7 +703,13 @@ function BookingSheet({ club, courts, booking: b, times, busy, onMove, onCancel,
         {b.price_usd != null && (
           <p className="mt-1 text-sm">
             ${Number(b.price_usd).toFixed(2)}
-            <span className="text-muted">{b.source === "app" ? ` + $${Number(b.fee_usd ?? 0).toFixed(2)} fee · paid in the app` : " · take payment at the desk, not through CourtBook"}</span>
+            <span className="text-muted">
+              {b.status === "pending"
+                ? ` + $${Number(b.fee_usd ?? 0).toFixed(2)} fee · awaiting payment`
+                : b.source === "app"
+                  ? ` + $${Number(b.fee_usd ?? 0).toFixed(2)} fee · paid in the app`
+                  : " · take payment at the desk, not through CourtBook"}
+            </span>
           </p>
         )}
       </div>
