@@ -141,7 +141,9 @@ function Slot({ label, hint, aspect, item, busy, onPick, onRemove }: {
         <div className="mt-2 flex items-start gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={mediaUrl(item)} alt={`${label} image`} width={item.width ?? 320} height={item.height ?? 120}
-               className={`${aspect} flex-1 rounded-xl border border-grid object-cover`} />
+               /* min-w-0: a flex item will not shrink below its intrinsic width by default, and a
+                  1600px cover pushed the Remove button off the side of a phone screen. */
+               className={`${aspect} min-w-0 flex-1 rounded-xl border border-grid object-cover`} />
           <button disabled={busy} onClick={onRemove} className="shrink-0 px-2 py-1 text-sm text-danger">Remove</button>
         </div>
       ) : (
