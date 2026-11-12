@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { clubLocalToUtc, dayBounds, hhmm, shiftDate, slotTimes, todayIn, toMin } from "@/lib/time";
 import { friendlyError, type Club, type Court } from "@/lib/types";
 import { readPrefs } from "@/lib/prefs";
+import { newToken, reserve as reserveSlot } from "@/lib/reserve";
 
 export type Occ = { id?: string | null; court_id: string; start_at: string; end_at: string; status?: string; mine?: boolean; kind: "booking" | "block" };
 type ClubX = Club & { booking_window_days: number; service_fee_usd: number; location_url: string | null; hold_minutes: number };
@@ -52,6 +53,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const stripRef = useRef<HTMLDivElement>(null);
+  const tokenRef = useRef<string | null>(null);   // one token per attempt, reused if it is retried
 
   // remembered sport from Home, if this club has it
   useEffect(() => {
@@ -136,13 +138,13 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
     }
     setBusy(true); setError(null);
     const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
-    const { data, error } = await createClient().rpc("hold_slot", { p_club: club.id, p_court: pick.courtId, p_start: start.toISOString(), p_end: end.toISOString() });
-    if (error) { setBusy(false); setError(friendlyError(error.message)); router.refresh(); return; }
-    const row = (Array.isArray(data) ? data[0] : data) as { booking_id: string };
-    router.push(`/pay/${row.booking_id}`);
+    const token = tokenRef.current ?? (tokenRef.current = newToken());   // a retry must not take a second court
+    const r = await reserveSlot({ mode: club.payment_mode, clubId: club.id, courtId: pick.courtId, start, end, token });
+    if (!r.ok) { setBusy(false); setError(friendlyError(r.message)); router.refresh(); return; }
+    router.push(r.value.href);
   }
 
-  const changeDate = (d: string) => { setDate(d); setPick(null); setError(null); setNotice(null); };
+  const changeDate = (d: string) => { setDate(d); setPick(null); setError(null); setNotice(null); tokenRef.current = null; };
   const endLabel = (t: string, n: number) => { const m = toMin(t) + n * club.slot_minutes; return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; };
   const fmtDur = (m: number) => (m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60}`);
   const dayOf = (d: string) => clubLocalToUtc(d, "12:00", club.timezone);

@@ -24,7 +24,7 @@ export default async function ClubPage({ params, searchParams }: { params: Promi
 
   const { data: club } = await supabase
     .from("clubs")
-    .select("id, name, slug, timezone, slot_minutes, cancel_cutoff_hours, open_time, close_time, min_booking_minutes, max_booking_minutes, booking_window_days, service_fee_usd, location_url, hold_minutes, town_id")
+    .select("id, name, slug, timezone, slot_minutes, cancel_cutoff_hours, open_time, close_time, min_booking_minutes, max_booking_minutes, booking_window_days, service_fee_usd, location_url, hold_minutes, town_id, payment_mode")
     .eq("slug", slug).eq("active", true).single<ClubRow>();
   if (!club) notFound();
 

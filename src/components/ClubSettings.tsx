@@ -12,6 +12,7 @@ type ClubRow = {
   open_time: string; close_time: string; slot_minutes: number; min_booking_minutes: number; max_booking_minutes: number;
   cancel_cutoff_hours: number; hold_minutes: number; booking_window_days: number; service_fee_usd: number;
   town_id: string | null; lat: number | null; lng: number | null;
+  payment_mode?: string | null; max_upcoming_bookings?: number | null;
 };
 type CourtRow = { id: string; name: string; sport: string; surface: string | null; active: boolean; sort: number };
 type RuleRow = { id: string; court_id: string | null; weekday_mask: number; start_time: string; end_time: string; price_usd: number; label: string | null };
@@ -76,6 +77,8 @@ function AdminBasics({ club, busy, run }: { club: ClubRow; busy: boolean; run: R
   const [name, setName] = useState(club.name);
   const [fee, setFee] = useState(String(club.service_fee_usd));
   const [active, setActive] = useState(club.active);
+  const [mode, setMode] = useState(club.payment_mode ?? "simulated");
+  const [cap, setCap] = useState(String(club.max_upcoming_bookings ?? 3));
   return (
     <section className={section}>
       <h2 className="font-medium">Club (admin)</h2>
@@ -83,6 +86,30 @@ function AdminBasics({ club, busy, run }: { club: ClubRow; busy: boolean; run: R
       <label className="flex flex-col gap-1 text-sm">CourtBook fee per booking ($)<input className={input} inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} /></label>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Visible to players</label>
       <button disabled={busy} onClick={() => run(() => createClient().from("clubs").update({ name: name.trim(), service_fee_usd: Number(fee), active }).eq("id", club.id))} className={primary}>Save</button>
+
+      <div className="mt-2 border-t border-grid pt-3">
+        <h3 className="text-sm font-medium">How this club takes money</h3>
+        <p className="mt-1 text-xs text-muted">
+          <b>At the desk</b>: players reserve and it is confirmed at once; nothing is paid through CourtBook, and the
+          in-app payment flow is refused for this club. <b>In the app</b>: the slot is held while the player pays.
+          Switching to at-the-desk releases any hold a player is part-way through paying for.
+        </p>
+        <label className="mt-2 flex flex-col gap-1 text-sm">Payment
+          <select className={input} value={mode} onChange={(e) => setMode(e.target.value)}>
+            <option value="simulated">In the app (simulated until a real provider is connected)</option>
+            <option value="at_desk">At the club&apos;s desk</option>
+          </select>
+        </label>
+        <label className="mt-2 flex flex-col gap-1 text-sm">Most bookings one player may hold at once
+          <input className={input} inputMode="numeric" value={cap} onChange={(e) => setCap(e.target.value)} />
+        </label>
+        <button disabled={busy} onClick={() => run(async () => {
+          const supabase = createClient();
+          const { error } = await supabase.rpc("set_club_payment_mode", { p_club: club.id, p_mode: mode });
+          if (error) return { error };
+          return supabase.from("clubs").update({ max_upcoming_bookings: Number(cap) }).eq("id", club.id);
+        })} className={primary}>Save payment settings</button>
+      </div>
     </section>
   );
 }

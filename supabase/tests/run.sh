@@ -1029,6 +1029,51 @@ wait
 check service "99m only one of the two got the last spot"           "select count(*) from match_players where match_id='$LS' and status='accepted';" 3
 check service "99n and the match closed itself as full"             "select status||'/'||closed_reason from matches where id='$LS';" "closed/full"
 
+echo "--- AI. pay at the desk (Phase 10)"
+CB=$($PSQL -At -q -d $DB -c "select id from clubs where slug='batroun'" | head -1)
+check service "100a existing clubs keep paying in the app"          "select payment_mode from clubs where id='$CB';" "simulated"
+denied $P4 "100b book_at_desk is refused while the club pays in-app" "select book_at_desk('$COURT', (current_date + 9 + time '09:00') at time zone 'Asia/Beirut', (current_date + 9 + time '10:00') at time zone 'Asia/Beirut', gen_random_uuid());"
+denied $P4 "100c a player cannot switch a club's mode"              "select set_club_payment_mode('$CB','at_desk');"
+
+# a hold in flight when the club switches must not survive as something payable
+HB=$({ as_user $P2; echo "select booking_id from hold_slot('$CB','$COURT', (current_date + 9 + time '11:00') at time zone 'Asia/Beirut', (current_date + 9 + time '12:00') at time zone 'Asia/Beirut');"; } | $PSQL -At -d $DB | tail -1)
+check service "100d the hold exists before the switch"              "select status from bookings where id='$HB';" "pending"
+check $ADMIN "100e switching to at-the-desk releases it"            "select set_club_payment_mode('$CB','at_desk');" 1
+check service "100f the booking is expired, not left hanging"       "select status from bookings where id='$HB';" "expired"
+check service "100g and so is its payment"                          "select status from payments where booking_id='$HB';" "expired"
+
+# the in-app flow is now refused at every entry point
+denied $P4 "100h hold_slot is refused"                              "select hold_slot('$CB','$COURT', (current_date + 9 + time '13:00') at time zone 'Asia/Beirut', (current_date + 9 + time '14:00') at time zone 'Asia/Beirut');"
+denied service "100i a payment row cannot even be created"          "insert into payments (booking_id, profile_id, club_id, provider, amount_usd, fee_usd, total_usd) values ('$HB','$P2','$CB','simulated',20,1,21);"
+denied service "100j and an old one cannot be marked paid"          "update payments set status='paid' where booking_id='$HB';"
+
+# reserving at the desk
+$PSQL -q -d $DB -c "update clubs set max_upcoming_bookings = 3 where id='$CB';" >/dev/null
+TK=$($PSQL -At -q -d $DB -c "select gen_random_uuid()" | head -1)
+AD=$({ as_user $P4; echo "select booking_id from book_at_desk('$COURT', (current_date + 9 + time '15:00') at time zone 'Asia/Beirut', (current_date + 9 + time '16:00') at time zone 'Asia/Beirut', '$TK');"; } | $PSQL -At -d $DB | tail -1)
+check service "100k confirmed at once, priced, no CourtBook fee"    "select status||'/'||price_usd||'/'||fee_usd||'/'||source from bookings where id='$AD';" "confirmed/20.00/0.00/app"
+check service "100l and no payment row exists for it"               "select count(*) from payments where booking_id='$AD';" 0
+check $P4 "100m the same token returns the same booking, not a second" "select booking_id='$AD' from book_at_desk('$COURT', (current_date + 9 + time '15:00') at time zone 'Asia/Beirut', (current_date + 9 + time '16:00') at time zone 'Asia/Beirut', '$TK');" "t"
+check service "100n so the player still has exactly one"            "select count(*) from bookings where player_id='$P4' and club_id='$CB' and start_at > now() and status='confirmed' and client_token='$TK';" 1
+denied $P2 "100o someone else cannot take the same slot"            "select book_at_desk('$COURT', (current_date + 9 + time '15:00') at time zone 'Asia/Beirut', (current_date + 9 + time '16:00') at time zone 'Asia/Beirut', gen_random_uuid());"
+
+# the cap on how many a player may hold at once
+$PSQL -q -d $DB -c "update clubs set max_upcoming_bookings = 3 where id='$CB';" >/dev/null
+{ as_user $P4; echo "select book_at_desk('$COURT', (current_date + 10 + time '15:00') at time zone 'Asia/Beirut', (current_date + 10 + time '16:00') at time zone 'Asia/Beirut', gen_random_uuid());"; } | $PSQL -q -d $DB >/dev/null
+{ as_user $P4; echo "select book_at_desk('$COURT', (current_date + 11 + time '15:00') at time zone 'Asia/Beirut', (current_date + 11 + time '16:00') at time zone 'Asia/Beirut', gen_random_uuid());"; } | $PSQL -q -d $DB >/dev/null
+check service "100p three ahead of them now"                        "select count(*) from bookings where player_id='$P4' and club_id='$CB' and status='confirmed' and start_at > now();" 3
+denied $P4 "100q a fourth is refused"                               "select book_at_desk('$COURT', (current_date + 13 + time '15:00') at time zone 'Asia/Beirut', (current_date + 13 + time '16:00') at time zone 'Asia/Beirut', gen_random_uuid());"
+{ as_user $P4; echo "select cancel_booking('$AD', false);"; } | $PSQL -q -d $DB >/dev/null
+check $P4 "100r cancelling one frees a place"                       "select count(*) from book_at_desk('$COURT', (current_date + 13 + time '15:00') at time zone 'Asia/Beirut', (current_date + 13 + time '16:00') at time zone 'Asia/Beirut', gen_random_uuid());" 1
+check service "100s a booking already under way does not count"     "select count(*) from bookings where player_id='$P4' and club_id='$CB' and status='confirmed' and start_at > now();" 3
+# two devices, one player, same slot, different tokens: the court decides
+{ as_user $P2; echo "begin; select pg_sleep(0.1); select book_at_desk('$COURT', (current_date + 12 + time '15:00') at time zone 'Asia/Beirut', (current_date + 12 + time '16:00') at time zone 'Asia/Beirut', gen_random_uuid()); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
+{ as_user $P3; echo "begin; select pg_sleep(0.1); select book_at_desk('$COURT', (current_date + 12 + time '15:00') at time zone 'Asia/Beirut', (current_date + 12 + time '16:00') at time zone 'Asia/Beirut', gen_random_uuid()); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
+wait
+check service "100t only one reservation exists for that slot"      "select count(*) from bookings where court_id='$COURT' and start_at = (current_date + 12 + time '15:00') at time zone 'Asia/Beirut' and status='confirmed';" 1
+$PSQL -q -d $DB -c "select set_config('request.jwt.claim.sub','$ADMIN',false); select set_club_payment_mode('$CB','simulated');" >/dev/null 2>&1
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated' where id='$CB';" >/dev/null
+
 echo
 echo "checks: $CHECKS, failures: $FAILS"
 [ "$FAILS" -eq 0 ] || { echo "SUITE FAILED"; exit 1; }

@@ -1,12 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/types";
+import { newToken, reserve as reserveSlot } from "@/lib/reserve";
 
 export type SheetClub = { id: string; name: string; slug: string; slot_minutes: number; min_minutes: number; max_minutes: number; service_fee_usd: number; hold_minutes: number; cancel_cutoff_hours: number; timezone: string };
+
+/** How this club settles money. club_day_slots does not carry it, so the sheet asks when it opens;
+ *  until the answer arrives, Reserve waits rather than guessing which flow to use. */
+type Mode = "simulated" | "at_desk" | null;
 type Quote = { state: "loading" } | { state: "ok"; value: number } | { state: "error"; message: string };
 
 /** Booking panel: court, duration, price, Reserve. Nothing is held until Reserve (hold_slot). */
@@ -48,20 +53,30 @@ export default function BookSheet({ club, date, at, courts, initialCourtId, init
   const current: Quote = quote.key === qKey ? quote.q : { state: "loading" };
   const total = current.state === "ok" ? current.value + club.service_fee_usd : null;
 
+  const [mode, setMode] = useState<Mode>(null);
+  const tokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    createClient().from("clubs").select("payment_mode").eq("id", club.id).single()
+      .then(({ data }) => { if (alive && data) setMode((data.payment_mode as Mode) ?? "simulated"); });
+    return () => { alive = false; };
+  }, [club.id]);
+
   async function reserve() {
-    if (current.state !== "ok" || !valid) return;
+    if (current.state !== "ok" || !valid || mode === null) return;
     if (!signedIn) {
       const q = new URLSearchParams({ date, at, court: court.id, dur: String(minutes) });   // encodes '+' inside timestamps
       router.push(`/login?next=${encodeURIComponent(`/courts?${q}`)}`);
       return;
     }
     setBusy(true); setError(null);
-    const { data, error } = await createClient().rpc("hold_slot", { p_club: club.id, p_court: court.id, p_start: start.toISOString(), p_end: end.toISOString() });
-    if (error) { setBusy(false); setError(friendlyError(error.message)); router.refresh(); return; }
-    const row = (Array.isArray(data) ? data[0] : data) as { booking_id: string };
-    router.push(`/pay/${row.booking_id}`);
+    const token = tokenRef.current ?? (tokenRef.current = newToken());   // a retry must not take a second court
+    const r = await reserveSlot({ mode, clubId: club.id, courtId: court.id, start, end, token });
+    if (!r.ok) { setBusy(false); setError(friendlyError(r.message)); router.refresh(); return; }
+    router.push(r.value.href);
   }
 
+  const atDesk = mode === "at_desk";
   const pill = (on: boolean) => `flex-1 rounded-2xl px-3 py-3 text-center text-[15px] ${on ? "bg-ink font-bold text-white" : "border border-grid bg-white font-semibold"}`;
   return (
     <div className="fixed inset-0 z-30 flex items-end bg-ink/45" onClick={onClose}>
@@ -82,10 +97,19 @@ export default function BookSheet({ club, date, at, courts, initialCourtId, init
         {current.state === "error" ? (
           <p className="mt-3 flex items-center justify-between rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{current.message}{current.message.startsWith("Could") && <button onClick={() => setRetry((n) => n + 1)} className="font-semibold underline">Retry</button>}</p>
         ) : (
-          <div className="mt-3 flex items-center justify-between"><span className="text-sm text-muted">Court {current.state === "ok" ? `$${current.value.toFixed(2)}` : "…"} + booking fee ${club.service_fee_usd.toFixed(2)}</span><span className="text-2xl font-extrabold tracking-tight">{total !== null ? `$${total.toFixed(2)}` : "…"}</span></div>
+          <div className="mt-3 flex items-center justify-between">
+            <span className="text-sm text-muted">{atDesk ? "Pay at the club" : `Court ${current.state === "ok" ? `$${current.value.toFixed(2)}` : "…"} + booking fee $${club.service_fee_usd.toFixed(2)}`}</span>
+            <span className="text-2xl font-extrabold tracking-tight">{atDesk ? (current.state === "ok" ? `$${current.value.toFixed(2)}` : "…") : total !== null ? `$${total.toFixed(2)}` : "…"}</span>
+          </div>
         )}
-        <button disabled={busy || total === null || !valid} onClick={reserve} className="btn btn-primary mt-4">{busy ? "Reserving…" : signedIn ? `Reserve and pay${total !== null ? ` $${total.toFixed(2)}` : ""}` : "Sign in to reserve"}</button>
-        <p className="mt-2 text-center text-xs text-muted">Slot held {club.hold_minutes} minutes while you pay · free cancellation until {club.cancel_cutoff_hours} h before</p>
+        <button disabled={busy || total === null || !valid || mode === null} onClick={reserve} className="btn btn-primary mt-4">
+          {busy ? "Reserving…" : !signedIn ? "Sign in to reserve" : atDesk ? "Reserve — you pay at the club" : `Reserve and pay${total !== null ? ` $${total.toFixed(2)}` : ""}`}
+        </button>
+        <p className="mt-2 text-center text-xs text-muted">
+          {atDesk
+            ? `Confirmed straight away · nothing is paid through the app · free cancellation until ${club.cancel_cutoff_hours} h before`
+            : `Slot held ${club.hold_minutes} minutes while you pay · free cancellation until ${club.cancel_cutoff_hours} h before`}
+        </p>
       </section>
     </div>
   );

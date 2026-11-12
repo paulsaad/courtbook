@@ -9,6 +9,8 @@ export type Club = {
   close_time: string;
   min_booking_minutes: number;
   max_booking_minutes: number;
+  /** 'simulated' (hold then pay in the app) or 'at_desk' (confirmed at once, paid at the club) */
+  payment_mode?: string | null;
 };
 
 export type Court = { id: string; name: string; sport: string; surface: string | null; sort: number; active: boolean };
@@ -43,6 +45,9 @@ export const ERRORS: Record<string, string> = {
   not_on_grid: "Start time must be on the slot grid.",
   bad_duration: "Duration must be whole slots, within what the club allows.",
   name_required: "Enter a name for the booking.",
+  wrong_payment_mode: "This club takes payment at its desk — reserve without paying.",
+  too_many_upcoming: "You already have the most bookings this club allows at once. Cancel one, or come back after your next game.",
+  token_required: "Could not reserve. Try again.",
   court_not_found: "That court is not available at this club.",
   forbidden: "You are not allowed to do that.",
   not_started: "The booking has not started yet.",
