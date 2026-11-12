@@ -58,6 +58,18 @@ export function weekStart(date: string): string {
   return shiftDate(date, -((dow + 6) % 7));
 }
 
+/** The club-local day a booking falls on. */
+export function bookingDate(startAt: string, tz: string): string {
+  return formatInTimeZone(parseISO(startAt), tz, "yyyy-MM-dd");
+}
+
+/** Where moving a booking lands. The day comes from the booking itself and never from the page's
+ *  date: the sheet can be opened from a week whose URL says another day. */
+export function moveTarget(startAt: string, tz: string, time: string, slots: number, slotMinutes: number) {
+  const start = clubLocalToUtc(bookingDate(startAt, tz), time, tz);
+  return { start, end: new Date(start.getTime() + slots * slotMinutes * 60000) };
+}
+
 /** Current time in ms. Kept out of components so React's purity lint does not flag server renders. */
 export function nowMs(): number {
   return Date.now();

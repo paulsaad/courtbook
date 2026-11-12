@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
-import { clubLocalToUtc, dayBounds, hhmm, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
+import { bookingDate, clubLocalToUtc, dayBounds, hhmm, moveTarget, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
 import { friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string> };
@@ -59,9 +59,13 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const [commonMins, setCommonMins] = useState<number | null>(null);
   const [week, setWeek] = useState<{ key: string; bookings: Booking[]; blocks: Block[] } | null>(null);
   const [refresh, setRefresh] = useState(0);
-  // a read that failed leaves the grid showing whatever it had: occupied slots could look free,
-  // so the view is marked unverified and adding is held back until a retry succeeds
-  const [stale, setStale] = useState(Boolean(loadFailed));
+  // A read that failed leaves the grid showing whatever it had, so occupied slots could look free.
+  // The day and the week are verified separately: one succeeding says nothing about the other, and
+  // adding stays off while a read is still in flight, not just when one has already failed.
+  const [dayError, setDayError] = useState(Boolean(loadFailed));
+  const [weekError, setWeekError] = useState(false);
+  const [dayLoading, setDayLoading] = useState(false);
+  const [weekLoading, setWeekLoading] = useState(false);
 
   // week view shows one court at a time: seven columns is all a phone has room for
   const weekCourt = courts.find((c) => c.id === courtParam) ?? courts[0] ?? null;
@@ -89,6 +93,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
 
   // Refetch only the day's rows from the browser: faster than re-rendering the page.
   const reload = useCallback(async () => {
+    setDayLoading(true);
     const supabase = createClient();
     const { dayStart, dayEnd } = dayBounds(date, club.timezone);
     const [{ data: b, error: eb }, { data: k, error: ek }] = await Promise.all([
@@ -96,10 +101,11 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         .eq("club_id", club.id).or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`).not("court_id", "is", null).lt("start_at", dayEnd).gt("end_at", dayStart).order("start_at"),
       supabase.from("blocks").select("id, court_id, start_at, end_at, reason").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart),
     ]);
-    if (eb || ek) { setStale(true); return; }          // keep what we had rather than showing free slots
+    if (eb || ek) { setDayError(true); setDayLoading(false); return; }  // keep what we had rather than showing free slots
     setBookings(await withContacts(supabase, club.id, b ?? []));
     setBlocks((k ?? []) as Block[]);
-    setStale(false);
+    setDayError(false);
+    setDayLoading(false);
   }, [club.id, club.timezone, date]);
 
   // Now view: which courts are usable this minute, refreshed with the clock. The server decides what
@@ -123,6 +129,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     const key = `${wkStart}|${weekCourt.id}`;
     let alive = true;
     (async () => {
+      setWeekLoading(true);
       const supabase = createClient();
       const from = dayBounds(wkStart, club.timezone).dayStart;
       const to = dayBounds(shiftDate(wkStart, 6), club.timezone).dayEnd;
@@ -134,11 +141,12 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         supabase.from("blocks").select("id, court_id, start_at, end_at, reason")
           .eq("club_id", club.id).eq("court_id", weekCourt.id).lt("start_at", to).gt("end_at", from),
       ]);
-      if (eb || ek) { if (alive) setStale(true); return; }
+      if (eb || ek) { if (alive) { setWeekError(true); setWeekLoading(false); } return; }
       const rows = await withContacts(supabase, club.id, b ?? []);
       if (!alive) return;
       setWeek({ key, bookings: rows, blocks: (k ?? []) as Block[] });
-      setStale(false);
+      setWeekError(false);
+      setWeekLoading(false);
     })();
     return () => { alive = false; };
   }, [view, club.id, club.timezone, wkStart, weekCourt, refresh]);
@@ -177,6 +185,11 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     const endRow = Math.min(times.length, Math.ceil((e - openMin) / club.slot_minutes));
     return { row, span: Math.max(1, endRow - row) };
   }
+
+  // only the view being looked at decides whether its rows can be trusted
+  const viewError = view === "week" ? weekError : dayError;
+  const viewLoading = view === "week" ? weekLoading : dayLoading;
+  const canAdd = !viewError && !viewLoading;
 
   const q = (d: string, v: string, sp: string | null, ct?: string | null) =>
     `/staff/${club.slug}?date=${d}&view=${v}${sp ? `&sport=${sp}` : ""}${ct ? `&court=${ct}` : ""}`;
@@ -243,10 +256,11 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         )}
       </header>
 
-      {stale && (
+      {viewError && (
         <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-danger/40 bg-red-50 px-3 py-2 text-sm text-danger">
-          <span className="flex-1">Couldn&apos;t load the latest bookings. What you see may be out of date, so adding is off until this works.</span>
-          <button onClick={() => { setStale(false); setRefresh((n) => n + 1); void reload(); }} className="shrink-0 rounded-lg border border-danger/40 px-3 py-1">Retry</button>
+          <span className="flex-1">Couldn&apos;t load the latest {view === "week" ? "week" : "bookings"}. What you see may be out of date, so adding is off until this works.</span>
+          {/* the flag is cleared by a successful read, never by tapping Retry */}
+          <button disabled={viewLoading} onClick={() => { setRefresh((n) => n + 1); void reload(); }} className="shrink-0 rounded-lg border border-danger/40 px-3 py-1 disabled:opacity-50">{viewLoading ? "Checking…" : "Retry"}</button>
         </div>
       )}
 
@@ -254,7 +268,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         <WeekGrid
           club={club} court={weekCourt} days={weekDays} times={times} today={todayIn(club.timezone)}
           data={week && week.key === `${wkStart}|${weekCourt?.id}` ? week : null}
-          canAdd={!stale}
+          canAdd={canAdd}
           dayHref={(d) => q(d, "grid", sport)}
           onOpenBooking={(b) => setSheet({ kind: "booking", booking: b })}
           onOpenBlock={(bl) => setSheet({ kind: "block", block: bl })}
@@ -290,7 +304,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                     <button
                       key={t}
                       onClick={() => setSheet({ kind: "add", courtId: c.id, time: t })}
-                      disabled={stale}
+                      disabled={!canAdd}
                       aria-label={`Add booking ${c.name} ${t}`}
                       className={`absolute inset-x-0 border-t first:border-t-0 active:bg-slate-soft ${i % labelEvery === 0 ? "border-grid" : "border-grid/50 border-dashed"}`}
                       style={{ top: i * ROW_PX, height: ROW_PX }}
@@ -387,10 +401,9 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                 club={club} courts={allCourts} booking={sheet.booking} times={times} busy={busy}
                 onMove={(courtId, time, slots) =>
                   run(() => {
-                    // the sheet can be opened from the week view, where the booking's day is not the page's date
-                    const bookingDate = formatInTimeZone(parseISO(sheet.booking.start_at), club.timezone, "yyyy-MM-dd");
-                    const start = clubLocalToUtc(bookingDate, time, club.timezone);
-                    const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
+                    // the day comes from the booking, never from the page: the sheet can be opened
+                    // from a week whose URL says another day (covered by src/lib/time.test.ts)
+                    const { start, end } = moveTarget(sheet.booking.start_at, club.timezone, time, slots, club.slot_minutes);
                     return createClient().rpc("move_booking", { p_booking: sheet.booking.id, p_court: courtId, p_start: start.toISOString(), p_end: end.toISOString() });
                   })
                 }
@@ -695,7 +708,7 @@ function BookingSheet({ club, courts, booking: b, times, busy, onMove, onCancel,
       <div>
         <h2 className="text-lg font-semibold">{b.guest_name ?? b.player_name ?? "Player"}</h2>
         <p className="text-sm text-muted">
-          {court?.name}, {formatInTimeZone(parseISO(b.start_at), club.timezone, "EEE d MMM")}, {hhmm(b.start_at, club.timezone)}–{hhmm(b.end_at, club.timezone)} · {b.status === "pending" ? "booked in the app, still paying" : b.source === "app" ? "booked in the app" : "desk booking"}
+          {court?.name}, {formatInTimeZone(clubLocalToUtc(bookingDate(b.start_at, club.timezone), "12:00", club.timezone), club.timezone, "EEE d MMM")}, {hhmm(b.start_at, club.timezone)}–{hhmm(b.end_at, club.timezone)} · {b.status === "pending" ? "booked in the app, still paying" : b.source === "app" ? "booked in the app" : "desk booking"}
         </p>
         {(b.contact_phone ?? b.guest_phone)
           ? <a href={`tel:${b.contact_phone ?? b.guest_phone}`} className="text-sm text-action underline">{b.contact_phone ?? b.guest_phone}</a>
