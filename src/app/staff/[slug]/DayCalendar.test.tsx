@@ -11,25 +11,27 @@ vi.mock("next/link", () => ({
 }));
 
 type Resp = { data: unknown[] | null; error: unknown };
-/** Each test programmes what the next read of a table answers, and when. */
-let handler: (table: string) => Promise<Resp>;
+/** What a query looked like by the time it was awaited. `court_id` is set only by the week read,
+ *  which is how a test tells the day's request apart from the week's. */
+type Query = { table: string; filters: Record<string, unknown> };
+/** Each test programmes what a given query answers, and when. */
+let handler: (q: Query) => Promise<Resp>;
 
 vi.mock("@/lib/supabase/client", () => ({
-  createClient: () => {
-    const chain: Record<string, unknown> = {};
-    for (const m of ["select", "eq", "or", "not", "lt", "gt", "order", "insert", "delete"]) {
-      chain[m] = () => chain;
-    }
-    const make = (table: string) => {
-      chain.then = (res: (v: Resp) => unknown, rej?: (e: unknown) => unknown) => handler(table).then(res, rej);
-      return chain;
-    };
-    return {
-      from: (table: string) => make(table),
-      rpc: async () => ({ data: [], error: null }),
-      auth: { getUser: async () => ({ data: { user: { id: "staff-1" } } }) },
-    };
-  },
+  createClient: () => ({
+    // a fresh builder per from(), or two queries running together would share one `then`
+    from: (table: string) => {
+      const filters: Record<string, unknown> = {};
+      const b: Record<string, unknown> = {};
+      for (const m of ["select", "or", "not", "lt", "gt", "order", "insert", "delete"]) b[m] = () => b;
+      b.eq = (col: string, val: unknown) => { filters[col] = val; return b; };
+      b.then = (res: (v: Resp) => unknown, rej?: (e: unknown) => unknown) =>
+        handler({ table, filters }).then(res, rej);
+      return b;
+    },
+    rpc: async () => ({ data: [], error: null }),
+    auth: { getUser: async () => ({ data: { user: { id: "staff-1" } } }) },
+  }),
 }));
 
 import DayCalendar from "./DayCalendar";
@@ -72,7 +74,8 @@ const addButtons = () => screen.getAllByRole("button", { name: /^Add booking/ })
 const retry = () => screen.getByRole("button", { name: /Retry|Checking/ });
 
 beforeEach(() => { handler = async () => ok([]); });
-afterEach(cleanup);
+const isWeekRead = (q: Query) => q.filters.court_id !== undefined;
+afterEach(() => { cleanup(); vi.useRealTimers(); });   // a failing timer test must not leak into the next one
 
 describe("staff calendar read state", () => {
   it("keeps adding disabled from a failed load until Retry actually succeeds", async () => {
@@ -103,24 +106,26 @@ describe("staff calendar read state", () => {
   });
 
   it("does not let a successful day read clear a failed week read", async () => {
-    handler = async () => failed;
+    // the week fails, the day succeeds — and Retry from the week view starts both
+    handler = async (q) => (isWeekRead(q) ? failed : ok([]));
     const { rerender } = view({ view: "week", court: courtA.id });
     await waitFor(() => expect(screen.getByText(/Couldn't load the latest week/)).toBeDefined());
 
-    // the day succeeds while the week on screen has failed
-    handler = async () => ok([]);
+    await act(async () => { retry().click(); });
+    await act(async () => { await Promise.resolve(); });
+
+    // the day request succeeded, but the week on screen did not: the banner stays and so does the guard
+    expect(screen.getByText(/Couldn't load the latest week/)).toBeDefined();
+    const weekCells = screen.getAllByRole("button", { name: /^Add a booking on/ });
+    expect(weekCells.every((b) => (b as HTMLButtonElement).disabled)).toBe(true);
+
+    // and the day really did come back clean: its own view shows no banner
     rerender(
       <DayCalendar club={club} courts={[courtA, courtB]} bookings={[]} blocks={[] as Block[]}
         date="2026-11-12" view="grid" sport={null} court={null} sportNames={{ padel: "Padel" }} />,
     );
-    await waitFor(() => expect(screen.queryByText(/Couldn't load the latest/)).toBeNull());
-
-    // back to the week: its own failure is still standing
-    rerender(
-      <DayCalendar club={club} courts={[courtA, courtB]} bookings={[]} blocks={[] as Block[]}
-        date="2026-11-12" view="week" sport={null} court={courtA.id} sportNames={{ padel: "Padel" }} />,
-    );
-    expect(screen.getByText(/Couldn't load the latest week/)).toBeDefined();
+    expect(screen.queryByText(/Couldn't load the latest/)).toBeNull();
+    expect(addButtons().some((b) => !(b as HTMLButtonElement).disabled)).toBe(true);
   });
 
   it("ignores a day response that arrives after a newer one", async () => {
