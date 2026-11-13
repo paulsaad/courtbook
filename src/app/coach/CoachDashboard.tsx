@@ -63,8 +63,12 @@ function ProfileSection({ coach, sports, busy, run }: { coach: Coach; sports: Sp
   return (
     <form onSubmit={save} className={section}>
       <h2 className="font-medium">Profile</h2>
-      <div className="text-sm">Sports<div className="mt-1 flex gap-2">{sports.map((s) => <button type="button" key={s.code} onClick={() => toggle("sports", s.code)} className={chip(f.sports.includes(s.code))}>{s.name_en}</button>)}</div></div>
-      <div className="text-sm">Levels you coach<div className="mt-1 flex gap-2">{["beginner", "intermediate", "advanced"].map((s) => <button type="button" key={s} onClick={() => toggle("levels", s)} className={chip(f.levels.includes(s))}>{s}</button>)}</div></div>
+      {/* These rows wrap rather than scroll. This is a form where every option
+          has to be found and tapped, so none of them may sit off-screen; the
+          filter bars elsewhere scroll because only the active chip matters.
+          Without wrapping, eight sports push the whole page sideways. */}
+      <div className="text-sm">Sports<div className="mt-1 flex flex-wrap gap-2">{sports.map((s) => <button type="button" key={s.code} onClick={() => toggle("sports", s.code)} className={chip(f.sports.includes(s.code))}>{s.name_en}</button>)}</div></div>
+      <div className="text-sm">Levels you coach<div className="mt-1 flex flex-wrap gap-2">{["beginner", "intermediate", "advanced"].map((s) => <button type="button" key={s} onClick={() => toggle("levels", s)} className={chip(f.levels.includes(s))}>{s}</button>)}</div></div>
       <label className="flex flex-col gap-1 text-sm">Price per hour ($)<input className={input} inputMode="decimal" required value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} /></label>
       <label className="flex flex-col gap-1 text-sm">WhatsApp number (players will message this)<input className={input} inputMode="tel" placeholder="03 123 456 or +961 3 123 456" value={f.whatsapp} onChange={(e) => setF({ ...f, whatsapp: e.target.value })} />
         {phoneError ? <span className="text-xs text-danger">{phoneError}</span> : f.whatsapp.trim() && normalizePhone(f.whatsapp) && <span className="text-xs text-muted">Saved as {normalizePhone(f.whatsapp)}</span>}</label>
