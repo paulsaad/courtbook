@@ -4,6 +4,7 @@ import { router } from "expo-router";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 import { supabase } from "../lib/supabase";
+import { AUTH_REDIRECT_URL } from "../lib/authRedirect";
 
 type Stage = "email" | "code";
 
@@ -42,8 +43,9 @@ export default function SignIn() {
   async function google() {
     setBusy(true);
     setError(null);
-    // The browser must be told to come back to the app rather than to a web page.
-    const redirectTo = Linking.createURL("/auth-callback");
+    // The browser must be told to come back to the app rather than to a web
+    // page, and Supabase must already have this exact URL on its allow list.
+    const redirectTo = AUTH_REDIRECT_URL;
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo, skipBrowserRedirect: true, queryParams: { prompt: "select_account" } },
@@ -65,7 +67,11 @@ export default function SignIn() {
     const authCode = typeof returned.queryParams?.code === "string" ? returned.queryParams.code : null;
     if (!authCode) {
       setBusy(false);
-      setError("Google sent us back without a sign-in code. Use your email instead.");
+      // Overwhelmingly the cause is the redirect URL missing from Supabase's
+      // allow list, so the message says where to look rather than just failing.
+      setError(
+        `Google came back without a sign-in code. Check that ${AUTH_REDIRECT_URL} is on the Redirect URLs list in Supabase.`
+      );
       return;
     }
 
@@ -85,6 +91,9 @@ export default function SignIn() {
       <Pressable style={[styles.secondary, busy && styles.disabled]} onPress={google} disabled={busy}>
         <Text style={styles.secondaryText}>Continue with Google</Text>
       </Pressable>
+      {/* Shown so the value can be checked against Supabase during setup
+          without reading the source. Remove once Google sign-in has passed. */}
+      <Text style={styles.mutedSmall}>Returns to {AUTH_REDIRECT_URL}</Text>
 
       <View style={styles.divider}>
         <View style={styles.rule} />

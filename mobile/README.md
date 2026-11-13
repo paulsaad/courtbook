@@ -23,26 +23,40 @@ Criterion 4 is blocked on gateway credentials and is unrelated to the rest.
 ## One-time setup
 
 You need a free Expo account. You do not need a Mac, Android Studio, Xcode, or
-any developer tools on your own computer.
+any developer tools on your own computer. Do these in order — steps 4 and 5
+cannot be done before step 3 has run once, because the Expo project does not
+exist until then.
 
 1. **Create an Expo account** at expo.dev. Free. No card.
 2. **Make an access token**: expo.dev → account settings → Access tokens →
-   create one. Copy it.
-3. **Put the token in GitHub**: the repo → Settings → Secrets and variables →
-   Actions → New repository secret. Name it exactly `EXPO_TOKEN`, paste the
-   token, save.
-4. **Set the two Supabase values on Expo**: expo.dev → your project →
-   Environment variables. Add them to the **preview** environment:
+   create one. Copy it. Then in the repo → Settings → Secrets and variables →
+   Actions → New repository secret. Name it exactly `EXPO_TOKEN`, paste, save.
+3. **Create the Expo project**: GitHub → Actions → **Mobile build (Expo)** →
+   Run workflow, and set **init_only** to `true`. This finishes in about a
+   minute and builds nothing, so it costs none of the monthly build allowance.
+4. **Set the two Supabase values on Expo**: expo.dev → the `courtbook` project
+   → Environment variables. Add both to the **preview** environment:
    - `EXPO_PUBLIC_SUPABASE_URL` — the same URL the website uses
    - `EXPO_PUBLIC_SUPABASE_ANON_KEY` — the same anon key the website uses
 
-   The project only appears on expo.dev after the first build run, so do step 4
-   after the first run of step "Build it" below, then run it again.
+   Without these the app installs and then cannot reach the database.
+5. **Allow the app's sign-in callback in Supabase** — needed for Google only.
+   Supabase → Authentication → URL Configuration → Redirect URLs. Add:
+
+   ```
+   courtbook://**
+   ```
+
+   Supabase refuses any redirect that is not on this list and sends the browser
+   to the website instead, so without this the browser never hands the app its
+   sign-in code and Google sign-in fails silently. The sign-in screen prints the
+   exact URL it uses underneath the Google button; it must match this pattern.
 
 ## Build it
 
 GitHub → **Actions** tab → **Mobile build (Expo)** → **Run workflow**. Leave
-the platform on `android` and the profile on `preview`. Press the green button.
+**init_only** off, the platform on `android` and the profile on `preview`.
+Press the green button.
 
 It takes roughly 10–25 minutes; the free queue is low priority, so it can wait
 before it starts. When it finishes, go to expo.dev → your project → Builds, and
@@ -51,6 +65,16 @@ open the newest one. There is an install page with a QR code.
 **On the Android phone**, open that page and install the APK. Android will ask
 you to allow installing from that source; that is normal for an app that does
 not come from the Play Store.
+
+### If the first build fails
+
+The EAS command line cannot be reached from where this was written, so the
+workflow has never been run end to end. The one step most likely to fail the
+first time is **signing**: an Android build needs a keystore, and EAS normally
+generates one by itself, but a non-interactive first build is where that would
+show up if it does not. If the log stops asking about credentials, say so —
+the fix is to generate the keystore once, and then every later build reuses it.
+Nothing else in the workflow depends on it.
 
 ## Why not Expo Go
 

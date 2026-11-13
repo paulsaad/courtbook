@@ -14,6 +14,10 @@ on:
         type: choice
         options: ["preview", "development"]
         default: "preview"
+      init_only:
+        description: "Create the Expo project and stop, without building"
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -62,7 +66,19 @@ jobs:
       - name: Link the EAS project
         run: npx eas init --non-interactive --force
 
+      # Run once with init_only before setting the Supabase values on expo.dev:
+      # the project has to exist before it has an environment to set them in,
+      # and a build made without them would install but not reach the database.
+      - name: Stop here (init only)
+        if: ${{ inputs.init_only }}
+        run: |
+          echo "Expo project created or linked."
+          echo "Next: on expo.dev open the courtbook project > Environment variables,"
+          echo "add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to the"
+          echo "'preview' environment, then run this workflow again with init_only off."
+
       - name: Build
+        if: ${{ !inputs.init_only }}
         run: |
           npx eas build \
             --platform ${{ inputs.platform }} \
@@ -71,7 +87,7 @@ jobs:
             --wait
 
       - name: Where to get the build
-        if: always()
+        if: ${{ !inputs.init_only }}
         run: |
           echo "Open expo.dev, go to the courtbook project, then Builds."
           echo "The newest build has an install page with a QR code."
