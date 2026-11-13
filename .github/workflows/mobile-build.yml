@@ -14,10 +14,6 @@ on:
         type: choice
         options: ["preview", "development"]
         default: "preview"
-      init_only:
-        description: "Create the Expo project and stop, without building"
-        type: boolean
-        default: false
 
 jobs:
   build:
@@ -69,25 +65,12 @@ jobs:
       - name: Type-check
         run: npm run typecheck
 
-      # The project id is not committed, so each run links this checkout to the
-      # EAS project that matches the slug in app.json under the token's account.
-      # It creates that project the first time and reuses it afterwards.
-      - name: Link the EAS project
-        run: eas init --non-interactive --force
-
-      # Run once with init_only before setting the Supabase values on expo.dev:
-      # the project has to exist before it has an environment to set them in,
-      # and a build made without them would install but not reach the database.
-      - name: Stop here (init only)
-        if: ${{ inputs.init_only }}
-        run: |
-          echo "Expo project created or linked."
-          echo "Next: on expo.dev open the courtbook project > Environment variables,"
-          echo "add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to the"
-          echo "'preview' environment, then run this workflow again with init_only off."
+      # No linking step: app.json carries owner and extra.eas.projectId, so the
+      # build targets that one project. The previous `eas init --force` is gone
+      # deliberately — it was only ever needed to create the project, and a
+      # workflow that can create projects can create the wrong one.
 
       - name: Build
-        if: ${{ !inputs.init_only }}
         run: |
           eas build \
             --platform ${{ inputs.platform }} \
@@ -96,7 +79,6 @@ jobs:
             --wait
 
       - name: Where to get the build
-        if: ${{ !inputs.init_only }}
         run: |
           echo "Open expo.dev, go to the courtbook project, then Builds."
           echo "The newest build has an install page with a QR code."

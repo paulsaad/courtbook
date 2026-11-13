@@ -2,6 +2,7 @@
   "expo": {
     "name": "CourtBook",
     "slug": "courtbook",
+    "owner": "paulsaad",
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -35,6 +36,11 @@
           "imageWidth": 160
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e55084d2-3e65-4c58-aa2e-5529dcafc77f"
+      }
+    }
   }
 }
