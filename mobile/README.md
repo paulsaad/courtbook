@@ -26,14 +26,17 @@ Builds are slow and limited; most changes are JavaScript only and reach phones a
 
 ## Shared code with the web app
 
-`@shared/*` is the web app's `src/lib/*`, imported in place (see `metro.config.js` and the `paths`
-in `tsconfig.json`). Only pure files with no web dependencies may be imported. CI installs only
-`mobile/`, which proves those files resolve their packages from here.
+`@shared/*` is `mobile/shared/`: byte-for-byte copies of the web app's `src/lib` files of the same
+name (see `shared/README.md`). The app must build from `mobile/` alone, so it never imports from
+outside this folder. `npm run check:shared` fails if a copy differs from its source.
 
 ## Checks
 
-`npm run typecheck`, `npm test`. The **Mobile checks** workflow runs both and bundles both
-platforms on every push touching `mobile/` or `src/lib/`.
+`npm run typecheck`, `npm test`, `npm run check:shared`, and `npm run check:bundle` — the exact
+release bundling command an EAS build runs (`expo export:embed --eager --dev false`), for iOS and
+Android, on an isolated copy of `mobile/` with nothing else from the repository. The **Mobile
+checks** workflow runs all four on every push touching `mobile/` or `src/lib/`, and the build
+workflow runs the bundling check before spending a build.
 
 ## What it has to prove
 

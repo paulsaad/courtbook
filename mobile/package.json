@@ -8,7 +8,9 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "typecheck": "tsc --noEmit",
-    "test": "jest"
+    "test": "jest",
+    "check:shared": "bash scripts/check-shared.sh",
+    "check:bundle": "bash scripts/check-bundle.sh"
   },
   "dependencies": {
     "@react-native-community/netinfo": "^12.0.1",
@@ -52,11 +54,8 @@
   },
   "jest": {
     "preset": "jest-expo",
-    "modulePaths": [
-      "<rootDir>/node_modules"
-    ],
     "moduleNameMapper": {
-      "^@shared/(.*)$": "<rootDir>/../src/lib/$1"
+      "^@shared/(.*)$": "<rootDir>/shared/$1"
     },
     "testPathIgnorePatterns": [
       "/node_modules/"
