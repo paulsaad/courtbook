@@ -14,7 +14,7 @@ import BookSheet, { type SheetClub } from "./BookSheet";
 export type DaySlot = {
   club_id: string; club_name: string; slug: string; town: string | null; district: string | null; price_from: number | null; sports: string[];
   slot_minutes: number; min_minutes: number; max_minutes: number; service_fee_usd: number; hold_minutes: number; cancel_cutoff_hours: number; timezone: string;
-  court_id: string; court_name: string; court_sport: string; start_at: string; free_minutes: number;
+  court_id: string; court_name: string; court_sport: string; start_at: string; free_minutes: number; is_demo: boolean | null;
 };
 type Resume = { at: string; court: string; dur: number | null } | null;
 type Sheet = { club: SheetClub; at: string; courts: { id: string; name: string; free: number }[]; courtId: string; minutes: number | null };
@@ -79,11 +79,11 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
 
   // group by club → distinct start times → courts free at that time
   const clubs = useMemo(() => {
-    const m = new Map<string, { club: SheetClub; town: string | null; district: string | null; price_from: number | null; sports: string[]; times: Map<string, { id: string; name: string; free: number }[]> }>();
+    const m = new Map<string, { club: SheetClub; town: string | null; district: string | null; price_from: number | null; sports: string[]; is_demo: boolean; times: Map<string, { id: string; name: string; free: number }[]> }>();
     for (const r of rows ?? []) {
       let c = m.get(r.club_id);
       if (!c) {
-        c = { club: { id: r.club_id, name: r.club_name, slug: r.slug, slot_minutes: r.slot_minutes, min_minutes: r.min_minutes, max_minutes: r.max_minutes, service_fee_usd: Number(r.service_fee_usd), hold_minutes: r.hold_minutes, cancel_cutoff_hours: r.cancel_cutoff_hours, timezone: r.timezone }, town: r.town, district: r.district, price_from: r.price_from, sports: r.sports, times: new Map() };
+        c = { club: { id: r.club_id, name: r.club_name, slug: r.slug, slot_minutes: r.slot_minutes, min_minutes: r.min_minutes, max_minutes: r.max_minutes, service_fee_usd: Number(r.service_fee_usd), hold_minutes: r.hold_minutes, cancel_cutoff_hours: r.cancel_cutoff_hours, timezone: r.timezone }, town: r.town, district: r.district, price_from: r.price_from, sports: r.sports, is_demo: r.is_demo ?? false, times: new Map() };
         m.set(r.club_id, c);
       }
       const list = c.times.get(r.start_at) ?? [];
@@ -162,6 +162,11 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
                 <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-turf-soft text-sm font-extrabold text-turf" aria-hidden="true">{c.club.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}</span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[17px] font-bold leading-tight">{c.club.name}</div>
+                  {/* Courts is its own list of clubs; the label has to reach it too, in words,
+                      the same as Home and the club page. */}
+                  {c.is_demo && (
+                    <span className="mt-0.5 inline-block rounded-full bg-sand-soft px-2 py-0.5 text-[11px] font-semibold text-sand">Fictional demo club</span>
+                  )}
                   <div className="text-sm text-muted">{[c.town, c.district].filter(Boolean).join(" · ") || "Lebanon"}{c.price_from != null ? ` · from $${Number(c.price_from).toFixed(0)}/h` : ""}{!prefs.sport && c.sports.length > 1 ? ` · ${c.sports.map(sportName).join(", ")}` : ""}</div>
                 </div>
                 <span className="text-muted">›</span>

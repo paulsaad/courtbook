@@ -14,8 +14,8 @@ alter table clubs add column if not exists is_demo boolean not null default fals
 comment on column clubs.is_demo is
   'This club does not exist. Every surface that shows it must say so — listing, club page, info tab.';
 
--- The two seeded clubs are the fictional ones.
-update clubs set is_demo = true where slug in ('batroun', 'other');
+-- Only the club that is actually the demo. `other` is a generic slug a real club could take.
+update clubs set is_demo = true where slug = 'batroun';
 
 -- Discovery carries it, so a listing never has to guess from the name or the slug.
 --

@@ -6,7 +6,7 @@
 insert into clubs (name, slug, location_url, slot_minutes, cancel_cutoff_hours, open_time, close_time, min_booking_minutes, max_booking_minutes, is_demo)
 values ('Batroun Padel & Tennis Club', 'batroun', 'https://maps.google.com/?q=Batroun', 30, 6, '08:00', '23:00', 60, 180, true)
 on conflict (slug) do nothing;
-update clubs set is_demo = true where slug in ('batroun', 'other');
+update clubs set is_demo = true where slug = 'batroun';
 
 with c as (select id from clubs where slug = 'batroun')
 insert into courts (club_id, name, sport, surface, sort)

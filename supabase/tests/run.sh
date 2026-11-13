@@ -1303,6 +1303,17 @@ check $ADMIN   "104an renaming in the bucket changes nothing"         "update st
 # in a 1600px image is 3.3px once a listing scales it to 344, which is a smudge.
 check service "104au1 the demo club is marked fictional"              "select is_demo from clubs where slug='batroun';" "t"
 check $ADMIN "104au2 discovery carries the flag to the listing"       "select is_demo from club_discovery(null,null,null,'Batroun') limit 1;" "t"
+# Courts is a separate list from a separate function, and it was missed the first time.
+check anon   "104au2b the courts list carries it too"                 "select distinct is_demo from club_day_slots((now() at time zone 'Asia/Beirut')::date + 1, null, null, null, 'Batroun') limit 1;" "t"
+check anon   "104au2c and anonymous visitors see both lists"          "select count(*) > 0 from club_discovery(null,null,null,'Batroun');" "t"
+check service "104au2d a generic slug is not assumed to be the demo"  "select coalesce(bool_or(is_demo), false) from clubs where slug = 'other';" "f"
+# That check alone is vacuous: the suite creates the 'other' club long after the migrations have
+# run, so 0063's update never sees it and would pass however broadly it was written. Re-applying the
+# migration now, with the club present, is exactly what running it against a live database does.
+$PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0063_demo_club_flag.sql >/dev/null
+$PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0064_demo_label_on_courts.sql >/dev/null
+check service "104au2e nor when the migration runs with that club present" "select coalesce(bool_or(is_demo), false) from clubs where slug = 'other';" "f"
+check service "104au2f and the real demo club is still labelled"      "select is_demo from clubs where slug = 'batroun';" "t"
 check service "104au3 and no other club inherits the label"           "select coalesce(bool_or(is_demo), false) from clubs where slug <> 'batroun';" "f"
 check anon   "104av a new club has answered nothing"                  "select count(*) from clubs where id='$CLUB_B' and has_parking is null and facilities_confirmed_at is null;" 1
 check $ADMIN "104aw staff can record an address"                      "select 'done' || coalesce((select set_club_venue('$CLUB','About us.','Behind the bakery.','Main road, Batroun', true, false, null, null, null, true, null))::text,''); select address from clubs where id='$CLUB';" "Main road, Batroun"
