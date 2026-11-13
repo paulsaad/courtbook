@@ -8,17 +8,19 @@
 export const color = {
   night: "#062B1C", // hero surfaces, tickets
   cedar: "#0F7A47", // primary actions, free slots, success
-  cedarDeep: "#0A4A30",
+  cedarDeep: "#0A5C36", // green text on light surfaces
   cedarSoft: "#DCEFE3",
   ground: "#F3EFE7", // page background (limestone)
   line: "#E2DCCF", // hairlines and borders
   card: "#FFFFFF",
   ink: "#0F1512",
-  muted: "#5E6862", // 5.3:1 on ground
+  muted: "#4A5450", // 6.9:1 on ground, 7.9:1 on white
   red: "#C8102E", // accent only: once per view, never for errors
   danger: "#B42318", // errors, always with words
-  warnSoft: "#F4EFE3",
-  warnInk: "#6E5418",
+  warnSoft: "#FCEFD2", // limited availability, pending states
+  warnInk: "#7A4E00", // 6.3:1 on warnSoft
+  booked: "#6B6455", // unavailable slots, 5.1:1 on ground
+  emptySlot: "#7D7565", // dashed open-spot circles, 4.6:1 on white
   onDark: "#FFFFFF",
   onDarkMuted: "#CFE6D8",
 } as const;
