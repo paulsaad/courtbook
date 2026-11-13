@@ -12,8 +12,16 @@ describe("what a player is told they will pay", () => {
     expect(s.payment).toContain("at the club");
   });
 
-  it("states the fee when it really is charged online", () => {
+  it("does not call a simulated payment an online one", () => {
+    // No money is collected in this mode, and the staff dashboard already says so.
     const s = feeSummary("simulated", 1);
+    expect(s.fee).toBe("$1.00 per booking");
+    expect(s.payment).toContain("no real money");
+    expect(s.payment).not.toContain("online");
+  });
+
+  it("states the fee as paid online only for a live gateway", () => {
+    const s = feeSummary("whish", 1);
     expect(s.fee).toBe("$1.00 per booking");
     expect(s.payment).toContain("online");
   });
@@ -25,6 +33,7 @@ describe("what a player is told they will pay", () => {
   it("treats an unknown mode as online rather than inventing a free booking", () => {
     // Safer to overstate the cost than to promise free and then charge.
     expect(feeSummary("something_new", 1).fee).toBe("$1.00 per booking");
+    expect(feeSummary("something_new", 1).payment).toContain("online");
   });
 
   it("accepts the string a database row actually carries", () => {

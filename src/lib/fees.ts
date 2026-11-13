@@ -25,6 +25,12 @@ export function feeSummary(mode: PaymentMode | string | null, serviceFeeUsd: num
     // No CourtBook fee, and the court itself is settled in person.
     return { fee: "None", payment: "Pay the court at the club when you arrive." };
   }
-  if (!(fee > 0)) return { fee: "None", payment: null };
-  return { fee: `$${fee.toFixed(2)} per booking`, payment: "Paid online when you reserve." };
+  const amount = fee > 0 ? `$${fee.toFixed(2)} per booking` : "None";
+  // Simulated is the testing provider: a payment row is written and a fee recorded, but nothing is
+  // collected — `payments.collected` stays false and the staff dashboard reports it as test money.
+  // Saying "paid online" here would contradict that on the one page a player reads before booking.
+  if (mode === "simulated") return { fee: amount, payment: "Demo payment — no real money is charged." };
+  // Anything else is a live gateway. Keep the online wording for that, and for a mode nobody has
+  // taught this function about: overstating a cost is safer than promising free and then charging.
+  return { fee: amount, payment: fee > 0 ? "Paid online when you reserve." : null };
 }
