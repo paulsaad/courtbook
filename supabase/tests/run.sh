@@ -1299,6 +1299,11 @@ check $ADMIN   "104an renaming in the bucket changes nothing"         "update st
 # Phase 11b. Three states, and the one that matters is null: a facility nobody has answered must
 # never reach a player as "no". The address is its own field — a maps link is not something you can
 # read out to a driver, and arrival notes are directions once you are already close.
+# The fictional club must say so from the database, not from pixels inside its cover: a 15.5px badge
+# in a 1600px image is 3.3px once a listing scales it to 344, which is a smudge.
+check service "104au1 the demo club is marked fictional"              "select is_demo from clubs where slug='batroun';" "t"
+check $ADMIN "104au2 discovery carries the flag to the listing"       "select is_demo from club_discovery(null,null,null,'Batroun') limit 1;" "t"
+check service "104au3 and no other club inherits the label"           "select coalesce(bool_or(is_demo), false) from clubs where slug <> 'batroun';" "f"
 check anon   "104av a new club has answered nothing"                  "select count(*) from clubs where id='$CLUB_B' and has_parking is null and facilities_confirmed_at is null;" 1
 check $ADMIN "104aw staff can record an address"                      "select 'done' || coalesce((select set_club_venue('$CLUB','About us.','Behind the bakery.','Main road, Batroun', true, false, null, null, null, true, null))::text,''); select address from clubs where id='$CLUB';" "Main road, Batroun"
 check anon   "104ax yes, no and unanswered are three distinct states" "select coalesce(has_parking::text,'?')||coalesce(has_changing_rooms::text,'?')||coalesce(has_showers::text,'?') from clubs where id='$CLUB';" "truefalse?"

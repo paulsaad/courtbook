@@ -11,7 +11,7 @@ export default async function ClubCoaches({ params }: { params: Promise<{ slug: 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?next=/club/${slug}/coaches`);
-  const { data: club } = await supabase.from("clubs").select("id, name, slug, open_time, close_time, location_url, town_id").eq("slug", slug).single();
+  const { data: club } = await supabase.from("clubs").select("id, name, slug, open_time, close_time, location_url, town_id, is_demo").eq("slug", slug).single();
   if (!club) notFound();
   const [{ data }, head] = await Promise.all([supabase.rpc("coaches_at_club", { p_club: club.id }), loadClubHead(supabase, club)]);
   const coaches = (data ?? []) as CoachRow[];

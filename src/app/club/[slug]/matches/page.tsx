@@ -9,7 +9,7 @@ export default async function ClubMatches({ params }: { params: Promise<{ slug: 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?next=/club/${slug}/matches`);
-  const { data: club } = await supabase.from("clubs").select("id, name, slug, timezone, open_time, close_time, slot_minutes, location_url, town_id").eq("slug", slug).single();
+  const { data: club } = await supabase.from("clubs").select("id, name, slug, timezone, open_time, close_time, slot_minutes, location_url, town_id, is_demo").eq("slug", slug).single();
   if (!club) notFound();
   const [{ data: rows }, { data: myBookings }, head, { data: clubSports }, { data: sportRows }] = await Promise.all([
     supabase.rpc("match_board", { p_club: club.id, p_days: 14 }),

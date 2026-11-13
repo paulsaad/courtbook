@@ -11,7 +11,7 @@ export default async function ClubInfo({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const supabase = await createClient();
   const { data: club } = await supabase.from("clubs")
-    .select("id, name, slug, open_time, close_time, location_url, town_id, slot_minutes, min_booking_minutes, max_booking_minutes, cancel_cutoff_hours, hold_minutes, booking_window_days, service_fee_usd, payment_mode, lat, lng, description, arrival_notes, address, has_parking, has_changing_rooms, has_showers, has_equipment_rental, has_cafe, has_floodlights, has_drinking_water")
+    .select("id, name, slug, open_time, close_time, location_url, town_id, slot_minutes, min_booking_minutes, max_booking_minutes, cancel_cutoff_hours, hold_minutes, booking_window_days, service_fee_usd, payment_mode, lat, lng, description, arrival_notes, address, has_parking, has_changing_rooms, has_showers, has_equipment_rental, has_cafe, has_floodlights, has_drinking_water, is_demo")
     .eq("slug", slug).eq("active", true).single();
   if (!club) notFound();
   const [head, { data: courts }, { data: rules }] = await Promise.all([

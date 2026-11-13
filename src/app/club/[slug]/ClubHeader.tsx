@@ -3,6 +3,7 @@ import Link from "next/link";
 export type ClubHead = {
   name: string; slug: string; open_time: string; close_time: string; location_url: string | null;
   town: string | null; district: string | null; sports: string[]; priceMin: number | null; priceMax: number | null;
+  is_demo?: boolean | null;
 };
 
 const TABS = [["", "Book"], ["/matches", "Matches"], ["/coaches", "Coaches"], ["/info", "Info"]] as const;
@@ -13,6 +14,13 @@ export default function ClubHeader({ club, tab }: { club: ClubHead; tab: "" | "/
     <header className="px-4 pt-3">
       <Link href="/" className="text-sm text-muted">‹ Clubs</Link>
       <h1 className="mt-1 text-2xl font-semibold tracking-tight">{club.name}</h1>
+      {/* Said in words, at the size it is read at. The cover's own badge disappears into three
+          pixels once a listing scales it down, so it cannot be what carries this. */}
+      {club.is_demo && (
+        <p className="mt-1 inline-block rounded-full bg-sand-soft px-3 py-1 text-xs font-semibold text-sand">
+          Fictional demo club — this venue does not exist
+        </p>
+      )}
       <p className="text-sm text-muted">
         {[club.town, club.district].filter(Boolean).join(" · ") || "Lebanon"} · {club.open_time.slice(0, 5)}–{club.close_time.slice(0, 5)}{price && <> · {price}</>}
         {club.location_url && <> · <a className="text-action underline" href={club.location_url} target="_blank" rel="noreferrer">Map</a></>}

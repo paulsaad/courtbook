@@ -11,7 +11,7 @@ import { rangeLabel } from "@/lib/levels";
 
 export type ClubCard = {
   club_id: string; name: string; slug: string; town: string | null; district: string | null; governorate: string | null;
-  sports: string[]; price_from: number | null; next_free_at: string | null; next_free_court: string | null; next_free_court_id: string | null; location_url: string | null; cover_url: string | null;
+  sports: string[]; price_from: number | null; next_free_at: string | null; next_free_court: string | null; next_free_court_id: string | null; location_url: string | null; cover_url: string | null; is_demo: boolean | null;
   open_time: string; close_time: string;
 };
 export type OpenMatch = {
@@ -93,14 +93,27 @@ export default function Discover({ areas, sports, initialClubs, initialMatches, 
                 list worse, not better. The ratio matches what the upload route produces, so the
                 card does not reflow when the image arrives. */}
             {c.cover_url && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={c.cover_url} alt="" loading="lazy" width={1600} height={600}
-                   className="aspect-[8/3] w-full object-cover" />
+              <div className="relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={c.cover_url} alt="" loading="lazy" width={1600} height={600}
+                     className="aspect-[8/3] w-full object-cover" />
+                {/* The cover carries its own badge, which is legible at full size and unreadable
+                    once the browser scales 1600px down to about 344. Anything a player must
+                    actually read comes from the database and is drawn at the size it is read at. */}
+                {c.is_demo && (
+                  <span className="absolute bottom-2 left-2 rounded-full bg-white/95 px-2.5 py-1 text-xs font-semibold text-ink shadow-sm">
+                    Fictional demo club
+                  </span>
+                )}
+              </div>
             )}
             <Link href={`/club/${c.slug}`} className="block p-4 active:bg-paper">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="truncate text-lg font-medium leading-tight">{c.name}</h2>
+                  {c.is_demo && !c.cover_url && (
+                    <span className="mt-1 inline-block rounded-full bg-sand-soft px-2.5 py-0.5 text-xs font-semibold text-sand">Fictional demo club</span>
+                  )}
                   <p className="text-sm text-muted">{[c.town, c.district].filter(Boolean).join(" · ") || "Lebanon"}</p>
                 </div>
                 {c.price_from != null && <span className="shrink-0 text-sm"><span className="text-muted">from </span><b>${Number(c.price_from).toFixed(0)}</b><span className="text-muted">/h</span></span>}
