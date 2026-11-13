@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
-import { useQueryClient } from "@tanstack/react-query";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { router } from "expo-router";
+import * as Updates from "expo-updates";
 import { supabase } from "../../lib/supabase";
 import { useSession } from "../../lib/session";
 import { currentBuild } from "../../lib/buildInfo";
@@ -15,15 +16,13 @@ import { color, radius, space, text, MAX_FONT_SCALE } from "../../lib/theme";
  */
 export default function Profile() {
   const session = useSession();
-  const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const build = currentBuild();
 
   async function signOut() {
     setBusy(true);
+    // The session provider empties the cache on every sign-out, however it happens.
     await supabase.auth.signOut();
-    // Nothing one person loaded may be shown to the next person on this phone.
-    queryClient.clear();
     setBusy(false);
   }
 
@@ -52,6 +51,11 @@ export default function Profile() {
           </View>
         ))}
       </View>
+      {Updates.channel !== "production" && (
+        <Pressable accessibilityRole="button" onPress={() => router.push("/design-preview")} style={styles.previewLink}>
+          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.previewText}>Component preview (test builds only)</Text>
+        </Pressable>
+      )}
     </ScrollView>
   );
 }
@@ -64,5 +68,7 @@ const styles = StyleSheet.create({
   label: { ...text.caption, color: color.muted },
   value: { ...text.body, color: color.ink },
   row: { flexDirection: "row", justifyContent: "space-between", gap: space.md },
+  previewLink: { minHeight: 48, justifyContent: "center", alignItems: "center" },
+  previewText: { ...text.label, color: color.cedarDeep },
   rowValue: { ...text.label, color: color.ink, flexShrink: 1, textAlign: "right" },
 });

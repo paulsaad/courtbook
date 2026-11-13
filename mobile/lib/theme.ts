@@ -3,7 +3,7 @@
  * after the screen designs are approved is a change to this file, not to every screen.
  *
  * Values follow the "Court Lines" proposal (cedar night, cedar, limestone, the red line).
- * STATUS: proposed, not yet approved by Paul — M1 placeholders only.
+ * STATUS: approved by Paul 2026-11-13 (refined round).
  */
 export const color = {
   night: "#062B1C", // hero surfaces, tickets
@@ -29,7 +29,22 @@ export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32 }
 
 export const radius = { sm: 10, md: 14, lg: 18, xl: 22, pill: 999 } as const;
 
-/** Five text sizes only. Fonts are loaded after the type choice is approved; system font until then. */
+/**
+ * Typefaces (SIL Open Font License, files in assets/fonts). Custom fonts carry their weight in the
+ * family name, so components set fontFamily and never fontWeight (Android otherwise substitutes).
+ */
+export const font = {
+  regular: "Inter_400Regular",
+  medium: "Inter_500Medium",
+  semibold: "Inter_600SemiBold",
+  bold: "Inter_700Bold",
+  display: "Archivo_700Bold",
+  displayHeavy: "Archivo_800ExtraBold",
+  score: "ArchivoNarrow_700Bold", // times, prices, counts: the scoreboard
+  scoreSemi: "ArchivoNarrow_600SemiBold",
+} as const;
+
+/** Legacy size set used by M1 placeholder screens; new screens use components/Text variants. */
 export const text = {
   title: { fontSize: 28, lineHeight: 32, fontWeight: "700" as const, letterSpacing: -0.5 },
   heading: { fontSize: 20, lineHeight: 26, fontWeight: "700" as const },

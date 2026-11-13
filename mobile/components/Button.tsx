@@ -1,9 +1,9 @@
 import { ActivityIndicator, Pressable, StyleSheet, Text, type PressableProps } from "react-native";
-import { color, radius, TOUCH, MAX_FONT_SCALE } from "../lib/theme";
+import { color, font, radius, TOUCH, MAX_FONT_SCALE } from "../lib/theme";
 
 type Props = Omit<PressableProps, "children" | "style"> & {
   label: string;
-  variant?: "primary" | "secondary" | "quiet";
+  variant?: "primary" | "secondary" | "quiet" | "dark";
   busy?: boolean;
 };
 
@@ -24,9 +24,9 @@ export function Button({ label, variant = "primary", busy = false, disabled, onP
       {...rest}
     >
       {busy ? (
-        <ActivityIndicator color={variant === "primary" ? color.onDark : color.ink} />
+        <ActivityIndicator color={variant === "primary" || variant === "dark" ? color.onDark : color.ink} />
       ) : (
-        <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.text, variant === "primary" ? styles.textOnPrimary : styles.textPlain]}>
+        <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.text, variant === "primary" || variant === "dark" ? styles.textOnPrimary : styles.textPlain]}>
           {label}
         </Text>
       )}
@@ -35,13 +35,14 @@ export function Button({ label, variant = "primary", busy = false, disabled, onP
 }
 
 const styles = StyleSheet.create({
-  base: { minHeight: TOUCH + 4, borderRadius: radius.md, alignItems: "center", justifyContent: "center", paddingHorizontal: 20 },
+  base: { minHeight: TOUCH + 6, borderRadius: radius.md + 2, alignItems: "center", justifyContent: "center", paddingHorizontal: 20 },
   primary: { backgroundColor: color.cedar },
   secondary: { backgroundColor: color.card, borderWidth: 1, borderColor: color.line },
   quiet: { backgroundColor: "transparent" },
+  dark: { backgroundColor: color.night },
   inactive: { opacity: 0.5 },
   pressed: { opacity: 0.85 },
-  text: { fontSize: 16, fontWeight: "700" },
+  text: { fontFamily: font.bold, fontSize: 17 },
   textOnPrimary: { color: color.onDark },
   textPlain: { color: color.ink },
 });

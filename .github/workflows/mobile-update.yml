@@ -10,6 +10,11 @@ name: Mobile update (Expo)
 #
 # After any of these, the phone needs two launches: the first downloads, the second runs it.
 # Profile -> About shows which update is running.
+#
+# Which code it sends: the branch chosen in "Use workflow from". GitHub only lists a hand-run
+# workflow if this file also exists on main, so a copy lives there; when run from mobile-m1 it is
+# mobile-m1's copy and mobile-m1's app that are used. Run from a branch whose app has no update
+# configuration (main, until M1 is merged), it stops at the first step and publishes nothing.
 on:
   workflow_dispatch:
     inputs:
@@ -47,6 +52,16 @@ jobs:
       PLATFORM: ${{ inputs.platform }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Refuse on a branch whose app is not set up for updates
+        run: |
+          url=$(jq -r '.expo.updates.url // empty' app.json)
+          policy=$(jq -r '.expo.runtimeVersion.policy // .expo.runtimeVersion // empty' app.json)
+          if [ -z "$url" ] || [ -z "$policy" ]; then
+            echo "::error::Branch '${GITHUB_REF_NAME}' has no EAS Update setup in mobile/app.json. Choose mobile-m1 under 'Use workflow from'."
+            exit 1
+          fi
+          echo "Branch ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7} · app version $(jq -r .expo.version app.json) · runtime policy $policy"
 
       - name: Fail early if the Expo token is missing
         working-directory: .
@@ -89,6 +104,9 @@ jobs:
                       --fingerprint-hash "$hash" --limit 1 --json --non-interactive | jq length)
             echo "$p native fingerprint $hash: $found matching preview build(s)"
             if [ "$found" = "0" ]; then
+              echo "Latest finished $p preview builds, for comparison:"
+              eas build:list --channel "$CHANNEL" --platform "$p" --status finished --limit 3 --json --non-interactive \
+                | jq -r '.[] | "  \(.createdAt) version \(.appVersion) runtime \(.runtimeVersion) fingerprint \(.fingerprintHash // .fingerprint.hash // "not recorded")"' || true
               echo "::error::No $p preview build has this native code. Native code changed (or no build exists yet):"
               echo "::error::bump \"version\" in mobile/app.json, run the Mobile build workflow, then publish."
               exit 1
@@ -100,7 +118,7 @@ jobs:
         env:
           MESSAGE: ${{ inputs.message }}
         run: |
-          msg="${MESSAGE:-$(git log -1 --pretty=%s)}"
+          msg="${MESSAGE:-$(git log -1 --pretty=%s)} [${GITHUB_REF_NAME}@${GITHUB_SHA::7}]"
           eas update --channel "$CHANNEL" --environment preview --platform "$PLATFORM" \
             --message "$msg" --non-interactive --json > /tmp/update.json
           echo "## Published to $CHANNEL" >> "$GITHUB_STEP_SUMMARY"
