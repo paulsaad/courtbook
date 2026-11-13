@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The React Native proof of concept has its own toolchain; linting it with
+    // the Next.js config would report rules that do not apply to it.
+    "mobile/**",
   ]),
 ]);
 

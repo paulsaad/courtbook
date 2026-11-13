@@ -1,0 +1,93 @@
+# CourtBook mobile — proof of concept
+
+A React Native app built with Expo, in the same repository as the web app and
+sharing its Supabase backend. It calls the same RPCs; it does not duplicate any
+server logic.
+
+**This is a test of whether native mobile is worth pursuing. It is not a second
+CourtBook.** The web PWA is untouched by anything in this folder.
+
+## What it has to prove
+
+| | What counts as passing |
+|---|---|
+| 1. Sign-in survives the app being killed | Sign in, force-quit the app, reopen it, still signed in. Both email code and Google. |
+| 2. Real availability from the same RPC | The list shows the same free courts as the website for the same day. |
+| 3. A booking opens from a push or a link | Tapping a notification opens that booking, not the home screen. |
+| 4. A payment return from a gateway sandbox | **A simulated payment is not a sandbox test.** With no gateway credentials this stays *unverified* — it is never marked passed. |
+
+Criteria 1 and 2 are testable with what is in this folder today. Criterion 3 has
+its link half (`courtbook://booking/<id>`); push delivery is not wired yet.
+Criterion 4 is blocked on gateway credentials and is unrelated to the rest.
+
+## One-time setup
+
+You need a free Expo account. You do not need a Mac, Android Studio, Xcode, or
+any developer tools on your own computer.
+
+1. **Create an Expo account** at expo.dev. Free. No card.
+2. **Make an access token**: expo.dev → account settings → Access tokens →
+   create one. Copy it.
+3. **Put the token in GitHub**: the repo → Settings → Secrets and variables →
+   Actions → New repository secret. Name it exactly `EXPO_TOKEN`, paste the
+   token, save.
+4. **Set the two Supabase values on Expo**: expo.dev → your project →
+   Environment variables. Add them to the **preview** environment:
+   - `EXPO_PUBLIC_SUPABASE_URL` — the same URL the website uses
+   - `EXPO_PUBLIC_SUPABASE_ANON_KEY` — the same anon key the website uses
+
+   The project only appears on expo.dev after the first build run, so do step 4
+   after the first run of step "Build it" below, then run it again.
+
+## Build it
+
+GitHub → **Actions** tab → **Mobile build (Expo)** → **Run workflow**. Leave
+the platform on `android` and the profile on `preview`. Press the green button.
+
+It takes roughly 10–25 minutes; the free queue is low priority, so it can wait
+before it starts. When it finishes, go to expo.dev → your project → Builds, and
+open the newest one. There is an install page with a QR code.
+
+**On the Android phone**, open that page and install the APK. Android will ask
+you to allow installing from that source; that is normal for an app that does
+not come from the Play Store.
+
+## Why not Expo Go
+
+Expo Go needs a development server running on a computer on the same network to
+serve the JavaScript. There is no such computer in this project — the web app is
+built by Vercel and the database is managed in Supabase's dashboard. So the app
+goes straight to a real build, which is also the only configuration that can
+test push notifications and native Google sign-in anyway.
+
+## iPhone
+
+A build that installs on a real iPhone has to be signed, and signing in the
+cloud requires the Apple Developer Program at $99 a year. The free route is a
+Mac with Xcode. Neither is needed to answer the question this proof of concept
+asks, so Android comes first and the iPhone decision waits until criteria 1–3
+have passed.
+
+## Layout
+
+```
+app/                  screens (expo-router: the file path is the route)
+  _layout.tsx         navigation shell
+  index.tsx           availability — calls club_day_slots
+  sign-in.tsx         email code and Google
+  booking/[id].tsx    deep-link target: courtbook://booking/<id>
+lib/
+  supabase.ts         client, with session storage that survives app kill
+  session.ts          sign-in state
+  types.ts            shapes returned by the RPCs
+eas.json              build profiles
+```
+
+## Running it locally (only if you have a dev machine)
+
+```bash
+cd mobile
+cp .env.example .env     # fill in the two Supabase values
+npm install
+npm start
+```
