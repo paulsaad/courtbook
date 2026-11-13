@@ -105,8 +105,15 @@ jobs:
             echo "$p native fingerprint $hash: $found matching preview build(s)"
             if [ "$found" = "0" ]; then
               echo "Latest finished $p preview builds, for comparison:"
-              eas build:list --channel "$CHANNEL" --platform "$p" --status finished --limit 3 --json --non-interactive \
-                | jq -r '.[] | "  \(.createdAt) version \(.appVersion) runtime \(.runtimeVersion) fingerprint \(.fingerprintHash // .fingerprint.hash // "not recorded")"' || true
+              eas build:list --channel "$CHANNEL" --platform "$p" --status finished --limit 3 --json --non-interactive > /tmp/builds.json || true
+              jq -r '.[] | "  \(.createdAt) build \(.id) version \(.appVersion) runtime \(.runtimeVersion // .runtime.version // "?") fingerprint \(.fingerprintHash // .fingerprint.hash // "not recorded")"' /tmp/builds.json || true
+              latest=$(jq -r '.[0].id // empty' /tmp/builds.json)
+              if [ -n "$latest" ]; then
+                echo "What differs between this code and build $latest (Expo's own comparison):"
+                eas fingerprint:compare --build-id "$latest" --environment preview --json --non-interactive > /tmp/compare.json 2>/tmp/compare.err || true
+                jq -r '.. | objects | select(has("op") or has("type")) | tostring' /tmp/compare.json 2>/dev/null | head -40 || true
+                head -c 4000 /tmp/compare.json; echo; tail -5 /tmp/compare.err
+              fi
               echo "::error::No $p preview build has this native code. Native code changed (or no build exists yet):"
               echo "::error::bump \"version\" in mobile/app.json, run the Mobile build workflow, then publish."
               exit 1
