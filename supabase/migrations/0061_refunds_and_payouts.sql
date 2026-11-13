@@ -73,13 +73,19 @@ revoke execute on function refunds_due() from public, anon;
 grant execute on function refunds_due() to authenticated;
 
 -- A refund cannot be recorded against money that was never taken.
+--
+-- Who may do it: club staff, for their own club. 0012 made this admin-only and 0017 widened it,
+-- which is right — the person who hands the money back is at the desk, not at head office, and the
+-- refund queue is on the staff payments page with a button on it. An earlier draft of this migration
+-- was written from 0012 and silently narrowed it back; `is_staff_of` already returns true for
+-- admins, so this one condition covers both.
 create or replace function mark_refunded(p_payment uuid) returns void
 language plpgsql security definer set search_path = public as $$
 declare p payments%rowtype;
 begin
-  if auth.uid() is not null and not is_admin() then raise exception 'forbidden'; end if;
   select * into p from payments where id = p_payment for update;
   if not found then raise exception 'not_found'; end if;
+  if auth.uid() is not null and not is_staff_of(p.club_id) then raise exception 'forbidden'; end if;
   if p.status <> 'refund_due' then raise exception 'not_refund_due'; end if;
   if not p.collected then raise exception 'never_collected'; end if;
   update payments set status = 'refunded', refunded_at = now() where id = p_payment;

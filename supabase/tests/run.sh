@@ -1346,21 +1346,36 @@ check $ADMIN "105l simulated cancellations are counted apart"          "select s
 SIMP=$($PSQL -At -q -d $DB -c "select id from payments where club_id='$CLUB' and not collected" | head -1)
 REALP=$($PSQL -At -q -d $DB -c "select id from payments where club_id='$CLUB' and collected" | head -1)
 denied $ADMIN "105m a refund cannot be recorded on uncollected money"  "select mark_refunded('$SIMP');"
-check $ADMIN "105n but a real one can"                                 "select 'done' || coalesce((select mark_refunded('$REALP'))::text,'');" "done"
+# The person handing the money back is at the desk, not at head office, so club staff do this for
+# their own club. 0012 had it admin-only, 0017 widened it, and a draft of 0061 narrowed it again.
+# Two identities of this block's own, rather than relying on who is staff of what by now.
+STAFF_C=66666666-cccc-4ccc-8ccc-666666666666
+STAFF_D=77777777-dddd-4ddd-8ddd-777777777777
+$PSQL -q -d $DB -c "insert into auth.users (id, phone) values ('$STAFF_C','+9617'),('$STAFF_D','+9618') on conflict do nothing;
+  insert into profiles (id, name) values ('$STAFF_C','Desk of this club'),('$STAFF_D','Desk of another') on conflict do nothing;
+  delete from club_staff where profile_id in ('$STAFF_C','$STAFF_D');
+  insert into club_staff (club_id, profile_id) values ('$CLUB','$STAFF_C'),('$CLUB_B','$STAFF_D');" >/dev/null
+denied $STAFF_D "105n nor by staff of a different club"                "select mark_refunded('$REALP');"
+denied $P1     "105o nor by a player"                                  "select mark_refunded('$REALP');"
+# reset it, so this check stands on its own rather than on 105m having already consumed the row
+$PSQL -q -d $DB -c "update payments set status='refund_due', refunded_at=null where id='$SIMP';" >/dev/null
+denied $STAFF_C "105p staff cannot refund uncollected money either"    "select mark_refunded('$SIMP');"
+check $STAFF_C "105q but staff can complete their own club's refund"   "select 'done' || coalesce((select mark_refunded('$REALP'))::text,'');" "done"
+check $ADMIN   "105r and it is recorded as refunded"                   "select status from payments where id='$REALP';" "refunded"
 
 # Payouts: the form used to insert straight into the table from the browser, with the amount and the
 # author both supplied by the client. Only the server knows what a club is owed.
 $PSQL -q -d $DB -c "delete from payments where club_id='$CLUB'; delete from club_payouts where club_id='$CLUB';
   insert into payments (booking_id, profile_id, club_id, provider, amount_usd, fee_usd, total_usd, status, paid_at, collected)
   values ('$PB1','$P1','$CLUB','whish', 40, 1, 41, 'paid', now(), true);" >/dev/null
-denied $ADMIN "105o the browser cannot write a payout directly"        "insert into club_payouts (club_id, amount_usd, method, created_by) values ('$CLUB', 10, 'Cash', '$ADMIN');"
-denied $ADMIN "105p nor pay out more than the club is owed"            "select record_club_payout('$CLUB', 40.01, 'Cash', null);"
-denied $ADMIN "105q nor a negative amount"                             "select record_club_payout('$CLUB', -5, 'Cash', null);"
-denied $P1    "105r and a player cannot record one at all"             "select record_club_payout('$CLUB', 10, 'Cash', null);"
-check $ADMIN "105s a payout within the balance is recorded"            "select record_club_payout('$CLUB', 40, 'Cash', 'ref-1') is not null;" "t"
-check $ADMIN "105t and it is attributed to whoever recorded it"        "select created_by = '$ADMIN' from club_payouts where club_id='$CLUB';" "t"
-check $ADMIN "105u leaving nothing outstanding"                        "select outstanding from club_balances() where club_id='$CLUB';" "0.00"
-denied $ADMIN "105v so a second payout is refused"                     "select record_club_payout('$CLUB', 1, 'Cash', null);"
+denied $ADMIN "105s the browser cannot write a payout directly"        "insert into club_payouts (club_id, amount_usd, method, created_by) values ('$CLUB', 10, 'Cash', '$ADMIN');"
+denied $ADMIN "105t nor pay out more than the club is owed"            "select record_club_payout('$CLUB', 40.01, 'Cash', null);"
+denied $ADMIN "105u nor a negative amount"                             "select record_club_payout('$CLUB', -5, 'Cash', null);"
+denied $P1    "105v and a player cannot record one at all"             "select record_club_payout('$CLUB', 10, 'Cash', null);"
+check $ADMIN "105w a payout within the balance is recorded"            "select record_club_payout('$CLUB', 40, 'Cash', 'ref-1') is not null;" "t"
+check $ADMIN "105x and it is attributed to whoever recorded it"        "select created_by = '$ADMIN' from club_payouts where club_id='$CLUB';" "t"
+check $ADMIN "105y leaving nothing outstanding"                        "select outstanding from club_balances() where club_id='$CLUB';" "0.00"
+denied $ADMIN "105z so a second payout is refused"                     "select record_club_payout('$CLUB', 1, 'Cash', null);"
 $PSQL -q -d $DB -c "delete from payments where club_id='$CLUB'; delete from club_payouts where club_id='$CLUB';" >/dev/null
 
 check $ADMIN "104at settings are not readable from a browser"         "select count(*) from app_settings;" 0
