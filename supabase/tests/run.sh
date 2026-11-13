@@ -1380,6 +1380,22 @@ $PSQL -q -d $DB -c "delete from payments where club_id='$CLUB'; delete from club
 
 check $ADMIN "104at settings are not readable from a browser"         "select count(*) from app_settings;" 0
 check service "104au but the server has the storage address"          "select value like 'https://%' from app_settings where key='storage_base_url';" "t"
+# --- AL. the recovery procedure the status doc promises ------------------------------------------
+# "If a migration ever needs re-running, re-run everything from that number onwards, in order."
+# That is only true if each file is safe to apply twice, and 0061 shipped a create policy without a
+# drop, which failed on Paul's database. Applying them all a second time is the cheapest way to keep
+# the promise honest. 0040 is excluded: it adds an enum value and must run alone.
+echo "--- AL. every migration from 0041 can be applied twice"
+RERUN_FAILS=""
+for f in $(ls supabase/migrations/*.sql | sort); do
+  n=$(basename "$f")
+  case "$n" in 00[0-3]*|0040_*) continue;; esac
+  err=$($PSQL -d $DB -v ON_ERROR_STOP=1 -1 -f "$f" 2>&1 >/dev/null | grep -m1 ERROR)
+  [ -n "$err" ] && RERUN_FAILS="$RERUN_FAILS\n    $n → $err"
+done
+if [ -z "$RERUN_FAILS" ]; then claim "106a re-applying 0041 onwards changes nothing and raises nothing" 0
+else claim "106a re-applying 0041 onwards changes nothing and raises nothing$(printf "$RERUN_FAILS")" 1; fi
+
 echo
 echo "checks: $CHECKS, failures: $FAILS"
 [ "$FAILS" -eq 0 ] || { echo "SUITE FAILED"; exit 1; }

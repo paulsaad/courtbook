@@ -127,5 +127,6 @@ grant execute on function record_club_payout(uuid, numeric, text, text) to authe
 -- Close the direct path. Reading stays; writing goes through the function above, which is the only
 -- thing that knows what a club is actually owed.
 drop policy if exists "club_payouts: admin write" on club_payouts;
+drop policy if exists "club_payouts: admin read" on club_payouts;
 create policy "club_payouts: admin read" on club_payouts for select using (is_staff_of(club_id));
 revoke insert, update, delete on club_payouts from authenticated, anon;
