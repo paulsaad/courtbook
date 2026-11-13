@@ -1310,10 +1310,19 @@ check service "104au2d a generic slug is not assumed to be the demo"  "select co
 # That check alone is vacuous: the suite creates the 'other' club long after the migrations have
 # run, so 0063's update never sees it and would pass however broadly it was written. Re-applying the
 # migration now, with the club present, is exactly what running it against a live database does.
+# 0063 on its own first. Checking only after 0064 has run would let a broad update in 0063 pass,
+# because 0064 would have cleared the wrong label before anything looked.
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0063_demo_club_flag.sql >/dev/null
+check service "104au2e 0063 alone does not label a generic slug"      "select coalesce(bool_or(is_demo), false) from clubs where slug = 'other';" "f"
+# then 0064, which clears the label from that slug for anyone who ran the earlier, broader 0063
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0064_demo_label_on_courts.sql >/dev/null
-check service "104au2e nor when the migration runs with that club present" "select coalesce(bool_or(is_demo), false) from clubs where slug = 'other';" "f"
-check service "104au2f and the real demo club is still labelled"      "select is_demo from clubs where slug = 'batroun';" "t"
+check service "104au2f and the end state agrees"                      "select coalesce(bool_or(is_demo), false) from clubs where slug = 'other';" "f"
+check service "104au2g while the real demo club keeps its label"      "select is_demo from clubs where slug = 'batroun';" "t"
+# and 0064 clears it whatever the club is called — an earlier draft spared names containing "demo"
+$PSQL -q -d $DB -c "update clubs set is_demo = true, name = 'Demo Sports Centre' where slug = 'other';" >/dev/null
+$PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0064_demo_label_on_courts.sql >/dev/null
+check service "104au2h a club named Demo is still cleared"            "select is_demo from clubs where slug = 'other';" "f"
+$PSQL -q -d $DB -c "update clubs set name = 'Other Club' where slug = 'other';" >/dev/null
 check service "104au3 and no other club inherits the label"           "select coalesce(bool_or(is_demo), false) from clubs where slug <> 'batroun';" "f"
 check anon   "104av a new club has answered nothing"                  "select count(*) from clubs where id='$CLUB_B' and has_parking is null and facilities_confirmed_at is null;" 1
 check $ADMIN "104aw staff can record an address"                      "select 'done' || coalesce((select set_club_venue('$CLUB','About us.','Behind the bakery.','Main road, Batroun', true, false, null, null, null, true, null))::text,''); select address from clubs where id='$CLUB';" "Main road, Batroun"

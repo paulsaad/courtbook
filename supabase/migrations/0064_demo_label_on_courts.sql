@@ -73,5 +73,11 @@ grant execute on function club_day_slots(date, sport, text, text, text) to anon,
 
 -- `other` was too broad. It is a generic slug, the production seed never creates it, and a real
 -- club taking that slug would have been labelled fictional by a migration nobody would think to
--- look at. Only the club that is actually the demo is marked.
-update clubs set is_demo = false where slug = 'other' and name not ilike '%demo%';
+-- look at. Only the club that is actually the demo is marked, and this clears the label from any
+-- club that an earlier run of 0063 caught by that slug.
+--
+-- Unconditionally. An earlier draft spared clubs whose name contained "demo", which was a hedge that
+-- created the very problem it was meant to avoid: a real club called something like "Demo Sports
+-- Centre" would have kept a label saying it does not exist. Nothing marks a club fictional except
+-- being the demo club.
+update clubs set is_demo = false where slug = 'other';
