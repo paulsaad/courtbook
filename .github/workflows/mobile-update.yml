@@ -111,8 +111,15 @@ jobs:
               if [ -n "$latest" ]; then
                 echo "What differs between this code and build $latest (Expo's own comparison):"
                 eas fingerprint:compare --build-id "$latest" --environment preview --json --non-interactive > /tmp/compare.json 2>/tmp/compare.err || true
-                jq -r '.. | objects | select(has("op") or has("type")) | tostring' /tmp/compare.json 2>/dev/null | head -40 || true
-                head -c 4000 /tmp/compare.json; echo; tail -5 /tmp/compare.err
+                echo "  top-level keys: $(jq -r 'keys | join(", ")' /tmp/compare.json 2>/dev/null)"
+                jq -r '
+                  def idx(f): [f.sources[] | {key: (.filePath // .id), value: .}] | from_entries;
+                  (idx(.fingerprint1)) as $a | (idx(.fingerprint2)) as $b
+                  | (($a + $b) | keys[]) as $k
+                  | select(($a[$k].hash // "absent") != ($b[$k].hash // "absent"))
+                  | "  DIFFERS \($k)\n    build: \(($a[$k].contents // $a[$k].hash // "absent") | tostring | .[0:600])\n    here:  \(($b[$k].contents // $b[$k].hash // "absent") | tostring | .[0:600])"
+                ' /tmp/compare.json 2>/dev/null || { head -c 3000 /tmp/compare.json; echo; }
+                tail -3 /tmp/compare.err
               fi
               echo "::error::No $p preview build has this native code. Native code changed (or no build exists yet):"
               echo "::error::bump \"version\" in mobile/app.json, run the Mobile build workflow, then publish."
