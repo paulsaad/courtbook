@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import ClubPhotos from "@/components/ClubPhotos";
+import ClubVenue, { type VenueRow } from "@/components/ClubVenue";
 import type { ClubMedia } from "@/lib/media";
 import { friendlyError } from "@/lib/types";
 import type { Governorate, Sport, Town, TownWithArea } from "@/lib/geo";
@@ -62,6 +63,7 @@ export default function ClubSettings({ club, courts, rules, staff, coaches, isAd
 
       {isAdmin && <AdminBasics club={club} busy={busy} run={run} />}
       <ClubPhotos clubId={club.id} initial={media} />
+      <ClubVenue club={club as unknown as VenueRow} />
       <Location f={f} setF={setF} areas={areas} town={town} busy={busy} save={save} />
       <Hours f={f} setF={setF} busy={busy} save={save} />
       <Courts clubId={club.id} courts={courts} sports={sports} busy={busy} run={run} />

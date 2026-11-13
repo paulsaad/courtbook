@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { loadClubHead } from "@/lib/clubHead";
 import ClubHeader from "../ClubHeader";
+import { FACILITIES } from "@/components/ClubVenue";
 
 const fmtDur = (m: number) => (m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`);
 
@@ -9,7 +10,7 @@ export default async function ClubInfo({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const supabase = await createClient();
   const { data: club } = await supabase.from("clubs")
-    .select("id, name, slug, open_time, close_time, location_url, town_id, slot_minutes, min_booking_minutes, max_booking_minutes, cancel_cutoff_hours, hold_minutes, booking_window_days, service_fee_usd, lat, lng")
+    .select("id, name, slug, open_time, close_time, location_url, town_id, slot_minutes, min_booking_minutes, max_booking_minutes, cancel_cutoff_hours, hold_minutes, booking_window_days, service_fee_usd, lat, lng, description, arrival_notes, address, has_parking, has_changing_rooms, has_showers, has_equipment_rental, has_cafe, has_floodlights, has_drinking_water")
     .eq("slug", slug).eq("active", true).single();
   if (!club) notFound();
   const [head, { data: courts }, { data: rules }] = await Promise.all([
@@ -19,10 +20,46 @@ export default async function ClubInfo({ params }: { params: Promise<{ slug: str
   ]);
   const maps = club.lat != null && club.lng != null ? `https://www.google.com/maps?q=${club.lat},${club.lng}` : club.location_url;
   const row = "flex justify-between gap-4 py-2 text-sm";
+  // Three states, and only two of them are worth a player's attention. A facility nobody has
+  // answered is left out entirely — showing it as a no would be inventing an answer the club
+  // never gave, and showing it as "unknown" is a row of noise on a small screen.
+  const facilities = FACILITIES
+    .map(([key, label]) => [label, (club as Record<string, unknown>)[key] as boolean | null] as const)
+    .filter(([, value]) => value !== null);
+  const has = facilities.filter(([, v]) => v === true);
+  const hasNot = facilities.filter(([, v]) => v === false);
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col">
       <ClubHeader club={head} tab="/info" />
       <div className="mx-auto flex w-full max-w-md flex-col gap-4 p-4">
+        {club.description && (
+          <section className="rounded-2xl border border-grid bg-white px-4 py-3">
+            <h2 className="font-medium">About</h2>
+            <p className="mt-1 whitespace-pre-line text-sm text-muted">{club.description}</p>
+          </section>
+        )}
+        {(club.address || club.arrival_notes) && (
+          <section className="rounded-2xl border border-grid bg-white px-4 py-3">
+            <h2 className="font-medium">Getting there</h2>
+            {club.address && <p className="mt-1 text-sm">{club.address}</p>}
+            {club.arrival_notes && <p className="mt-1 whitespace-pre-line text-sm text-muted">{club.arrival_notes}</p>}
+          </section>
+        )}
+        {facilities.length > 0 && (
+          <section className="rounded-2xl border border-grid bg-white px-4 py-3">
+            <h2 className="font-medium">Facilities</h2>
+            {has.length > 0 && (
+              <ul className="mt-2 flex flex-wrap gap-2">
+                {has.map(([label]) => (
+                  <li key={label} className="rounded-full bg-turf-soft px-3 py-1 text-xs text-turf">{label}</li>
+                ))}
+              </ul>
+            )}
+            {hasNot.length > 0 && (
+              <p className="mt-2 text-xs text-muted">No {hasNot.map(([label]) => label.toLowerCase()).join(", ")}.</p>
+            )}
+          </section>
+        )}
         <section className="rounded-2xl border border-grid bg-white px-4 py-2">
           <h2 className="pt-2 font-medium">Opening and booking</h2>
           <div className={row}><span className="text-muted">Open</span><span>{club.open_time.slice(0, 5)}–{club.close_time.slice(0, 5)}, every day</span></div>

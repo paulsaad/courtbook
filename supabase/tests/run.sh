@@ -894,17 +894,11 @@ AFTER=$($PSQL -At -q -d $DB -c "select max(created_at) from match_messages where
 check $P1 "91q incremental read after the last message carries nothing" "select count(*) from match_messages_list('$PM', '$AFTER');" 0
 check $P1 "91r full read shows player2's message as deleted"        "select deleted from match_messages_list('$PM', null) where id='$MSG';" "t"
 
-# the phase 8 migrations must survive being run twice (a half-applied run has to be recoverable)
-# re-apply the whole recent range, in order: stopping part-way would leave an older definition of a
-# function that a later migration has since replaced
-for f in $(ls supabase/migrations/00[45]*.sql | sort); do
-  CHECKS=$((CHECKS+1))
-  if $PSQL -q -d $DB -v ON_ERROR_STOP=1 -f "$f" >/tmp/cb_reapply.log 2>&1; then
-    echo "  ok    91s $(basename $f) re-applies cleanly"
-  else
-    echo "  FAIL  91s $(basename $f) cannot be re-applied — $(grep -m1 ERROR /tmp/cb_reapply.log)"; FAILS=$((FAILS+1))
-  fi
-done
+# A mid-suite re-application used to live here, globbing 00[45]*.sql. That glob was written when the
+# newest migration was in the 0050s, so it re-created 0056's ten-argument set_club_venue and stopped
+# before 0062 could drop it again — the exact hazard the status doc warns about, inside the suite
+# itself, silently corrupting every check that followed. Section AL does this properly: all of them,
+# in order, at the very end, with the end state asserted afterwards.
 check $P1 "91t chat still works after the re-apply"                "select count(*) from match_messages_list('$PM', null);" 2
 
 echo "--- AG. staff calendar (Phase 9a): walk-in entry, suggestions, free now"
@@ -1302,11 +1296,30 @@ $PSQL -q -d $DB -c "insert into storage.objects (bucket_id, name) values ('club-
 check $ADMIN   "104am deleting from the bucket removes nothing"       "delete from storage.objects where bucket_id='club-media'; select count(*) from storage.objects where bucket_id='club-media';" 1
 check $ADMIN   "104an renaming in the bucket changes nothing"         "update storage.objects set name='hacked' where bucket_id='club-media'; select count(*) from storage.objects where name='hacked';" 0
 # venue information, with three states
+# Phase 11b. Three states, and the one that matters is null: a facility nobody has answered must
+# never reach a player as "no". The address is its own field — a maps link is not something you can
+# read out to a driver, and arrival notes are directions once you are already close.
+check anon   "104av a new club has answered nothing"                  "select count(*) from clubs where id='$CLUB_B' and has_parking is null and facilities_confirmed_at is null;" 1
+check $ADMIN "104aw staff can record an address"                      "select 'done' || coalesce((select set_club_venue('$CLUB','About us.','Behind the bakery.','Main road, Batroun', true, false, null, null, null, true, null))::text,''); select address from clubs where id='$CLUB';" "Main road, Batroun"
+check anon   "104ax yes, no and unanswered are three distinct states" "select coalesce(has_parking::text,'?')||coalesce(has_changing_rooms::text,'?')||coalesce(has_showers::text,'?') from clubs where id='$CLUB';" "truefalse?"
+check $ADMIN "104ay answering is dated, so silence is distinguishable" "select facilities_confirmed_at is not null from clubs where id='$CLUB';" "t"
+check $ADMIN "104az blanks are stored as nothing, not as empty text"  "select 'done' || coalesce((select set_club_venue('$CLUB','   ','','  ', null,null,null,null,null,null,null))::text,''); select description is null and arrival_notes is null and address is null from clubs where id='$CLUB';" "t"
+denied $ADMIN "104ba an address over 200 characters is refused"       "select set_club_venue('$CLUB', null, null, repeat('x',201), null,null,null,null,null,null,null);"
+denied $P1   "104bb a player cannot write venue information"          "select set_club_venue('$CLUB','hack',null,null,null,null,null,null,null,null,null);"
+# staff of a different club, created here because this is where it is first needed
+STAFF_D=77777777-dddd-4ddd-8ddd-777777777777
+$PSQL -q -d $DB -c "insert into auth.users (id, phone) values ('$STAFF_D','+9618') on conflict do nothing;
+  insert into profiles (id, name) values ('$STAFF_D','Desk of another') on conflict do nothing;
+  delete from club_staff where profile_id='$STAFF_D';
+  insert into club_staff (club_id, profile_id) values ('$CLUB_B','$STAFF_D');" >/dev/null
+denied $STAFF_D "104bc nor staff of another club"                     "select set_club_venue('$CLUB','hack',null,null,null,null,null,null,null,null,null);"
+denied $ADMIN "104bd the old signature is gone, so nothing skips the address" "select set_club_venue('$CLUB','x','y',true,true,true,true,true,true,true);"
+$PSQL -q -d $DB -c "update clubs set description=null, arrival_notes=null, address=null, has_parking=null, has_changing_rooms=null, has_showers=null, facilities_confirmed_at=null where id='$CLUB';" >/dev/null
 check $ADMIN "104ao facilities start unconfirmed"                     "select facilities_confirmed_at is null from clubs where id='$CLUB_B';" "t"
-check $ADMIN "104ap staff record yes, no and not-confirmed"           "select set_club_venue('$CLUB','A friendly club.','Gate on the main road.', true, true, null, false, null, true, true); select coalesce(has_parking::text,'?')||coalesce(has_showers::text,'?')||coalesce(has_equipment_rental::text,'?') from clubs where id='$CLUB';" "true?false"
+check $ADMIN "104ap staff record yes, no and not-confirmed"           "select set_club_venue('$CLUB','A friendly club.','Gate on the main road.','Main road', true, true, null, false, null, true, true); select coalesce(has_parking::text,'?')||coalesce(has_showers::text,'?')||coalesce(has_equipment_rental::text,'?') from clubs where id='$CLUB';" "true?false"
 check service "104aq and the answer is dated"                         "select facilities_confirmed_at is not null from clubs where id='$CLUB';" "t"
-denied $P1 "104ar a player cannot change venue information"           "select set_club_venue('$CLUB','hack',null,null,null,null,null,null,null,null);"
-denied $ADMIN "104as a description over 600 characters is refused"    "select set_club_venue('$CLUB', repeat('x',601), null,null,null,null,null,null,null,null);"
+denied $P1 "104ar a player cannot change venue information"           "select set_club_venue('$CLUB','hack',null,null,null,null,null,null,null,null,null);"
+denied $ADMIN "104as a description over 600 characters is refused"    "select set_club_venue('$CLUB', repeat('x',601), null,null,null,null,null,null,null,null,null);"
 
 echo "--- AK. money reporting tells real money from simulated (Phase 12 finding)"
 # The dashboard reported simulated payments as collected, told a club it was owed $310, and offered a
@@ -1350,11 +1363,10 @@ denied $ADMIN "105m a refund cannot be recorded on uncollected money"  "select m
 # their own club. 0012 had it admin-only, 0017 widened it, and a draft of 0061 narrowed it again.
 # Two identities of this block's own, rather than relying on who is staff of what by now.
 STAFF_C=66666666-cccc-4ccc-8ccc-666666666666
-STAFF_D=77777777-dddd-4ddd-8ddd-777777777777
-$PSQL -q -d $DB -c "insert into auth.users (id, phone) values ('$STAFF_C','+9617'),('$STAFF_D','+9618') on conflict do nothing;
-  insert into profiles (id, name) values ('$STAFF_C','Desk of this club'),('$STAFF_D','Desk of another') on conflict do nothing;
-  delete from club_staff where profile_id in ('$STAFF_C','$STAFF_D');
-  insert into club_staff (club_id, profile_id) values ('$CLUB','$STAFF_C'),('$CLUB_B','$STAFF_D');" >/dev/null
+$PSQL -q -d $DB -c "insert into auth.users (id, phone) values ('$STAFF_C','+9617') on conflict do nothing;
+  insert into profiles (id, name) values ('$STAFF_C','Desk of this club') on conflict do nothing;
+  delete from club_staff where profile_id='$STAFF_C';
+  insert into club_staff (club_id, profile_id) values ('$CLUB','$STAFF_C');" >/dev/null
 denied $STAFF_D "105n nor by staff of a different club"                "select mark_refunded('$REALP');"
 denied $P1     "105o nor by a player"                                  "select mark_refunded('$REALP');"
 # reset it, so this check stands on its own rather than on 105m having already consumed the row
@@ -1398,6 +1410,11 @@ for f in $(ls supabase/migrations/*.sql | sort); do
 done
 if [ -z "$RERUN_FAILS" ]; then claim "106a re-applying 0041 onwards raises no error" 0
 else claim "106a re-applying 0041 onwards raises no error$(printf "$RERUN_FAILS")" 1; fi
+# Succeeding is not the same as landing in the same place. 0056 grants table-level select on
+# club_media and 0057 takes it away again; applied in order the result is right, but only because
+# of the order. These two assert the end state rather than trusting it.
+check service "106b and the uploader is still not public afterwards"  "select has_column_privilege('anon','club_media','created_by','SELECT');" "f"
+check service "106c and publication is still server-only afterwards"  "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('set_club_image','add_club_gallery','reorder_club_gallery','set_gallery_caption','remove_club_media','record_media_orphan') and has_function_privilege('authenticated', p.oid, 'EXECUTE');" 0
 
 echo
 echo "checks: $CHECKS, failures: $FAILS"
