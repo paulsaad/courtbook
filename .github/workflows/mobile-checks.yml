@@ -1,0 +1,34 @@
+name: Mobile checks
+
+# Runs on every push that touches the app or the web files it shares (src/lib).
+# Nothing here talks to Expo or Supabase; it only proves the code is sound.
+on:
+  push:
+    paths: ["mobile/**", "src/lib/**", ".github/workflows/mobile-*.yml"]
+  pull_request:
+    paths: ["mobile/**", "src/lib/**", ".github/workflows/mobile-*.yml"]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      # Only mobile/ is installed, on purpose: it proves the shared src/lib files resolve their
+      # packages from the app's own node_modules, as they must on EAS.
+      - run: npm ci
+      - name: Type-check
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test -- --ci
+      - name: Bundle both platforms
+        run: npx expo export --platform ios --platform android --output-dir /tmp/export
+        env:
+          EXPO_OFFLINE: "1"

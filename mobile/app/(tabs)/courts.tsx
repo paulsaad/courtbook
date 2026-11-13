@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Link } from "expo-router";
-import { formatInTimeZone } from "date-fns-tz";
-import { supabase, configNote, supabaseHost } from "../lib/supabase";
-import { useSession } from "../lib/session";
-import type { DaySlot } from "../lib/types";
+import { hhmm, todayIn } from "@shared/time";
+import { supabase, configNote, supabaseHost } from "../../lib/supabase";
+import { useSession } from "../../lib/session";
+import type { DaySlot } from "../../lib/types";
 
 const TZ = "Asia/Beirut";
 
@@ -47,7 +47,7 @@ export default function Availability() {
 
   const load = useCallback(async () => {
     // Today as the clubs reckon it, not as the phone's clock reckons it.
-    const date = formatInTimeZone(new Date(), TZ, "yyyy-MM-dd");
+    const date = todayIn(TZ);
     const { data, error } = await supabase.rpc("club_day_slots", {
       p_date: date,
       p_sport: null,
@@ -161,7 +161,7 @@ export default function Availability() {
               {club.slots.slice(0, 12).map((slot) => (
                 <View key={`${slot.court_id}-${slot.start_at}`} style={styles.slot}>
                   <Text style={styles.slotTime}>
-                    {formatInTimeZone(new Date(slot.start_at), slot.timezone, "HH:mm")}
+                    {hhmm(slot.start_at, slot.timezone)}
                   </Text>
                   <Text style={styles.slotCourt} numberOfLines={1}>
                     {slot.court_name}

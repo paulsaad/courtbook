@@ -3,14 +3,15 @@
     "name": "CourtBook",
     "slug": "courtbook",
     "owner": "paulsaad",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "courtbook",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.courtbook.mobile"
+      "bundleIdentifier": "app.courtbook.mobile",
+      "usesAppleSignIn": true
     },
     "android": {
       "package": "app.courtbook.mobile",
@@ -35,12 +36,21 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 160
         }
-      ]
+      ],
+      "expo-apple-authentication"
     ],
     "extra": {
       "eas": {
         "projectId": "e55084d2-3e65-4c58-aa2e-5529dcafc77f"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/e55084d2-3e65-4c58-aa2e-5529dcafc77f",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
     }
   }
 }

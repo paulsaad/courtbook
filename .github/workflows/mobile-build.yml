@@ -65,6 +65,9 @@ jobs:
       - name: Type-check
         run: npm run typecheck
 
+      - name: Unit tests
+        run: npm test -- --ci
+
       # No linking step: app.json carries owner and extra.eas.projectId, so the
       # build targets that one project. The previous `eas init --force` is gone
       # deliberately — it was only ever needed to create the project, and a
