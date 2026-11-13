@@ -21,8 +21,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: mobile/package-lock.json
-      # Only mobile/ is installed, on purpose: it proves the shared src/lib files resolve their
-      # packages from the app's own node_modules, as they must on EAS.
+      # Only mobile/ is installed: the app must build from mobile/ alone.
       - run: npm ci
       - name: Type-check
         run: npm run typecheck
