@@ -109,15 +109,19 @@ export default function ClubVenue({ club }: { club: VenueRow }) {
 
         <fieldset className="flex flex-col gap-2">
           <legend className="text-sm">Facilities</legend>
+          {/* Label and choices sit side by side where there is room and stack where there is not:
+              "Equipment rental" beside "Yes / No / Not confirmed" does not fit on a 320px phone.
+              The buttons are 44px tall and share the width evenly when stacked, so they stay
+              thumb-sized rather than shrinking to fit. */}
           {FACILITIES.map(([key, label]) => (
-            <div key={key} className="flex items-center justify-between gap-3 border-t border-grid py-2 first:border-t-0">
+            <div key={key} className="flex flex-col gap-2 border-t border-grid py-2 first:border-t-0 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-sm">{label}</span>
-              <div className="flex shrink-0 overflow-hidden rounded-lg border border-grid">
+              <div className="flex overflow-hidden rounded-lg border border-grid sm:shrink-0">
                 {([[true, "Yes"], [false, "No"], [null, "Not confirmed"]] as const).map(([value, text]) => (
                   <button key={text} type="button"
                     onClick={() => setFacilities((f) => ({ ...f, [key]: value }))}
                     aria-pressed={facilities[key] === value}
-                    className={`px-3 py-1.5 text-xs ${facilities[key] === value ? "bg-action text-white" : "bg-white text-muted"}`}>
+                    className={`min-h-11 flex-1 whitespace-nowrap px-3 text-xs sm:flex-none ${facilities[key] === value ? "bg-action text-white" : "bg-white text-muted"}`}>
                     {text}
                   </button>
                 ))}
