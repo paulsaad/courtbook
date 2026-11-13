@@ -1333,6 +1333,36 @@ $PSQL -q -d $DB -c "insert into club_payouts (club_id, amount_usd, method, creat
 check $ADMIN "105h paying out more than was collected goes negative"   "select outstanding from club_balances() where club_id='$CLUB';" "-25.00"
 $PSQL -q -d $DB -c "delete from payments where club_id='$CLUB'; delete from club_payouts where club_id='$CLUB';" >/dev/null
 
+# A cancelled simulated booking is not money anybody is owed. cancel_booking still marks the payment
+# refund_due — that is the booking's truth — but `collected` decides what counts as an obligation.
+$PSQL -q -d $DB -c "delete from payments where club_id='$CLUB';
+  insert into payments (booking_id, profile_id, club_id, provider, amount_usd, fee_usd, total_usd, status, paid_at, collected)
+  values ('$PB1','$P1','$CLUB','simulated', 20, 1, 21, 'refund_due', now(), false),
+         ('$PB2','$P1','$CLUB','whish',     30, 1, 31, 'refund_due', now(), true);" >/dev/null
+check $ADMIN "105i only real money reaches the refund queue"           "select count(*) from refunds_due() where club_id='$CLUB';" 1
+check $ADMIN "105j and the queue holds the one that was collected"     "select total_usd from refunds_due() where club_id='$CLUB';" "31.00"
+check $ADMIN "105k the badge counts real obligations only"             "select refunds_due from payments_summary(date_trunc('month', now())::date) where club_id='$CLUB';" 1
+check $ADMIN "105l simulated cancellations are counted apart"          "select simulated_refunds from payments_summary(date_trunc('month', now())::date) where club_id='$CLUB';" 1
+SIMP=$($PSQL -At -q -d $DB -c "select id from payments where club_id='$CLUB' and not collected" | head -1)
+REALP=$($PSQL -At -q -d $DB -c "select id from payments where club_id='$CLUB' and collected" | head -1)
+denied $ADMIN "105m a refund cannot be recorded on uncollected money"  "select mark_refunded('$SIMP');"
+check $ADMIN "105n but a real one can"                                 "select 'done' || coalesce((select mark_refunded('$REALP'))::text,'');" "done"
+
+# Payouts: the form used to insert straight into the table from the browser, with the amount and the
+# author both supplied by the client. Only the server knows what a club is owed.
+$PSQL -q -d $DB -c "delete from payments where club_id='$CLUB'; delete from club_payouts where club_id='$CLUB';
+  insert into payments (booking_id, profile_id, club_id, provider, amount_usd, fee_usd, total_usd, status, paid_at, collected)
+  values ('$PB1','$P1','$CLUB','whish', 40, 1, 41, 'paid', now(), true);" >/dev/null
+denied $ADMIN "105o the browser cannot write a payout directly"        "insert into club_payouts (club_id, amount_usd, method, created_by) values ('$CLUB', 10, 'Cash', '$ADMIN');"
+denied $ADMIN "105p nor pay out more than the club is owed"            "select record_club_payout('$CLUB', 40.01, 'Cash', null);"
+denied $ADMIN "105q nor a negative amount"                             "select record_club_payout('$CLUB', -5, 'Cash', null);"
+denied $P1    "105r and a player cannot record one at all"             "select record_club_payout('$CLUB', 10, 'Cash', null);"
+check $ADMIN "105s a payout within the balance is recorded"            "select record_club_payout('$CLUB', 40, 'Cash', 'ref-1') is not null;" "t"
+check $ADMIN "105t and it is attributed to whoever recorded it"        "select created_by = '$ADMIN' from club_payouts where club_id='$CLUB';" "t"
+check $ADMIN "105u leaving nothing outstanding"                        "select outstanding from club_balances() where club_id='$CLUB';" "0.00"
+denied $ADMIN "105v so a second payout is refused"                     "select record_club_payout('$CLUB', 1, 'Cash', null);"
+$PSQL -q -d $DB -c "delete from payments where club_id='$CLUB'; delete from club_payouts where club_id='$CLUB';" >/dev/null
+
 check $ADMIN "104at settings are not readable from a browser"         "select count(*) from app_settings;" 0
 check service "104au but the server has the storage address"          "select value like 'https://%' from app_settings where key='storage_base_url';" "t"
 echo

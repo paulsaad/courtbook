@@ -38,6 +38,11 @@ export type Block = { id: string; court_id: string; start_at: string; end_at: st
 
 /** Database error names → what the desk sees */
 export const ERRORS: Record<string, string> = {
+  exceeds_balance: "That is more than this club is owed. Check the balance above — money that was never collected does not count.",
+  never_collected: "This payment was never collected, so there is nothing to refund.",
+  not_refund_due: "That payment is not awaiting a refund.",
+  bad_amount: "Enter an amount greater than zero.",
+  bad_method: "Choose a payment method from the list.",
   slot_taken: "That slot was just taken.",
   block_overlaps_booking: "There is a booking in that range. Cancel or move it first.",
   overlaps_existing_block: "That range is already blocked.",

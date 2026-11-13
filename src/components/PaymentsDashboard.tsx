@@ -7,7 +7,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/types";
 
-export type Summary = { club_id: string; club_name: string; bookings: number; gross: number; fees: number; owed_to_club: number; refunds_due: number; refunded: number; simulated_bookings: number; simulated_total: number };
+export type Summary = { club_id: string; club_name: string; bookings: number; gross: number; fees: number; owed_to_club: number; refunds_due: number; refunded: number; simulated_bookings: number; simulated_total: number; simulated_refunds: number };
 export type Balance = { club_id: string; club_name: string; club_share: number; paid_out: number; outstanding: number; simulated_share: number };
 export type RefundRow = { payment_id: string; club_id: string; club_name: string; player_name: string | null; court_name: string | null; start_at: string; total_usd: number; note: string | null; since: string | null };
 export type PaymentRow = { payment_id: string; status: string; player_name: string | null; court_name: string | null; start_at: string; amount_usd: number; fee_usd: number; total_usd: number; paid_at: string | null; provider_ref: string | null };
@@ -34,7 +34,7 @@ export default function PaymentsDashboard({ month, summary, refunds, rows, clubI
   const monthLabel = formatInTimeZone(new Date(`${month}-15T00:00:00Z`), "UTC", "MMMM yyyy");
   const totals = summary.reduce((a, s) => ({ bookings: a.bookings + s.bookings, gross: a.gross + Number(s.gross), fees: a.fees + Number(s.fees), owed: a.owed + Number(s.owed_to_club) }), { bookings: 0, gross: 0, fees: 0, owed: 0 });
   // Money nobody actually paid. Kept apart from every figure above, and never added to them.
-  const simulated = summary.reduce((a, s) => ({ n: a.n + Number(s.simulated_bookings ?? 0), total: a.total + Number(s.simulated_total ?? 0) }), { n: 0, total: 0 });
+  const simulated = summary.reduce((a, s) => ({ n: a.n + Number(s.simulated_bookings ?? 0), total: a.total + Number(s.simulated_total ?? 0), r: a.r + Number(s.simulated_refunds ?? 0) }), { n: 0, total: 0, r: 0 });
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-5 p-5 pb-16">
@@ -51,9 +51,9 @@ export default function PaymentsDashboard({ month, summary, refunds, rows, clubI
 
       <section className="rounded-2xl border border-grid bg-white p-4">
         <h2 className="mb-3 font-medium">Month summary</h2>
-        {simulated.n > 0 && (
+        {(simulated.n > 0 || simulated.r > 0) && (
           <p className="mb-3 rounded-lg bg-slate-soft px-3 py-2 text-xs text-muted">
-            <strong className="text-ink">Test money, not counted.</strong> {simulated.n} booking{simulated.n > 1 ? "s" : ""} worth {usd(simulated.total)} {simulated.n > 1 ? "were" : "was"} paid with a simulated provider. No money changed hands, so {simulated.n > 1 ? "they are" : "it is"} left out of every figure below.
+            <strong className="text-ink">Test money, not counted.</strong> {simulated.n} booking{simulated.n > 1 ? "s" : ""} worth {usd(simulated.total)} {simulated.n > 1 ? "were" : "was"} paid with a simulated provider. No money changed hands, so {simulated.n > 1 ? "they are" : "it is"} left out of every figure below.{simulated.r > 0 && ` ${simulated.r} cancelled simulated booking${simulated.r > 1 ? "s are" : " is"} not a refund anybody is owed.`}
           </p>
         )}
         <div className="-mx-4 overflow-x-auto px-4">
@@ -155,9 +155,11 @@ function PayoutForm({ clubId }: { clubId: string }) {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true); setError(null);
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    const { error } = await supabase.from("club_payouts").insert({ club_id: clubId, amount_usd: Number(amount), method, reference: reference.trim() || null, created_by: user!.id });
+    // Through the function, not into the table: only the server knows what this club is owed, and
+    // only the server should decide who the payout is recorded against.
+    const { error } = await createClient().rpc("record_club_payout", {
+      p_club: clubId, p_amount: Number(amount), p_method: method, p_reference: reference.trim() || null,
+    });
     setBusy(false);
     if (error) { setError(friendlyError(error.message)); return; }
     setAmount(""); setReference("");
