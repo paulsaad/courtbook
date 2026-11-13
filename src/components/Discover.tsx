@@ -11,7 +11,7 @@ import { rangeLabel } from "@/lib/levels";
 
 export type ClubCard = {
   club_id: string; name: string; slug: string; town: string | null; district: string | null; governorate: string | null;
-  sports: string[]; price_from: number | null; next_free_at: string | null; next_free_court: string | null; next_free_court_id: string | null; location_url: string | null;
+  sports: string[]; price_from: number | null; next_free_at: string | null; next_free_court: string | null; next_free_court_id: string | null; location_url: string | null; cover_url: string | null;
   open_time: string; close_time: string;
 };
 export type OpenMatch = {
@@ -89,6 +89,14 @@ export default function Discover({ areas, sports, initialClubs, initialMatches, 
         {!failed && clubs.length === 0 && <p className="rounded-2xl border border-dashed border-grid p-6 text-center text-sm text-muted">No clubs here yet. Try a wider area or another sport.</p>}
         {clubs.map((c) => (
           <article key={c.club_id} className="overflow-hidden rounded-2xl border border-grid bg-white">
+            {/* Only when there is one: an empty grey box on every coverless club would make the
+                list worse, not better. The ratio matches what the upload route produces, so the
+                card does not reflow when the image arrives. */}
+            {c.cover_url && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={c.cover_url} alt="" loading="lazy" width={1600} height={600}
+                   className="aspect-[8/3] w-full object-cover" />
+            )}
             <Link href={`/club/${c.slug}`} className="block p-4 active:bg-paper">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
