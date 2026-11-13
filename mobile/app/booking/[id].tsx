@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { Link, useLocalSearchParams } from "expo-router";
 import { formatInTimeZone } from "date-fns-tz";
-import { supabase } from "../../lib/supabase";
+import { supabase, supabaseHost } from "../../lib/supabase";
 import { useSession } from "../../lib/session";
 
 type AgendaRow = {
@@ -18,7 +18,11 @@ type AgendaRow = {
   role: string | null;
 };
 
-type Result = { state: "loading" } | { state: "failed" } | { state: "missing" } | { state: "found"; row: AgendaRow };
+type Result =
+  | { state: "loading" }
+  | { state: "failed"; why: string }
+  | { state: "missing" }
+  | { state: "found"; row: AgendaRow };
 
 /**
  * Deep-link target: courtbook://booking/<id>
@@ -43,7 +47,12 @@ export default function Booking() {
       const { data, error } = await supabase.rpc("my_agenda");
       if (!alive) return;
       if (error) {
-        setResult({ state: "failed" });
+        setResult({
+          state: "failed",
+          why: [error.code ? `Code ${error.code}` : null, error.message, `Host: ${supabaseHost}`]
+            .filter(Boolean)
+            .join("\n"),
+        });
         return;
       }
       const row = ((data ?? []) as AgendaRow[]).find((r) => r.kind === "booking" && r.id === id);
@@ -77,6 +86,7 @@ export default function Booking() {
     return (
       <View style={styles.page}>
         <Text style={styles.body}>Could not load this booking.</Text>
+        <Text style={styles.detail} selectable>{result.why}</Text>
       </View>
     );
   }
@@ -114,5 +124,6 @@ const styles = StyleSheet.create({
   heading: { fontSize: 22, fontWeight: "700", color: "#111111" },
   body: { fontSize: 16, color: "#111111" },
   muted: { fontSize: 13, color: "#6b6b6b" },
+  detail: { fontSize: 12, color: "#6b6b6b", lineHeight: 17 },
   link: { fontSize: 15, color: "#1d4ed8", fontWeight: "600", marginTop: 8 },
 });

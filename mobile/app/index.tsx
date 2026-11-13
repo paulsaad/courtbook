@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Link } from "expo-router";
 import { formatInTimeZone } from "date-fns-tz";
-import { supabase } from "../lib/supabase";
+import { supabase, configNote, supabaseHost } from "../lib/supabase";
 import { useSession } from "../lib/session";
 import type { DaySlot } from "../lib/types";
 
@@ -42,6 +42,7 @@ function groupByClub(rows: DaySlot[]): Grouped[] {
 export default function Availability() {
   const session = useSession();
   const [rows, setRows] = useState<DaySlot[] | null | undefined>(undefined); // undefined = loading, null = failed
+  const [failure, setFailure] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
@@ -54,7 +55,28 @@ export default function Availability() {
       p_district: null,
       p_query: null,
     });
-    setRows(error ? null : ((data ?? []) as DaySlot[]));
+    if (error) {
+      // There is no console on a phone, so the reason goes on the screen.
+      // Supabase errors carry a code, message, details and hint; none of them
+      // is a credential, and the anon key is never touched here. The host is
+      // included because a wrong URL is the failure this is most often hiding,
+      // and the host alone would have named it the first time.
+      setFailure(
+        [
+          error.code ? `Code ${error.code}` : null,
+          error.message,
+          error.details,
+          error.hint,
+          `Host: ${supabaseHost}`,
+        ]
+          .filter(Boolean)
+          .join("\n")
+      );
+      setRows(null);
+      return;
+    }
+    setFailure(null);
+    setRows((data ?? []) as DaySlot[]);
   }, []);
 
   useEffect(() => {
@@ -95,6 +117,12 @@ export default function Availability() {
         )}
       </View>
 
+      {configNote !== null && (
+        <View style={styles.warning}>
+          <Text style={styles.detail} selectable>{configNote}</Text>
+        </View>
+      )}
+
       <Text style={styles.heading}>Free today</Text>
 
       {rows === undefined && (
@@ -106,6 +134,7 @@ export default function Availability() {
       {rows === null && (
         <View style={styles.card}>
           <Text style={styles.body}>Could not load availability.</Text>
+          {failure !== null && <Text style={styles.detail} selectable>{failure}</Text>}
           <Pressable onPress={onRefresh} hitSlop={8}>
             <Text style={styles.link}>Try again</Text>
           </Pressable>
@@ -157,6 +186,8 @@ const styles = StyleSheet.create({
   body: { fontSize: 15, color: "#111111" },
   muted: { fontSize: 13, color: "#6b6b6b", flexShrink: 1 },
   link: { fontSize: 14, color: "#1d4ed8", fontWeight: "600" },
+  detail: { fontSize: 12, color: "#6b6b6b", lineHeight: 17 },
+  warning: { borderWidth: 1, borderColor: "#fcd34d", backgroundColor: "#fffbeb", borderRadius: 12, padding: 12 },
   demo: { fontSize: 12, color: "#92400e", backgroundColor: "#fef3c7", alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, overflow: "hidden" },
   slotRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   slot: { borderWidth: 1, borderColor: "#e5e5e5", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, minWidth: 72 },
