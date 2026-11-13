@@ -1307,6 +1307,32 @@ check $ADMIN "104ap staff record yes, no and not-confirmed"           "select se
 check service "104aq and the answer is dated"                         "select facilities_confirmed_at is not null from clubs where id='$CLUB';" "t"
 denied $P1 "104ar a player cannot change venue information"           "select set_club_venue('$CLUB','hack',null,null,null,null,null,null,null,null);"
 denied $ADMIN "104as a description over 600 characters is refused"    "select set_club_venue('$CLUB', repeat('x',601), null,null,null,null,null,null,null,null);"
+
+echo "--- AK. money reporting tells real money from simulated (Phase 12 finding)"
+# The dashboard reported simulated payments as collected, told a club it was owed $310, and offered a
+# payout button for money nobody had paid. `payments.collected` existed the whole time and neither
+# reporting function used it. These checks assert the distinction the data always carried.
+PB1=$($PSQL -At -q -d $DB -c "select id from bookings where club_id='$CLUB' and status='confirmed' order by created_at limit 1" | head -1)
+PB2=$($PSQL -At -q -d $DB -c "select id from bookings where club_id='$CLUB' and status='confirmed' order by created_at offset 1 limit 1" | head -1)
+$PSQL -q -d $DB -c "delete from payments where club_id='$CLUB'; delete from club_payouts where club_id='$CLUB';
+  insert into payments (booking_id, profile_id, club_id, provider, amount_usd, fee_usd, total_usd, status, paid_at, collected)
+  values ('$PB1','$P1','$CLUB','simulated', 20, 1, 21, 'paid', now(), false),
+         ('$PB2','$P1','$CLUB','whish',     30, 1, 31, 'paid', now(), true);" >/dev/null
+check $ADMIN "105a only collected money is reported as collected"      "select gross from payments_summary(date_trunc('month', now())::date) where club_id='$CLUB';" "31.00"
+check $ADMIN "105b and only collected fees are earned"                 "select fees from payments_summary(date_trunc('month', now())::date) where club_id='$CLUB';" "1.00"
+check $ADMIN "105c simulated money is shown, separately"               "select simulated_bookings || '/' || simulated_total from payments_summary(date_trunc('month', now())::date) where club_id='$CLUB';" "1/21.00"
+check $ADMIN "105d a club is owed only what was actually taken"        "select club_share from club_balances() where club_id='$CLUB';" "30.00"
+check $ADMIN "105e and simulated share is reported apart from it"      "select simulated_share from club_balances() where club_id='$CLUB';" "20.00"
+# the case that was on the screen: nothing real collected at all
+$PSQL -q -d $DB -c "update payments set collected = false where club_id='$CLUB';" >/dev/null
+check $ADMIN "105f with only simulated money, the club is owed nothing" "select outstanding from club_balances() where club_id='$CLUB';" "0"
+check $ADMIN "105g and nothing reads as collected"                     "select gross from payments_summary(date_trunc('month', now())::date) where club_id='$CLUB';" "0"
+# A payout can exceed what was collected — a mistake, or a refund after the money went out. The
+# balance must go negative and stay negative: clamping it to zero would hide money that left.
+$PSQL -q -d $DB -c "insert into club_payouts (club_id, amount_usd, method, created_by) values ('$CLUB', 25, 'cash', '$ADMIN');" >/dev/null
+check $ADMIN "105h paying out more than was collected goes negative"   "select outstanding from club_balances() where club_id='$CLUB';" "-25.00"
+$PSQL -q -d $DB -c "delete from payments where club_id='$CLUB'; delete from club_payouts where club_id='$CLUB';" >/dev/null
+
 check $ADMIN "104at settings are not readable from a browser"         "select count(*) from app_settings;" 0
 check service "104au but the server has the storage address"          "select value like 'https://%' from app_settings where key='storage_base_url';" "t"
 echo

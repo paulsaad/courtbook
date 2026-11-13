@@ -7,8 +7,8 @@ import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/types";
 
-export type Summary = { club_id: string; club_name: string; bookings: number; gross: number; fees: number; owed_to_club: number; refunds_due: number; refunded: number };
-export type Balance = { club_id: string; club_name: string; club_share: number; paid_out: number; outstanding: number };
+export type Summary = { club_id: string; club_name: string; bookings: number; gross: number; fees: number; owed_to_club: number; refunds_due: number; refunded: number; simulated_bookings: number; simulated_total: number };
+export type Balance = { club_id: string; club_name: string; club_share: number; paid_out: number; outstanding: number; simulated_share: number };
 export type RefundRow = { payment_id: string; club_id: string; club_name: string; player_name: string | null; court_name: string | null; start_at: string; total_usd: number; note: string | null; since: string | null };
 export type PaymentRow = { payment_id: string; status: string; player_name: string | null; court_name: string | null; start_at: string; amount_usd: number; fee_usd: number; total_usd: number; paid_at: string | null; provider_ref: string | null };
 
@@ -33,6 +33,8 @@ export default function PaymentsDashboard({ month, summary, refunds, rows, clubI
   const shift = (d: number) => { const [y, m] = month.split("-").map(Number); const x = new Date(Date.UTC(y, m - 1 + d, 1)); return `${x.getUTCFullYear()}-${String(x.getUTCMonth() + 1).padStart(2, "0")}`; };
   const monthLabel = formatInTimeZone(new Date(`${month}-15T00:00:00Z`), "UTC", "MMMM yyyy");
   const totals = summary.reduce((a, s) => ({ bookings: a.bookings + s.bookings, gross: a.gross + Number(s.gross), fees: a.fees + Number(s.fees), owed: a.owed + Number(s.owed_to_club) }), { bookings: 0, gross: 0, fees: 0, owed: 0 });
+  // Money nobody actually paid. Kept apart from every figure above, and never added to them.
+  const simulated = summary.reduce((a, s) => ({ n: a.n + Number(s.simulated_bookings ?? 0), total: a.total + Number(s.simulated_total ?? 0) }), { n: 0, total: 0 });
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-5 p-5 pb-16">
@@ -49,36 +51,55 @@ export default function PaymentsDashboard({ month, summary, refunds, rows, clubI
 
       <section className="rounded-2xl border border-grid bg-white p-4">
         <h2 className="mb-3 font-medium">Month summary</h2>
-        <table className="w-full text-sm">
-          <thead className="text-left text-xs text-muted"><tr><th className="py-1">Club</th><th className="text-right">Paid bookings</th><th className="text-right">Collected</th><th className="text-right">CourtBook fees</th><th className="text-right">Club share</th></tr></thead>
+        {simulated.n > 0 && (
+          <p className="mb-3 rounded-lg bg-slate-soft px-3 py-2 text-xs text-muted">
+            <strong className="text-ink">Test money, not counted.</strong> {simulated.n} booking{simulated.n > 1 ? "s" : ""} worth {usd(simulated.total)} {simulated.n > 1 ? "were" : "was"} paid with a simulated provider. No money changed hands, so {simulated.n > 1 ? "they are" : "it is"} left out of every figure below.
+          </p>
+        )}
+        <div className="-mx-4 overflow-x-auto px-4">
+        <table className="w-full min-w-max text-sm">
+          <thead className="text-left text-xs text-muted"><tr><th className="py-1">Club</th><th className="whitespace-nowrap pl-4 text-right">Paid bookings</th><th className="whitespace-nowrap pl-4 text-right">Collected</th><th className="whitespace-nowrap pl-4 text-right">CourtBook fees</th><th className="whitespace-nowrap pl-4 text-right">Club share</th></tr></thead>
           <tbody>
             {summary.map((s) => (
               <tr key={s.club_id} className="border-t border-grid">
                 <td className="py-2">{s.club_name}{s.refunds_due > 0 && <span className="ml-2 rounded-full bg-red-50 px-2 py-0.5 text-xs text-danger">{s.refunds_due} refund{s.refunds_due > 1 ? "s" : ""} due</span>}</td>
-                <td className="text-right">{s.bookings}</td><td className="text-right">{usd(s.gross)}</td><td className="text-right font-medium text-turf">{usd(s.fees)}</td><td className="text-right">{usd(s.owed_to_club)}</td>
+                <td className="whitespace-nowrap pl-4 text-right">{s.bookings}</td><td className="whitespace-nowrap pl-4 text-right">{usd(s.gross)}</td><td className="whitespace-nowrap pl-4 text-right font-medium text-turf">{usd(s.fees)}</td><td className="whitespace-nowrap pl-4 text-right">{usd(s.owed_to_club)}</td>
               </tr>
             ))}
             {summary.length > 1 && (
-              <tr className="border-t border-grid font-medium"><td className="py-2">Total</td><td className="text-right">{totals.bookings}</td><td className="text-right">{usd(totals.gross)}</td><td className="text-right text-turf">{usd(totals.fees)}</td><td className="text-right">{usd(totals.owed)}</td></tr>
+              <tr className="border-t border-grid font-medium"><td className="py-2">Total</td><td className="whitespace-nowrap pl-4 text-right">{totals.bookings}</td><td className="whitespace-nowrap pl-4 text-right">{usd(totals.gross)}</td><td className="whitespace-nowrap pl-4 text-right text-turf">{usd(totals.fees)}</td><td className="whitespace-nowrap pl-4 text-right">{usd(totals.owed)}</td></tr>
             )}
           </tbody>
         </table>
-        <p className="mt-2 text-xs text-muted">Payments with status paid in this month; refunded bookings excluded. Club share is before payouts — see balances below.</p>
+        </div>
+        <p className="mt-2 text-xs text-muted">Money actually collected this month; refunded bookings and simulated payments excluded. Club share is before payouts — see balances below.</p>
       </section>
 
       <section className="rounded-2xl border border-grid bg-white p-4">
         <h2 className="mb-2 font-medium">Club balances (all time)</h2>
-        <table className="w-full text-sm">
-          <thead className="text-left text-xs text-muted"><tr><th className="py-1">Club</th><th className="text-right">Club share</th><th className="text-right">Paid out</th><th className="text-right">Outstanding</th></tr></thead>
+        <div className="-mx-4 overflow-x-auto px-4">
+        <table className="w-full min-w-max text-sm">
+          <thead className="text-left text-xs text-muted"><tr><th className="py-1">Club</th><th className="whitespace-nowrap pl-4 text-right">Club share</th><th className="whitespace-nowrap pl-4 text-right">Paid out</th><th className="whitespace-nowrap pl-4 text-right">Outstanding</th></tr></thead>
           <tbody>
             {balances.map((b) => (
               <tr key={b.club_id} className="border-t border-grid">
-                <td className="py-2">{b.club_name}</td><td className="text-right">{usd(b.club_share)}</td><td className="text-right">{usd(b.paid_out)}</td>
-                <td className={`text-right font-medium ${Number(b.outstanding) > 0 ? "text-danger" : ""}`}>{usd(b.outstanding)}</td>
+                <td className="py-2">{b.club_name}</td><td className="whitespace-nowrap pl-4 text-right">{usd(b.club_share)}</td><td className="whitespace-nowrap pl-4 text-right">{usd(b.paid_out)}</td>
+                <td className={`whitespace-nowrap pl-4 text-right font-medium ${Number(b.outstanding) > 0 ? "text-danger" : ""}`}>
+                  {usd(b.outstanding)}
+                  {/* Negative means CourtBook paid out more than it collected — the opposite of a debt
+                      to the club, and a red number alone would read as exactly that. */}
+                  {Number(b.outstanding) < 0 && <span className="ml-1 text-xs font-normal text-muted">overpaid</span>}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
+        {balances.some((b) => Number(b.simulated_share ?? 0) > 0) && (
+          <p className="mt-3 rounded-lg bg-slate-soft px-3 py-2 text-xs text-muted">
+            An outstanding balance means CourtBook is holding this club&apos;s money. Simulated bookings are excluded, so a club that has only test bookings is owed nothing.
+          </p>
+        )}
         {isAdmin && clubId && <PayoutForm clubId={clubId} />}
       </section>
 
