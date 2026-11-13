@@ -68,6 +68,9 @@ jobs:
       - name: Unit tests
         run: npm test -- --ci
 
+      - name: Release bundling, as EAS runs it (before spending a build)
+        run: npm run check:bundle
+
       # No linking step: app.json carries owner and extra.eas.projectId, so the
       # build targets that one project. The previous `eas init --force` is gone
       # deliberately — it was only ever needed to create the project, and a

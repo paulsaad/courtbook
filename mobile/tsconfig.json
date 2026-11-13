@@ -4,9 +4,7 @@
     "strict": true,
     "types": ["jest"],
     "paths": {
-      "@shared/*": ["../src/lib/*"],
-      "date-fns": ["./node_modules/date-fns"],
-      "date-fns-tz": ["./node_modules/date-fns-tz"]
+      "@shared/*": ["./shared/*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"]
