@@ -1417,6 +1417,74 @@ $PSQL -q -d $DB -c "delete from payments where club_id='$CLUB'; delete from club
 
 check $ADMIN "104at settings are not readable from a browser"         "select count(*) from app_settings;" 0
 check service "104au but the server has the storage address"          "select value like 'https://%' from app_settings where key='storage_base_url';" "t"
+# --- AM. hold_slot retry token (0065, native app plan G2) ------------------------------------------
+echo "--- AM. a retry with the same token gets the same hold back; nothing else changes"
+# fails_with <who> <label> <sql> <reason> : must raise, and for exactly that reason
+fails_with() { CHECKS=$((CHECKS+1)); local got; got=$({ who_sql $1; echo "$3"; } | $PSQL -At -d $DB 2>&1 | grep -m1 ERROR)
+  if echo "$got" | grep -q "ERROR:  $4\$"; then echo "  ok    $2 ($got)"; else echo "  FAIL  $2 — expected ERROR $4 got [$got]"; FAILS=$((FAILS+1)); fi; }
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated', max_upcoming_bookings=10 where id='$CB';" >/dev/null
+at() { echo "(current_date + 11 + time '$1') at time zone 'Asia/Beirut'"; }
+hs() { { as_user $1; echo "select booking_id||'/'||already from hold_slot('$CB','$2', $(at $3), $(at $4)${5:+, '$5'});"; } | $PSQL -At -d $DB 2>&1 | tail -1; }
+TA=$($PSQL -At -q -d $DB -c "select gen_random_uuid()" | head -1)
+TB=$($PSQL -At -q -d $DB -c "select gen_random_uuid()" | head -1)
+TC=$($PSQL -At -q -d $DB -c "select gen_random_uuid()" | head -1)
+
+check service "107a exactly one hold_slot exists (a second would make PostgREST calls ambiguous)" "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='hold_slot';" 1
+check service "107b and only signed-in players and the server may call it" "select has_function_privilege('anon','hold_slot(uuid,uuid,timestamptz,timestamptz,uuid)','EXECUTE')||'/'||has_function_privilege('authenticated','hold_slot(uuid,uuid,timestamptz,timestamptz,uuid)','EXECUTE');" "false/true"
+
+# the web app's call: four arguments, by position and by name (PostgREST uses names)
+W1=$(hs $P1 $COURT2 10:00 11:00)
+check service "107c the old 4-argument call still works and is not a replay" "select '$W1' like '%/false';" t
+W2=$({ as_user $P1; echo "select booking_id from hold_slot(p_club => '$CB', p_court => '$COURT2', p_start => $(at 12:00), p_end => $(at 13:00));"; } | $PSQL -At -d $DB | tail -1)
+check service "107d so does the named call, and it replaces the first hold as before" "select (select status from bookings where id='${W1%%/*}')||'/'||(select status from bookings where id='$W2');" "expired/pending"
+check service "107e the web's holds carry no token" "select count(*) from bookings where id in ('${W1%%/*}','$W2') and client_token is not null;" 0
+
+# the phone's call, then its retry after a lost response
+R1=$(hs $P1 $COURT2 14:00 15:00 $TA)
+R2=$(hs $P1 $COURT2 14:00 15:00 $TA)
+check service "107f the first call is new" "select '$R1' like '%/false';" t
+check service "107g the retry returns the same booking, marked as a replay" "select '${R2%%/*}' = '${R1%%/*}' and '$R2' like '%/true';" t
+check service "107h one booking for that token, still pending (the retry did not replace it)" "select count(*)||'/'||max(status::text) from bookings where player_id='$P1' and client_token='$TA';" "1/pending"
+check service "107i and its payment is still pending" "select status from payments where booking_id='${R1%%/*}';" pending
+
+fails_with $P1 "107j same token, different time: refused, not a silent old booking" "select hold_slot('$CB','$COURT2', $(at 16:00), $(at 17:00), '$TA');" token_reused
+fails_with $P1 "107k same token, different court: refused" "select hold_slot('$CB','$COURT3', $(at 14:00), $(at 15:00), '$TA');" token_reused
+
+# a new attempt (new token) replaces the hold as before; a late retry of the old one disturbs nothing
+N1=$(hs $P1 $COURT2 18:00 19:00 $TB)
+check service "107l a new attempt replaces the old hold as before" "select (select status from bookings where id='${R1%%/*}')||'/'||(select status from bookings where id='${N1%%/*}');" "expired/pending"
+L1=$(hs $P1 $COURT2 14:00 15:00 $TA)
+check service "107m a late retry of the old attempt gets the old booking back, still expired" "select '${L1%%/*}' = '${R1%%/*}' and '$L1' like '%/true' and (select status from bookings where id='${R1%%/*}') = 'expired';" t
+check service "107n and leaves the newer hold alone" "select status from bookings where id='${N1%%/*}';" pending
+
+# tokens belong to one player
+O1=$(hs $P2 $COURT3 14:00 15:00 $TA)
+check service "107o another player using the same token gets their own new hold" "select '${O1%%/*}' <> '${R1%%/*}' and '$O1' like '%/false';" t
+check service "107p and player 1's booking is untouched" "select status from bookings where id='${R1%%/*}';" expired
+
+# two retries racing each other: the player lock serialises them; one booking results
+ret() { { as_user $P4; echo "begin; select booking_id from hold_slot('$CB','$COURT3', $(at 20:00), $(at 21:00), '$TC'); select pg_sleep(1); commit;"; } | $PSQL -At -d $DB 2>&1; }
+ret > /tmp/cb_r1.log & sleep 0.3; ret > /tmp/cb_r2.log & wait
+B1=$(grep -m1 -E '^[0-9a-f-]{36}$' /tmp/cb_r1.log); B2=$(grep -m1 -E '^[0-9a-f-]{36}$' /tmp/cb_r2.log)
+claim "107q two concurrent calls with one token both return the same booking" $([ -n "$B1" ] && [ "$B1" = "$B2" ] && echo 0 || echo 1)
+check service "107r and exactly one row exists for it" "select count(*) from bookings where player_id='$P4' and client_token='$TC';" 1
+
+# The case only the up-front replay check handles. Without it, the unique-token handler still
+# returns the player's booking in every case above (the failed insert rolls the call back), so those
+# checks pass either way. Here the expired hold's slot has since been taken by someone else: without
+# the up-front check the retry fails with slot_taken instead of getting its own (expired) booking.
+TD=$($PSQL -At -q -d $DB -c "select gen_random_uuid()" | head -1)
+X1=$(hs $P1 $COURT2 21:00 22:00 $TD)
+$PSQL -q -d $DB -c "update bookings set status='expired' where id='${X1%%/*}'; update payments set status='expired' where booking_id='${X1%%/*}';" >/dev/null
+X2=$(hs $P2 $COURT2 21:00 22:00)
+check service "107t someone else then holds that slot" "select status from bookings where id='${X2%%/*}';" pending
+X3=$(hs $P1 $COURT2 21:00 22:00 $TD)
+check service "107u a late retry still gets its own expired booking back, not slot_taken" "select '${X3%%/*}' = '${X1%%/*}' and '$X3' like '%/true';" t
+check service "107v and the other player's hold is untouched" "select status from bookings where id='${X2%%/*}';" pending
+
+fails_with anon "107s a visitor cannot hold a slot" "select hold_slot('$CB','$COURT3', $(at 09:00), $(at 10:00), gen_random_uuid());" "permission denied for function hold_slot"
+$PSQL -q -d $DB -c "update clubs set payment_mode='at_desk' where id='$CB';" >/dev/null
+
 # --- AL. the recovery procedure the status doc promises ------------------------------------------
 # "If a migration ever needs re-running, re-run everything from that number onwards, in order."
 # That is only true if each file is safe to apply twice, and 0061 shipped a create policy without a
@@ -1439,6 +1507,7 @@ else claim "106a re-applying 0041 onwards raises no error$(printf "$RERUN_FAILS"
 # club_media and 0057 takes it away again; applied in order the result is right, but only because
 # of the order. These two assert the end state rather than trusting it.
 check service "106b and the uploader is still not public afterwards"  "select has_column_privilege('anon','club_media','created_by','SELECT');" "f"
+check service "106d and still exactly one hold_slot after 0051/0052 re-created the old one" "select count(*)||'/'||max(pronargs) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='hold_slot';" "1/5"
 check service "106c and publication is still server-only afterwards"  "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('set_club_image','add_club_gallery','reorder_club_gallery','set_gallery_caption','remove_club_media','record_media_orphan') and has_function_privilege('authenticated', p.oid, 'EXECUTE');" 0
 
 echo

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { authenticateRequest } from "@/lib/supabase/request";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProvider } from "@/lib/payments";
 
@@ -16,9 +16,10 @@ export async function POST(request: Request) {
   const { paymentId } = (await request.json().catch(() => ({}))) as { paymentId?: string };
   if (!paymentId) return NextResponse.json({ error: "paymentId required" }, { status: 400 });
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "not_authenticated" }, { status: 401 });
+  // Website (cookie) or app (bearer token, verified by Supabase Auth). The user comes only from here.
+  const auth = await authenticateRequest(request);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const { supabase, user } = auth;
 
   const { data: payment, error: lookupError } = await supabase
     .from("payments")
