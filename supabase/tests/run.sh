@@ -1386,6 +1386,9 @@ check service "104au but the server has the storage address"          "select va
 # drop, which failed on Paul's database. Applying them all a second time is the cheapest way to keep
 # the promise honest. 0040 is excluded: it adds an enum value and must run alone.
 echo "--- AL. every migration from 0041 can be applied twice"
+# What this asserts: re-application raises no error. It does NOT assert that a second application
+# leaves the data identical — a migration that rewrites rows would pass this and still change them.
+# Every check above runs against a singly-applied database, so that stronger property is untested.
 RERUN_FAILS=""
 for f in $(ls supabase/migrations/*.sql | sort); do
   n=$(basename "$f")
@@ -1393,8 +1396,8 @@ for f in $(ls supabase/migrations/*.sql | sort); do
   err=$($PSQL -d $DB -v ON_ERROR_STOP=1 -1 -f "$f" 2>&1 >/dev/null | grep -m1 ERROR)
   [ -n "$err" ] && RERUN_FAILS="$RERUN_FAILS\n    $n → $err"
 done
-if [ -z "$RERUN_FAILS" ]; then claim "106a re-applying 0041 onwards changes nothing and raises nothing" 0
-else claim "106a re-applying 0041 onwards changes nothing and raises nothing$(printf "$RERUN_FAILS")" 1; fi
+if [ -z "$RERUN_FAILS" ]; then claim "106a re-applying 0041 onwards raises no error" 0
+else claim "106a re-applying 0041 onwards raises no error$(printf "$RERUN_FAILS")" 1; fi
 
 echo
 echo "checks: $CHECKS, failures: $FAILS"
