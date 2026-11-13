@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import CoachDashboard from "./CoachDashboard";
+import { loadRefData } from "@/lib/geo";
 
 export default async function CoachPage() {
   const supabase = await createClient();
@@ -10,6 +11,9 @@ export default async function CoachPage() {
 
   const { data: coach } = await supabase.from("coaches").select("id, sports, levels, price_usd, bio, whatsapp, active").eq("profile_id", user.id).maybeSingle();
   const { data: clubs } = await supabase.from("clubs").select("id, name, slug, timezone").eq("active", true).order("name");
+  // The same list every other page uses. This form had padel and tennis written into it from
+  // Phase 5, so the four sports added in Phase 6 were invisible to coaches.
+  const ref = await loadRefData(supabase);
   const [{ data: links }, { data: rules }, { data: exceptions }] = coach
     ? await Promise.all([
         supabase.from("coach_clubs").select("club_id, status").eq("coach_id", coach.id),
@@ -21,7 +25,7 @@ export default async function CoachPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5 pb-16">
       <Link href="/" className="text-sm text-muted">‹ Home</Link>
-      <CoachDashboard coach={coach} clubs={clubs ?? []} links={links ?? []} rules={rules ?? []} exceptions={exceptions ?? []} />
+      <CoachDashboard coach={coach} sports={ref.sports} clubs={clubs ?? []} links={links ?? []} rules={rules ?? []} exceptions={exceptions ?? []} />
     </main>
   );
 }

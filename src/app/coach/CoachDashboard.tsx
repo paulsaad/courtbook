@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import type { Sport } from "@/lib/geo";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/types";
@@ -19,7 +20,7 @@ const section = "flex flex-col gap-3 rounded-2xl border border-grid bg-white p-4
 const chip = (on: boolean) => `rounded-xl border px-3 py-2 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
 const hhmm = (t: string) => t.slice(0, 5);
 
-export default function CoachDashboard({ coach, clubs, links, rules, exceptions }: { coach: Coach; clubs: ClubRow[]; links: LinkRow[]; rules: Rule[]; exceptions: Exc[] }) {
+export default function CoachDashboard({ coach, sports, clubs, links, rules, exceptions }: { coach: Coach; sports: Sport[]; clubs: ClubRow[]; links: LinkRow[]; rules: Rule[]; exceptions: Exc[] }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -36,7 +37,7 @@ export default function CoachDashboard({ coach, clubs, links, rules, exceptions 
       <h1 className="text-2xl font-semibold tracking-tight">{coach ? "Coach profile" : "Become a coach"}</h1>
       {!coach && <p className="text-muted">Set your profile, ask the clubs where you coach to list you, and players will find you and message you on WhatsApp.</p>}
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
-      <ProfileSection coach={coach} busy={busy} run={run} />
+      <ProfileSection coach={coach} sports={sports} busy={busy} run={run} />
       {coach && <ClubsSection coach={coach} clubs={clubs} links={links} busy={busy} run={run} />}
       {coach && <AvailabilitySection coach={coach} clubs={clubs.filter((c) => links.some((l) => l.club_id === c.id && l.status === "approved"))} rules={rules} exceptions={exceptions} busy={busy} run={run} />}
     </>
@@ -45,7 +46,7 @@ export default function CoachDashboard({ coach, clubs, links, rules, exceptions 
 
 type Run = (fn: () => PromiseLike<{ error: { message: string } | null }>) => Promise<void>;
 
-function ProfileSection({ coach, busy, run }: { coach: Coach; busy: boolean; run: Run }) {
+function ProfileSection({ coach, sports, busy, run }: { coach: Coach; sports: Sport[]; busy: boolean; run: Run }) {
   const [f, setF] = useState({ sports: coach?.sports ?? ["padel"], levels: coach?.levels ?? [], price: coach ? String(coach.price_usd) : "", bio: coach?.bio ?? "", whatsapp: coach?.whatsapp ?? "", active: coach?.active ?? true });
   const toggle = (k: "sports" | "levels", v: string) => setF({ ...f, [k]: f[k].includes(v) ? f[k].filter((x) => x !== v) : [...f[k], v] });
   const [phoneError, setPhoneError] = useState<string | null>(null);
@@ -62,7 +63,7 @@ function ProfileSection({ coach, busy, run }: { coach: Coach; busy: boolean; run
   return (
     <form onSubmit={save} className={section}>
       <h2 className="font-medium">Profile</h2>
-      <div className="text-sm">Sports<div className="mt-1 flex gap-2">{["padel", "tennis"].map((s) => <button type="button" key={s} onClick={() => toggle("sports", s)} className={chip(f.sports.includes(s))}>{s}</button>)}</div></div>
+      <div className="text-sm">Sports<div className="mt-1 flex gap-2">{sports.map((s) => <button type="button" key={s.code} onClick={() => toggle("sports", s.code)} className={chip(f.sports.includes(s.code))}>{s.name_en}</button>)}</div></div>
       <div className="text-sm">Levels you coach<div className="mt-1 flex gap-2">{["beginner", "intermediate", "advanced"].map((s) => <button type="button" key={s} onClick={() => toggle("levels", s)} className={chip(f.levels.includes(s))}>{s}</button>)}</div></div>
       <label className="flex flex-col gap-1 text-sm">Price per hour ($)<input className={input} inputMode="decimal" required value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} /></label>
       <label className="flex flex-col gap-1 text-sm">WhatsApp number (players will message this)<input className={input} inputMode="tel" placeholder="03 123 456 or +961 3 123 456" value={f.whatsapp} onChange={(e) => setF({ ...f, whatsapp: e.target.value })} />
