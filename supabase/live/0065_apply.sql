@@ -5,6 +5,7 @@
 -- replaces it, then checks the result is exactly the verified 0065 version with the right
 -- permissions. If any step or check fails, everything is rolled back and the old function is
 -- untouched. Running it a second time stops at the first check and changes nothing.
+-- Code is compared ignoring Windows line endings and trailing spaces (how live was pasted).
 begin;
 set local lock_timeout = '5s';
 set local statement_timeout = '60s';
@@ -12,10 +13,10 @@ set local statement_timeout = '60s';
 do $pre$
 declare n int; args text; body text;
 begin
-  select count(*), max(pg_get_function_identity_arguments(oid)), max(md5(prosrc)) into n, args, body
+  select count(*), max(pg_get_function_identity_arguments(oid)), max(md5(regexp_replace(prosrc, '[ \t\r]+(\n|$)', '\1', 'g'))) into n, args, body
   from pg_proc where proname = 'hold_slot' and pronamespace = 'public'::regnamespace;
   if n <> 1 or args <> 'p_club uuid, p_court uuid, p_start timestamp with time zone, p_end timestamp with time zone'
-     or body <> 'a91e9a74505c97e17c4f910fa10d1e15' then
+     or body <> '93fa689d8321abde3f8d586203356c53' then
     raise exception 'STOPPED, nothing changed: hold_slot is not the verified pre-0065 version (count %, args %, body %)', n, args, body;
   end if;
 end $pre$;
@@ -155,10 +156,10 @@ grant execute on function hold_slot(uuid, uuid, timestamptz, timestamptz, uuid) 
 do $post$
 declare n int; args text; body text; f oid;
 begin
-  select count(*), max(pg_get_function_identity_arguments(oid)), max(md5(prosrc)), max(oid) into n, args, body, f
+  select count(*), max(pg_get_function_identity_arguments(oid)), max(md5(regexp_replace(prosrc, '[ \t\r]+(\n|$)', '\1', 'g'))), max(oid) into n, args, body, f
   from pg_proc where proname = 'hold_slot' and pronamespace = 'public'::regnamespace;
   if n <> 1 or args <> 'p_club uuid, p_court uuid, p_start timestamp with time zone, p_end timestamp with time zone, p_token uuid'
-     or body <> '6003eef1bc05a95409b35e064367f903' then
+     or body <> '04b6a3a1cda5618ec2894642fd0e08a2' then
     raise exception 'ROLLED BACK: hold_slot after 0065 is not the verified version (count %, args %, body %)', n, args, body;
   end if;
   if has_function_privilege('anon', f, 'execute') or not has_function_privilege('authenticated', f, 'execute')

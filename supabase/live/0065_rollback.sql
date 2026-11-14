@@ -9,8 +9,8 @@ set local statement_timeout = '60s';
 do $pre$
 declare n int; body text;
 begin
-  select count(*), max(md5(prosrc)) into n, body from pg_proc where proname = 'hold_slot' and pronamespace = 'public'::regnamespace;
-  if n <> 1 or body <> '6003eef1bc05a95409b35e064367f903' then
+  select count(*), max(md5(regexp_replace(prosrc, '[ \t\r]+(\n|$)', '\1', 'g'))) into n, body from pg_proc where proname = 'hold_slot' and pronamespace = 'public'::regnamespace;
+  if n <> 1 or body <> '04b6a3a1cda5618ec2894642fd0e08a2' then
     raise exception 'STOPPED, nothing changed: hold_slot is not the 0065 version (count %, body %)', n, body;
   end if;
 end $pre$;
@@ -86,10 +86,10 @@ grant execute on function public.hold_slot(uuid, uuid, timestamptz, timestamptz)
 do $post$
 declare n int; args text; body text; f oid;
 begin
-  select count(*), max(pg_get_function_identity_arguments(oid)), max(md5(prosrc)), max(oid) into n, args, body, f
+  select count(*), max(pg_get_function_identity_arguments(oid)), max(md5(regexp_replace(prosrc, '[ \t\r]+(\n|$)', '\1', 'g'))), max(oid) into n, args, body, f
   from pg_proc where proname = 'hold_slot' and pronamespace = 'public'::regnamespace;
   if n <> 1 or args <> 'p_club uuid, p_court uuid, p_start timestamp with time zone, p_end timestamp with time zone'
-     or body <> 'a91e9a74505c97e17c4f910fa10d1e15'
+     or body <> '93fa689d8321abde3f8d586203356c53'
      or has_function_privilege('anon', f, 'execute') or not has_function_privilege('authenticated', f, 'execute')
      or not has_function_privilege('service_role', f, 'execute') then
     raise exception 'ROLLED BACK: hold_slot after rollback is not the verified pre-0065 version';
