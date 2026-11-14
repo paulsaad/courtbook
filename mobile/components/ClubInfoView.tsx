@@ -72,12 +72,12 @@ export function ClubInfoView({ query, onBook }: {
           <View style={styles.heroActions}>
             <Pressable accessibilityRole="button" onPress={onBook} style={({ pressed }) => [styles.heroBtn, styles.heroBook, pressed && styles.pressed]}>
               <Icon name="calendar" size={18} color={color.onDark} />
-              <Text style={styles.heroBookText}>See free times</Text>
+              <Text style={styles.heroBookText} numberOfLines={1}>Free times</Text>
             </Pressable>
             {maps && (
               <Pressable accessibilityRole="link" accessibilityHint="Opens the map" onPress={openMaps} style={({ pressed }) => [styles.heroBtn, styles.heroMap, pressed && styles.pressed]}>
                 <Icon name="pin" size={18} color={color.ink} />
-                <Text style={styles.heroMapText}>Directions</Text>
+                <Text style={styles.heroMapText} numberOfLines={1}>Directions</Text>
               </Pressable>
             )}
           </View>
@@ -86,7 +86,7 @@ export function ClubInfoView({ query, onBook }: {
 
       {/* The three numbers players ask about first, scoreboard style. */}
       <View style={styles.facts}>
-        <Fact label="Open daily" value={`${club.open_time.slice(0, 5)}–${club.close_time.slice(0, 5)}`} />
+        <Fact wide label="Open daily" value={`${club.open_time.slice(0, 5)}–${club.close_time.slice(0, 5)}`} />
         <View style={styles.factRule} />
         <Fact label="Play" value={length} />
         <View style={styles.factRule} />
@@ -185,9 +185,10 @@ export function ClubInfoView({ query, onBook }: {
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+/** `wide`: the opening hours ("08:00–23:00") get a little more room, so they never shrink or cut off. */
+function Fact({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
   return (
-    <View style={styles.fact} accessible accessibilityLabel={`${label}: ${value}`}>
+    <View style={[styles.fact, wide && { flex: 1.3 }]} accessible accessibilityLabel={`${label}: ${value}`}>
       <Text style={styles.factValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{value}</Text>
       <Text variant="caption" numberOfLines={2} style={{ textAlign: "center" }}>{label}</Text>
     </View>
@@ -223,21 +224,23 @@ const styles = StyleSheet.create({
   sportRow: { flex: 1, flexDirection: "row", flexWrap: "wrap", gap: 12, paddingTop: 2 },
   sportTag: { flexDirection: "row", alignItems: "center", gap: 6 },
   sportText: { fontFamily: font.bold, fontSize: 14, letterSpacing: 0.6, textTransform: "uppercase", color: color.redOnDark },
-  heroName: { fontFamily: font.displayHeavy, fontSize: 28, lineHeight: 32, letterSpacing: -0.5, color: color.onDark },
+  // The navigation bar already names the club; here it is the card's title, not the page's.
+  heroName: { fontFamily: font.display, fontSize: 22, lineHeight: 27, letterSpacing: -0.2, color: color.onDark },
   placeRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   placeText: { fontFamily: font.medium, fontSize: 15, lineHeight: 20, color: color.onDarkMuted, flexShrink: 1 },
   demoPill: { alignSelf: "flex-start", backgroundColor: color.warnSoft, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4, marginTop: 2 },
   demoText: { fontFamily: font.semibold, fontSize: 13, color: color.warnInk },
+  // Two equal buttons on one row, down to the iPhone SE; they stack only at very large text sizes.
   heroActions: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: space.sm },
   heroBtn: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 48, paddingHorizontal: 16, borderRadius: radius.md },
-  heroBook: { backgroundColor: color.cedar, flexGrow: 1, justifyContent: "center" },
+  heroBook: { backgroundColor: color.cedar, flexGrow: 1, flexBasis: 120, justifyContent: "center" },
   heroBookText: { fontFamily: font.bold, fontSize: 16, color: color.onDark },
-  heroMap: { backgroundColor: color.card, justifyContent: "center" },
+  heroMap: { backgroundColor: color.card, flexGrow: 1, flexBasis: 120, justifyContent: "center" },
   heroMapText: { fontFamily: font.bold, fontSize: 16, color: color.ink },
   pressed: { opacity: 0.85 },
   facts: { flexDirection: "row", backgroundColor: color.card, borderRadius: radius.lg, borderWidth: 1, borderColor: color.line, paddingVertical: 14 },
   fact: { flex: 1, alignItems: "center", gap: 2, paddingHorizontal: 6 },
-  factValue: { fontFamily: font.score, fontSize: 22, lineHeight: 26, color: color.ink },
+  factValue: { fontFamily: font.score, fontSize: 20, lineHeight: 24, color: color.ink },
   factRule: { width: 1, backgroundColor: color.line, marginVertical: 2 },
   gallery: { gap: 10, paddingRight: space.lg },
   photo: { width: 240, gap: 6 },

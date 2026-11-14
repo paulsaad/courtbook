@@ -56,12 +56,21 @@ export default function Profile() {
 
       <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.section}>About this app</Text>
       <View style={styles.card}>
-        {build.map((row) => (
-          <View key={row.label} style={styles.row}>
-            <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.label}>{row.label}</Text>
-            <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.rowValue} selectable>{row.value}</Text>
-          </View>
-        ))}
+        {build.map((row) =>
+          row.value.length > 24 ? (
+            // A long value (the update ID) gets its own line, kept on one line, so it can be read
+            // and compared at a glance rather than broken with a character left over.
+            <View key={row.label} style={styles.stacked}>
+              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.label}>{row.label}</Text>
+              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.longValue} selectable numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{row.value}</Text>
+            </View>
+          ) : (
+            <View key={row.label} style={styles.row}>
+              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.label}>{row.label}</Text>
+              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.rowValue} selectable>{row.value}</Text>
+            </View>
+          ),
+        )}
       </View>
       {faultsAvailable() && (
         <>
@@ -104,5 +113,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", justifyContent: "space-between", gap: space.md },
   previewLink: { minHeight: 48, justifyContent: "center", alignItems: "center" },
   previewText: { ...text.label, color: color.cedarDeep },
+  stacked: { gap: 2 },
+  longValue: { fontFamily: font.semibold, fontSize: 14, lineHeight: 19, color: color.ink, fontVariant: ["tabular-nums"] },
   rowValue: { ...text.label, color: color.ink, flexShrink: 1, textAlign: "right" },
 });
