@@ -77,4 +77,4 @@ checks(n, check_name, found, expected) as (
   select 9, 'one token per player (unique index)', (select indexdef from pg_indexes where schemaname = 'public' and indexname = 'bookings_one_per_client_token'),
          'CREATE UNIQUE INDEX bookings_one_per_client_token ON public.bookings USING btree (player_id, client_token) WHERE (client_token IS NOT NULL)'
 )
-select n as "#", check_name as "check", found, expected, (found = expected) as ok from checks order by n, check_name;
+select n as "#", check_name as "check", coalesce(found, 'MISSING') as found, expected, coalesce(found = expected, false) as ok from checks order by n, check_name;
