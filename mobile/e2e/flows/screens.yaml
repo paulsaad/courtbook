@@ -5,7 +5,7 @@ appId: app.courtbook.mobile.staging
 - extendedWaitUntil: { visible: "Book a court", timeout: 30000 }
 - takeScreenshot: shots/sizes/home-${SUFFIX}
 - tapOn: "Courts"
-- extendedWaitUntil: { visible: ".*Demo club.*", timeout: 30000 }
+- extendedWaitUntil: { visible: "All sports", timeout: 30000 }
 - takeScreenshot: shots/sizes/courts-${SUFFIX}
 - openLink: "courtbook-staging://club/${E2E_CLUB}?date=${E2E_DATE}"
 - extendedWaitUntil: { visible: { id: "time-.*" }, timeout: 30000 }

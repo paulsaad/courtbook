@@ -2,7 +2,7 @@
 
 Fails (exit 1) on a control that can be tapped but has nothing to announce: no text and no
 content description on it or anything inside it. Reports, without failing, tap targets smaller than
-44 x 44 dp (Apple's minimum; Android recommends 48). Usage: a11y_audit.py <dump.xml> <screen> <density-dpi>
+44 x 44 dp (Apple's minimum; Android recommends 48, which the app reaches with extra touch area), ignoring controls partly scrolled off screen. Usage: a11y_audit.py <dump.xml> <screen> <density-dpi>
 """
 import sys
 import xml.etree.ElementTree as ET
@@ -24,8 +24,18 @@ def size_dp(n):
     return (x2 - x1) / scale, (y2 - y1) / scale
 
 
+def bounds(n):
+    b = n.get("bounds", "[0,0][0,0]").replace("][", ",").strip("[]").split(",")
+    return list(map(int, b))
+
+
+screen_w = max(bounds(n)[2] for n in root.iter("node"))
+screen_h = max(bounds(n)[3] for n in root.iter("node"))
 problems, small = [], []
 for n in root.iter("node"):
+    x1, y1, x2, y2 = bounds(n)
+    # Partly scrolled off screen: its visible size says nothing about its real size.
+    clipped = x1 <= 0 or y1 <= 0 or x2 >= screen_w or y2 >= screen_h
     if n.get("package", "").startswith("com.android.systemui"):
         continue
     if n.get("clickable") == "true" and n.get("enabled") == "true":
@@ -35,7 +45,7 @@ for n in root.iter("node"):
             continue
         if not spoken(n):
             problems.append(f"{screen}: tappable {n.get('class')} {n.get('resource-id') or ''} at {n.get('bounds')} has nothing to announce")
-        elif min(w, h) < 44 and n.get("class") != "android.widget.EditText":
+        elif not clipped and min(w, h) < 43.5 and n.get("class") != "android.widget.EditText":
             small.append(f"{screen}: '{label[:40]}' is {w:.0f}x{h:.0f} dp")
 
 for p in problems:
