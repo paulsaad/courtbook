@@ -22,16 +22,19 @@ fails_with() { CHECKS=$((CHECKS+1)); local got; got=$(q "$1" "$3"); if echo "$go
 CLUB=$(q admin "select id from clubs where slug='batroun'")
 COURT=$(q admin "select id from courts where club_id='$CLUB' and name='Padel 1'")
 COURT2=$(q admin "select id from courts where club_id='$CLUB' and name='Padel 2'")
+COURT3=$(q admin "select id from courts where club_id='$CLUB' and name='Padel 3'")
 MODE=$(q admin "select payment_mode from clubs where id='$CLUB'")
+MINB=$(q admin "select min_booking_minutes from clubs where id='$CLUB'")
 [ -n "$COURT" ] || { echo "demo club or court missing"; exit 1; }
 at() { echo "((current_date + 2 + time '$1') at time zone 'Asia/Beirut')"; }
 
 cleanup() {
   { echo "\\set QUIET on"; cat <<SQL
-delete from payments where booking_id in (select id from bookings where player_id in ('$U1','$U2'));
-delete from bookings where player_id in ('$U1','$U2');
+delete from payments where booking_id in (select id from bookings where player_id in ('$U1','$U2') or created_by in ('$U1','$U2'));
+delete from bookings where player_id in ('$U1','$U2') or created_by in ('$U1','$U2');
+delete from club_staff where profile_id in ('$U1','$U2');
 delete from auth.users where id in ('$U1','$U2');
-update clubs set payment_mode = '$MODE' where id = '$CLUB';
+update clubs set payment_mode = '$MODE', min_booking_minutes = $MINB where id = '$CLUB';
 SQL
   } | psql "$DB" -v ON_ERROR_STOP=1 -q >/dev/null
 }
@@ -88,6 +91,36 @@ if [ "$HAS_TOKEN" = "1" ]; then
 else
   echo "  (hold_slot has no retry token yet — 0065 not applied; S2b–S2j skipped)"
 fi
+
+echo "--- S3. staff moves keep the club's minimum and maximum length (migration 0066) and the slot rules"
+HAS_0066=$(q admin "select (prosrc like '%min_booking_minutes%')::text from pg_proc where proname='move_booking' and pronamespace='public'::regnamespace")
+$PSQL -q -c "update clubs set payment_mode='at_desk', min_booking_minutes = 60 where id='$CLUB'; insert into club_staff (club_id, profile_id) values ('$CLUB', '$U1') on conflict do nothing;" >/dev/null
+check admin "S3a club limits for this test: 30 min grid, 1 h minimum, 3 h maximum, 08:00-23:00" "select slot_minutes||'/'||min_booking_minutes||'/'||max_booking_minutes||'/'||to_char(open_time,'HH24:MI')||'-'||to_char(close_time,'HH24:MI') from clubs where id='$CLUB';" "30/60/180/08:00-23:00"
+MB=$(q $U1 "select staff_book('$CLUB','$COURT3', $(at 09:00), $(at 10:00), 'smoke-move', null);")
+check admin "S3b fixture: a 1 h walk-in booked by staff" "select count(*) from bookings where id='$MB' and status='confirmed' and source='staff';" 1
+mv() { q $U1 "select move_booking('$MB','$1', $(at $2), $(at $3))::text || 'moved';"; }
+span() { q admin "select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'-'||to_char(end_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='$MB';"; }
+if [ "$HAS_0066" = "true" ]; then
+  fails_with $U1 "S3c move to 30 min (below the 1 h minimum): refused" "select move_booking('$MB','$COURT3', $(at 09:00), $(at 09:30));" bad_duration
+  fails_with $U1 "S3d move to 4 h (above the 3 h maximum): refused" "select move_booking('$MB','$COURT3', $(at 09:00), $(at 13:00));" bad_duration
+  fails_with $U1 "S3e move to 3 h 30 elsewhere (above the maximum): refused" "select move_booking('$MB','$COURT2', $(at 12:00), $(at 15:30));" bad_duration
+  check admin "S3f ...the booking is unchanged" "select '$(span)';" "09:00-10:00"
+  check $U1 "S3g move to 1 h 30 at another time (within limits): accepted" "select move_booking('$MB','$COURT3', $(at 11:00), $(at 12:30))::text || 'moved';" moved
+  check $U1 "S3h move to exactly 3 h (the maximum): accepted" "select move_booking('$MB','$COURT3', $(at 11:00), $(at 14:00))::text || 'moved';" moved
+  check $U1 "S3i move to exactly 1 h (the minimum): accepted" "select move_booking('$MB','$COURT3', $(at 11:00), $(at 12:00))::text || 'moved';" moved
+  $PSQL -q -c "update clubs set min_booking_minutes = 120 where id='$CLUB';" >/dev/null
+  check $U1 "S3j club raises its minimum to 2 h: the 1 h booking can still move at its existing length" "select move_booking('$MB','$COURT2', $(at 16:30), $(at 17:30))::text || 'moved';" moved
+  fails_with $U1 "S3k ...but not to another length below the new minimum (1 h 30)" "select move_booking('$MB','$COURT2', $(at 16:30), $(at 18:00));" bad_duration
+  $PSQL -q -c "update clubs set min_booking_minutes = 60 where id='$CLUB';" >/dev/null
+else
+  echo "  (move_booking has no length check yet — 0066 not applied; S3c-S3k skipped)"
+fi
+fails_with $U1 "S3l off the 30-minute grid (10:10): refused by the slot trigger" "select move_booking('$MB','$COURT2', $(at 10:10), $(at 11:10));" not_on_grid
+fails_with $U1 "S3m before opening (06:00): refused" "select move_booking('$MB','$COURT2', $(at 06:00), $(at 07:00));" outside_opening_hours
+fails_with $U1 "S3n not whole slots (1 h 15): refused" "select move_booking('$MB','$COURT2', $(at 10:00), $(at 11:15));" bad_duration
+OB=$(q $U1 "select staff_book('$CLUB','$COURT2', $(at 19:00), $(at 20:00), 'smoke-move', null);")
+fails_with $U1 "S3o onto another booking: refused" "select move_booking('$MB','$COURT2', $(at 19:30), $(at 20:30));" slot_taken
+fails_with $U2 "S3p a player who is not staff cannot move it" "select move_booking('$MB','$COURT2', $(at 21:00), $(at 22:00));" forbidden
 
 echo
 echo "checks: $CHECKS, failures: $FAILS"
