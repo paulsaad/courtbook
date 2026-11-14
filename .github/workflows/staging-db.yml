@@ -14,16 +14,16 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "check = connect and report; apply = apply every migration not yet applied (and the demo seed); smoke = booking-protection checks with throwaway players, cleaned up after"
+        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up)"
         type: choice
-        options: [check, apply, smoke]
+        options: [check, apply, smoke, api]
         default: check
       up_to:
         description: "apply only: highest migration number to apply, e.g. 0064 (leave empty for all on this branch)"
         type: string
         default: ""
       confirm_ref:
-        description: "apply only: the staging project ref, exactly as 'check' reported it"
+        description: "apply and api: the staging project ref, exactly as 'check' reported it"
         type: string
         default: ""
 
@@ -104,6 +104,54 @@ jobs:
           echo "applied $n migration(s)"
           psql "$DB" -v ON_ERROR_STOP=1 -q -f supabase/seed.sql
           echo "demo seed applied (idempotent)"
+
+      - name: API credentials are staging's (api)
+        if: inputs.action == 'api'
+        env:
+          CONFIRM: ${{ inputs.confirm_ref }}
+          S_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          S_ANON: ${{ secrets.STAGING_ANON_KEY }}
+          S_SERVICE: ${{ secrets.STAGING_SERVICE_ROLE_KEY }}
+        run: |
+          [ "$CONFIRM" = "$REF" ] || { echo "::error::confirm_ref '$CONFIRM' is not the database's ref '$REF'."; exit 1; }
+          for v in S_URL S_ANON S_SERVICE; do [ -n "${!v}" ] || { echo "::error::$v is empty"; exit 1; }; done
+          if printf '%s' "$S_URL$S_ANON$S_SERVICE" | grep -q "$LIVE_REF"; then echo "::error::an API secret mentions the LIVE project"; exit 1; fi
+          host=$(node -e 'console.log(new URL(process.argv[1].trim()).host)' "$S_URL")
+          [ "$host" = "$REF.supabase.co" ] || { echo "::error::STAGING_SUPABASE_URL is $host, expected $REF.supabase.co"; exit 1; }
+          echo "API URL host: $host (matches the database's ref $REF)"
+
+      - uses: actions/setup-node@v4
+        if: inputs.action == 'api'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build this branch's web app against staging (api)
+        if: inputs.action == 'api'
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.STAGING_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SERVICE_ROLE_KEY }}
+        run: |
+          npm ci
+          npm run build
+          nohup npx next start -p 3100 > /tmp/next.log 2>&1 &
+          for i in $(seq 1 60); do curl -s -o /dev/null http://localhost:3100/ && break; sleep 1; done
+          curl -s -o /dev/null -w "web app up: HTTP %{http_code}\n" http://localhost:3100/
+
+      - name: Checks through Supabase's API and the payment route (api)
+        if: inputs.action == 'api'
+        env:
+          STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          STAGING_ANON_KEY: ${{ secrets.STAGING_ANON_KEY }}
+          STAGING_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SERVICE_ROLE_KEY }}
+          EXPECTED_REF: ${{ inputs.confirm_ref }}
+          APP_URL: http://localhost:3100
+        run: node supabase/tests/staging_api.mjs
+
+      - name: Web app log (api, on failure)
+        if: failure() && inputs.action == 'api'
+        run: tail -60 /tmp/next.log || true
 
       - name: Booking-protection checks on staging
         if: inputs.action == 'smoke'
