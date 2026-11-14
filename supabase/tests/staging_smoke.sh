@@ -113,7 +113,10 @@ if [ "$HAS_0066" = "true" ]; then
   fails_with $U1 "S3k ...but not to another length below the new minimum (1 h 30)" "select move_booking('$MB','$COURT2', $(at 16:30), $(at 18:00));" bad_duration
   $PSQL -q -c "update clubs set min_booking_minutes = 60 where id='$CLUB';" >/dev/null
 else
-  echo "  (move_booking has no length check yet — 0066 not applied; S3c-S3k skipped)"
+  echo "  (move_booking has no length check yet — 0066 not applied; showing the gap it closes)"
+  check $U1 "S3c-gap without 0066: moving it to 30 min (below the 1 h minimum) is ACCEPTED" "select move_booking('$MB','$COURT3', $(at 09:00), $(at 09:30))::text || 'moved';" moved
+  check $U1 "S3d-gap without 0066: moving it to 4 h (above the 3 h maximum) is ACCEPTED" "select move_booking('$MB','$COURT3', $(at 09:00), $(at 13:00))::text || 'moved';" moved
+  q $U1 "select move_booking('$MB','$COURT3', $(at 09:00), $(at 10:00));" >/dev/null
 fi
 fails_with $U1 "S3l off the 30-minute grid (10:10): refused by the slot trigger" "select move_booking('$MB','$COURT2', $(at 10:10), $(at 11:10));" not_on_grid
 fails_with $U1 "S3m before opening (06:00): refused" "select move_booking('$MB','$COURT2', $(at 06:00), $(at 07:00));" outside_opening_hours
