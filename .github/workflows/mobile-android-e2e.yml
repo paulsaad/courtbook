@@ -56,7 +56,7 @@ jobs:
       # The test build only depends on the app code; reuse it when nothing but the tests changed.
       - name: Reuse the test build if the app code is unchanged
         id: apk
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: mobile/e2e/app-release.apk
           key: e2e-apk-${{ hashFiles('mobile/app/**', 'mobile/components/**', 'mobile/lib/**', 'mobile/shared/**', 'mobile/assets/**', 'mobile/package-lock.json', 'mobile/app.json', 'mobile/app.config.ts') }}
@@ -67,6 +67,14 @@ jobs:
           npx expo prebuild --platform android --no-install --clean
           cd android && ./gradlew assembleRelease -PreactNativeArchitectures=x86_64 --no-daemon -q
           cp app/build/outputs/apk/release/app-release.apk ../e2e/app-release.apk
+
+      # Saved straight away, so a later failure in the tests doesn't throw the build away.
+      - name: Keep the test build
+        if: steps.apk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: mobile/e2e/app-release.apk
+          key: ${{ steps.apk.outputs.cache-primary-key }}
 
       - name: Prepare staging (test account, demo club takes payment at the desk)
         run: node e2e/staging.mjs prepare
