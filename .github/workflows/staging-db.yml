@@ -175,6 +175,8 @@ jobs:
           SQL
           # the live preflight, run read-only here too (staging has 0065: only the hold_slot rows may differ)
           psql "$DB" -f supabase/live/0065_preflight_v2.sql || true
+          # the 0066 post-check, read only (staging has 0066: every row should be true)
+          psql "$DB" -f supabase/live/0066_postcheck.sql || true
           # per kind of object: count and hash (the same query can be run read-only on live)
           psql "$DB" -f supabase/tests/schema_fingerprint_summary.sql || true
           # one line per schema object with a hash of its definition, to compare with a local build
