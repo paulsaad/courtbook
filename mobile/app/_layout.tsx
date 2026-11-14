@@ -13,6 +13,8 @@ import { trackPath } from "../lib/authRecovery";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { PendingReservationWatcher } from "../components/PendingReservation";
 import { TestFaultBanner } from "../components/TestFaultBanner";
+import { ConnectionBlocked } from "../components/ConnectionBlocked";
+import { connectionBlocked } from "../lib/supabase";
 import { color, font } from "../lib/theme";
 
 wireAppLifecycle();
@@ -36,6 +38,7 @@ export default function RootLayout() {
     if (ready) void SplashScreen.hideAsync().catch(() => {});
   }, [ready]);
   if (!ready) return null;
+  if (connectionBlocked) return <ConnectionBlocked message={connectionBlocked} />;
   return (
     <SafeAreaProvider>
       <QueryClientProvider client={queryClient}>

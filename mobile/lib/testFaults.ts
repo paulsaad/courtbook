@@ -1,5 +1,6 @@
 import * as Updates from "expo-updates";
 import type { Attempt, Lookup, ReserveResult } from "./reserve";
+import { installedVariant } from "./appIdentity";
 
 /**
  * Test builds only: make the next reservations lose their connection on purpose, so the
@@ -13,7 +14,7 @@ import type { Attempt, Lookup, ReserveResult } from "./reserve";
  *
  * While a fault is on, nothing reaches the database except the one real reservation request in
  * answer-lost. Turning the fault off lets lookups through, which settles the reservation the usual
- * way. Never on the production channel (unavailable, and setFault refuses); kept in memory only, so
+ * way. Never in a store build (unavailable, and setFault refuses); kept in memory only, so
  * closing the app always turns it off.
  */
 export type Fault = "off" | "answer-lost" | "request-lost";
@@ -24,7 +25,8 @@ export const FAULT_LABEL: Record<Fault, string> = {
   "request-lost": "Request lost",
 };
 
-let available = __DEV__ || Updates.channel === "preview";
+// Test builds: the live app's preview channel, the CourtBook Staging app, development builds.
+let available = __DEV__ || Updates.channel === "preview" || installedVariant === "staging";
 let fault: Fault = "off";
 const listeners = new Set<() => void>();
 

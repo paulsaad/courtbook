@@ -48,6 +48,7 @@ export function TimeTile({ time, price = null, freeCourts, selected, onPress, di
   const s = look[state];
   return (
     <Pressable
+      testID={state === "booked" ? `time-taken-${time}` : `time-${time}`}
       accessibilityRole="button"
       accessibilityLabel={tileAccessibilityLabel(time, state, price, freeCourts)}
       accessibilityState={{ selected: state === "selected", disabled: state === "booked" || disabled }}

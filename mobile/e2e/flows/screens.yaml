@@ -1,0 +1,21 @@
+# One screenshot of each main screen, for the current display size and text size (SUFFIX).
+appId: app.courtbook.mobile.staging
+---
+- launchApp
+- extendedWaitUntil: { visible: "Book a court", timeout: 30000 }
+- takeScreenshot: shots/sizes/home-${SUFFIX}
+- tapOn: "Courts"
+- extendedWaitUntil: { visible: ".*Demo club.*", timeout: 30000 }
+- takeScreenshot: shots/sizes/courts-${SUFFIX}
+- openLink: "courtbook-staging://club/${E2E_CLUB}?date=${E2E_DATE}"
+- extendedWaitUntil: { visible: { id: "time-.*" }, timeout: 30000 }
+- takeScreenshot: shots/sizes/club-book-${SUFFIX}
+- tapOn: { id: "time-1[0-9]:00", index: 0 }
+- takeScreenshot: shots/sizes/club-selected-${SUFFIX}
+- tapOn: "Info"
+- takeScreenshot: shots/sizes/club-info-${SUFFIX}
+- back
+- tapOn: "Bookings"
+- takeScreenshot: shots/sizes/bookings-${SUFFIX}
+- tapOn: "Profile"
+- takeScreenshot: shots/sizes/profile-${SUFFIX}

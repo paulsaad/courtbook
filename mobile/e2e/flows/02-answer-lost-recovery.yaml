@@ -1,0 +1,32 @@
+# The reservation reaches the database but the answer is lost (Test tools). The app must keep it
+# unresolved, block nothing else silently, show the banner, and recover the same booking by its token.
+appId: app.courtbook.mobile.staging
+---
+- launchApp
+- tapOn: "Profile"
+- scrollUntilVisible: { element: "Answer lost" }
+- tapOn: "Answer lost"
+- assertVisible: ".*Test mode: answer lost.*"
+- openLink: "courtbook-staging://club/${E2E_CLUB}?date=${E2E_DATE}"
+- extendedWaitUntil: { visible: { id: "time-1[0-9]:30" }, timeout: 30000 }
+- tapOn: { id: "time-1[0-9]:30", index: 0 }
+- extendedWaitUntil: { visible: "Reserve court", timeout: 20000 }
+- tapOn: "Reserve court"
+- extendedWaitUntil: { visible: "Check now", timeout: 90000 }
+- takeScreenshot: shots/07-unresolved-club
+- back
+- tapOn: "Home"
+- extendedWaitUntil: { visible: "Booking not confirmed yet", timeout: 20000 }
+- takeScreenshot: shots/08-unresolved-home
+- tapOn: "Profile"
+- scrollUntilVisible: { element: "Off" }
+- tapOn: "Off"
+- tapOn: "Home"
+- tapOn: "Check now"
+- extendedWaitUntil: { visible: "Your booking went through", timeout: 60000 }
+- takeScreenshot: shots/09-recovered
+- tapOn: "View booking"
+- scrollUntilVisible: { element: "Cancel booking" }
+- tapOn: "Cancel booking"
+- tapOn: "Yes, cancel"
+- extendedWaitUntil: { visible: ".*[Cc]ancelled.*", timeout: 30000 }

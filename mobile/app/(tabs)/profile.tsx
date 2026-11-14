@@ -6,6 +6,7 @@ import { supabase } from "../../lib/supabase";
 import { useSession } from "../../lib/session";
 import { currentBuild } from "../../lib/buildInfo";
 import { initials, useProfileName } from "../../lib/profile";
+import { installedVariant as appVariant } from "../../lib/appIdentity";
 import { Button } from "../../components/Button";
 import { Loading } from "../../components/StateView";
 import { SignInPrompt } from "../../components/SignInPrompt";
@@ -20,7 +21,10 @@ import { color, font, radius, space, text, MAX_FONT_SCALE } from "../../lib/them
 export default function Profile() {
   const session = useSession();
   const [busy, setBusy] = useState(false);
-  const build = currentBuild();
+  const build = [
+    ...(appVariant === "staging" ? [{ label: "App", value: "CourtBook Staging (test database)" }] : []),
+    ...currentBuild(),
+  ];
   const fault = useSyncExternalStore(subscribeFault, currentFault);
   const name = useProfileName(session.status === "signed-in" ? session.session.user.id : null);
   const email = session.status === "signed-in" ? session.session.user.email ?? null : null;

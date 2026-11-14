@@ -2,6 +2,8 @@ import "react-native-url-polyfill/auto";
 import { AppState } from "react-native";
 import { ChunkedSecureStore } from "./secureStorage";
 import { createClient } from "@supabase/supabase-js";
+import * as Application from "expo-application";
+import { checkConnection, type Variant } from "./variant";
 
 // These two reads must stay exactly this shape — a static dotted property of
 // process.env. Expo only inlines that form at build time; destructuring, or
@@ -51,7 +53,17 @@ function readUrl(value: string): { url: string; note: string | null } {
   };
 }
 
-const { url, note } = readUrl(rawUrl);
+const { url: configuredUrl, note } = readUrl(rawUrl);
+
+// The staging app may only use the staging database, the live app only the live one.
+const check = checkConnection(Application.applicationId, configuredUrl);
+/** Non-null when this app was given the wrong database: the app shows this and connects nowhere. */
+export const connectionBlocked: string | null = check.ok ? null : check.message;
+/** Which app this is (null outside a native build). */
+export const appVariant: Variant | null = check.ok ? check.variant : null;
+// When blocked, the client points at an address that cannot resolve, so not a single request can
+// reach either database, whatever a screen does.
+const url = check.ok ? configuredUrl : "https://connection-blocked.invalid";
 
 /** Non-null when the Supabase URL was not what it should have been. Shown on screen. */
 export const configNote = note;

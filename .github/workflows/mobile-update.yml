@@ -1,8 +1,9 @@
 name: Mobile update (Expo)
 
 # Sends new app code to phones that already have a build installed, without a new build.
-# Run by hand from the Actions tab. Every action targets the "preview" channel (Paul's test phones);
-# "production" is first used in M5 and only by republishing an update already tested on preview.
+# Run by hand from the Actions tab. "app" chooses the target: live → the "preview" channel (CourtBook
+# on Paul's test phones, live database); staging → the "staging" channel (CourtBook Staging, staging
+# database). "production" is first used in M5, only by republishing an update tested on preview.
 #
 #   publish                 checks, then publishes the current code as a new update
 #   rollback-to-previous    re-publishes an earlier update (paste its group ID from the run summary)
@@ -23,6 +24,11 @@ on:
         type: choice
         options: ["publish", "rollback-to-previous", "rollback-to-built-in"]
         default: "publish"
+      app:
+        description: "Which app: live (CourtBook, channel preview) or staging (CourtBook Staging, channel staging)"
+        type: choice
+        options: ["live", "staging"]
+        default: "live"
       platform:
         description: "Which phones"
         type: choice
@@ -38,7 +44,7 @@ on:
         required: false
 
 concurrency:
-  group: mobile-update-preview
+  group: mobile-update-${{ inputs.app }}
   cancel-in-progress: false
 
 jobs:
@@ -48,7 +54,6 @@ jobs:
       run:
         working-directory: mobile
     env:
-      CHANNEL: preview
       PLATFORM: ${{ inputs.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -83,6 +88,14 @@ jobs:
 
       - run: npm ci
 
+      # Sets EAS_ENV and CHANNEL (and APP_VARIANT for staging); stops unless the database the update
+      # will use is the right one for this app. The app itself refuses a mismatch too (lib/variant.ts).
+      - name: Which app, and is it wired to the right database
+        env:
+          STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          STAGING_ANON_KEY: ${{ secrets.STAGING_ANON_KEY }}
+        run: bash ../.github/scripts/eas-app-env.sh "${{ inputs.app }}"
+
       - name: Checks (publish only)
         if: inputs.action == 'publish'
         run: |
@@ -102,21 +115,21 @@ jobs:
             hash=$(npx expo-updates fingerprint:generate --platform "$p" | jq -r .hash)
             found=$(eas build:list --channel "$CHANNEL" --platform "$p" --status finished \
                       --fingerprint-hash "$hash" --limit 1 --json --non-interactive | jq length)
-            echo "$p native fingerprint $hash: $found matching preview build(s)"
+            echo "$p native fingerprint $hash: $found matching $CHANNEL build(s)"
             if [ "$found" = "0" ]; then
-              echo "Latest finished $p preview builds, for comparison:"
+              echo "Latest finished $p $CHANNEL builds, for comparison:"
               eas build:list --channel "$CHANNEL" --platform "$p" --status finished --limit 3 --json --non-interactive > /tmp/builds.json || true
               jq -r '.[] | "  \(.createdAt) build \(.id) version \(.appVersion) runtime \(.runtimeVersion // .runtime.version // "?") fingerprint \(.fingerprintHash // .fingerprint.hash // "not recorded")"' /tmp/builds.json || true
               latest=$(jq -r '.[0].id // empty' /tmp/builds.json)
               if [ -n "$latest" ]; then
                 echo "What differs between this code and build $latest (Expo's own comparison):"
-                eas fingerprint:compare --build-id "$latest" --environment preview --json --non-interactive > /tmp/compare.raw 2>/tmp/compare.err || true
+                eas fingerprint:compare --build-id "$latest" --environment "$EAS_ENV" --json --non-interactive > /tmp/compare.raw 2>/tmp/compare.err || true
                 # the command prints an environment notice before its JSON; keep the JSON only
                 sed -n '/^{/,$p' /tmp/compare.raw > /tmp/compare.json
                 python3 ../.github/scripts/fingerprint-diff.py /tmp/compare.json || head -c 3000 /tmp/compare.json
                 tail -3 /tmp/compare.err
               fi
-              echo "::error::No $p preview build has this native code. Native code changed (or no build exists yet):"
+              echo "::error::No $p $CHANNEL build has this native code. Native code changed (or no build exists yet):"
               echo "::error::bump \"version\" in mobile/app.json, run the Mobile build workflow, then publish."
               exit 1
             fi
@@ -136,7 +149,7 @@ jobs:
           MESSAGE: ${{ inputs.message }}
         run: |
           msg="${MESSAGE:-$(git log -1 --pretty=%s)} [${GITHUB_REF_NAME}@${GITHUB_SHA::7}]"
-          eas update --channel "$CHANNEL" --environment preview --platform "$PLATFORM" \
+          eas update --channel "$CHANNEL" --environment "$EAS_ENV" --platform "$PLATFORM" \
             --message "$msg" --non-interactive --json > /tmp/update.json
           echo "## Published to $CHANNEL" >> "$GITHUB_STEP_SUMMARY"
           echo "Message: $msg" >> "$GITHUB_STEP_SUMMARY"
