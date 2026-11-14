@@ -14,9 +14,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "check = connect and report; apply = apply every migration not yet applied (and the demo seed)"
+        description: "check = connect and report; apply = apply every migration not yet applied (and the demo seed); smoke = booking-protection checks with throwaway players, cleaned up after"
         type: choice
-        options: [check, apply]
+        options: [check, apply, smoke]
         default: check
       up_to:
         description: "apply only: highest migration number to apply, e.g. 0064 (leave empty for all on this branch)"
@@ -104,6 +104,10 @@ jobs:
           echo "applied $n migration(s)"
           psql "$DB" -v ON_ERROR_STOP=1 -q -f supabase/seed.sql
           echo "demo seed applied (idempotent)"
+
+      - name: Booking-protection checks on staging
+        if: inputs.action == 'smoke'
+        run: bash supabase/tests/staging_smoke.sh
 
       - name: Report
         if: always()
