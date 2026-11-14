@@ -1,4 +1,4 @@
-import { clubsFromSlots, durationLabel, durationOptions, tilesFor, type DaySlot } from "../lib/courts";
+import { clubsFromSlots, durationLabel, durationOptions, sameInstant, tilesFor, type DaySlot } from "../lib/courts";
 
 const base = {
   club_id: "c1", club_name: "Sample Padel", slug: "sample", town: "Batroun", district: null, price_from: 20, sports: ["padel"],
@@ -57,5 +57,20 @@ describe("durations", () => {
   });
   it("labels them as people say them", () => {
     expect([30, 60, 90, 120].map(durationLabel)).toEqual(["30 min", "1 h", "1 h 30", "2 h"]);
+  });
+});
+
+describe("times as PostgREST sends them", () => {
+  const pg = (hhmm: string) => `2026-11-14T${hhmm}:00+00:00`;
+  it("a time tapped on the Courts list is found again among the club's tiles", () => {
+    const rows = [row("k1", pg("16:00"), 120), row("k1", pg("17:00"), 60)];
+    const listed = clubsFromSlots(rows)[0].starts[0];
+    const tile = tilesFor(rows, "c1", 60).find((t) => sameInstant(t.start, listed));
+    expect(tile?.freeCourts).toHaveLength(1);
+  });
+  it("sameInstant compares instants, not spellings", () => {
+    expect(sameInstant("2026-11-14T16:00:00+00:00", "2026-11-14T16:00:00.000Z")).toBe(true);
+    expect(sameInstant("2026-11-14T18:00:00+02:00", "2026-11-14T16:00:00Z")).toBe(true);
+    expect(sameInstant("2026-11-14T16:00:00Z", null)).toBe(false);
   });
 });

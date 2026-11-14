@@ -28,7 +28,8 @@ export function clubsFromSlots(rows: DaySlot[]): ClubDay[] {
   for (const r of rows) {
     const c = by.get(r.club_id) ?? { first: r, courts: new Set(), starts: new Set() };
     c.courts.add(r.court_id);
-    if (r.free_minutes >= r.min_minutes) c.starts.add(r.start_at);
+    // normalised: PostgREST sends "…+00:00", the tile grid uses toISOString() ("…Z")
+    if (r.free_minutes >= r.min_minutes) c.starts.add(new Date(r.start_at).toISOString());
     by.set(r.club_id, c);
   }
   const clubs = [...by.values()].map(({ first: r, courts, starts }) => ({
@@ -58,6 +59,11 @@ export function durationLabel(m: number): string {
 }
 
 export type Tile = { start: string; freeCourts: { id: string; name: string }[] };
+
+/** Same instant? Times arrive in more than one ISO spelling, so never compare them as text. */
+export function sameInstant(a: string | null | undefined, b: string | null | undefined): boolean {
+  return !!a && !!b && Date.parse(a) === Date.parse(b);
+}
 
 /**
  * One tile per start time on this club's grid, between its first and last free start. A court

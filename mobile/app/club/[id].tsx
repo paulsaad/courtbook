@@ -10,7 +10,7 @@ import { TimeTile } from "../../components/TimeTile";
 import { Button } from "../../components/Button";
 import { Freshness } from "../../components/Freshness";
 import { Empty, ErrorState, Loading } from "../../components/StateView";
-import { clubsFromSlots, durationLabel, durationOptions, partOfDay, tilesFor } from "../../lib/courts";
+import { clubsFromSlots, durationLabel, durationOptions, partOfDay, sameInstant, tilesFor } from "../../lib/courts";
 import { BEIRUT, useDaySlots, useQuote } from "../../lib/queries";
 import { bookingDays, shortDate, sportName } from "../../lib/days";
 import { color, font, radius, space } from "../../lib/theme";
@@ -38,7 +38,7 @@ export default function Club() {
   const [start, setStart] = useState<string | null>(p.at ?? null);
   const [courtId, setCourtId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const tile = tiles.find((t) => t.start === start);
+  const tile = tiles.find((t) => sameInstant(t.start, start));
   const freeCourts = tile?.freeCourts ?? [];
   const court = freeCourts.find((c) => c.id === courtId) ?? freeCourts[0] ?? null;
 
@@ -103,7 +103,7 @@ export default function Club() {
                     <TimeTile
                       time={hhmm(t.start, club.timezone)}
                       freeCourts={t.freeCourts.length}
-                      selected={t.start === start}
+                      selected={sameInstant(t.start, start)}
                       onPress={() => { setStart(t.start); setCourtId(null); setNotice(null); }}
                     />
                   </View>
