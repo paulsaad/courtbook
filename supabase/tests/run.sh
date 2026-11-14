@@ -1060,6 +1060,9 @@ AD=$({ as_user $P4; echo "select booking_id from book_at_desk('$COURT', (current
 check service "100k confirmed at once, priced, no CourtBook fee"    "select status||'/'||price_usd||'/'||fee_usd||'/'||source from bookings where id='$AD';" "confirmed/20.00/0.00/app"
 check service "100l and no payment row exists for it"               "select count(*) from payments where booking_id='$AD';" 0
 check $P4 "100m the same token returns the same booking, not a second" "select booking_id='$AD' from book_at_desk('$COURT', (current_date + 9 + time '15:00') at time zone 'Asia/Beirut', (current_date + 9 + time '16:00') at time zone 'Asia/Beirut', '$TK');" "t"
+# the app's reconciliation read after a lost response: find the booking by the token it sent
+check $P4 "100m2 the player finds that booking by its token (app reconciliation)" "select id||'/'||status from bookings where client_token='$TK';" "$AD/confirmed"
+check $P2 "100m3 another player cannot see a booking by someone else's token" "select count(*) from bookings where client_token='$TK';" 0
 check service "100n so the player still has exactly one"            "select count(*) from bookings where player_id='$P4' and club_id='$CB' and start_at > now() and status='confirmed' and client_token='$TK';" 1
 denied $P2 "100o someone else cannot take the same slot"            "select book_at_desk('$COURT', (current_date + 9 + time '15:00') at time zone 'Asia/Beirut', (current_date + 9 + time '16:00') at time zone 'Asia/Beirut', gen_random_uuid());"
 

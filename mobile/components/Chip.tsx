@@ -9,18 +9,19 @@ import { haptic } from "../lib/haptics";
  * tone "sport": the selected sport is outlined in red with a bold label (brand accent), so it never
  * looks like a selected time, which is green.
  */
-export function Chip({ label, selected = false, onPress, icon, style, tone = "filter" }: { label: string; selected?: boolean; onPress: () => void; icon?: ReactNode; style?: ViewStyle; tone?: "filter" | "sport" }) {
+export function Chip({ label, selected = false, onPress, icon, style, tone = "filter", disabled = false }: { label: string; selected?: boolean; onPress: () => void; icon?: ReactNode; style?: ViewStyle; tone?: "filter" | "sport"; disabled?: boolean }) {
   const on = tone === "sport" ? styles.sportOn : styles.on;
   const textOn = tone === "sport" ? styles.sportTextOn : styles.textOn;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ selected }}
+      accessibilityState={{ selected, disabled }}
+      disabled={disabled}
       onPress={() => {
         haptic.select();
         onPress();
       }}
-      style={({ pressed }) => [styles.chip, selected ? on : styles.off, pressed && { opacity: 0.85 }, style]}
+      style={({ pressed }) => [styles.chip, selected ? on : styles.off, pressed && { opacity: 0.85 }, disabled && !selected && { opacity: 0.5 }, style]}
     >
       {icon}
       <Text style={[styles.text, selected && textOn]}>{label}</Text>

@@ -40,22 +40,23 @@ export function tileAccessibilityLabel(time: string, state: TileState, price: st
   return `${time}, ${price ? `${price}, ` : ""}${courts}${state === "selected" ? ", selected" : ""}`;
 }
 
-type Props = { time: string; price?: string | null; freeCourts: number; selected: boolean; onPress: () => void };
+type Props = { time: string; price?: string | null; freeCourts: number; selected: boolean; onPress: () => void; disabled?: boolean };
 
-export function TimeTile({ time, price = null, freeCourts, selected, onPress }: Props) {
+/** `disabled` locks the grid while a reservation is in flight; the selected time stays readable. */
+export function TimeTile({ time, price = null, freeCourts, selected, onPress, disabled = false }: Props) {
   const state = tileState(freeCourts, selected);
   const s = look[state];
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={tileAccessibilityLabel(time, state, price, freeCourts)}
-      accessibilityState={{ selected: state === "selected", disabled: state === "booked" }}
-      disabled={state === "booked"}
+      accessibilityState={{ selected: state === "selected", disabled: state === "booked" || disabled }}
+      disabled={state === "booked" || disabled}
       onPress={() => {
         haptic.select();
         onPress();
       }}
-      style={({ pressed }) => [styles.tile, s.tile, pressed && state !== "booked" && styles.pressed]}
+      style={({ pressed }) => [styles.tile, s.tile, pressed && state !== "booked" && styles.pressed, disabled && state !== "selected" && state !== "booked" && { opacity: 0.5 }]}
     >
       {state === "booked" && <Hatch />}
       <View style={styles.top}>

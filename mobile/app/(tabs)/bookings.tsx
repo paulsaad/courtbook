@@ -48,7 +48,7 @@ export default function Bookings() {
           {upcoming.length === 0 ? <Text variant="secondary">Nothing coming up.</Text> : upcoming.map((r) => <Row key={r.id} r={r} />)}
           {past.length > 0 && (
             <>
-              <Text variant="eyebrow" style={{ marginTop: space.md }}>Past</Text>
+              <Text variant="eyebrow" style={{ marginTop: space.md }}>Past and cancelled</Text>
               {past.map((r) => <Row key={r.id} r={r} past />)}
             </>
           )}

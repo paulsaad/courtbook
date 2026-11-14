@@ -6,7 +6,7 @@ import { haptic } from "../lib/haptics";
 /** The booking window as a strip of days. The selected day carries the red line. */
 export type Day = { key: string; weekday: string; day: string; a11y: string };
 
-export function DateStrip({ days, selected, onSelect }: { days: Day[]; selected: string; onSelect: (key: string) => void }) {
+export function DateStrip({ days, selected, onSelect, disabled = false }: { days: Day[]; selected: string; onSelect: (key: string) => void; disabled?: boolean }) {
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row} accessibilityRole="tablist">
       {days.map((d) => {
@@ -16,12 +16,13 @@ export function DateStrip({ days, selected, onSelect }: { days: Day[]; selected:
             key={d.key}
             accessibilityRole="tab"
             accessibilityLabel={d.a11y}
-            accessibilityState={{ selected: on }}
+            accessibilityState={{ selected: on, disabled }}
+            disabled={disabled}
             onPress={() => {
               haptic.select();
               onSelect(d.key);
             }}
-            style={[styles.day, on && styles.dayOn]}
+            style={[styles.day, on && styles.dayOn, disabled && !on && { opacity: 0.5 }]}
           >
             <Text style={[styles.weekday, on && styles.onText]}>{d.weekday}</Text>
             <Text style={[styles.num, on && styles.onText]}>{d.day}</Text>

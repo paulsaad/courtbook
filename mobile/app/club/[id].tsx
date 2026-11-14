@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { RefreshControl, ScrollView, StyleSheet, View, type ScrollViewInstance } from "react-native";
-import { router, Stack, useLocalSearchParams, usePathname } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { RefreshControl, ScrollView, StyleSheet, View, type HostInstance, type ScrollViewInstance } from "react-native";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { hhmm } from "@shared/time";
@@ -14,7 +14,7 @@ import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { clubsFromSlots, durationLabel, durationOptions, partOfDay, sameInstant, tilesFor } from "../../lib/courts";
 import { BEIRUT, money, tilePriceLabel, useClubMode, useDaySlots, useQuote, useTilePrices } from "../../lib/queries";
 import { useSession } from "../../lib/session";
-import { newAttempt, reserve, type Attempt } from "../../lib/reserve";
+import { useReservation } from "../../lib/reservation";
 import { haptic } from "../../lib/haptics";
 import { bookingDays, shortDate, sportName } from "../../lib/days";
 import { color, font, radius, space } from "../../lib/theme";
@@ -47,73 +47,91 @@ export default function Club() {
   const freeCourts = tile?.freeCourts ?? [];
   const court = freeCourts.find((c) => c.id === courtId) ?? freeCourts[0] ?? null;
 
-  // A selection that is no longer free after a refresh is dropped, and the player is told.
+  const session = useSession();
+  const queryClient = useQueryClient();
+  const mode = useClubMode(club?.id ?? null);
+  const res = useReservation({
+    onReserved: (bookingId) => {
+      haptic.success();
+      void queryClient.invalidateQueries({ queryKey: ["my-agenda"] });
+      void queryClient.invalidateQueries({ queryKey: ["day-slots"] });
+      router.replace({ pathname: "/booking/[id]", params: { id: bookingId, new: "1" } });
+    },
+  });
+  // While a reservation is in flight or unconfirmed, nothing the player sent can change.
+  const locked = res.locked;
+
+  // A selection that is no longer free after a refresh is dropped, and the player is told — but
+  // never while a reservation is out: the slot may have gone to this very player.
   useEffect(() => {
-    if (!start || !q.isSuccess || !club) return;
+    if (locked || !start || !q.isSuccess || !club) return;
     if (!tile || tile.freeCourts.length === 0) {
       setStart(null);
       setNotice(`${hhmm(start, club.timezone)} is no longer free for ${durationLabel(dur ?? 0)}. Pick another time.`);
     }
-  }, [tile, start, q.isSuccess, club, dur]);
+  }, [locked, tile, start, q.isSuccess, club, dur]);
 
   const prices = useTilePrices(club?.id ?? null, dur, tiles);
   const quote = useQuote(court?.id ?? null, tile ? tile.start : null, dur);
-  const panelPrice = (tile && court && prices.data?.get(tile.start)?.get(court.id)?.price) ?? (quote.isSuccess ? quote.data : null);
-  const mode = useClubMode(club?.id ?? null);
-  const session = useSession();
-  const path = usePathname();
-  const queryClient = useQueryClient();
-  // One attempt per selection. A retry after an uncertain result reuses it, so the database
-  // returns the same booking instead of making a second one. Any change of selection starts afresh.
-  const attempt = useRef<{ key: string; a: Attempt } | null>(null);
-  const [reserving, setReserving] = useState(false);
-  const [problem, setProblem] = useState<{ text: string; retry: boolean } | null>(null);
+  const livePrice = (tile && court && prices.data?.get(tile.start)?.get(court.id)?.price) ?? (quote.isSuccess ? quote.data : null);
   const selKey = tile && court && dur ? `${court.id}|${tile.start}|${dur}` : "";
-  useEffect(() => setProblem(null), [selKey]);
+  useEffect(() => res.clearProblem(), [selKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // jump between morning / afternoon / evening when the list is long
+  // What the panel shows: the frozen selection while one is out, otherwise the live one.
+  const shown =
+    res.pending ??
+    (tile && court && dur && club
+      ? { date, start: tile.start, minutes: dur, courtId: court.id, courtName: court.name, price: livePrice ?? null }
+      : null);
+
   const scroller = useRef<ScrollViewInstance | null>(null);
+  const content = useRef<HostInstance | null>(null);
+  const cells = useRef(new Map<string, HostInstance | null>());
   const groupY = useRef<Record<string, number>>({});
+  const scrollY = useRef(0);
+  const viewport = useRef(0);
+
+  // The panel sits below the list (not over it), so the list ends where the panel begins. When the
+  // panel appears or grows, the list gets shorter; this keeps the chosen time in view.
+  const reveal = useCallback(() => {
+    const cell = tile ? cells.current.get(tile.start) : null;
+    if (!cell || !content.current) return;
+    cell.measureLayout(content.current, (_x: number, y: number, _w: number, h: number) => {
+      const margin = 12;
+      if (y + h + margin > scrollY.current + viewport.current) {
+        scroller.current?.scrollTo({ y: y + h + margin - viewport.current, animated: true });
+      } else if (y - margin < scrollY.current) {
+        scroller.current?.scrollTo({ y: Math.max(0, y - margin), animated: true });
+      }
+    }, () => {});
+  }, [tile]);
+  useEffect(() => {
+    const id = requestAnimationFrame(reveal);
+    return () => cancelAnimationFrame(id);
+  }, [tile?.start, reveal]);
+
   const name = club?.name ?? p.name ?? "Club";
 
-  async function onReserve() {
-    if (!tile || !court || !dur || !club) return;
+  function onReserve() {
+    if (!tile || !court || !dur || !club || locked) return;
     if (session.status !== "signed-in") {
-      router.push({ pathname: "/sign-in", params: { returnTo: path } });
+      router.push({ pathname: "/sign-in" });
       return;
     }
-    if (!attempt.current || attempt.current.key !== selKey) {
-      attempt.current = {
-        key: selKey,
-        a: newAttempt({ mode: mode.data ?? "", clubId: club.id, courtId: court.id, start: new Date(tile.start), end: new Date(Date.parse(tile.start) + dur * 60_000) }),
-      };
-    }
-    setReserving(true);
-    setProblem(null);
-    const r = await reserve(attempt.current.a);
-    setReserving(false);
-    void queryClient.invalidateQueries({ queryKey: ["day-slots"] });
-    if (r.kind === "reserved") {
-      attempt.current = null;
-      haptic.success();
-      void queryClient.invalidateQueries({ queryKey: ["my-agenda"] });
-      router.replace({ pathname: "/booking/[id]", params: { id: r.value.bookingId, new: "1" } });
-    } else if (r.kind === "refused") {
-      attempt.current = null; // the database said no; a new tap is a new attempt
-      setProblem({ text: r.failure.message, retry: false });
-    } else {
-      // The request may or may not have reached the server. Trying again with the same token is
-      // safe: if the first one went through, the database hands back that same booking.
-      setProblem({ text: "We couldn't hear back from the server. Your booking may or may not have gone through.", retry: true });
-    }
+    void res.submit({
+      key: selKey, mode: mode.data ?? "", clubId: club.id, courtId: court.id, courtName: court.name,
+      date, start: tile.start, minutes: dur, price: livePrice ?? null,
+    });
   }
 
   const atDesk = mode.data === "at_desk";
   const reserveLabel =
-    session.status !== "signed-in" ? "Sign in to reserve"
+    res.phase === "sending" ? "Reserving…"
+    : res.phase === "checking" ? "Checking…"
+    : res.phase === "uncertain" ? "Check now"
+    : session.status !== "signed-in" ? "Sign in to reserve"
     : mode.isPending ? "Checking the club…"
     : !atDesk ? "Reserve on the website for now"
-    : problem?.retry ? "Try again (safe)"
     : "Reserve court";
   const groups = groupTiles(tiles, club?.timezone ?? BEIRUT);
 
@@ -122,9 +140,14 @@ export default function Club() {
       <Stack.Screen options={{ title: name, headerBackTitle: "Courts" }} />
       <ScrollView
         ref={scroller}
-        contentContainerStyle={{ paddingBottom: tile ? 340 : 40 }}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: space.xxl }}
+        scrollEventThrottle={32}
+        onScroll={(e) => { scrollY.current = e.nativeEvent.contentOffset.y; }}
+        onLayout={(e) => { viewport.current = e.nativeEvent.layout.height; reveal(); }}
         refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => void q.refetch()} tintColor={color.cedar} />}
       >
+        <View ref={content} collapsable={false}>
         <View style={styles.head}>
           {club && (
             <Text variant="secondary">
@@ -134,12 +157,12 @@ export default function Club() {
           {club?.isDemo && <Text style={styles.demo}>Demo club — not a real venue</Text>}
         </View>
         <View style={styles.pickers}>
-          <DateStrip days={days} selected={date} onSelect={(d) => { setDate(d); setStart(null); setNotice(null); }} />
+          <DateStrip days={days} selected={date} disabled={locked} onSelect={(d) => { if (locked) return; setDate(d); setStart(null); setNotice(null); }} />
           {durations.length > 0 && (
             <View style={styles.durRow}>
               <Text variant="secondary">Play for</Text>
               {durations.slice(0, 4).map((m) => (
-                <Chip key={m} label={durationLabel(m)} selected={m === dur} onPress={() => { setMinutes(m); setNotice(null); }} />
+                <Chip key={m} label={durationLabel(m)} selected={m === dur} disabled={locked} onPress={() => { if (locked) return; setMinutes(m); setNotice(null); }} />
               ))}
             </View>
           )}
@@ -169,13 +192,14 @@ export default function Club() {
               <Text variant="heading" style={styles.groupTitle}>{g.label}</Text>
               <View style={styles.grid}>
                 {g.tiles.map((t) => (
-                  <View key={t.start} style={styles.cell}>
+                  <View key={t.start} style={styles.cell} collapsable={false} ref={(v) => { cells.current.set(t.start, v); }}>
                     <TimeTile
                       time={hhmm(t.start, club.timezone)}
                       price={tilePriceLabel(prices.data?.get(t.start))}
                       freeCourts={t.freeCourts.length}
                       selected={sameInstant(t.start, start)}
-                      onPress={() => { setStart(t.start); setCourtId(null); setNotice(null); }}
+                      disabled={locked}
+                      onPress={() => { if (locked) return; setStart(t.start); setCourtId(null); setNotice(null); }}
                     />
                   </View>
                 ))}
@@ -183,27 +207,32 @@ export default function Club() {
             </View>
           ))
         )}
+        </View>
       </ScrollView>
 
-      {tile && club && dur && court && (
-        <View style={[styles.panel, { paddingBottom: insets.bottom + 14 }]}>
+      {shown && club && (
+        <View testID="booking-panel" style={[styles.panel, { paddingBottom: insets.bottom + 14 }]}>
           <View style={styles.courtRow} accessibilityRole="radiogroup">
-            <Text variant="label" style={{ width: 52 }}>Court</Text>
+            <Text variant="label" style={{ marginRight: 10 }} numberOfLines={1}>Court</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-              {freeCourts.map((c) => (
-                <Chip key={c.id} label={courtLabel(c, prices.data?.get(tile.start))} selected={c.id === court.id} onPress={() => setCourtId(c.id)} />
-              ))}
+              {locked ? (
+                <Chip label={shown.courtName} selected disabled onPress={() => {}} />
+              ) : (
+                freeCourts.map((c) => (
+                  <Chip key={c.id} label={courtLabel(c, tile ? prices.data?.get(tile.start) : undefined)} selected={c.id === shown.courtId} onPress={() => setCourtId(c.id)} />
+                ))
+              )}
             </ScrollView>
           </View>
-          {freeCourts.length === 1 && <Text variant="caption">The only court free at this time.</Text>}
+          {!locked && freeCourts.length === 1 && <Text variant="caption">The only court free at this time.</Text>}
           <View style={styles.summaryRow}>
             <View style={{ flexShrink: 1 }}>
-              <Text variant="strong">{shortDate(date)} · {hhmm(tile.start, club.timezone)}–{hhmm(new Date(Date.parse(tile.start) + dur * 60_000), club.timezone)}</Text>
-              <Text variant="secondary">{[sport ? sportName(sport) : null, court.name, durationLabel(dur)].filter(Boolean).join(" · ")}</Text>
+              <Text variant="strong">{shortDate(shown.date)} · {hhmm(shown.start, club.timezone)}–{hhmm(new Date(Date.parse(shown.start) + shown.minutes * 60_000), club.timezone)}</Text>
+              <Text variant="secondary">{[sport ? sportName(sport) : null, shown.courtName, durationLabel(shown.minutes)].filter(Boolean).join(" · ")}</Text>
             </View>
             <View style={{ alignItems: "flex-end" }}>
-              {panelPrice !== null && panelPrice !== undefined ? (
-                <Text style={styles.total} accessibilityLabel={`Total ${panelPrice} dollars`}>{money(panelPrice)}</Text>
+              {shown.price !== null ? (
+                <Text style={styles.total} accessibilityLabel={`Total ${shown.price} dollars`}>{money(shown.price)}</Text>
               ) : quote.isError ? (
                 <Text variant="caption" style={{ color: color.danger }}>Price unavailable</Text>
               ) : (
@@ -212,16 +241,18 @@ export default function Club() {
               <Text variant="caption">{atDesk ? "pay at the club" : "court price"}</Text>
             </View>
           </View>
-          {atDesk && <Text variant="caption">Nothing is charged in the app. Free cancellation up to {club.cancelCutoffHours} h before.</Text>}
-          {mode.isSuccess && !atDesk && (
+          {res.problem ? (
+            <Text style={res.phase === "idle" ? styles.problem : styles.pending} accessibilityRole="alert" accessibilityLiveRegion="polite">{res.problem}</Text>
+          ) : atDesk ? (
+            <Text variant="caption">Nothing is charged in the app. Free cancellation up to {club.cancelCutoffHours} h before.</Text>
+          ) : mode.isSuccess ? (
             <Text variant="caption">This club takes payment in the app. That arrives in the next update — reserve it on the website for now.</Text>
-          )}
-          {problem && <Text style={styles.problem} accessibilityRole="alert">{problem.text}</Text>}
+          ) : null}
           <Button
             label={reserveLabel}
-            busy={reserving}
-            disabled={session.status === "signed-in" && (!atDesk || panelPrice === null || panelPrice === undefined)}
-            onPress={onReserve}
+            busy={res.phase === "sending" || res.phase === "checking"}
+            disabled={res.phase === "idle" && session.status === "signed-in" && (!atDesk || shown.price === null)}
+            onPress={res.phase === "uncertain" ? () => void res.check() : onReserve}
           />
         </View>
       )}
@@ -229,7 +260,6 @@ export default function Club() {
   );
 }
 
-/** Court name, plus its price when the free courts at this time are not all the same price. */
 function courtLabel(c: { id: string; name: string }, prices: Map<string, { price: number | null }> | undefined) {
   const known = prices ? [...prices.values()].map((p) => p.price).filter((p): p is number => p !== null) : [];
   const mine = prices?.get(c.id)?.price;
@@ -259,10 +289,11 @@ const styles = StyleSheet.create({
   groupTitle: { marginBottom: 8 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   cell: { width: "31.8%" },
-  panel: { position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: color.card, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, borderTopWidth: 1, borderColor: color.line, paddingHorizontal: 20, paddingTop: 14, gap: 10 },
+  panel: { backgroundColor: color.card, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, borderTopWidth: 1, borderColor: color.line, paddingHorizontal: 20, paddingTop: 14, gap: 10 },
   courtRow: { flexDirection: "row", alignItems: "center" },
   summaryRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", gap: 12 },
   total: { fontFamily: font.score, fontSize: 30, lineHeight: 32, color: color.ink },
   problem: { fontFamily: font.semibold, fontSize: 15, color: color.danger },
+  pending: { fontFamily: font.semibold, fontSize: 15, color: color.warnInk },
   jumpRow: { flexDirection: "row", gap: 8, paddingHorizontal: 20, paddingTop: space.md },
 });

@@ -1,7 +1,7 @@
 jest.mock("expo-crypto", () => ({ randomUUID: () => "tok-1" }));
-jest.mock("../lib/supabase", () => ({ supabase: { rpc: jest.fn() } }));
+jest.mock("../lib/supabase", () => ({ supabase: { rpc: jest.fn(), from: jest.fn() } }));
 import { supabase } from "../lib/supabase";
-import { newAttempt, reserve } from "../lib/reserve";
+import { CALL_TIMEOUT_MS, findByToken, newAttempt, reserve } from "../lib/reserve";
 
 const rpc = supabase.rpc as jest.Mock;
 const attempt = (mode: string) =>
@@ -43,5 +43,58 @@ describe("reserve", () => {
     const r = await reserve(attempt("simulated"), now);
     expect(r).toMatchObject({ kind: "uncertain", failure: { kind: "network" } });
     expect(rpc).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("reserve — answers that are not a refusal", () => {
+  it("retries a gateway error with the same token; it may have committed", async () => {
+    rpc
+      .mockResolvedValueOnce({ data: null, error: { message: "Bad Gateway", code: "" } })
+      .mockResolvedValueOnce({ data: [{ booking_id: "b3", already: true }], error: null });
+    const r = await reserve(attempt("at_desk"), now);
+    expect(r).toMatchObject({ kind: "reserved", value: { bookingId: "b3", already: true } });
+    expect(rpc.mock.calls.map((c) => c[1].p_token)).toEqual(["tok-1", "tok-1"]);
+  });
+
+  it("gives up waiting after the time limit and treats it as no answer, not a failure", async () => {
+    jest.useFakeTimers();
+    try {
+      // a request that hangs until it is aborted, as supabase-js reports an abort
+      rpc.mockImplementation(() => {
+        let signal: AbortSignal | undefined;
+        const p = new Promise((resolve) => {
+          const wait = () => (signal ? signal.addEventListener("abort", () => resolve({ data: null, error: { message: "AbortError: Aborted", code: "" } })) : setTimeout(wait, 0));
+          wait();
+        });
+        return Object.assign(p, { abortSignal: (s: AbortSignal) => { signal = s; return p; } });
+      });
+      const pending = reserve(attempt("at_desk"), { attempts: 1, waitMs: () => 0 });
+      await jest.advanceTimersByTimeAsync(CALL_TIMEOUT_MS + 10);
+      expect(await pending).toMatchObject({ kind: "uncertain", failure: { kind: "network" } });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe("findByToken", () => {
+  const from = supabase.from as jest.Mock;
+  const chain = (result: unknown) => {
+    const c: { select: () => unknown; eq: jest.Mock; maybeSingle: () => Promise<unknown> } = { select: () => c, eq: jest.fn(() => c), maybeSingle: () => (result instanceof Error ? Promise.reject(result) : Promise.resolve(result)) };
+    from.mockReturnValueOnce(c);
+    return c;
+  };
+  it("finds the booking the token made", async () => {
+    const c = chain({ data: { id: "b9", status: "confirmed" }, error: null });
+    expect(await findByToken("tok-1")).toEqual({ kind: "found", bookingId: "b9", status: "confirmed" });
+    expect(c.eq).toHaveBeenCalledWith("client_token", "tok-1");
+  });
+  it("'absent' only when the database answered", async () => {
+    chain({ data: null, error: null });
+    expect(await findByToken("t")).toEqual({ kind: "absent" });
+    chain({ data: null, error: { message: "TypeError: Network request failed", code: "" } });
+    expect(await findByToken("t")).toEqual({ kind: "unreachable" });
+    chain(new TypeError("Network request failed"));
+    expect(await findByToken("t")).toEqual({ kind: "unreachable" });
   });
 });

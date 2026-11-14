@@ -19,7 +19,13 @@ export type Failure = { kind: FailureKind; message: string; reason?: string };
 type ErrorLike = { message?: unknown; code?: unknown; status?: unknown; name?: unknown };
 
 const AUTH_CODES = new Set(["PGRST301", "PGRST302", "401", "session_not_found", "refresh_token_not_found", "bad_jwt"]);
-const NETWORK_PATTERNS = [/network request failed/i, /failed to fetch/i, /network error/i, /timed? ?out/i, /aborted/i, /load failed/i];
+const NETWORK_PATTERNS = [
+  /network request failed/i, /failed to fetch/i, /network error/i, /timed? ?out/i, /aborted/i, /load failed/i,
+  // iOS's own wording when the request never got an answer (airplane mode, dropped Wi-Fi)
+  /internet connection/i, /offline/i, /network connection was lost/i, /could not connect/i, /not connected/i,
+];
+/** supabase-js reports a fetch that threw as "<ErrorName>: <text>" with an empty code — no server answered. */
+const FETCH_FAILURE = /^(TypeError|FetchError|Error|AbortError|TimeoutError|NetworkError)\b/;
 
 /** Database reasons named in ERRORS, longest first so `court_not_found` wins over `not_found`. */
 const REASONS = Object.keys(ERRORS).sort((a, b) => b.length - a.length);
@@ -37,7 +43,8 @@ export function classify(error: unknown): Failure {
     return { kind: "auth", message: "Your session has ended. Sign in again to continue." };
   }
 
-  if (NETWORK_PATTERNS.some((p) => p.test(message)) || e.name === "AbortError") {
+  const noServerAnswer = code === "" && status === undefined && FETCH_FAILURE.test(message) && !REASONS.some((r) => message.includes(r));
+  if (NETWORK_PATTERNS.some((p) => p.test(message)) || e.name === "AbortError" || noServerAnswer) {
     return { kind: "network", message: "No connection. Check your internet and try again." };
   }
 

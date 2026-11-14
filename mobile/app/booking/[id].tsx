@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Alert, Linking, ScrollView, StyleSheet, View } from "react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -15,8 +14,7 @@ import { cancellation, useBooking, usePayment } from "../../lib/bookings";
 import { money } from "../../lib/queries";
 import { durationLabel } from "../../lib/courts";
 import { sportName } from "../../lib/days";
-import { classify } from "../../lib/errors";
-import { supabase } from "../../lib/supabase";
+import { useCancellation } from "../../lib/cancel";
 import { color, font, radius, space } from "../../lib/theme";
 
 /**
@@ -34,8 +32,15 @@ export default function Booking() {
   const atDesk = b?.club.payment_mode === "at_desk";
   const pay = usePayment(signedIn && b && !atDesk ? b.id : undefined);
   const queryClient = useQueryClient();
-  const [cancelling, setCancelling] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
+  const cancel = useCancellation({
+    bookingId: p.id,
+    read: async () => {
+      void queryClient.invalidateQueries({ queryKey: ["my-agenda"] });
+      void queryClient.invalidateQueries({ queryKey: ["day-slots"] });
+      const r = await q.refetch();
+      return r.isError ? "unreachable" : r.data?.status ?? null;
+    },
+  });
 
   if (session.status === "loading") return <Loading label="Checking sign-in" />;
   if (!signedIn) return <SignInPrompt title="Sign in to see this booking" body="Your bookings are only shown to you." />;
@@ -58,19 +63,8 @@ export default function Booking() {
       : freeCancel ? "You will be refunded in full." : "This is inside the cutoff: the payment is not refunded.";
     Alert.alert("Cancel this booking?", msg, [
       { text: "Keep it", style: "cancel" },
-      { text: "Yes, cancel", style: "destructive", onPress: () => void doCancel() },
+      { text: "Yes, cancel", style: "destructive", onPress: () => void cancel.submit() },
     ]);
-  }
-
-  async function doCancel() {
-    setCancelling(true);
-    setProblem(null);
-    const { error } = await supabase.rpc("cancel_booking", { p_booking: b!.id, p_club_caused: false });
-    setCancelling(false);
-    void queryClient.invalidateQueries({ queryKey: ["booking", b!.id] });
-    void queryClient.invalidateQueries({ queryKey: ["my-agenda"] });
-    void queryClient.invalidateQueries({ queryKey: ["day-slots"] });
-    if (error) setProblem(classify(error).message);
   }
 
   const statusLine =
@@ -114,7 +108,9 @@ export default function Booking() {
         />
       </Ticket>
 
-      {problem && <Text style={styles.problem} accessibilityRole="alert">{problem}</Text>}
+      {cancel.problem && (
+        <Text style={cancel.phase === "idle" ? styles.problem : styles.pending} accessibilityRole="alert" accessibilityLiveRegion="polite">{cancel.problem}</Text>
+      )}
 
       <View style={styles.actions}>
         {isNew && <Button label="See it in Bookings" onPress={() => router.dismissTo("/bookings")} />}
@@ -124,14 +120,22 @@ export default function Booking() {
         {isNew && <Button label="Done" variant="quiet" onPress={() => router.dismissTo("/courts")} />}
       </View>
 
-      {upcoming && (
+      {upcoming && cancel.phase === "uncertain" && (
+        <Button label="Check now" variant="secondary" onPress={() => void cancel.check()} />
+      )}
+      {upcoming && cancel.phase !== "uncertain" && (
         <View style={styles.cancelBox}>
           <Text variant="caption" style={{ textAlign: "center" }}>
             {atDesk
               ? freeCancel ? `Free to cancel before ${cutoffLabel}. Nothing was paid through CourtBook.` : `Less than ${b.club.cancel_cutoff_hours} h before start — please tell the club.`
               : freeCancel ? `Full refund if you cancel before ${cutoffLabel}.` : `Less than ${b.club.cancel_cutoff_hours} h before start: no refund.`}
           </Text>
-          <Button label={cancelling ? "Cancelling…" : "Cancel booking"} variant="quiet" busy={cancelling} onPress={confirmCancel} />
+          <Button
+            label={cancel.phase === "sending" ? "Cancelling…" : "Cancel booking"}
+            variant="quiet"
+            busy={cancel.phase === "sending" || cancel.phase === "checking"}
+            onPress={confirmCancel}
+          />
         </View>
       )}
     </ScrollView>
@@ -144,6 +148,7 @@ const styles = StyleSheet.create({
   hero: { alignItems: "flex-start", gap: 6, marginBottom: 4 },
   tick: { width: 52, height: 52, borderRadius: 26, backgroundColor: color.cedar, alignItems: "center", justifyContent: "center", marginBottom: 6 },
   problem: { fontFamily: font.semibold, fontSize: 15, color: color.danger },
+  pending: { fontFamily: font.semibold, fontSize: 15, color: color.warnInk },
   actions: { gap: 10 },
   cancelBox: { gap: 6, marginTop: space.md, paddingTop: space.md, borderTopWidth: 1, borderTopColor: color.line, borderRadius: radius.md },
 });
