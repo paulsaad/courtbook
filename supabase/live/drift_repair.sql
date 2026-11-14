@@ -14,6 +14,15 @@ begin;
 set local lock_timeout = '5s';
 set local statement_timeout = '60s';
 
+-- Freeze the two tables this repair decides about, BEFORE any check reads them, until commit.
+-- Without this, an exception inserted after the checks (and before 0023) would be deleted by 0023
+-- while the final count still matched (one kept, one deleted, one new). ACCESS EXCLUSIVE is the
+-- strongest lock either table needs later in this transaction (0023's ALTER TABLE, 0021's policy),
+-- so no lock is ever upgraded mid-way. Other sessions wait (reads included) for the second or so
+-- this takes; if a lock is not granted within 5 s, the repair stops and nothing changes.
+lock table availability_exceptions in access exclusive mode;
+lock table coach_clubs in access exclusive mode;
+
 do $pre$
 begin
   if exists (select 1 from pg_trigger where tgname = 'bookings_slot_validation' and tgrelid = 'public.bookings'::regclass) then
