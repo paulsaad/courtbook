@@ -117,3 +117,5 @@ jobs:
           select 'booking exclusion constraint present:', count(*) > 0 from pg_constraint where conrelid = to_regclass('public.bookings') and contype = 'x';
           select 'demo clubs:', string_agg(name || ' (' || payment_mode || ')', ', ') from public.clubs where is_demo;
           SQL
+          # one line per schema object with a hash of its definition, to compare with a local build
+          psql "$DB" -At -f supabase/tests/schema_fingerprint.sql || true
