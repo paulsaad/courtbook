@@ -56,6 +56,9 @@ const { url, note } = readUrl(rawUrl);
 /** Non-null when the Supabase URL was not what it should have been. Shown on screen. */
 export const configNote = note;
 
+/** The project origin (https://<ref>.supabase.co), for public storage addresses. */
+export const supabaseOrigin = url;
+
 /** The project host, for error messages. Not a secret — the anon key is, and is never shown. */
 export const supabaseHost = url.replace(/^https?:\/\//, "");
 

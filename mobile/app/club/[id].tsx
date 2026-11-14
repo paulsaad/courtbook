@@ -11,6 +11,9 @@ import { TimeTile } from "../../components/TimeTile";
 import { Button } from "../../components/Button";
 import { Freshness } from "../../components/Freshness";
 import { Empty, ErrorState, Loading } from "../../components/StateView";
+import { Segmented } from "../../components/Segmented";
+import { ClubInfoView } from "../../components/ClubInfoView";
+import { useClubInfo } from "../../lib/clubInfo";
 import { clubsFromSlots, durationLabel, durationOptions, partOfDay, sameInstant, tilesFor } from "../../lib/courts";
 import { BEIRUT, money, tilePriceLabel, useClubMode, useDaySlots, useQuote, useTilePrices } from "../../lib/queries";
 import { useSession } from "../../lib/session";
@@ -26,13 +29,17 @@ import { color, font, radius, space } from "../../lib/theme";
  * asks. Clubs that take payment in the app wait for the retry-safe hold (G2, migration 0065).
  */
 export default function Club() {
-  const p = useLocalSearchParams<{ id: string; name?: string; date?: string; sport?: string; at?: string }>();
+  const p = useLocalSearchParams<{ id: string; name?: string; date?: string; sport?: string; at?: string; tab?: string }>();
   const insets = useSafeAreaInsets();
   const days = useMemo(() => bookingDays(BEIRUT), []);
   const [date, setDate] = useState(p.date ?? days[0].key);
   const sport = p.sport ?? null;
   const q = useDaySlots(date, sport);
   const club = useMemo(() => clubsFromSlots(q.data ?? []).find((c) => c.id === p.id), [q.data, p.id]);
+  // Book | Info. The club's details are read on their own, so they show even on a day with nothing free.
+  const [tab, setTab] = useState<"book" | "info">(p.tab === "info" ? "info" : "book");
+  const info = useClubInfo(p.id ?? null);
+  const infoClub = info.data?.club;
   const durations = club ? durationOptions(club) : [];
   const [minutes, setMinutes] = useState<number | null>(null);
   // Arriving from a time on the Courts list: that time was listed because it is free for the club's
@@ -110,7 +117,10 @@ export default function Club() {
     return () => cancelAnimationFrame(id);
   }, [tile?.start, reveal]);
 
-  const name = club?.name ?? p.name ?? "Club";
+  const name = club?.name ?? infoClub?.name ?? p.name ?? "Club";
+  const town = club?.town ?? infoClub?.town?.name_en ?? null;
+  const cutoff = club?.cancelCutoffHours ?? infoClub?.cancel_cutoff_hours ?? null;
+  const isDemo = club?.isDemo ?? infoClub?.is_demo ?? false;
 
   function onReserve() {
     if (!tile || !court || !dur || !club || locked) return;
@@ -138,6 +148,22 @@ export default function Club() {
   return (
     <View style={styles.page}>
       <Stack.Screen options={{ title: name, headerBackTitle: "Courts" }} />
+      <View style={styles.tabs}>
+        <Segmented
+          options={[{ key: "book", label: "Book" }, { key: "info", label: "Info" }]}
+          value={tab}
+          onChange={(k) => { if (!locked) setTab(k); }}
+        />
+      </View>
+      {tab === "info" ? (
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: insets.bottom + space.xxxl }}
+          refreshControl={<RefreshControl refreshing={info.isRefetching} onRefresh={() => void info.refetch()} tintColor={color.cedar} />}
+        >
+          <ClubInfoView query={info} onBook={() => setTab("book")} />
+        </ScrollView>
+      ) : (
       <ScrollView
         ref={scroller}
         style={{ flex: 1 }}
@@ -149,12 +175,12 @@ export default function Club() {
       >
         <View ref={content} collapsable={false}>
         <View style={styles.head}>
-          {club && (
+          {(town || cutoff !== null) && (
             <Text variant="secondary">
-              {[club.town, sport ? sportName(sport) : null, `Free cancellation up to ${club.cancelCutoffHours} h before`].filter(Boolean).join(" · ")}
+              {[town, sport ? sportName(sport) : null, cutoff !== null ? `Free cancellation up to ${cutoff} h before` : null].filter(Boolean).join(" · ")}
             </Text>
           )}
-          {club?.isDemo && <Text style={styles.demo}>Demo club — not a real venue</Text>}
+          {isDemo && <Text style={styles.demo}>Demo club — not a real venue</Text>}
         </View>
         <View style={styles.pickers}>
           <DateStrip days={days} selected={date} disabled={locked} onSelect={(d) => { if (locked) return; setDate(d); setStart(null); setNotice(null); }} />
@@ -209,11 +235,12 @@ export default function Club() {
         )}
         </View>
       </ScrollView>
+      )}
 
-      {shown && club && (
+      {tab === "book" && shown && club && (
         <View testID="booking-panel" style={[styles.panel, { paddingBottom: insets.bottom + 14 }]}>
           <View style={styles.courtRow} accessibilityRole="radiogroup">
-            <Text variant="label" style={{ marginRight: 10 }} numberOfLines={1}>Court</Text>
+            <Text variant="label" style={{ marginRight: 10, flexShrink: 0 }} numberOfLines={1}>Court</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
               {locked ? (
                 <Chip label={shown.courtName} selected disabled onPress={() => {}} />
@@ -279,7 +306,8 @@ function groupTiles<T extends { start: string }>(tiles: T[], tz: string) {
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: color.ground },
-  head: { backgroundColor: color.card, paddingHorizontal: 20, paddingTop: 4, paddingBottom: 8, gap: 2 },
+  tabs: { backgroundColor: color.card, paddingHorizontal: 20, paddingTop: 6, paddingBottom: 10 },
+  head: { backgroundColor: color.card, paddingHorizontal: 20, paddingTop: 0, paddingBottom: 8, gap: 2 },
   demo: { fontFamily: font.semibold, fontSize: 13, color: color.warnInk },
   pickers: { backgroundColor: color.card, borderBottomWidth: 1, borderBottomColor: color.line, paddingBottom: space.md, gap: space.md },
   durRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 20, flexWrap: "wrap" },
