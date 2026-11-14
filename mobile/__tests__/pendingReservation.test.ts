@@ -2,7 +2,8 @@ jest.mock("../lib/supabase", () => ({ supabase: {} }));
 jest.mock("../lib/secureStorage", () => ({ ChunkedSecureStore: {} }));
 jest.mock("expo-crypto", () => ({ randomUUID: () => "unused" }));
 import type { Attempt, Lookup, ReserveResult } from "../lib/reserve";
-import { MESSAGES, PendingReservations, QUIET_MS, RECHECK_MS, SEND_WINDOW_MS, storageKey, type Deps, type Selection } from "../lib/pendingReservation";
+import { CALL_TIMEOUT_MS } from "../lib/reserve";
+import { MESSAGES, PendingReservations, QUIET_MS, RECHECK_MS, SEND_WINDOW_MS, SERVER_STATEMENT_TIMEOUT_MS, storageKey, type Deps, type Selection } from "../lib/pendingReservation";
 
 /**
  * The unresolved-reservation store on its own, with a fake phone storage, a fake database and a
@@ -17,6 +18,8 @@ function world() {
   let online = true;
   let n = 0;
   const reserveCalls: Attempt[] = [];
+  let authLost = 0;
+  let failWrites = false;
   const lookups: string[] = [];
   let nextReserve: (a: Attempt) => Promise<ReserveResult> = async () => ({ kind: "uncertain", failure: { kind: "network", message: "x" } as never });
   let nextLookup: (t: string) => Promise<Lookup> = async (t) => {
@@ -26,7 +29,7 @@ function world() {
   const deps: Deps = {
     storage: {
       getItem: async (k) => disk.get(k) ?? null,
-      setItem: async (k, v) => { disk.set(k, v); },
+      setItem: async (k, v) => { if (failWrites) throw new Error("keychain unavailable"); disk.set(k, v); },
       removeItem: async (k) => { disk.delete(k); },
     },
     reserve: (a) => { reserveCalls.push(a); return nextReserve(a); },
@@ -34,9 +37,12 @@ function world() {
     newAttempt: (a) => ({ ...a, token: `tok-${++n}` }),
     isOnline: () => online,
     now: () => clock,
+    onAuthLost: () => { authLost++; },
   };
   return {
     disk, db, deps, reserveCalls, lookups,
+    authLost: () => authLost,
+    failWrites: (v: boolean) => { failWrites = v; },
     store: () => new PendingReservations(deps),
     tick: (ms: number) => { clock += ms; },
     setOnline: (v: boolean) => { online = v; },
@@ -318,5 +324,73 @@ describe("6 — cleared only when the outcome is established", () => {
     await s.setUser("u1");
     expect(s.mine()).toBeNull();
     expect(w.disk.has(storageKey("u1"))).toBe(false);
+  });
+});
+
+describe("review corrections (2026-11-14)", () => {
+  test("the token cannot be saved: nothing is sent, the player is told, and nothing is left blocking", async () => {
+    const w = world();
+    const s = w.store();
+    await s.setUser("u1");
+    w.failWrites(true);
+    w.onReserve(async () => { throw new Error("must not send"); });
+    expect(await s.submit(sel())).toBe("not-saved");
+    expect(w.reserveCalls).toHaveLength(0);
+    expect(s.mine()).toBeNull();
+    expect(s.getState().phase).toBe("idle");
+    expect(s.getState().notice).toEqual({ clubId: "club", message: MESSAGES.notSaved });
+    // storage works again → the same tap goes through normally
+    w.failWrites(false);
+    w.onReserve(async () => ({ kind: "reserved", value: { bookingId: "b1", paymentId: null, holdExpiresAt: null, already: false, confirmed: true } }));
+    expect(await s.submit(sel())).toBe("sent");
+    expect(w.reserveCalls).toHaveLength(1);
+  });
+
+  test("session rejected after an earlier call got no answer: kept, sign-in asked for, looked up after signing in", async () => {
+    const w = world();
+    const s = w.store();
+    await s.setUser("u1");
+    w.onReserve(async () => ({ kind: "uncertain", failure: { kind: "auth", message: "Your session has ended. Sign in again to continue." } as never }));
+    w.onLookup(unreachable);
+    await s.submit(sel());
+    await settle();
+    expect(w.lookups).toHaveLength(0); // no lookup with a dead session: it could only fail
+    expect(s.mine()?.token).toBe("tok-1");
+    expect(s.getState().note).toBe(MESSAGES.signIn);
+    expect(w.authLost()).toBe(1);
+    expect(w.disk.has(storageKey("u1"))).toBe(true);
+    // the app signs out locally, the player signs in again
+    await s.setUser(null);
+    expect(w.disk.has(storageKey("u1"))).toBe(true);
+    w.db.bookings.set("tok-1", { id: "b-first-call", status: "confirmed" });
+    w.onLookup(async (t) => (w.db.bookings.has(t) ? { kind: "found", bookingId: w.db.bookings.get(t)!.id, status: "confirmed" } : { kind: "absent" }));
+    await s.setUser("u1");
+    await settle();
+    expect(s.getState().outcome).toMatchObject({ kind: "booked", bookingId: "b-first-call" });
+    expect(w.reserveCalls).toHaveLength(1);
+  });
+
+  test("session rejected during the lookup: still unresolved, sign-in asked for, nothing cleared", async () => {
+    const w = world();
+    const s = w.store();
+    await s.setUser("u1");
+    w.onReserve(noAnswer);
+    w.onLookup(async () => ({ kind: "unreachable", auth: true }));
+    await s.submit(sel());
+    w.tick(10 * 60_000);
+    await s.check();
+    expect(s.mine()?.token).toBe("tok-1");
+    expect(s.getState().note).toBe(MESSAGES.signIn);
+    expect(w.authLost()).toBeGreaterThan(0);
+    expect(w.disk.has(storageKey("u1"))).toBe(true);
+    s.dispose();
+  });
+
+  test("the quiet time covers the phone's wait plus the server's statement limit, with margin", () => {
+    // A request abandoned at the phone's timeout can have reached the server just before; the server
+    // then has at most its statement limit to commit. "No booking" is believed only after that.
+    expect(SERVER_STATEMENT_TIMEOUT_MS).toBe(8_000); // live: authenticated statement_timeout=8s
+    expect(QUIET_MS).toBeGreaterThanOrEqual(SERVER_STATEMENT_TIMEOUT_MS * 3);
+    expect(CALL_TIMEOUT_MS).toBeGreaterThan(SERVER_STATEMENT_TIMEOUT_MS);
   });
 });

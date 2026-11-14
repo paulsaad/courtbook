@@ -95,6 +95,27 @@ describe("findByToken", () => {
     chain({ data: null, error: { message: "TypeError: Network request failed", code: "" } });
     expect(await findByToken("t")).toEqual({ kind: "unreachable" });
     chain(new TypeError("Network request failed"));
-    expect(await findByToken("t")).toEqual({ kind: "unreachable" });
+    expect(await findByToken("t")).toEqual({ kind: "unreachable" });    chain({ data: null, error: { message: "JWT expired", code: "PGRST301" } });
+    expect(await findByToken("t")).toEqual({ kind: "unreachable", auth: true }); // never "absent"
+  });
+});
+
+describe("a rejected session (review correction, 2026-11-14)", () => {
+  it("on the first call is final: the database never ran it", async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: { message: "JWT expired", code: "PGRST301" } });
+    const r = await reserve(attempt("at_desk"), { waitMs: () => 0 });
+    expect(r.kind).toBe("refused");
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("on a retry after no answer proves nothing: uncertain, same token, not retried further", async () => {
+    rpc
+      .mockResolvedValueOnce({ data: null, error: { message: "TypeError: Network request failed", code: "" } })
+      .mockResolvedValueOnce({ data: null, error: { message: "JWT expired", code: "PGRST301" } });
+    const r = await reserve(attempt("at_desk"), { waitMs: () => 0 });
+    expect(r.kind).toBe("uncertain");
+    if (r.kind === "uncertain") expect(r.failure.kind).toBe("auth");
+    expect(rpc).toHaveBeenCalledTimes(2);
+    expect(new Set(rpc.mock.calls.map((c) => c[1].p_token)).size).toBe(1);
   });
 });

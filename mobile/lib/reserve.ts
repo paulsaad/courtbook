@@ -90,7 +90,13 @@ export async function reserve(a: Attempt, opts: { attempts?: number; waitMs?: (n
       };
     }
     last = classify(error ?? { message: "empty response" });
-    if (last.kind === "refused" || last.kind === "auth") return { kind: "refused", failure: last };
+    if (last.kind === "refused") return { kind: "refused", failure: last };
+    if (last.kind === "auth") {
+      // A rejected session on the first call means the database never ran it. On a retry it proves
+      // nothing: an earlier call of this attempt got no answer and may have committed. Keep the token
+      // and leave it to be looked up once the player has signed in again.
+      return n === 0 ? { kind: "refused", failure: last } : { kind: "uncertain", failure: last };
+    }
     if (n < attempts - 1) await new Promise((r) => setTimeout(r, wait(n)));
   }
   return { kind: "uncertain", failure: last };
@@ -99,7 +105,7 @@ export async function reserve(a: Attempt, opts: { attempts?: number; waitMs?: (n
 export type Lookup =
   | { kind: "found"; bookingId: string; status: string }
   | { kind: "absent" }
-  | { kind: "unreachable" };
+  | { kind: "unreachable"; auth?: boolean }; // auth: the session was rejected — sign in again, then look
 
 /**
  * Did the attempt with this token create a booking? Reads the player's own bookings (row-level
@@ -109,7 +115,7 @@ export type Lookup =
 export async function findByToken(token: string): Promise<Lookup> {
   try {
     const { data, error } = await limited(supabase.from("bookings").select("id, status").eq("client_token", token).maybeSingle());
-    if (error) return { kind: "unreachable" };
+    if (error) return classify(error).kind === "auth" ? { kind: "unreachable", auth: true } : { kind: "unreachable" };
     const row = data as { id: string; status: string } | null;
     return row ? { kind: "found", bookingId: row.id, status: row.status } : { kind: "absent" };
   } catch {

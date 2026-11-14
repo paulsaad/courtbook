@@ -1,5 +1,6 @@
 import { onlineManager } from "@tanstack/react-query";
 import { ChunkedSecureStore } from "./secureStorage";
+import { recoverFromAuthFailure } from "./authRecovery";
 import { CALL_TIMEOUT_MS, RESERVE_ATTEMPTS, RESERVE_WAITS_MS, findByToken, newAttempt, reserve, type Attempt, type Lookup, type ReserveResult } from "./reserve";
 
 /**
@@ -53,15 +54,21 @@ export const MESSAGES = {
   settling: "No booking found yet. Making sure — we'll check again in a few seconds.",
   absent: "Your booking didn't go through — nothing was reserved. You can try again.",
   blocked: "Your earlier booking isn't confirmed yet. Nothing else can be reserved until we know.",
+  notSaved: "Your phone couldn't save this reservation safely, so nothing was sent. Try again — if it keeps happening, restart the app.",
+  signIn: "Your sign-in expired before we could confirm this booking. Sign in again and we'll check it straight away.",
 } as const;
 
 /**
  * How long after the last request ended the database could still commit it. A request the phone
  * gave up on can still be running at the server: the phone stops waiting after CALL_TIMEOUT_MS, and
- * a signed-in player's statement is cut off by the server after 8 s (Supabase's default
- * statement_timeout for `authenticated`). 30 s leaves a wide margin; "no booking" read before then
- * is not believed.
+ * the server cuts off a signed-in player's statement after SERVER_STATEMENT_TIMEOUT_MS. "No booking"
+ * read before QUIET_MS has passed is not believed.
+ *
+ * Verified 2026-11-14 (pg_roles.rolconfig): live — authenticated statement_timeout=8s, anon 3s,
+ * authenticator 8s with lock_timeout=8s; staging printed by the "Staging database" check. If the
+ * server's limit is ever raised, QUIET_MS must be raised with it (a test ties the two).
  */
+export const SERVER_STATEMENT_TIMEOUT_MS = 8_000;
 export const QUIET_MS = 30_000;
 /** While unresolved and still unanswered, look again this often (while the app is open). */
 export const RECHECK_MS = 30_000;
@@ -100,7 +107,7 @@ export type State = {
   notice: { clubId: string; message: string } | null; // e.g. "you're offline, nothing was sent"
 };
 
-export type SubmitResult = "sent" | "blocked" | "offline" | "signed-out";
+export type SubmitResult = "sent" | "blocked" | "offline" | "signed-out" | "not-saved";
 
 export type Deps = {
   storage: { getItem(k: string): Promise<string | null>; setItem(k: string, v: string): Promise<void>; removeItem(k: string): Promise<void> };
@@ -109,6 +116,8 @@ export type Deps = {
   newAttempt: (a: Omit<Attempt, "token">) => Attempt;
   isOnline: () => boolean;
   now: () => number;
+  /** The session was rejected: sign out on this phone and open sign-in. The attempt stays stored. */
+  onAuthLost: () => void;
 };
 
 const toAttempt = (p: Stored): Attempt => ({ token: p.token, mode: p.mode, clubId: p.clubId, courtId: p.courtId, start: new Date(p.start), end: new Date(p.end) });
@@ -200,8 +209,13 @@ export class PendingReservations {
     };
     this.busy = true;
     this.set({ pending, phase: "sending", note: null, outcome: null, notice: null });
-    // Written before anything is sent: whatever happens next, the token can be looked up.
-    await this.save(pending);
+    // Written before anything is sent: whatever happens next, the token can be looked up. If it
+    // cannot be written, nothing is sent — a request whose token could be lost is not made.
+    if (!(await this.save(pending))) {
+      this.busy = false;
+      this.set({ pending: null, phase: "idle", notice: { clubId: sel.clubId, message: MESSAGES.notSaved } });
+      return "not-saved";
+    }
     const r = await this.deps.reserve(attempt);
     this.busy = false;
     if (this.state.userId !== userId) return "sent"; // signed out meanwhile: stays stored for that account
@@ -215,8 +229,16 @@ export class PendingReservations {
       return "sent";
     }
     const waiting = { ...pending, quietAfter: this.deps.now() + QUIET_MS };
-    this.set({ pending: waiting, phase: "uncertain", note: MESSAGES.uncertain });
+    // If this second write fails, the stored copy keeps the earlier, later quiet time: safe.
     await this.save(waiting);
+    if (r.failure.kind === "auth") {
+      // A retry was refused for the session, after an earlier call may have committed: unresolved
+      // until the player signs in again (setUser then reads it back and looks it up).
+      this.set({ pending: waiting, phase: "uncertain", note: MESSAGES.signIn });
+      this.deps.onAuthLost();
+      return "sent";
+    }
+    this.set({ pending: waiting, phase: "uncertain", note: MESSAGES.uncertain });
     this.recheckIfWaiting();
     return "sent";
   }
@@ -238,6 +260,11 @@ export class PendingReservations {
     if (r.kind === "absent" && now >= p.quietAfter) {
       this.retry = { key: p.sel.key, attempt: toAttempt(p) };
       return this.settle({ kind: "not-booked", userId: p.userId, sel: p.sel, message: MESSAGES.absent });
+    }
+    if (r.kind === "unreachable" && r.auth) {
+      this.set({ phase: "uncertain", note: MESSAGES.signIn });
+      this.deps.onAuthLost();
+      return;
     }
     // Not found too soon to believe, or no answer at all: still unknown.
     const early = r.kind === "absent";
@@ -262,8 +289,14 @@ export class PendingReservations {
     await this.deps.storage.removeItem(storageKey(outcome.userId)).catch(() => {});
   }
 
-  private async save(p: Stored) {
-    try { await this.deps.storage.setItem(storageKey(p.userId), JSON.stringify(p)); } catch { /* kept in memory for this run */ }
+  /** True only when the phone confirms the write. */
+  private async save(p: Stored): Promise<boolean> {
+    try {
+      await this.deps.storage.setItem(storageKey(p.userId), JSON.stringify(p));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private schedule(ms: number) {
@@ -282,6 +315,7 @@ export const realDeps: Deps = {
   newAttempt,
   isOnline: () => onlineManager.isOnline(),
   now: () => Date.now(),
+  onAuthLost: () => { void recoverFromAuthFailure(); },
 };
 
 let store = new PendingReservations(realDeps);
