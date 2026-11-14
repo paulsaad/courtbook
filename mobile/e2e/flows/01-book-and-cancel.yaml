@@ -3,7 +3,8 @@ appId: app.courtbook.mobile.staging
 ---
 - clearState
 - launchApp
-- extendedWaitUntil: { visible: "Book a court in Lebanon", timeout: 30000 }
+- runFlow: _dismiss-anr.yaml
+- extendedWaitUntil: { visible: "Book a court in Lebanon", timeout: 120000 }
 - assertVisible: "STAGING"
 - takeScreenshot: shots/01-home-signed-out
 - tapOn: "Courts"

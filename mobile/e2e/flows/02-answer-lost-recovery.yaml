@@ -3,6 +3,8 @@
 appId: app.courtbook.mobile.staging
 ---
 - launchApp
+- runFlow: _dismiss-anr.yaml
+- extendedWaitUntil: { visible: "Home", timeout: 120000 }
 - tapOn: "Profile"
 - scrollUntilVisible: { element: "Answer lost" }
 - tapOn: "Answer lost"

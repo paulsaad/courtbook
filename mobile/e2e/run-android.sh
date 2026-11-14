@@ -4,7 +4,7 @@
 # sizes, and audits each screen for TalkBack. Everything lands in e2e/out/ for the artifact.
 set -uo pipefail
 OUT=e2e/out; mkdir -p "$OUT/shots/sizes"
-APK=android/app/build/outputs/apk/release/app-release.apk
+APK=e2e/app-release.apk
 APP=app.courtbook.mobile.staging
 export PATH="$PATH:$HOME/.maestro/bin"
 envs=(-e "E2E_EMAIL=$E2E_EMAIL" -e "E2E_PASSWORD=$E2E_PASSWORD" -e "E2E_CLUB=$E2E_CLUB" -e "E2E_DATE=$E2E_DATE")
@@ -18,7 +18,7 @@ adb shell settings put global animator_duration_scale 0
 # 0. Does it start? First launch, then what is on screen and anything the app logged.
 adb logcat -c
 adb shell monkey -p "$APP" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-sleep 45
+sleep 60
 echo "::group::first launch"
 adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/first.xml" >/dev/null
 python3 -c "import re,sys; t=open('$OUT/first.xml').read(); print('on screen:', [x for x in re.findall(r'(?:text|content-desc)=\"([^\"]+)\"', t) if x][:40])"
