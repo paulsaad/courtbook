@@ -15,6 +15,16 @@ adb shell settings put global window_animation_scale 0
 adb shell settings put global transition_animation_scale 0
 adb shell settings put global animator_duration_scale 0
 
+# 0. Does it start? First launch, then what is on screen and anything the app logged.
+adb logcat -c
+adb shell monkey -p "$APP" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+sleep 45
+echo "::group::first launch"
+adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/first.xml" >/dev/null
+python3 -c "import re,sys; t=open('$OUT/first.xml').read(); print('on screen:', [x for x in re.findall(r'(?:text|content-desc)=\"([^\"]+)\"', t) if x][:40])"
+adb logcat -d -v brief ReactNativeJS:V ReactNative:W AndroidRuntime:E ActivityManager:W '*:F' '*:S' | tail -150 | tee "$OUT/logcat-first.txt"
+echo "::endgroup::"
+
 # 1. Behaviour: book and cancel, unresolved recovery, offline.
 for f in 01-book-and-cancel 02-answer-lost-recovery 03-offline; do
   echo "::group::flow $f"
@@ -46,4 +56,7 @@ for cfg in "1080x2400 420 412dp" "1080x1920 480 360dp"; do
   done
 done
 adb shell wm size reset; adb shell wm density reset
+echo "::group::logcat (app errors)"
+adb logcat -d -v brief ReactNativeJS:V AndroidRuntime:E '*:F' '*:S' | tail -200 | tee "$OUT/logcat.txt"
+echo "::endgroup::"
 exit $status
