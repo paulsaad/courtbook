@@ -7,6 +7,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { bookingDate, clubLocalToUtc, dayBounds, hhmm, moveTarget, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
 import { friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
+import { blockSlotOptions, bookingSlotOptions, pickSlots } from "./durations";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string> };
 
@@ -381,7 +382,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
 
             {sheet.kind === "add" && (
               <AddSheet
-                club={club} court={courts.find((c) => c.id === sheet.courtId)!} time={sheet.time} times={times} busy={busy}
+                club={club} court={courts.find((c) => c.id === sheet.courtId)!} time={sheet.time} busy={busy}
                 defaultMinutes={commonMins}
                 onSave={(name, phone, slots, asBlock) =>
                   run(async () => {
@@ -636,16 +637,24 @@ function NowPanel({ club, courts, bookings, freeNow, sportNames, showLater, onTo
   );
 }
 
-function AddSheet({ club, court, time, times, busy, defaultMinutes, onSave }: {
-  club: Club; court: Court; time: string; times: string[]; busy: boolean; defaultMinutes: number | null;
+function AddSheet({ club, court, time, busy, defaultMinutes, onSave }: {
+  club: Club; court: Court; time: string; busy: boolean; defaultMinutes: number | null;
   onSave: (name: string, phone: string, slots: number, asBlock: boolean) => void;
 }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [picked, setPicked] = useState(false);
   const [hints, setHints] = useState<Guest[]>([]);
-  const remaining = times.length - times.indexOf(time);
-  const [slots, setSlots] = useState(Math.min(remaining, Math.max(1, Math.round((defaultMinutes ?? club.min_booking_minutes) / club.slot_minutes))));
+  // bookings get the club's minimum to maximum; a block has its own lengths (see durations.ts)
+  const [asBlock, setAsBlock] = useState(false);
+  const startMin = toMin(time);
+  const closeMin = closeMinutes(club);
+  const bookOpts = bookingSlotOptions(club, startMin, closeMin);
+  const blockOpts = blockSlotOptions(club, startMin, closeMin);
+  const opts = asBlock ? blockOpts : bookOpts;
+  const wanted = Math.max(1, Math.round((defaultMinutes ?? club.min_booking_minutes) / club.slot_minutes));
+  const [wish, setWish] = useState(wanted);
+  const slots = pickSlots(opts, wish, Math.round(club.min_booking_minutes / club.slot_minutes));
 
   // customers this club has booked before, matched on what the desk has typed so far
   useEffect(() => {
@@ -663,11 +672,11 @@ function AddSheet({ club, court, time, times, busy, defaultMinutes, onSave }: {
     return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
   };
   return (
-    <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); onSave(name.trim(), phone.trim(), slots, false); }}>
-      <h2 className="text-lg font-semibold">{court.name}, {time}–{endTime(slots)}</h2>
-      <input className={input} placeholder="Name" required value={name} autoFocus
+    <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); if (slots !== null) onSave(name.trim(), asBlock ? "" : phone.trim(), slots, asBlock); }}>
+      <h2 className="text-lg font-semibold">{court.name}, {time}{slots !== null ? `–${endTime(slots)}` : ""}{asBlock ? " · block" : ""}</h2>
+      <input className={input} placeholder={asBlock ? "Reason (optional)" : "Name"} required={!asBlock} value={name} autoFocus
              onChange={(e) => { setName(e.target.value); setPicked(false); }} />
-      {hints.length > 0 && (
+      {!asBlock && hints.length > 0 && (
         <ul className="-mt-1 divide-y divide-grid rounded-xl border border-grid bg-paper text-sm">
           {hints.map((g) => (
             <li key={`${g.name}|${g.phone ?? ""}`}>
@@ -681,16 +690,28 @@ function AddSheet({ club, court, time, times, busy, defaultMinutes, onSave }: {
           ))}
         </ul>
       )}
-      <input className={input} placeholder="Phone (optional)" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
-      <div className="grid grid-cols-4 gap-2">
-        {Array.from({ length: Math.min(Math.floor(240 / club.slot_minutes), remaining) }, (_, i) => i + 1).map((n) => (
-          <button type="button" key={n} onClick={() => setSlots(n)} className={`rounded-xl border py-2 text-sm ${slots === n ? "border-ink bg-ink text-white" : "border-grid"}`}>
-            {fmtDur(n * club.slot_minutes)}
-          </button>
-        ))}
-      </div>
-      <button type="submit" disabled={busy} className={primary}>{busy ? "Saving…" : "Add booking"}</button>
-      <button type="button" disabled={busy} onClick={() => onSave(name.trim(), "", slots, true)} className={secondary}>Block this time instead</button>
+      {!asBlock && <input className={input} placeholder="Phone (optional)" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />}
+      {opts.length > 0 ? (
+        <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label={asBlock ? "Block length" : "Booking length"}>
+          {opts.map((n) => (
+            <button type="button" key={n} role="radio" aria-checked={slots === n} onClick={() => setWish(n)}
+                    className={`rounded-xl border py-2 text-sm ${slots === n ? "border-ink bg-ink text-white" : "border-grid"}`}>
+              {fmtDur(n * club.slot_minutes)}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-muted">
+          Not enough time before closing for a booking. Bookings here: {fmtDur(club.min_booking_minutes)} to {fmtDur(club.max_booking_minutes)}.
+        </p>
+      )}
+      {!asBlock && opts.length > 0 && (
+        <p className="-mt-1 text-xs text-muted">Bookings at this club: {fmtDur(club.min_booking_minutes)} to {fmtDur(club.max_booking_minutes)}.</p>
+      )}
+      <button type="submit" disabled={busy || slots === null} className={primary}>{busy ? "Saving…" : asBlock ? "Block this time" : "Add booking"}</button>
+      {asBlock
+        ? <button type="button" disabled={busy} onClick={() => setAsBlock(false)} className={backLink}>Back to booking</button>
+        : <button type="button" disabled={busy || blockOpts.length === 0} onClick={() => setAsBlock(true)} className={secondary}>Block this time instead</button>}
     </form>
   );
 }
@@ -705,11 +726,14 @@ function BookingSheet({ club, courts, booking: b, times, busy, onMove, onCancel,
   const [courtId, setCourtId] = useState(b.court_id!);
   const [time, setTime] = useState(hhmm(b.start_at, club.timezone));
   const curSlots = Math.round((new Date(b.end_at).getTime() - new Date(b.start_at).getTime()) / 60000 / club.slot_minutes);
-  const [slots, setSlots] = useState(curSlots);
+  const [wish, setWish] = useState(curSlots);
   const [clubCaused, setClubCaused] = useState(false);
   const [started] = useState(() => new Date(b.start_at).getTime() <= Date.now());
   const court = courts.find((c) => c.id === b.court_id);
   const closeMin = closeMinutes(club);
+  // the club's minimum to maximum, plus the booking's current length (always allowed to keep)
+  const moveOpts = bookingSlotOptions(club, toMin(time), closeMin, curSlots);
+  const slots = pickSlots(moveOpts, wish, curSlots);
 
   return (
     <div className="flex flex-col gap-3">
@@ -756,13 +780,17 @@ function BookingSheet({ club, courts, booking: b, times, busy, onMove, onCancel,
             </select>
           </label>
           <label className="flex items-center justify-between text-sm">Duration
-            <select className={select} value={slots} onChange={(e) => setSlots(Number(e.target.value))}>
-              {Array.from({ length: Math.floor(240 / club.slot_minutes) }, (_, i) => i + 1).filter((n) => toMin(time) + n * club.slot_minutes <= closeMin).map((n) => (
-                <option key={n} value={n}>{fmtDur(n * club.slot_minutes)}</option>
-              ))}
-            </select>
+            {moveOpts.length > 0 ? (
+              <select className={select} value={slots ?? ""} onChange={(e) => setWish(Number(e.target.value))}>
+                {moveOpts.map((n) => (
+                  <option key={n} value={n}>{fmtDur(n * club.slot_minutes)}{n === curSlots ? " (current)" : ""}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-muted">too close to closing</span>
+            )}
           </label>
-          <button disabled={busy} onClick={() => onMove(courtId, time, slots)} className={primary}>{busy ? "Saving…" : "Save move"}</button>
+          <button disabled={busy || slots === null} onClick={() => slots !== null && onMove(courtId, time, slots)} className={primary}>{busy ? "Saving…" : "Save move"}</button>
           <button disabled={busy} onClick={() => setMode("view")} className={backLink}>Back</button>
         </>
       )}
