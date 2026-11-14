@@ -1,0 +1,86 @@
+# Staging database (decision D2): every migration reaches the staging Supabase project first,
+# from here, and the live project only after staging has been verified.
+#
+# Needs one repository secret, STAGING_DB_URL: the staging project's "Session pooler" connection
+# string (Supabase → Connect). GitHub's runners have no IPv6, so the direct db.<ref> address does
+# not work from here; the session pooler does.
+#
+# Safety: the run refuses if the connection string names the live project, and it only ever applies
+# files from supabase/migrations of the branch it runs on. It records what it applied in
+# staging_meta.applied (staging only), so running it twice never re-applies a file.
+name: Staging database
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "check = connect and report; apply = apply every migration not yet applied (and the demo seed)"
+        type: choice
+        options: [check, apply]
+        default: check
+      up_to:
+        description: "apply only: highest migration number to apply, e.g. 0064 (leave empty for all on this branch)"
+        type: string
+        default: ""
+
+concurrency: staging-db
+
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    env:
+      DB: ${{ secrets.STAGING_DB_URL }}
+      LIVE_REF: lgujfbwunokobjxlvpuf
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse anything but staging
+        run: |
+          if [ -z "$DB" ]; then
+            echo "::error::Secret STAGING_DB_URL is not set (Settings → Secrets and variables → Actions)."; exit 1
+          fi
+          if echo "$DB" | grep -q "$LIVE_REF"; then
+            echo "::error::STAGING_DB_URL points at the LIVE project ($LIVE_REF). Nothing was done."; exit 1
+          fi
+          echo "Branch ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}; target project: $(echo "$DB" | sed -E 's#.*postgres\.([a-z0-9]+):.*#\1#')"
+
+      - name: Connect
+        run: |
+          psql "$DB" -v ON_ERROR_STOP=1 -At -c "select 'connected: ' || current_database() || ', ' || split_part(version(), ' ', 2)"
+          psql "$DB" -v ON_ERROR_STOP=1 -q -c "create schema if not exists staging_meta; create table if not exists staging_meta.applied (name text primary key, applied_at timestamptz not null default now(), sha text); revoke all on schema staging_meta from public, anon, authenticated;"
+
+      - name: Apply migrations not yet applied
+        if: inputs.action == 'apply'
+        env:
+          UP_TO: ${{ inputs.up_to }}
+        run: |
+          applied=$(psql "$DB" -At -c "select name from staging_meta.applied")
+          n=0
+          for f in $(ls supabase/migrations/*.sql | sort); do
+            name=$(basename "$f")
+            num=${name%%_*}
+            if [ -n "$UP_TO" ] && [ "$num" \> "$UP_TO" ]; then continue; fi
+            if echo "$applied" | grep -qx "$name"; then continue; fi
+            echo "applying $name"
+            # each file in its own transaction, recorded in the same one (0040 must run alone: it does)
+            { cat "$f"; echo; echo "insert into staging_meta.applied (name, sha) values ('$name', '${GITHUB_SHA::7}');"; } \
+              | psql "$DB" -v ON_ERROR_STOP=1 -q -1 \
+              || { echo "::error::$name failed; it was rolled back and nothing after it was applied."; exit 1; }
+            n=$((n+1))
+          done
+          echo "applied $n migration(s)"
+          psql "$DB" -v ON_ERROR_STOP=1 -q -f supabase/seed.sql
+          echo "demo seed applied (idempotent)"
+
+      - name: Report
+        if: always()
+        run: |
+          psql "$DB" -At -F ' ' <<'SQL'
+          select 'migrations applied:', count(*), coalesce(max(name), 'none') from staging_meta.applied;
+          select 'hold_slot signatures:', count(*) from pg_proc where proname = 'hold_slot' and pronamespace = 'public'::regnamespace;
+          select 'hold_slot args:', pg_get_function_identity_arguments(oid) from pg_proc where proname = 'hold_slot' and pronamespace = 'public'::regnamespace;
+          select 'public functions:', count(*) from pg_proc where pronamespace = 'public'::regnamespace;
+          select 'RLS policies:', count(*) from pg_policies where schemaname = 'public';
+          select 'booking exclusion constraint present:', count(*) > 0 from pg_constraint where conrelid = to_regclass('public.bookings') and contype = 'x';
+          select 'demo clubs:', string_agg(name || ' (' || payment_mode || ')', ', ') from public.clubs where is_demo;
+          SQL
