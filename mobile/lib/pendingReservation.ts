@@ -1,6 +1,7 @@
 import { onlineManager } from "@tanstack/react-query";
 import { ChunkedSecureStore } from "./secureStorage";
 import { recoverFromAuthFailure } from "./authRecovery";
+import { withLookupFault, withReserveFault } from "./testFaults";
 import { CALL_TIMEOUT_MS, RESERVE_ATTEMPTS, RESERVE_WAITS_MS, findByToken, newAttempt, reserve, type Attempt, type Lookup, type ReserveResult } from "./reserve";
 
 /**
@@ -310,8 +311,9 @@ export class PendingReservations {
 
 export const realDeps: Deps = {
   storage: ChunkedSecureStore,
-  reserve: (a) => reserve(a),
-  lookup: findByToken,
+  // Test builds can drop connections on purpose (Profile → Test tools); production passes straight through.
+  reserve: (a) => withReserveFault(reserve, a),
+  lookup: (token) => withLookupFault(findByToken, token),
   newAttempt,
   isOnline: () => onlineManager.isOnline(),
   now: () => Date.now(),

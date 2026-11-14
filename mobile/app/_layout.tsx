@@ -12,6 +12,7 @@ import { makeQueryClient, wireAppLifecycle } from "../lib/query";
 import { trackPath } from "../lib/authRecovery";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { PendingReservationWatcher } from "../components/PendingReservation";
+import { TestFaultBanner } from "../components/TestFaultBanner";
 import { color, font } from "../lib/theme";
 
 wireAppLifecycle();
@@ -60,6 +61,7 @@ export default function RootLayout() {
               <Stack.Screen name="club/[id]" options={{ title: "" }} />
             </Stack>
             <OfflineBanner />
+            <TestFaultBanner />
           </View>
         </SessionProvider>
       </QueryClientProvider>

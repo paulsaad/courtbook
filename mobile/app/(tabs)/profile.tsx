@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import * as Updates from "expo-updates";
@@ -8,6 +8,8 @@ import { currentBuild } from "../../lib/buildInfo";
 import { Button } from "../../components/Button";
 import { Loading } from "../../components/StateView";
 import { SignInPrompt } from "../../components/SignInPrompt";
+import { Segmented } from "../../components/Segmented";
+import { FAULT_LABEL, currentFault, faultsAvailable, setFault, subscribeFault, type Fault } from "../../lib/testFaults";
 import { color, radius, space, text, MAX_FONT_SCALE } from "../../lib/theme";
 
 /**
@@ -18,6 +20,7 @@ export default function Profile() {
   const session = useSession();
   const [busy, setBusy] = useState(false);
   const build = currentBuild();
+  const fault = useSyncExternalStore(subscribeFault, currentFault);
 
   async function signOut() {
     setBusy(true);
@@ -51,6 +54,24 @@ export default function Profile() {
           </View>
         ))}
       </View>
+      {faultsAvailable() && (
+        <>
+          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.section}>Test tools (test builds only)</Text>
+          <View style={styles.card} testID="test-tools">
+            <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.value}>Lose the connection when reserving</Text>
+            <Segmented
+              options={(["off", "answer-lost", "request-lost"] as Fault[]).map((k) => ({ key: k, label: FAULT_LABEL[k] }))}
+              value={fault}
+              onChange={(k) => { setFault(k); }}
+            />
+            <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.label}>
+              Answer lost: the booking is really made, then the app acts as if the answer never arrived.{"\n"}
+              Request lost: nothing is sent; the app acts as if the request never left.{"\n"}
+              While on, the app cannot check bookings either. Closing the app turns this off.
+            </Text>
+          </View>
+        </>
+      )}
       {Updates.channel !== "production" && (
         <Pressable accessibilityRole="button" onPress={() => router.push("/design-preview")} style={styles.previewLink}>
           <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.previewText}>Component preview (test builds only)</Text>
