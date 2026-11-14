@@ -57,11 +57,11 @@ const day = new Date(Date.now() + 3 * 86400e3).toISOString().slice(0, 10);
 const at = (hhmm) => new Date(`${day}T${hhmm}:00+02:00`).toISOString(); // Beirut is UTC+2 in November
 
 function cleanup() {
+  const mine = "(select id from auth.users where email like 'api-%@courtbook.test')";
   sql(`drop function if exists public.hold_slot(uuid, uuid, timestamptz, timestamptz);
-       delete from bookings where created_by in (select id from auth.users where email like 'api-%@courtbook.test');
-       delete from club_staff where profile_id in (select id from auth.users where email like 'api-%@courtbook.test');
-       delete from payments where booking_id in (select b.id from bookings b join auth.users u on u.id = b.player_id where u.email like 'api-%@courtbook.test');
-       delete from bookings where player_id in (select id from auth.users where email like 'api-%@courtbook.test');
+       delete from payments where booking_id in (select id from bookings where player_id in ${mine} or created_by in ${mine});
+       delete from bookings where player_id in ${mine} or created_by in ${mine};
+       delete from club_staff where profile_id in ${mine};
        delete from auth.users where email like 'api-%@courtbook.test';
        update clubs set payment_mode='${MODE}' where id='${CLUB}';`);
 }
