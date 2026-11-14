@@ -64,6 +64,8 @@ jobs:
           select 'public tables:', count(*) from pg_tables where schemaname = 'public';
           select 'staging marker present:', to_regclass('staging_meta.applied') is not null;
           select 'auth users:', count(*) from auth.users;
+          -- The app's "no booking" quiet time (mobile/lib/pendingReservation.ts, QUIET_MS) relies on these.
+          select 'role settings:', rolname, coalesce(array_to_string(rolconfig, ', '), '(none)') from pg_roles where rolname in ('authenticated', 'anon', 'authenticator') order by rolname;
           SQL
 
       - name: Refuse a database that is not ours to initialise
