@@ -6,6 +6,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 PHOTO=${PHOTO:-$PWD/assets/icon.png}
+mkdir -p "${SHOTS:-/tmp}"
 OUT=${WEBOUT:-/tmp/courtbook-webout}; TOOLS=${TOOLS:-/tmp/courtbook-layout-tools}
 npm i --no-save react-native-web@0.21 @expo/metro-runtime@~58 >/dev/null
 # SecureStore has no web implementation; a throwaway localStorage stand-in for this build only
