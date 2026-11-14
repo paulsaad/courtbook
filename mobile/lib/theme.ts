@@ -2,7 +2,12 @@
  * Design tokens. Every colour, size and radius in the app comes from here, so the visual pass
  * after the screen designs are approved is a change to this file, not to every screen.
  *
- * Values follow the "Court Lines" proposal (cedar night, cedar, limestone, the red line).
+ * Values follow the "Court Lines" design (cedar night, cedar, limestone) with the stronger Lebanese
+ * red approved on 2026-11-14:
+ *   green — every action, selected time, success: the main colour;
+ *   red   — brand accent only (wordmark, sport marks, selected sport, ticket edge and perforation,
+ *           open player spots, badges). Never a status: errors, cancellations and "booked" have
+ *           their own treatments, so red can never be read as "something went wrong".
  * STATUS: approved by Paul 2026-11-13 (refined round).
  */
 export const color = {
@@ -15,7 +20,8 @@ export const color = {
   card: "#FFFFFF",
   ink: "#0F1512",
   muted: "#4A5450", // 6.9:1 on ground, 7.9:1 on white
-  red: "#C8102E", // accent only: once per view, never for errors
+  red: "#C8102E", // brand accent (5.1:1 on ground, 5.9:1 on white): text only at 14 pt bold or larger
+  redOnDark: "#F2A0AC", // red for text on night surfaces (7.6:1)
   danger: "#B42318", // errors, always with words
   warnSoft: "#FCEFD2", // limited availability, pending states
   warnInk: "#7A4E00", // 6.3:1 on warnSoft

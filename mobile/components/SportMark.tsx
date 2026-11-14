@@ -1,11 +1,11 @@
 import Svg, { Circle, Line, Rect } from "react-native-svg";
 import { color as palette } from "../lib/theme";
 
-/** Each sport drawn from its own court plan. Unknown sports get the "other" mark, never nothing. */
+/** Each sport drawn from its own court plan, in red like painted court lines. Unknown sports get the "other" mark, never nothing. */
 export const SPORTS = ["padel", "tennis", "football", "basketball", "volleyball", "squash", "badminton", "other"] as const;
 export type Sport = (typeof SPORTS)[number];
 
-export function SportMark({ sport, size = 28, color = palette.cedar }: { sport: string; size?: number; color?: string }) {
+export function SportMark({ sport, size = 28, color = palette.red }: { sport: string; size?: number; color?: string }) {
   const p = { fill: "none", stroke: color, strokeWidth: 1.5 };
   const net = { ...p, strokeWidth: 2.3 };
   const s = (SPORTS as readonly string[]).includes(sport) ? sport : "other";

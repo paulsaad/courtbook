@@ -1,10 +1,12 @@
 import { ScrollView, StyleSheet, Text } from "react-native";
 import { color, space, text, MAX_FONT_SCALE } from "../../lib/theme";
+import { Brand } from "../../components/Brand";
 
 /** Placeholder until the Home design is approved (M2). */
 export default function Home() {
   return (
     <ScrollView style={styles.page} contentContainerStyle={styles.content}>
+      <Brand />
       <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.title}>Home</Text>
       <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.body}>
         This screen is built once its design is approved. Courts shows today's real availability in the meantime.

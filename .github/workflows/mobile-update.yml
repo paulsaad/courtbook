@@ -105,13 +105,30 @@ jobs:
             echo "$p native fingerprint $hash: $found matching preview build(s)"
             if [ "$found" = "0" ]; then
               echo "Latest finished $p preview builds, for comparison:"
-              eas build:list --channel "$CHANNEL" --platform "$p" --status finished --limit 3 --json --non-interactive \
-                | jq -r '.[] | "  \(.createdAt) version \(.appVersion) runtime \(.runtimeVersion) fingerprint \(.fingerprintHash // .fingerprint.hash // "not recorded")"' || true
+              eas build:list --channel "$CHANNEL" --platform "$p" --status finished --limit 3 --json --non-interactive > /tmp/builds.json || true
+              jq -r '.[] | "  \(.createdAt) build \(.id) version \(.appVersion) runtime \(.runtimeVersion // .runtime.version // "?") fingerprint \(.fingerprintHash // .fingerprint.hash // "not recorded")"' /tmp/builds.json || true
+              latest=$(jq -r '.[0].id // empty' /tmp/builds.json)
+              if [ -n "$latest" ]; then
+                echo "What differs between this code and build $latest (Expo's own comparison):"
+                eas fingerprint:compare --build-id "$latest" --environment preview --json --non-interactive > /tmp/compare.raw 2>/tmp/compare.err || true
+                # the command prints an environment notice before its JSON; keep the JSON only
+                sed -n '/^{/,$p' /tmp/compare.raw > /tmp/compare.json
+                python3 ../.github/scripts/fingerprint-diff.py /tmp/compare.json || head -c 3000 /tmp/compare.json
+                tail -3 /tmp/compare.err
+              fi
               echo "::error::No $p preview build has this native code. Native code changed (or no build exists yet):"
               echo "::error::bump \"version\" in mobile/app.json, run the Mobile build workflow, then publish."
               exit 1
             fi
           done
+
+      - name: Keep the fingerprint comparison (when the gate refused)
+        if: failure() && inputs.action == 'publish'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fingerprint-compare
+          path: /tmp/compare.json
+          if-no-files-found: ignore
 
       - name: Publish
         if: inputs.action == 'publish'

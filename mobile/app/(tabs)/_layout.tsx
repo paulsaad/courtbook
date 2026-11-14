@@ -10,7 +10,7 @@ import { color, font } from "../../lib/theme";
 function TabIcon({ name, focused }: { name: IconName; focused: boolean }) {
   return (
     <View style={{ alignItems: "center" }}>
-      <View style={{ position: "absolute", top: -8, width: 18, height: 3, borderRadius: 2, backgroundColor: focused ? color.red : "transparent" }} />
+      <View style={{ position: "absolute", top: -8, width: 24, height: 3, borderRadius: 2, backgroundColor: focused ? color.red : "transparent" }} />
       <Icon name={name} color={focused ? color.cedar : color.muted} strokeWidth={focused ? 2.1 : 1.8} />
     </View>
   );

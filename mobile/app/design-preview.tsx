@@ -9,6 +9,8 @@ import { Ticket, TicketRow } from "../components/Ticket";
 import { Segmented } from "../components/Segmented";
 import { SportMark, SPORTS } from "../components/SportMark";
 import { Freshness } from "../components/Freshness";
+import { Brand } from "../components/Brand";
+import { PlayerSlots } from "../components/PlayerSlots";
 import { color, space } from "../lib/theme";
 
 /**
@@ -35,6 +37,7 @@ export default function DesignPreview() {
   return (
     <ScrollView style={styles.page} contentContainerStyle={styles.content}>
       <Text variant="eyebrow">Sample values only</Text>
+      <Brand />
       <Text variant="title">Ready to play?</Text>
       <Text variant="heading">Your next booking</Text>
       <Text>Body text at 16 points, the size everything you read uses.</Text>
@@ -50,7 +53,7 @@ export default function DesignPreview() {
       <Section title="Sports">
         <View style={styles.wrap}>
           {["padel", "tennis", "football"].map((s) => (
-            <Chip key={s} label={s[0].toUpperCase() + s.slice(1)} selected={sport === s} onPress={() => setSport(s)} icon={<SportMark sport={s} size={20} color={sport === s ? color.onDark : color.cedar} />} />
+            <Chip key={s} tone="sport" label={s[0].toUpperCase() + s.slice(1)} selected={sport === s} onPress={() => setSport(s)} icon={<SportMark sport={s} size={20} />} />
           ))}
         </View>
         <View style={styles.wrap}>
@@ -74,12 +77,17 @@ export default function DesignPreview() {
         <Freshness lastSuccessAt={now - 2 * 60_000} fetching={false} failedSinceSuccess />
       </Section>
 
+      <Section title="Games">
+        <PlayerSlots players={["NH", "RS"]} capacity={4} />
+        <PlayerSlots players={["EK", "MT", "JA", "LS"]} capacity={4} />
+      </Section>
+
       <Section title="Lists">
         <Segmented options={[{ key: "courts", label: "Courts · 2" }, { key: "games", label: "Games · 1" }]} value={seg} onChange={setSeg} />
       </Section>
 
       <Section title="Ticket">
-        <Ticket date="Saturday 14 November" start="18:30" end="20:00">
+        <Ticket date="Saturday 14 November" start="18:30" end="20:00" sport={{ key: "padel", label: "Padel" }}>
           <TicketRow label="Club" value="Sample Padel Club" />
           <TicketRow label="Court" value="Court 2 · Padel · 1 h 30" />
           <TicketRow label="Payment" value="$30 at the club" note="Nothing was charged in the app" />
