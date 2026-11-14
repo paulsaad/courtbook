@@ -37,7 +37,7 @@ export default function TabsLayout() {
         sceneStyle: { backgroundColor: color.ground },
       }}
     >
-      <Tabs.Screen name="index" options={tab("Home", "home")} />
+      <Tabs.Screen name="index" options={{ ...tab("Home", "home"), headerShown: false }} />
       <Tabs.Screen name="courts" options={tab("Courts", "court")} />
       <Tabs.Screen name="bookings" options={tab("Bookings", "calendar")} />
       <Tabs.Screen name="profile" options={tab("Profile", "person")} />

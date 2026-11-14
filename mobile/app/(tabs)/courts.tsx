@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { hhmm } from "@shared/time";
 import { Text } from "../../components/Text";
 import { Chip } from "../../components/Chip";
@@ -22,6 +22,11 @@ export default function Courts() {
   const days = useMemo(() => bookingDays(BEIRUT), []);
   const [date, setDate] = useState(days[0].key);
   const [sport, setSport] = useState<string | null>(null);
+  // Home's sport chips open this tab with ?sport=…; a later chip tap on Home changes it again
+  const p = useLocalSearchParams<{ sport?: string }>();
+  useEffect(() => {
+    if (p.sport && (SPORTS as readonly string[]).includes(p.sport)) setSport(p.sport);
+  }, [p.sport]);
   const q = useDaySlots(date, sport);
   const clubs = useMemo(() => clubsFromSlots(q.data ?? []), [q.data]);
   const open = clubs.filter((c) => c.starts.length > 0);
