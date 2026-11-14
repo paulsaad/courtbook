@@ -41,7 +41,7 @@ export default function Booking() {
   if (!signedIn) return <SignInPrompt title="Sign in to see this booking" body="Your bookings are only shown to you." />;
   if (q.isPending) return <Loading label="Loading your booking" />;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
-  if (!b) return <Empty title="Booking not found" body="It isn't one of your bookings." action="Go to Bookings" onAction={() => router.replace("/bookings")} />;
+  if (!b) return <Empty title="Booking not found" body="It isn't one of your bookings." action="Go to Bookings" onAction={() => router.dismissTo("/bookings")} />;
 
   const tz = b.club.timezone;
   const minutes = Math.round((Date.parse(b.end_at) - Date.parse(b.start_at)) / 60_000);
@@ -117,11 +117,11 @@ export default function Booking() {
       {problem && <Text style={styles.problem} accessibilityRole="alert">{problem}</Text>}
 
       <View style={styles.actions}>
-        {isNew && <Button label="See it in Bookings" onPress={() => router.replace("/bookings")} />}
+        {isNew && <Button label="See it in Bookings" onPress={() => router.dismissTo("/bookings")} />}
         {upcoming && b.club.location_url && (
           <Button label="Directions" variant="secondary" onPress={() => void Linking.openURL(b.club.location_url!)} />
         )}
-        {isNew && <Button label="Done" variant="quiet" onPress={() => router.replace("/courts")} />}
+        {isNew && <Button label="Done" variant="quiet" onPress={() => router.dismissTo("/courts")} />}
       </View>
 
       {upcoming && (
