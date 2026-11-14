@@ -1,0 +1,35 @@
+name: Mobile checks
+
+# Runs on every push that touches the app or the web files it shares (src/lib).
+# Nothing here talks to Expo or Supabase; it only proves the code is sound.
+on:
+  push:
+    paths: ["mobile/**", "src/lib/**", ".github/workflows/mobile-*.yml"]
+  pull_request:
+    paths: ["mobile/**", "src/lib/**", ".github/workflows/mobile-*.yml"]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      # Only mobile/ is installed: the app must build from mobile/ alone.
+      - run: npm ci
+      - name: Type-check
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test -- --ci
+      - name: Shared copies match the web app's src/lib
+        run: npm run check:shared
+      # The exact release bundling step an EAS build runs, on mobile/ alone. This is the check that
+      # would have caught the 0.2.0 iOS build failure before a build was spent on it.
+      - name: Release bundling, as EAS runs it (iOS and Android, mobile/ only)
+        run: npm run check:bundle

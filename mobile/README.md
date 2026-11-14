@@ -1,11 +1,42 @@
-# CourtBook mobile — proof of concept
+# CourtBook mobile
 
-A React Native app built with Expo, in the same repository as the web app and
-sharing its Supabase backend. It calls the same RPCs; it does not duplicate any
-server logic.
+The native CourtBook player app (React Native, Expo), in the same repository as the web app and
+sharing its Supabase backend. It calls the same RPCs; it does not duplicate any server logic.
+The plan is the project doc "CourtBook — native app plan"; this folder started as the proof of
+concept and is now milestone M1 (foundation, sign-in, updates). The web app is untouched by
+anything in this folder.
 
-**This is a test of whether native mobile is worth pursuing. It is not a second
-CourtBook.** The web PWA is untouched by anything in this folder.
+## Sending new code to an installed app (EAS Update)
+
+Builds are slow and limited; most changes are JavaScript only and reach phones as an *update*.
+
+- Each build profile has its own channel (`eas.json`): `preview` builds receive `preview` updates.
+- `runtimeVersion` follows the app `version` in `app.json`. An update only reaches builds with the
+  same version, so JavaScript is never sent to a build whose native code it was not made for.
+- **Adding or upgrading anything native** (a new `expo-*` package with native code, a config
+  plugin, an SDK upgrade) means: bump `version` in `app.json`, run **Mobile build**, install it.
+  The **Mobile update** workflow refuses to publish when no preview build has this exact native
+  fingerprint, so a forgotten bump is caught there rather than on a phone.
+- GitHub → Actions → **Mobile update (Expo)** → Run workflow:
+  - `publish` — checks, then publishes. The run summary lists the update and group IDs.
+  - `rollback-to-previous` — paste an earlier group ID from a run summary.
+  - `rollback-to-built-in` — phones go back to the code inside their installed build.
+- On the phone: close and reopen the app **twice** (download, then run). Profile → About shows
+  the update ID now running, or "Built-in".
+
+## Shared code with the web app
+
+`@shared/*` is `mobile/shared/`: byte-for-byte copies of the web app's `src/lib` files of the same
+name (see `shared/README.md`). The app must build from `mobile/` alone, so it never imports from
+outside this folder. `npm run check:shared` fails if a copy differs from its source.
+
+## Checks
+
+`npm run typecheck`, `npm test`, `npm run check:shared`, and `npm run check:bundle` — the exact
+release bundling command an EAS build runs (`expo export:embed --eager --dev false`), for iOS and
+Android, on an isolated copy of `mobile/` with nothing else from the repository. The **Mobile
+checks** workflow runs all four on every push touching `mobile/` or `src/lib/`, and the build
+workflow runs the bundling check before spending a build.
 
 ## What it has to prove
 
@@ -96,15 +127,25 @@ have passed.
 
 ```
 app/                  screens (expo-router: the file path is the route)
-  _layout.tsx         navigation shell
-  index.tsx           availability — calls club_day_slots
-  sign-in.tsx         email code and Google
+  _layout.tsx         providers, offline banner, root stack
+  (tabs)/             Home · Courts · Bookings · Profile
+    courts.tsx        today's availability (proof-of-concept screen, until M2)
+    profile.tsx       account, sign out, About (build, runtime, channel, update)
+  sign-in.tsx         email code, Google, Apple (iOS); opens over the current screen
   booking/[id].tsx    deep-link target: courtbook://booking/<id>
+components/           Button, StateView, OfflineBanner, SignInPrompt
 lib/
-  supabase.ts         client, with session storage that survives app kill
-  session.ts          sign-in state
-  types.ts            shapes returned by the RPCs
-eas.json              build profiles
+  supabase.ts         client
+  secureStorage.ts    session storage that survives app kill (chunked SecureStore)
+  session.tsx         sign-in state, one subscription for the app
+  query.ts            React Query: retry policy, foreground and online wiring
+  errors.ts           failure kinds and plain messages (web's own message table)
+  authRecovery.ts     expired session → sign in → back where you were
+  appleAuth.ts        Sign in with Apple → Supabase
+  buildInfo.ts        what About shows
+  theme.ts            design tokens (pending design approval)
+__tests__/            jest tests
+eas.json              build profiles and their update channels
 ```
 
 ## Running it locally (only if you have a dev machine)
