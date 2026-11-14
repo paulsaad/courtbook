@@ -65,12 +65,15 @@ for (const c of cases) for (const [s, e] of times) {
   const start = await page.getByTestId("ticket-start").boundingBox();
   const end = await page.getByTestId("ticket-end").boundingBox();
   const mark = await page.getByTestId("ticket-mark").boundingBox();
+  const perf = await page.getByTestId("ticket-perforation").boundingBox();
   const endText = await page.getByTestId("ticket-end").innerText();
-  const ok = !overlap(end, mark) && !overlap(start, mark) && !overlap(start, end) && end.x + end.width <= c.w;
+  // Clear of the marking, of each other, of the screen edge, and wholly above the perforation.
+  const ok = !overlap(end, mark) && !overlap(start, mark) && !overlap(start, end) && end.x + end.width <= c.w &&
+    end.y + end.height <= perf.y + 0.5 && end.x + end.width <= mark.x - 8;
   const wrapped = end.y >= start.y + start.height - 2;
   const file = `${process.env.SHOTS ?? "/tmp"}/ticket-${c.w}-${c.scale}-${s.replace(":", "")}.png`;
   await page.screenshot({ path: file, clip: { x: 0, y: 0, width: c.w, height: Math.min(c.h, mark.y + mark.height + 120) } });
-  console.log(`${c.name}, ${endText}: ${ok ? "OK" : "OVERLAP"}${wrapped ? " (end time on its own line)" : ""}`);
+  console.log(`${c.name}, ${endText}: ${ok ? "OK" : "OVERLAP"}${wrapped ? " (end time on its own line)" : " (end time beside the start)"}; end bottom ${Math.round(end.y + end.height)} vs perforation ${Math.round(perf.y)}, end right ${Math.round(end.x + end.width)} vs marking ${Math.round(mark.x)}`);
   if (!ok) failures++;
   await ctx.close();
 }

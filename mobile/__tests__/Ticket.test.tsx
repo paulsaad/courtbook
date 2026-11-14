@@ -28,3 +28,20 @@ it("shows the sport on the ticket band when given", async () => {
   expect(screen.getByText("SATURDAY 14 NOVEMBER")).toBeTruthy();
   expect(screen.getByText("Padel")).toBeTruthy();
 });
+
+it("lays the times out in a column of their own: no wrapping row, no baseline alignment (iPhone, 2026-11-14)", async () => {
+  const { StyleSheet } = require("react-native");
+  await render(
+    <Ticket date="Saturday 14 November" start="21:30" end="23:00">
+      <TicketRow label="Club" value="Sample Club" last />
+    </Ticket>
+  );
+  const times = StyleSheet.flatten(screen.getByTestId("ticket-times").props.style);
+  expect(times.flexDirection ?? "column").toBe("column");
+  expect(times.flexWrap).toBeUndefined();
+  expect(times.alignItems).not.toBe("baseline");
+  expect(screen.getByText("to 23:00")).toBeTruthy();
+  const mark = StyleSheet.flatten(screen.getByTestId("ticket-mark", { includeHiddenElements: true }).props.style);
+  expect(mark.position).not.toBe("absolute");
+  expect(mark.flexShrink).toBe(0);
+});
