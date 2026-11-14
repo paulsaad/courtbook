@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { act } from "react";
 
 // next/link needs a router in tests and all we want is an anchor
@@ -34,7 +34,7 @@ vi.mock("@/lib/supabase/client", () => ({
   }),
 }));
 
-import DayCalendar from "./DayCalendar";
+import DayCalendar, { AddSheet } from "./DayCalendar";
 import type { Block, Booking, Club, Court } from "@/lib/types";
 
 const club: Club = {
@@ -203,5 +203,44 @@ describe("staff calendar lengths follow the club's limits (Phase 9 / 0066)", () 
     await act(async () => { screen.getByRole("button", { name: "Move" }).click(); });
     const select = screen.getByDisplayValue("30 min (current)") as HTMLSelectElement;
     expect(Array.from(select.options).map((o) => o.textContent)).toEqual(["30 min (current)", "1 h", "1 h 30", "2 h", "2 h 30", "3 h"]);
+  });
+});
+
+describe("walk-in sheet: a block never takes the customer's name (review fix)", () => {
+  const sheet = (time: string, onSave = vi.fn(), c: Club = club) => {
+    render(<AddSheet club={c} court={courtA} time={time} busy={false} defaultMinutes={60} onSave={onSave} />);
+    return onSave;
+  };
+
+  it("switching to a block after typing a name blocks with no reason, and the name is kept for the booking", async () => {
+    const onSave = sheet("10:00");
+    fireEvent.change(screen.getByLabelText("Customer name"), { target: { value: "Ali Haddad" } });
+    await act(async () => { screen.getByRole("button", { name: "Block this time instead" }).click(); });
+    expect((screen.getByLabelText("Block reason") as HTMLInputElement).value).toBe("");
+    await act(async () => { screen.getByRole("button", { name: "Block this time" }).click(); });
+    expect(onSave).toHaveBeenCalledWith("", "", 2, true);       // reason empty, not "Ali Haddad"
+    await act(async () => { screen.getByRole("button", { name: "Back to booking" }).click(); });
+    expect((screen.getByLabelText("Customer name") as HTMLInputElement).value).toBe("Ali Haddad");
+  });
+
+  it("a block reason never becomes the customer's name", async () => {
+    const onSave = sheet("10:00");
+    await act(async () => { screen.getByRole("button", { name: "Block this time instead" }).click(); });
+    fireEvent.change(screen.getByLabelText("Block reason"), { target: { value: "Net repair" } });
+    await act(async () => { screen.getByRole("button", { name: "Back to booking" }).click(); });
+    expect((screen.getByLabelText("Customer name") as HTMLInputElement).value).toBe("");
+    await act(async () => { screen.getByRole("button", { name: "Block this time instead" }).click(); });
+    await act(async () => { screen.getByRole("button", { name: "Block this time" }).click(); });
+    expect(onSave).toHaveBeenCalledWith("Net repair", "", 2, true);
+  });
+
+  it("when no block length fits before closing, it says so for a block and cannot save", async () => {
+    const onSave = sheet("22:45");                                // 15 min left on a 30 min grid
+    expect(screen.getByText(/Not enough time before closing for a booking/)).toBeDefined();
+    await act(async () => { screen.getByRole("button", { name: "Block this time instead" }).click(); });
+    expect(screen.getByText("Not enough time before closing for a block.")).toBeDefined();
+    expect(screen.queryByText(/for a booking/)).toBeNull();
+    expect((screen.getByRole("button", { name: "Block this time" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(onSave).not.toHaveBeenCalled();
   });
 });

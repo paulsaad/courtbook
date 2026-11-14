@@ -637,12 +637,14 @@ function NowPanel({ club, courts, bookings, freeNow, sportNames, showLater, onTo
   );
 }
 
-function AddSheet({ club, court, time, busy, defaultMinutes, onSave }: {
+export function AddSheet({ club, court, time, busy, defaultMinutes, onSave }: {
   club: Club; court: Court; time: string; busy: boolean; defaultMinutes: number | null;
   onSave: (name: string, phone: string, slots: number, asBlock: boolean) => void;
 }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  // a block's reason is its own field: switching modes never turns a customer's name into a reason
+  const [reason, setReason] = useState("");
   const [picked, setPicked] = useState(false);
   const [hints, setHints] = useState<Guest[]>([]);
   // bookings get the club's minimum to maximum; a block has its own lengths (see durations.ts)
@@ -672,10 +674,20 @@ function AddSheet({ club, court, time, busy, defaultMinutes, onSave }: {
     return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
   };
   return (
-    <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); if (slots !== null) onSave(name.trim(), asBlock ? "" : phone.trim(), slots, asBlock); }}>
+    <form className="flex flex-col gap-3" onSubmit={(e) => {
+      e.preventDefault();
+      if (slots === null) return;
+      if (asBlock) onSave(reason.trim(), "", slots, true);
+      else onSave(name.trim(), phone.trim(), slots, false);
+    }}>
       <h2 className="text-lg font-semibold">{court.name}, {time}{slots !== null ? `–${endTime(slots)}` : ""}{asBlock ? " · block" : ""}</h2>
-      <input className={input} placeholder={asBlock ? "Reason (optional)" : "Name"} required={!asBlock} value={name} autoFocus
-             onChange={(e) => { setName(e.target.value); setPicked(false); }} />
+      {asBlock ? (
+        <input key="reason" className={input} placeholder="Reason (optional)" aria-label="Block reason" value={reason} autoFocus
+               onChange={(e) => setReason(e.target.value)} />
+      ) : (
+        <input key="name" className={input} placeholder="Name" aria-label="Customer name" required value={name} autoFocus
+               onChange={(e) => { setName(e.target.value); setPicked(false); }} />
+      )}
       {!asBlock && hints.length > 0 && (
         <ul className="-mt-1 divide-y divide-grid rounded-xl border border-grid bg-paper text-sm">
           {hints.map((g) => (
@@ -702,7 +714,9 @@ function AddSheet({ club, court, time, busy, defaultMinutes, onSave }: {
         </div>
       ) : (
         <p className="text-sm text-muted">
-          Not enough time before closing for a booking. Bookings here: {fmtDur(club.min_booking_minutes)} to {fmtDur(club.max_booking_minutes)}.
+          {asBlock
+            ? "Not enough time before closing for a block."
+            : `Not enough time before closing for a booking. Bookings here: ${fmtDur(club.min_booking_minutes)} to ${fmtDur(club.max_booking_minutes)}.`}
         </p>
       )}
       {!asBlock && opts.length > 0 && (
@@ -711,7 +725,7 @@ function AddSheet({ club, court, time, busy, defaultMinutes, onSave }: {
       <button type="submit" disabled={busy || slots === null} className={primary}>{busy ? "Saving…" : asBlock ? "Block this time" : "Add booking"}</button>
       {asBlock
         ? <button type="button" disabled={busy} onClick={() => setAsBlock(false)} className={backLink}>Back to booking</button>
-        : <button type="button" disabled={busy || blockOpts.length === 0} onClick={() => setAsBlock(true)} className={secondary}>Block this time instead</button>}
+        : <button type="button" disabled={busy} onClick={() => setAsBlock(true)} className={secondary}>Block this time instead</button>}
     </form>
   );
 }
