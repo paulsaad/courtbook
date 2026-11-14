@@ -45,7 +45,8 @@ for n in root.iter("node"):
             continue
         if not spoken(n):
             problems.append(f"{screen}: tappable {n.get('class')} {n.get('resource-id') or ''} at {n.get('bounds')} has nothing to announce")
-        elif not clipped and min(w, h) < 43.5 and n.get("class") != "android.widget.EditText":
+        # Selectable text (the About values) reports as clickable but is not a control.
+        elif not clipped and min(w, h) < 43.5 and n.get("class") not in ("android.widget.EditText", "android.widget.TextView"):
             small.append(f"{screen}: '{label[:40]}' is {w:.0f}x{h:.0f} dp")
 
 for p in problems:

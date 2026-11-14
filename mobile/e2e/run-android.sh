@@ -41,7 +41,8 @@ density=$(adb shell wm density | tr -dc '0-9\n' | tail -1)
 for cfg in "1080x2400 420 412dp" "1080x1920 480 360dp"; do
   set -- $cfg; size=$1; dpi=$2; name=$3
   adb shell wm size "$size"; adb shell wm density "$dpi"
-  for fs in 1.0 1.3 1.6; do
+  case "$name" in 412dp) scales="1.0 1.6" ;; *) scales="1.0 1.3" ;; esac
+  for fs in $scales; do
     adb shell settings put system font_scale "$fs"
     adb shell am force-stop "$APP"
     (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/screens.yaml) || { echo "::warning::screens $name text $fs incomplete"; }

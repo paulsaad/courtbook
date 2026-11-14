@@ -19,9 +19,12 @@ appId: app.courtbook.mobile.staging
 - scrollUntilVisible: { element: { id: "staging-email" } }
 - tapOn: { id: "staging-email" }
 - inputText: "${E2E_EMAIL}"
+- hideKeyboard
+- scrollUntilVisible: { element: { id: "staging-password" } }
 - tapOn: { id: "staging-password" }
 - inputText: "${E2E_PASSWORD}"
 - hideKeyboard
+- scrollUntilVisible: { element: { id: "staging-sign-in" } }
 - tapOn: { id: "staging-sign-in" }
 - extendedWaitUntil: { visible: "Reserve court", timeout: 30000 }
 - takeScreenshot: shots/04-ready
