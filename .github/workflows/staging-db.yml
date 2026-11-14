@@ -14,12 +14,16 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "check = connect and report; apply = apply every migration not yet applied (and the demo seed)"
+        description: "check = connect and report; apply = apply every migration not yet applied (and the demo seed); smoke = booking-protection checks with throwaway players, cleaned up after"
         type: choice
-        options: [check, apply]
+        options: [check, apply, smoke]
         default: check
       up_to:
         description: "apply only: highest migration number to apply, e.g. 0064 (leave empty for all on this branch)"
+        type: string
+        default: ""
+      confirm_ref:
+        description: "apply only: the staging project ref, exactly as 'check' reported it"
         type: string
         default: ""
 
@@ -42,11 +46,40 @@ jobs:
           if echo "$DB" | grep -q "$LIVE_REF"; then
             echo "::error::STAGING_DB_URL points at the LIVE project ($LIVE_REF). Nothing was done."; exit 1
           fi
-          echo "Branch ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}; target project: $(echo "$DB" | sed -E 's#.*postgres\.([a-z0-9]+):.*#\1#')"
+          ref=$(echo "$DB" | sed -nE 's#^postgres(ql)?://postgres\.([a-z0-9]+):.*#\2#p')
+          host=$(echo "$DB" | sed -nE 's#.*@([^:/]+).*#\1#p')
+          if [ -z "$ref" ]; then
+            echo "::error::Could not read a project ref from STAGING_DB_URL (expected the Session pooler form postgresql://postgres.<ref>:...)."; exit 1
+          fi
+          echo "Branch ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"
+          echo "Target project ref: $ref"
+          echo "Target host: $host"
+          echo "Live project ref:   $LIVE_REF (refused)"
+          echo "REF=$ref" >> "$GITHUB_ENV"
 
-      - name: Connect
+      - name: Connect (read only)
         run: |
-          psql "$DB" -v ON_ERROR_STOP=1 -At -c "select 'connected: ' || current_database() || ', ' || split_part(version(), ' ', 2)"
+          psql "$DB" -v ON_ERROR_STOP=1 -At -F ' ' <<'SQL'
+          select 'connected as', current_user, 'to', current_database(), '— PostgreSQL', current_setting('server_version');
+          select 'public tables:', count(*) from pg_tables where schemaname = 'public';
+          select 'staging marker present:', to_regclass('staging_meta.applied') is not null;
+          select 'auth users:', count(*) from auth.users;
+          SQL
+
+      - name: Refuse a database that is not ours to initialise
+        if: inputs.action == 'apply'
+        env:
+          CONFIRM: ${{ inputs.confirm_ref }}
+        run: |
+          if [ "$CONFIRM" != "$REF" ]; then
+            echo "::error::confirm_ref '$CONFIRM' does not match the target ref '$REF'. Run 'check' and copy the ref it reports."; exit 1
+          fi
+          tables=$(psql "$DB" -At -c "select count(*) from pg_tables where schemaname = 'public'")
+          marker=$(psql "$DB" -At -c "select to_regclass('staging_meta.applied') is not null")
+          # A database with tables we did not put there (for example the live one) is never touched.
+          if [ "$tables" != "0" ] && [ "$marker" != "t" ]; then
+            echo "::error::Target has $tables public tables and no staging marker: not a fresh staging database. Nothing was done."; exit 1
+          fi
           psql "$DB" -v ON_ERROR_STOP=1 -q -c "create schema if not exists staging_meta; create table if not exists staging_meta.applied (name text primary key, applied_at timestamptz not null default now(), sha text); revoke all on schema staging_meta from public, anon, authenticated;"
 
       - name: Apply migrations not yet applied
@@ -72,11 +105,15 @@ jobs:
           psql "$DB" -v ON_ERROR_STOP=1 -q -f supabase/seed.sql
           echo "demo seed applied (idempotent)"
 
+      - name: Booking-protection checks on staging
+        if: inputs.action == 'smoke'
+        run: bash supabase/tests/staging_smoke.sh
+
       - name: Report
         if: always()
         run: |
           psql "$DB" -At -F ' ' <<'SQL'
-          select 'migrations applied:', count(*), coalesce(max(name), 'none') from staging_meta.applied;
+          select 'migrations applied:', count(*), coalesce(min(name), '-'), '…', coalesce(max(name), 'none') from staging_meta.applied;
           select 'hold_slot signatures:', count(*) from pg_proc where proname = 'hold_slot' and pronamespace = 'public'::regnamespace;
           select 'hold_slot args:', pg_get_function_identity_arguments(oid) from pg_proc where proname = 'hold_slot' and pronamespace = 'public'::regnamespace;
           select 'public functions:', count(*) from pg_proc where pronamespace = 'public'::regnamespace;
@@ -84,3 +121,5 @@ jobs:
           select 'booking exclusion constraint present:', count(*) > 0 from pg_constraint where conrelid = to_regclass('public.bookings') and contype = 'x';
           select 'demo clubs:', string_agg(name || ' (' || payment_mode || ')', ', ') from public.clubs where is_demo;
           SQL
+          # one line per schema object with a hash of its definition, to compare with a local build
+          psql "$DB" -At -f supabase/tests/schema_fingerprint.sql || true
