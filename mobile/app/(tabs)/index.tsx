@@ -10,6 +10,7 @@ import { Icon } from "../../components/Icon";
 import { SportMark } from "../../components/SportMark";
 import { Ticket, TicketRow } from "../../components/Ticket";
 import { Button } from "../../components/Button";
+import { PendingReservationBanner } from "../../components/PendingReservation";
 import { useSession } from "../../lib/session";
 import { firstName, useProfileName } from "../../lib/profile";
 import { splitAgenda, useAgenda } from "../../lib/bookings";
@@ -50,6 +51,7 @@ export default function Home() {
       <Text variant="title" accessibilityRole="header">
         {userId ? (hello ? `Ready to play, ${hello}?` : "Ready to play?") : "Book a court in Lebanon"}
       </Text>
+      <PendingReservationBanner />
 
       <View style={styles.bookCard}>
         <Pressable accessibilityRole="button" accessibilityLabel="Book a court" onPress={() => router.navigate("/courts")} style={styles.bookHead}>

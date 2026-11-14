@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { PendingReservationBanner } from "../../components/PendingReservation";
 import { router } from "expo-router";
 import { formatInTimeZone } from "date-fns-tz";
 import { hhmm } from "@shared/time";
@@ -35,6 +36,7 @@ export default function Bookings() {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => void q.refetch()} tintColor={color.cedar} />}
     >
+      <PendingReservationBanner />
       <Segmented options={[{ key: "booking", label: "Courts" }, { key: "match", label: "Games" }]} value={view} onChange={setView} />
       {upcoming.length === 0 && past.length === 0 ? (
         view === "booking" ? (

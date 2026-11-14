@@ -11,6 +11,7 @@ import { SessionProvider } from "../lib/session";
 import { makeQueryClient, wireAppLifecycle } from "../lib/query";
 import { trackPath } from "../lib/authRecovery";
 import { OfflineBanner } from "../components/OfflineBanner";
+import { PendingReservationWatcher } from "../components/PendingReservation";
 import { color, font } from "../lib/theme";
 
 wireAppLifecycle();
@@ -40,6 +41,7 @@ export default function RootLayout() {
         <SessionProvider>
           <StatusBar style="dark" />
           <PathTracker />
+          <PendingReservationWatcher />
           <View style={{ flex: 1, backgroundColor: color.ground }}>
             <Stack
               screenOptions={{

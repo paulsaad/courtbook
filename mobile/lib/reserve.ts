@@ -59,9 +59,14 @@ async function callOnce(a: Attempt): Promise<{ data: Row | null; error: unknown 
   return { data: row, error };
 }
 
+/** Calls per reserve() and the waits between them (600 ms, 1.2 s). */
+export const RESERVE_ATTEMPTS = 3;
+const defaultWait = (n: number) => 600 * 2 ** n;
+export const RESERVE_WAITS_MS = Array.from({ length: RESERVE_ATTEMPTS - 1 }, (_, n) => defaultWait(n)).reduce((a, b) => a + b, 0);
+
 export async function reserve(a: Attempt, opts: { attempts?: number; waitMs?: (n: number) => number } = {}): Promise<ReserveResult> {
-  const attempts = opts.attempts ?? 3;
-  const wait = opts.waitMs ?? ((n) => 600 * 2 ** n);
+  const attempts = opts.attempts ?? RESERVE_ATTEMPTS;
+  const wait = opts.waitMs ?? defaultWait;
   let last: Failure = { kind: "unknown", message: "Something went wrong. Try again." };
 
   for (let n = 0; n < attempts; n++) {

@@ -14,6 +14,7 @@ import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { Segmented } from "../../components/Segmented";
 import { ClubInfoView } from "../../components/ClubInfoView";
 import { useClubInfo } from "../../lib/clubInfo";
+import { PendingReservationBanner } from "../../components/PendingReservation";
 import { clubsFromSlots, durationLabel, durationOptions, partOfDay, sameInstant, tilesFor } from "../../lib/courts";
 import { BEIRUT, money, tilePriceLabel, useClubMode, useDaySlots, useQuote, useTilePrices } from "../../lib/queries";
 import { useSession } from "../../lib/session";
@@ -58,6 +59,7 @@ export default function Club() {
   const queryClient = useQueryClient();
   const mode = useClubMode(club?.id ?? null);
   const res = useReservation({
+    clubId: p.id ?? null,
     onReserved: (bookingId) => {
       haptic.success();
       void queryClient.invalidateQueries({ queryKey: ["my-agenda"] });
@@ -123,14 +125,14 @@ export default function Club() {
   const isDemo = club?.isDemo ?? infoClub?.is_demo ?? false;
 
   function onReserve() {
-    if (!tile || !court || !dur || !club || locked) return;
+    if (!tile || !court || !dur || !club || locked || res.blockedBy) return;
     if (session.status !== "signed-in") {
       router.push({ pathname: "/sign-in" });
       return;
     }
     void res.submit({
-      key: selKey, mode: mode.data ?? "", clubId: club.id, courtId: court.id, courtName: court.name,
-      date, start: tile.start, minutes: dur, price: livePrice ?? null,
+      key: selKey, mode: mode.data ?? "", clubId: club.id, clubName: club.name, timezone: club.timezone,
+      courtId: court.id, courtName: court.name, date, start: tile.start, minutes: dur, price: livePrice ?? null,
     });
   }
 
@@ -140,10 +142,12 @@ export default function Club() {
     : res.phase === "checking" ? "Checking…"
     : res.phase === "uncertain" ? "Check now"
     : session.status !== "signed-in" ? "Sign in to reserve"
+    : res.blockedBy ? "Earlier booking not confirmed"
     : mode.isPending ? "Checking the club…"
     : !atDesk ? "Reserve on the website for now"
     : "Reserve court";
   const groups = groupTiles(tiles, club?.timezone ?? BEIRUT);
+  const tz = club?.timezone ?? res.pending?.timezone ?? BEIRUT;
 
   return (
     <View style={styles.page}>
@@ -174,6 +178,7 @@ export default function Club() {
         refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => void q.refetch()} tintColor={color.cedar} />}
       >
         <View ref={content} collapsable={false}>
+        {res.blockedBy && <PendingReservationBanner style={{ marginHorizontal: 16, marginTop: 12 }} />}
         <View style={styles.head}>
           {(town || cutoff !== null) && (
             <Text variant="secondary">
@@ -237,7 +242,7 @@ export default function Club() {
       </ScrollView>
       )}
 
-      {tab === "book" && shown && club && (
+      {tab === "book" && shown && (club || res.pending) && (
         <View testID="booking-panel" style={[styles.panel, { paddingBottom: insets.bottom + 14 }]}>
           <View style={styles.courtRow} accessibilityRole="radiogroup">
             <Text variant="label" style={{ marginRight: 10, flexShrink: 0 }} numberOfLines={1}>Court</Text>
@@ -254,7 +259,7 @@ export default function Club() {
           {!locked && freeCourts.length === 1 && <Text variant="caption">The only court free at this time.</Text>}
           <View style={styles.summaryRow}>
             <View style={{ flexShrink: 1 }}>
-              <Text variant="strong">{shortDate(shown.date)} · {hhmm(shown.start, club.timezone)}–{hhmm(new Date(Date.parse(shown.start) + shown.minutes * 60_000), club.timezone)}</Text>
+              <Text variant="strong">{shortDate(shown.date)} · {hhmm(shown.start, tz)}–{hhmm(new Date(Date.parse(shown.start) + shown.minutes * 60_000), tz)}</Text>
               <Text variant="secondary">{[sport ? sportName(sport) : null, shown.courtName, durationLabel(shown.minutes)].filter(Boolean).join(" · ")}</Text>
             </View>
             <View style={{ alignItems: "flex-end" }}>
@@ -269,16 +274,16 @@ export default function Club() {
             </View>
           </View>
           {res.problem ? (
-            <Text style={res.phase === "idle" ? styles.problem : styles.pending} accessibilityRole="alert" accessibilityLiveRegion="polite">{res.problem}</Text>
+            <Text style={res.phase === "idle" && !res.blockedBy ? styles.problem : styles.pending} accessibilityRole="alert" accessibilityLiveRegion="polite">{res.problem}</Text>
           ) : atDesk ? (
-            <Text variant="caption">Nothing is charged in the app. Free cancellation up to {club.cancelCutoffHours} h before.</Text>
+            <Text variant="caption">Nothing is charged in the app.{cutoff !== null ? ` Free cancellation up to ${cutoff} h before.` : ""}</Text>
           ) : mode.isSuccess ? (
             <Text variant="caption">This club takes payment in the app. That arrives in the next update — reserve it on the website for now.</Text>
           ) : null}
           <Button
             label={reserveLabel}
             busy={res.phase === "sending" || res.phase === "checking"}
-            disabled={res.phase === "idle" && session.status === "signed-in" && (!atDesk || shown.price === null)}
+            disabled={res.phase === "idle" && session.status === "signed-in" && (!!res.blockedBy || !atDesk || shown.price === null)}
             onPress={res.phase === "uncertain" ? () => void res.check() : onReserve}
           />
         </View>

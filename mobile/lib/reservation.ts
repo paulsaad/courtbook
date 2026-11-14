@@ -1,123 +1,55 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { onlineManager } from "@tanstack/react-query";
-import { findByToken, newAttempt, reserve, type Attempt } from "./reserve";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { MESSAGES, reservations, type Phase, type Selection, type SubmitResult } from "./pendingReservation";
 
-/** What the player asked for, frozen at the moment they tapped Reserve. */
-export type Selection = {
-  key: string; // court|start|minutes — a different key is a different reservation
-  mode: string;
-  clubId: string;
-  courtId: string;
-  courtName: string;
-  date: string;
-  start: string;
-  minutes: number;
-  price: number | null;
-};
+export { MESSAGES, type Phase, type Selection } from "./pendingReservation";
 
 /**
- * idle      — nothing in flight; the selection can change.
- * sending   — the request (and its automatic retries) are in flight.
- * uncertain — no answer: the booking may or may not exist. Checked as soon as we are online.
- * checking  — reading the database for the attempt's token.
- * While not idle the selection is locked and the panel shows `pending`, the selection that was sent.
+ * A club screen's view of the player's reservation. The attempt itself lives in the app-wide store
+ * (pendingReservation.ts), so it outlives this screen; this hook only decides what the screen shows:
+ *   - an unresolved attempt at this club → locked, showing exactly what was sent;
+ *   - an unresolved attempt at another club → `blockedBy`: nothing can be reserved here until then;
+ *   - an attempt at this club that just ended → the booking opens, or the reason is shown.
  */
-export type Phase = "idle" | "sending" | "uncertain" | "checking";
+export function useReservation({ clubId, onReserved }: { clubId: string | null; onReserved: (bookingId: string, status: string) => void }) {
+  const store = reservations();
+  const s = useSyncExternalStore(store.subscribe, store.getState);
+  const mine = s.pending && s.userId && s.pending.userId === s.userId ? s.pending : null;
+  const here = !!mine && !!clubId && mine.sel.clubId === clubId;
+  const phase: Phase = here ? s.phase : "idle";
 
-export const MESSAGES = {
-  offline: "You're offline, so nothing was sent. Reserve again when you're back online.",
-  uncertain: "We couldn't confirm your booking yet. We'll check as soon as you're back online.",
-  checking: "Checking whether your booking went through…",
-  absent: "Your booking didn't go through — nothing was reserved. You can try again.",
-} as const;
-
-export function useReservation({ onReserved }: { onReserved: (bookingId: string, status: string) => void }) {
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [problem, setProblem] = useState<string | null>(null);
-  const [pending, setPending] = useState<Selection | null>(null);
-  // The attempt and its token outlive a failure: asking again for the same selection reuses the
-  // token, so a request that did reach the database is returned instead of being made twice.
-  const attempt = useRef<{ sel: Selection; a: Attempt } | null>(null);
-  const phaseRef = useRef<Phase>("idle");
-  const busy = useRef(false);
-  const go = (p: Phase) => { phaseRef.current = p; setPhase(p); };
   const reserved = useRef(onReserved);
   reserved.current = onReserved;
-
-  const finish = useCallback((bookingId: string, status: string) => {
-    attempt.current = null;
-    setPending(null);
-    setProblem(null);
-    go("idle");
-    reserved.current(bookingId, status);
-  }, []);
-
-  const check = useCallback(async () => {
-    const cur = attempt.current;
-    if (!cur || busy.current) return;
-    busy.current = true;
-    go("checking");
-    setProblem(MESSAGES.checking);
-    const r = await findByToken(cur.a.token);
-    busy.current = false;
-    if (r.kind === "found") return finish(r.bookingId, r.status);
-    if (r.kind === "absent") {
-      // An answer from the database: nothing was made. The token is kept for "try again".
-      setPending(null);
-      setProblem(MESSAGES.absent);
-      return go("idle");
+  // A booking made from this club's screen opens its confirmation here; one that resolves while the
+  // player is elsewhere is announced by the banner instead.
+  useEffect(() => {
+    const o = s.outcome;
+    if (o?.kind === "booked" && clubId && o.sel.clubId === clubId && o.userId === s.userId) {
+      store.acknowledge();
+      reserved.current(o.bookingId, o.status);
     }
-    setProblem(MESSAGES.uncertain);
-    go("uncertain");
-  }, [finish]);
+  }, [s.outcome, s.userId, clubId, store]);
 
-  const submit = useCallback(async (sel: Selection) => {
-    if (busy.current || phaseRef.current !== "idle") return;
-    if (!onlineManager.isOnline()) {
-      setProblem(MESSAGES.offline);
-      return;
-    }
-    if (!attempt.current || attempt.current.sel.key !== sel.key) {
-      const start = new Date(sel.start);
-      attempt.current = {
-        sel,
-        a: newAttempt({ mode: sel.mode, clubId: sel.clubId, courtId: sel.courtId, start, end: new Date(start.getTime() + sel.minutes * 60_000) }),
-      };
-    }
-    const cur = attempt.current;
-    busy.current = true;
-    setPending(cur.sel);
-    setProblem(null);
-    go("sending");
-    const r = await reserve(cur.a);
-    busy.current = false;
-    if (r.kind === "reserved") return finish(r.value.bookingId, "confirmed");
-    if (r.kind === "refused") {
-      attempt.current = null; // the database said no; a new tap is a new attempt
-      setPending(null);
-      setProblem(r.failure.message);
-      return go("idle");
-    }
-    setProblem(MESSAGES.uncertain);
-    go("uncertain");
-    if (onlineManager.isOnline()) void check();
-  }, [check, finish]);
+  // Whatever this screen said about how the last attempt ended was seen here; not repeated elsewhere.
+  useEffect(() => () => { if (clubId) store.dismiss(clubId); }, [clubId, store]);
 
-  // When the connection comes back, find out what happened — never assume.
-  useEffect(
-    () => onlineManager.subscribe((online) => {
-      if (online && phaseRef.current === "uncertain") void check();
-    }),
-    [check],
-  );
+  const ended = s.outcome?.kind === "not-booked" && s.outcome.sel.clubId === clubId && s.outcome.userId === s.userId ? s.outcome.message : null;
+  const notice = s.notice?.clubId === clubId ? s.notice.message : null;
+  const problem = here ? s.note : mine ? MESSAGES.blocked : ended ?? notice;
+
+  const submit = useCallback((sel: Selection): Promise<SubmitResult> => store.submit(sel), [store]);
+  const check = useCallback(() => store.check(), [store]);
 
   return {
     phase,
+    /** While this club's reservation is in flight or unconfirmed, nothing the player sent can change. */
     locked: phase !== "idle",
-    pending,
+    /** What was sent, while it is unresolved. */
+    pending: here ? mine.sel : null,
+    /** An unresolved reservation at another club: nothing can be reserved here until it is settled. */
+    blockedBy: mine && !here ? mine.sel : null,
     problem,
     submit,
     check,
-    clearProblem: () => { if (phaseRef.current === "idle") setProblem(null); },
+    clearProblem: () => { if (clubId && !here) store.dismiss(clubId); },
   };
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { PendingReservationBanner } from "../../components/PendingReservation";
 import { router, useLocalSearchParams } from "expo-router";
 import { hhmm } from "@shared/time";
 import { Text } from "../../components/Text";
@@ -37,6 +38,7 @@ export default function Courts() {
       contentContainerStyle={{ paddingBottom: 32 }}
       refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => void q.refetch()} tintColor={color.cedar} />}
     >
+      <PendingReservationBanner style={{ marginHorizontal: 16, marginTop: 12 }} />
       <View style={styles.filters}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           <Chip tone="sport" label="All sports" selected={sport === null} onPress={() => setSport(null)} />
