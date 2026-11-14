@@ -15,8 +15,10 @@ import { PendingReservationWatcher } from "../components/PendingReservation";
 import { TestFaultBanner } from "../components/TestFaultBanner";
 import { ConnectionBlocked } from "../components/ConnectionBlocked";
 import { connectionBlocked } from "../lib/supabase";
+import { startCrashReporting, wrapRoot } from "../lib/crash";
 import { color, font } from "../lib/theme";
 
+startCrashReporting();
 wireAppLifecycle();
 // Keep the splash screen up until the typefaces are ready, so no screen flashes in system fonts.
 void SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -28,7 +30,7 @@ function PathTracker() {
   return null;
 }
 
-export default function RootLayout() {
+function RootLayout() {
   const [queryClient] = useState(makeQueryClient);
   const [fontsLoaded, fontError] = useFonts(FONTS);
   const ready = fontsLoaded || fontError !== null;
@@ -71,3 +73,5 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
+export default wrapRoot(RootLayout);
