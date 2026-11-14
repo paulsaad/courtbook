@@ -39,11 +39,12 @@ begin
   end if;
 end $pre$;
 
--- ===== Reviewed assignments: exception → club (from exception_inspect.sql, approved by Paul) =====
--- Filled in only after review. Placeholders are not valid ids, so an unfilled file stops here.
+-- ===== Reviewed assignment: exception → club (exception_inspect.sql on live, approved by Paul 2026-11-14) =====
+-- Coach Bol's whole-day closure on 2026-11-19 → Batroun Padel & Tennis Club, the only club the coach
+-- has ever been linked to (status 'removed') and the only club where the coach has weekly hours.
 create temp table reviewed_exception_club (exception_id uuid primary key, coach_id uuid not null, club_id uuid not null) on commit drop;
 insert into reviewed_exception_club (exception_id, coach_id, club_id) values
-  ('REVIEWED-EXCEPTION-ID', 'REVIEWED-COACH-ID', 'REVIEWED-CLUB-ID');
+  ('1aedac0e-ee88-4b9a-a837-fdc038452abf', '19d1d3bf-ddbc-4c0a-b17c-280bd96b31b6', 'e73352f9-6ea1-4f97-b2f8-0b8bc26abdc0');
 
 create temp table exceptions_before on commit drop as select count(*) as n from availability_exceptions;
 
@@ -57,6 +58,12 @@ begin
   where e.coach_id not in (select coach_id from coach_clubs where status = 'approved' group by coach_id having count(*) = 1);
   if covered <> unassignable or (select count(*) from reviewed_exception_club) <> unassignable then
     raise exception 'STOPPED, nothing changed: % exception(s) need a club, % reviewed assignment(s) match them', unassignable, covered;
+  end if;
+  -- the exception must still be exactly the one that was reviewed
+  if not exists (select 1 from availability_exceptions where id = '1aedac0e-ee88-4b9a-a837-fdc038452abf'
+                 and coach_id = '19d1d3bf-ddbc-4c0a-b17c-280bd96b31b6' and date = '2026-11-19'
+                 and start_time is null and end_time is null and available = false) then
+    raise exception 'STOPPED, nothing changed: the reviewed exception is not as inspected';
   end if;
   -- an assignment must name a club the coach is actually linked to
   select count(*) into bad from reviewed_exception_club m
@@ -155,6 +162,10 @@ begin
      or exists (select 1 from availability_exceptions where club_id is null) then
     raise exception 'ROLLED BACK: an availability exception would have been lost or left without a club';
   end if;
+  if not exists (select 1 from availability_exceptions where id = '1aedac0e-ee88-4b9a-a837-fdc038452abf'
+                 and club_id = 'e73352f9-6ea1-4f97-b2f8-0b8bc26abdc0' and date = '2026-11-19' and available = false) then
+    raise exception 'ROLLED BACK: the reviewed exception is not kept with Batroun Padel & Tennis Club';
+  end if;
   if (select pg_get_triggerdef(oid) from pg_trigger where tgname = 'bookings_slot_validation' and tgrelid = 'public.bookings'::regclass)
      is distinct from 'CREATE TRIGGER bookings_slot_validation BEFORE INSERT OR UPDATE OF court_id, start_at, end_at ON public.bookings FOR EACH ROW EXECUTE FUNCTION bookings_validate_slot()' then
     raise exception 'ROLLED BACK: trigger is not the repository version';
@@ -181,4 +192,4 @@ end $post$;
 
 notify pgrst, 'reload schema';
 commit;
-select 'drift repaired: trigger restored, 0021 and 0023 applied' as result;
+select 'drift repaired: trigger restored, 0021 and 0023 applied, 1 coach exception kept at Batroun' as result;
