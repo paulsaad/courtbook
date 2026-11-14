@@ -57,7 +57,8 @@ const day = new Date(Date.now() + 3 * 86400e3).toISOString().slice(0, 10);
 const at = (hhmm) => new Date(`${day}T${hhmm}:00+02:00`).toISOString(); // Beirut is UTC+2 in November
 
 function cleanup() {
-  sql(`delete from payments where booking_id in (select b.id from bookings b join auth.users u on u.id = b.player_id where u.email like 'api-%@courtbook.test');
+  sql(`drop function if exists public.hold_slot(uuid, uuid, timestamptz, timestamptz);
+       delete from payments where booking_id in (select b.id from bookings b join auth.users u on u.id = b.player_id where u.email like 'api-%@courtbook.test');
        delete from bookings where player_id in (select id from auth.users where email like 'api-%@courtbook.test');
        delete from auth.users where email like 'api-%@courtbook.test';
        update clubs set payment_mode='${MODE}' where id='${CLUB}';`);
@@ -140,6 +141,16 @@ try {
   const app = (u, court, s, e, token) => u.client.rpc("hold_slot", { p_club: CLUB, p_court: court, p_start: at(s), p_end: at(e), p_token: token });
   const b0 = await web(U2, COURT3, "09:00", "10:00");
   record("B1", "the website's call (4 named arguments) works: no 'could not choose' ambiguity", !b0.error && !!rowOf(b0)?.booking_id, errOf(b0) ?? `status ${b0.status}`);
+  // B1 must be able to fail: put back a second, 4-argument hold_slot (the situation 0065 removes)
+  // for a moment, and the very same call must be refused as ambiguous.
+  sql(`create function public.hold_slot(p_club uuid, p_court uuid, p_start timestamptz, p_end timestamptz)
+       returns table (booking_id uuid) language sql as $$ select null::uuid $$; notify pgrst, 'reload schema';`);
+  await new Promise((res) => setTimeout(res, 3000));
+  const amb = await web(U2, COURT3, "11:00", "12:00");
+  sql(`drop function public.hold_slot(uuid, uuid, timestamptz, timestamptz); notify pgrst, 'reload schema';`);
+  await new Promise((res) => setTimeout(res, 3000));
+  record("B1m", "...and with an old-style overload added back for a moment, that same call fails as ambiguous (so B1 can fail)",
+    !!amb.error && (amb.error.code === "PGRST203" || /could not choose|ambiguous|not unique/i.test(errOf(amb))), `${amb.error?.code ?? ""} ${errOf(amb) ?? "no error"}`);
   const b0b = await web(U2, COURT3, "12:00", "13:00");
   record("B2", "a second website hold replaces the first, as before",
     !b0b.error && sql(`select status from bookings where id='${rowOf(b0).booking_id}'`) === "expired" && sql(`select status from bookings where id='${rowOf(b0b).booking_id}'`) === "pending");
