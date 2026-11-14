@@ -8,6 +8,8 @@ import { Chip } from "../../components/Chip";
 import { DateStrip } from "../../components/DateStrip";
 import { SportMark, SPORTS } from "../../components/SportMark";
 import { CourtLines } from "../../components/CourtLines";
+import { Image } from "expo-image";
+import { useClubCovers } from "../../lib/clubInfo";
 import { Freshness } from "../../components/Freshness";
 import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { clubsFromSlots, type ClubDay } from "../../lib/courts";
@@ -31,6 +33,7 @@ export default function Courts() {
   const q = useDaySlots(date, sport);
   const clubs = useMemo(() => clubsFromSlots(q.data ?? []), [q.data]);
   const open = clubs.filter((c) => c.starts.length > 0);
+  const covers = useClubCovers(open.map((c) => c.id));
 
   return (
     <ScrollView
@@ -66,14 +69,14 @@ export default function Courts() {
         <Empty title="Nothing free that day" body="Try another day or another sport." />
       ) : (
         <View style={styles.list}>
-          {open.map((c) => <ClubCard key={c.id} club={c} date={date} sport={sport} />)}
+          {open.map((c) => <ClubCard key={c.id} club={c} date={date} sport={sport} cover={covers.data?.get(c.id) ?? null} />)}
         </View>
       )}
     </ScrollView>
   );
 }
 
-function ClubCard({ club, date, sport }: { club: ClubDay; date: string; sport: string | null }) {
+function ClubCard({ club, date, sport, cover }: { club: ClubDay; date: string; sport: string | null; cover: string | null }) {
   const go = (at?: string) =>
     router.push({ pathname: "/club/[id]", params: { id: club.id, name: club.name, date, ...(sport ? { sport } : {}), ...(at ? { at } : {}) } });
   const shown = club.starts.slice(0, 3);
@@ -87,7 +90,11 @@ function ClubCard({ club, date, sport }: { club: ClubDay; date: string; sport: s
     <View style={styles.card}>
       <Pressable accessibilityRole="button" accessibilityLabel={[club.name, club.town, courts, from !== null ? `from ${from} dollars an hour` : null].filter(Boolean).join(", ")} onPress={() => go()} style={styles.cardTop}>
         <View style={styles.thumb}>
-          <CourtLines opacity={0.3} width={64} height={64} right={0} top={0} />
+          {cover ? (
+            <Image source={{ uri: cover }} style={styles.thumbImg} contentFit="cover" transition={150} accessible={false} />
+          ) : (
+            <CourtLines opacity={0.3} width={64} height={64} right={0} top={0} />
+          )}
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <View style={styles.nameRow}>
@@ -127,6 +134,7 @@ const styles = StyleSheet.create({
   card: { backgroundColor: color.card, borderRadius: radius.lg, borderWidth: 1, borderColor: color.line, padding: 14 },
   cardTop: { flexDirection: "row", gap: 12 },
   thumb: { width: 64, height: 64, borderRadius: 12, backgroundColor: color.cedarDeep, overflow: "hidden" },
+  thumbImg: { width: 64, height: 64 },
   nameRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: 8 },
   name: { fontFamily: font.bold, fontSize: 17, lineHeight: 22, color: color.ink, flexShrink: 1 },
   from: { fontFamily: font.regular, fontSize: 13, color: color.muted },

@@ -18,3 +18,10 @@ export function firstName(name: string | null | undefined): string | null {
   const first = (name ?? "").trim().split(/\s+/)[0];
   return first ? first : null;
 }
+
+/** "Paul Saad" → "PS"; "paul.saad@…" → "PS"; one word → its first letter. */
+export function initials(s: string | null): string {
+  const words = (s ?? "").split("@")[0].trim().split(/[\s._-]+/).filter(Boolean);
+  const letters = (words.length > 1 ? [words[0], words[words.length - 1]] : words.slice(0, 1)).map((w) => w[0]!.toUpperCase());
+  return letters.join("") || "?";
+}

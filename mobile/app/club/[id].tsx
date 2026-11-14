@@ -321,7 +321,9 @@ const styles = StyleSheet.create({
   group: { paddingHorizontal: 20, paddingTop: space.lg },
   groupTitle: { marginBottom: 8 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  cell: { width: "31.8%" },
+  // Three columns: 3 × 31.5% + two 8 pt gaps fit a 335 pt row (iPhone SE). At 31.8% they did not,
+  // and the SE showed two columns with an empty third.
+  cell: { width: "31.5%" },
   panel: { backgroundColor: color.card, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, borderTopWidth: 1, borderColor: color.line, paddingHorizontal: 20, paddingTop: 14, gap: 10 },
   courtRow: { flexDirection: "row", alignItems: "center" },
   summaryRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", gap: 12 },

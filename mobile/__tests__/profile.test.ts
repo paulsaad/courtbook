@@ -11,3 +11,14 @@ describe("firstName", () => {
     expect(firstName("   ")).toBeNull();
   });
 });
+
+describe("initials", () => {
+  const { initials } = jest.requireActual("../lib/profile") as typeof import("../lib/profile");
+  it("first and last name, an email, one word, nothing", () => {
+    expect(initials("Paul Saad")).toBe("PS");
+    expect(initials("Jean-Marc el Khoury")).toBe("JK");
+    expect(initials("paul.saad@example.com")).toBe("PS");
+    expect(initials("Rami")).toBe("R");
+    expect(initials(null)).toBe("?");
+  });
+});

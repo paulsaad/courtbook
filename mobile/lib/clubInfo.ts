@@ -78,6 +78,26 @@ export function useClubInfo(clubId: string | null) {
   });
 }
 
+/** Cover photos for the clubs on a list, by club id (clubs without one are absent). */
+export function useClubCovers(clubIds: string[]) {
+  const ids = [...new Set(clubIds)].sort();
+  return useQuery({
+    queryKey: ["club-covers", ids.join(",")],
+    enabled: ids.length > 0,
+    staleTime: 10 * 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("clubs").select("id, cover_url").in("id", ids);
+      if (error) throw error;
+      const out = new Map<string, string>();
+      for (const r of (data ?? []) as { id: string; cover_url: string | null }[]) {
+        const u = imageUrl(r.cover_url);
+        if (u) out.set(r.id, u);
+      }
+      return out;
+    },
+  });
+}
+
 /**
  * Where to fetch an image. Stored images live in the public club-media bucket; a cover that predates
  * managed storage keeps its own address. clubs.cover_url holds either a full address or a path on

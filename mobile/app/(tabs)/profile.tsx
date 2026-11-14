@@ -5,12 +5,13 @@ import * as Updates from "expo-updates";
 import { supabase } from "../../lib/supabase";
 import { useSession } from "../../lib/session";
 import { currentBuild } from "../../lib/buildInfo";
+import { initials, useProfileName } from "../../lib/profile";
 import { Button } from "../../components/Button";
 import { Loading } from "../../components/StateView";
 import { SignInPrompt } from "../../components/SignInPrompt";
 import { Segmented } from "../../components/Segmented";
 import { FAULT_LABEL, currentFault, faultsAvailable, setFault, subscribeFault, type Fault } from "../../lib/testFaults";
-import { color, radius, space, text, MAX_FONT_SCALE } from "../../lib/theme";
+import { color, font, radius, space, text, MAX_FONT_SCALE } from "../../lib/theme";
 
 /**
  * M1: account and About. About is what Paul reads to say exactly which code he tested — the update
@@ -21,6 +22,9 @@ export default function Profile() {
   const [busy, setBusy] = useState(false);
   const build = currentBuild();
   const fault = useSyncExternalStore(subscribeFault, currentFault);
+  const name = useProfileName(session.status === "signed-in" ? session.session.user.id : null);
+  const email = session.status === "signed-in" ? session.session.user.email ?? null : null;
+  const shownName = name.data?.trim() || null;
 
   async function signOut() {
     setBusy(true);
@@ -37,10 +41,15 @@ export default function Profile() {
         <SignInPrompt title="Your profile" body="Sign in to set your levels, see your activity and manage your account." />
       ) : (
         <View style={styles.card}>
-          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.label}>Signed in as</Text>
-          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.value} selectable>
-            {session.session.user.email ?? "your account"}
-          </Text>
+          <View style={styles.who}>
+            <View style={styles.avatar} accessible={false}>
+              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.initials}>{initials(shownName ?? email)}</Text>
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.name} numberOfLines={2}>{shownName ?? "Signed in"}</Text>
+              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.label} selectable numberOfLines={1}>{email ?? "your account"}</Text>
+            </View>
+          </View>
           <Button label="Sign out" variant="secondary" busy={busy} onPress={signOut} />
         </View>
       )}
@@ -82,6 +91,10 @@ export default function Profile() {
 }
 
 const styles = StyleSheet.create({
+  who: { flexDirection: "row", alignItems: "center", gap: space.md },
+  avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: color.night, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: color.red },
+  initials: { fontFamily: font.display, fontSize: 20, color: color.onDark },
+  name: { fontFamily: font.display, fontSize: 20, lineHeight: 25, color: color.ink },
   page: { flex: 1, backgroundColor: color.ground },
   content: { padding: space.xl, gap: space.md, paddingBottom: space.xxxl },
   card: { backgroundColor: color.card, borderRadius: radius.lg, borderWidth: 1, borderColor: color.line, padding: space.lg, gap: space.md },
