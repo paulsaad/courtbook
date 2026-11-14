@@ -8,7 +8,9 @@ import { haptic } from "../lib/haptics";
 /**
  * One start time on the availability grid. Four states, each told apart by words and shape as
  * well as colour (approved design): free (outline, "3 courts"), limited (amber, "1 court free"),
- * selected (filled, tick, "selected"), booked (hatched, struck through, "Booked", not pressable).
+ * selected (filled, tick, "selected"), not free (hatched, struck through, "Not free", not pressable).
+ * "Not free" rather than "Booked": the availability data cannot tell a booking from the club being
+ * closed, and a screen must not assert what the system does not know.
  *
  * The counts describe what the last successful read returned. Nothing here promises the slot:
  * the server decides when the player reserves.
@@ -21,24 +23,26 @@ export function tileState(freeCourts: number, selected: boolean): TileState {
   return freeCourts === 1 ? "limited" : "free";
 }
 
-export function tileLabel(state: TileState, price: string, freeCourts: number): string {
+/** `price` is optional: the exact total comes from the server quote once a time is chosen. */
+export function tileLabel(state: TileState, price: string | null, freeCourts: number): string {
+  const p = price ? `${price} · ` : "";
   switch (state) {
-    case "booked": return "Booked";
-    case "selected": return `${price} · selected`;
-    case "limited": return `${price} · 1 court free`;
-    case "free": return `${price} · ${freeCourts} courts`;
+    case "booked": return "Not free";
+    case "selected": return `${p}selected`;
+    case "limited": return `${p}1 court free`;
+    case "free": return `${p}${freeCourts} courts`;
   }
 }
 
-export function tileAccessibilityLabel(time: string, state: TileState, price: string, freeCourts: number): string {
-  if (state === "booked") return `${time}, booked`;
+export function tileAccessibilityLabel(time: string, state: TileState, price: string | null, freeCourts: number): string {
+  if (state === "booked") return `${time}, not free`;
   const courts = freeCourts === 1 ? "1 court free" : `${freeCourts} courts free`;
-  return `${time}, ${price}, ${courts}${state === "selected" ? ", selected" : ""}`;
+  return `${time}, ${price ? `${price}, ` : ""}${courts}${state === "selected" ? ", selected" : ""}`;
 }
 
-type Props = { time: string; price: string; freeCourts: number; selected: boolean; onPress: () => void };
+type Props = { time: string; price?: string | null; freeCourts: number; selected: boolean; onPress: () => void };
 
-export function TimeTile({ time, price, freeCourts, selected, onPress }: Props) {
+export function TimeTile({ time, price = null, freeCourts, selected, onPress }: Props) {
   const state = tileState(freeCourts, selected);
   const s = look[state];
   return (

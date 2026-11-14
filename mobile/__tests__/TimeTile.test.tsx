@@ -13,7 +13,8 @@ describe("tile states", () => {
     expect(tileLabel("free", "$30", 3)).toBe("$30 · 3 courts");
     expect(tileLabel("limited", "$30", 1)).toBe("$30 · 1 court free");
     expect(tileLabel("selected", "$30", 2)).toBe("$30 · selected");
-    expect(tileLabel("booked", "$30", 0)).toBe("Booked");
+    expect(tileLabel("booked", "$30", 0)).toBe("Not free");
+    expect(tileLabel("free", null, 3)).toBe("3 courts");
     expect(tileLabel("limited", "$30", 1)).not.toMatch(/last|guaranteed|yours/i);
   });
 });
@@ -28,7 +29,7 @@ describe("TimeTile", () => {
   it("cannot be chosen when booked", async () => {
     const onPress = jest.fn();
     await render(<TimeTile time="19:00" price="$30" freeCourts={0} selected={false} onPress={onPress} />);
-    await fireEvent.press(screen.getByRole("button", { name: "19:00, booked" }));
+    await fireEvent.press(screen.getByRole("button", { name: "19:00, not free" }));
     expect(onPress).not.toHaveBeenCalled();
   });
 

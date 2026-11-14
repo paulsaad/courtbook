@@ -1,196 +1,128 @@
-import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Link } from "expo-router";
-import { hhmm, todayIn } from "@shared/time";
-import { supabase, configNote, supabaseHost } from "../../lib/supabase";
-import { useSession } from "../../lib/session";
-import type { DaySlot } from "../../lib/types";
+import { useMemo, useState } from "react";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { router } from "expo-router";
+import { hhmm } from "@shared/time";
+import { Text } from "../../components/Text";
+import { Chip } from "../../components/Chip";
+import { DateStrip } from "../../components/DateStrip";
+import { SportMark, SPORTS } from "../../components/SportMark";
+import { CourtLines } from "../../components/CourtLines";
+import { Freshness } from "../../components/Freshness";
+import { Empty, ErrorState, Loading } from "../../components/StateView";
+import { clubsFromSlots, type ClubDay } from "../../lib/courts";
+import { BEIRUT, useDaySlots } from "../../lib/queries";
+import { bookingDays, sportName } from "../../lib/days";
+import { color, font, radius, space } from "../../lib/theme";
 
-const TZ = "Asia/Beirut";
-
-type Grouped = {
-  club_id: string;
-  club_name: string;
-  town: string | null;
-  is_demo: boolean | null;
-  timezone: string;
-  price_from: number | null;
-  slots: DaySlot[];
-};
-
-function groupByClub(rows: DaySlot[]): Grouped[] {
-  const out: Grouped[] = [];
-  for (const row of rows) {
-    let club = out.find((c) => c.club_id === row.club_id);
-    if (!club) {
-      club = {
-        club_id: row.club_id,
-        club_name: row.club_name,
-        town: row.town,
-        is_demo: row.is_demo,
-        timezone: row.timezone,
-        price_from: row.price_from,
-        slots: [],
-      };
-      out.push(club);
-    }
-    club.slots.push(row);
-  }
-  return out;
-}
-
-export default function Availability() {
-  const session = useSession();
-  const [rows, setRows] = useState<DaySlot[] | null | undefined>(undefined); // undefined = loading, null = failed
-  const [failure, setFailure] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const load = useCallback(async () => {
-    // Today as the clubs reckon it, not as the phone's clock reckons it.
-    const date = todayIn(TZ);
-    const { data, error } = await supabase.rpc("club_day_slots", {
-      p_date: date,
-      p_sport: null,
-      p_governorate: null,
-      p_district: null,
-      p_query: null,
-    });
-    if (error) {
-      // There is no console on a phone, so the reason goes on the screen.
-      // Supabase errors carry a code, message, details and hint; none of them
-      // is a credential, and the anon key is never touched here. The host is
-      // included because a wrong URL is the failure this is most often hiding,
-      // and the host alone would have named it the first time.
-      setFailure(
-        [
-          error.code ? `Code ${error.code}` : null,
-          error.message,
-          error.details,
-          error.hint,
-          `Host: ${supabaseHost}`,
-        ]
-          .filter(Boolean)
-          .join("\n")
-      );
-      setRows(null);
-      return;
-    }
-    setFailure(null);
-    setRows((data ?? []) as DaySlot[]);
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
-  }, [load]);
+/**
+ * Courts: which clubs have free times on a day, compared without opening each one (approved
+ * design 2). Reads club_day_slots, the same function as the website; visitors can browse.
+ */
+export default function Courts() {
+  const days = useMemo(() => bookingDays(BEIRUT), []);
+  const [date, setDate] = useState(days[0].key);
+  const [sport, setSport] = useState<string | null>(null);
+  const q = useDaySlots(date, sport);
+  const clubs = useMemo(() => clubsFromSlots(q.data ?? []), [q.data]);
+  const open = clubs.filter((c) => c.starts.length > 0);
 
   return (
     <ScrollView
       style={styles.page}
-      contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      contentContainerStyle={{ paddingBottom: 32 }}
+      refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => void q.refetch()} tintColor={color.cedar} />}
     >
-      <View style={styles.authBar}>
-        {session.status === "loading" ? (
-          <Text style={styles.muted}>Checking sign-in…</Text>
-        ) : session.status === "signed-in" ? (
-          <>
-            <Text style={styles.muted} numberOfLines={1}>
-              Signed in as {session.session.user.email ?? "your account"}
-            </Text>
-            <Pressable onPress={() => void supabase.auth.signOut()} hitSlop={8}>
-              <Text style={styles.link}>Sign out</Text>
-            </Pressable>
-          </>
-        ) : (
-          <>
-            <Text style={styles.muted}>Not signed in</Text>
-            <Link href="/sign-in" style={styles.link}>
-              Sign in
-            </Link>
-          </>
-        )}
+      <View style={styles.filters}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+          <Chip tone="sport" label="All sports" selected={sport === null} onPress={() => setSport(null)} />
+          {SPORTS.filter((s) => s !== "other").map((s) => (
+            <Chip key={s} tone="sport" label={sportName(s)} selected={sport === s} onPress={() => setSport(s)} icon={<SportMark sport={s} size={20} />} />
+          ))}
+        </ScrollView>
+        <DateStrip days={days} selected={date} onSelect={setDate} />
       </View>
 
-      {configNote !== null && (
-        <View style={styles.warning}>
-          <Text style={styles.detail} selectable>{configNote}</Text>
+      <View style={styles.summary}>
+        {q.isSuccess && (
+          <Text variant="label">
+            {open.length === 0 ? "No free courts" : `${open.length} ${open.length === 1 ? "club" : "clubs"} with free times`}
+          </Text>
+        )}
+        <Freshness lastSuccessAt={q.dataUpdatedAt} fetching={q.isFetching} failedSinceSuccess={q.isError && q.dataUpdatedAt > 0} />
+      </View>
+
+      {q.isPending ? (
+        <Loading label="Loading courts" />
+      ) : q.isError && !q.data ? (
+        <ErrorState error={q.error} onRetry={() => void q.refetch()} />
+      ) : open.length === 0 ? (
+        <Empty title="Nothing free that day" body="Try another day or another sport." />
+      ) : (
+        <View style={styles.list}>
+          {open.map((c) => <ClubCard key={c.id} club={c} date={date} sport={sport} />)}
         </View>
       )}
-
-      <Text style={styles.heading}>Free today</Text>
-
-      {rows === undefined && (
-        <View style={styles.centre}>
-          <ActivityIndicator />
-        </View>
-      )}
-
-      {rows === null && (
-        <View style={styles.card}>
-          <Text style={styles.body}>Could not load availability.</Text>
-          {failure !== null && <Text style={styles.detail} selectable>{failure}</Text>}
-          <Pressable onPress={onRefresh} hitSlop={8}>
-            <Text style={styles.link}>Try again</Text>
-          </Pressable>
-        </View>
-      )}
-
-      {rows !== undefined && rows !== null && rows.length === 0 && (
-        <View style={styles.card}>
-          <Text style={styles.body}>No free courts left today.</Text>
-        </View>
-      )}
-
-      {rows !== undefined &&
-        rows !== null &&
-        groupByClub(rows).map((club) => (
-          <View key={club.club_id} style={styles.card}>
-            <Text style={styles.clubName}>{club.club_name}</Text>
-            <Text style={styles.muted}>
-              {club.town ?? "—"}
-              {club.price_from !== null ? ` · from $${club.price_from}` : ""}
-            </Text>
-            {club.is_demo === true && <Text style={styles.demo}>Fictional demo club</Text>}
-            <View style={styles.slotRow}>
-              {club.slots.slice(0, 12).map((slot) => (
-                <View key={`${slot.court_id}-${slot.start_at}`} style={styles.slot}>
-                  <Text style={styles.slotTime}>
-                    {hhmm(slot.start_at, slot.timezone)}
-                  </Text>
-                  <Text style={styles.slotCourt} numberOfLines={1}>
-                    {slot.court_name}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        ))}
     </ScrollView>
   );
 }
 
+function ClubCard({ club, date, sport }: { club: ClubDay; date: string; sport: string | null }) {
+  const go = (at?: string) =>
+    router.push({ pathname: "/club/[id]", params: { id: club.id, name: club.name, date, ...(sport ? { sport } : {}), ...(at ? { at } : {}) } });
+  const shown = club.starts.slice(0, 3);
+  const more = club.starts.length - shown.length;
+  return (
+    <View style={styles.card}>
+      <Pressable accessibilityRole="button" accessibilityLabel={`${club.name}, ${club.town ?? ""}, from ${club.priceFrom ?? "?"} dollars an hour`} onPress={() => go()} style={styles.cardTop}>
+        <View style={styles.thumb}>
+          <CourtLines opacity={0.3} width={64} height={64} right={0} top={0} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <View style={styles.nameRow}>
+            <Text style={styles.name} numberOfLines={2}>{club.name}</Text>
+            {club.priceFrom !== null && (
+              <Text style={styles.from}>from <Text style={styles.price}>${club.priceFrom}</Text>/h</Text>
+            )}
+          </View>
+          <Text variant="secondary">
+            {[club.town, `${club.courtCount} ${club.courtCount === 1 ? "court" : "courts"}`].filter(Boolean).join(" · ")}
+          </Text>
+          {club.isDemo && <Text style={styles.demo}>Demo club — not a real venue</Text>}
+        </View>
+      </Pressable>
+      <View style={styles.times}>
+        {shown.map((s) => (
+          <Pressable key={s} accessibilityRole="button" accessibilityLabel={`${hhmm(s, club.timezone)} at ${club.name}`} onPress={() => go(s)} style={styles.time}>
+            <Text style={styles.timeText}>{hhmm(s, club.timezone)}</Text>
+          </Pressable>
+        ))}
+        {more > 0 && (
+          <Pressable accessibilityRole="button" onPress={() => go()} style={styles.more}>
+            <Text style={styles.moreText}>+{more} more</Text>
+          </Pressable>
+        )}
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: "#ffffff" },
-  content: { padding: 16, paddingBottom: 48, gap: 12 },
-  authBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
-  heading: { fontSize: 22, fontWeight: "700", color: "#111111", marginTop: 4 },
-  centre: { paddingVertical: 32, alignItems: "center" },
-  card: { borderWidth: 1, borderColor: "#e5e5e5", borderRadius: 12, padding: 14, gap: 6 },
-  clubName: { fontSize: 17, fontWeight: "600", color: "#111111" },
-  body: { fontSize: 15, color: "#111111" },
-  muted: { fontSize: 13, color: "#6b6b6b", flexShrink: 1 },
-  link: { fontSize: 14, color: "#1d4ed8", fontWeight: "600" },
-  detail: { fontSize: 12, color: "#6b6b6b", lineHeight: 17 },
-  warning: { borderWidth: 1, borderColor: "#fcd34d", backgroundColor: "#fffbeb", borderRadius: 12, padding: 12 },
-  demo: { fontSize: 12, color: "#92400e", backgroundColor: "#fef3c7", alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, overflow: "hidden" },
-  slotRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
-  slot: { borderWidth: 1, borderColor: "#e5e5e5", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, minWidth: 72 },
-  slotTime: { fontSize: 15, fontWeight: "600", color: "#111111" },
-  slotCourt: { fontSize: 11, color: "#6b6b6b" },
+  page: { flex: 1, backgroundColor: color.ground },
+  filters: { backgroundColor: color.card, borderBottomWidth: 1, borderBottomColor: color.line, paddingTop: space.md, paddingBottom: space.md, gap: space.md },
+  chips: { gap: 8, paddingHorizontal: 20 },
+  summary: { paddingHorizontal: 20, paddingTop: space.lg, gap: 4 },
+  list: { padding: 20, paddingTop: space.md, gap: 10 },
+  card: { backgroundColor: color.card, borderRadius: radius.lg, borderWidth: 1, borderColor: color.line, padding: 14 },
+  cardTop: { flexDirection: "row", gap: 12 },
+  thumb: { width: 64, height: 64, borderRadius: 12, backgroundColor: color.cedarDeep, overflow: "hidden" },
+  nameRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: 8 },
+  name: { fontFamily: font.bold, fontSize: 17, lineHeight: 22, color: color.ink, flexShrink: 1 },
+  from: { fontFamily: font.regular, fontSize: 13, color: color.muted },
+  price: { fontFamily: font.score, fontSize: 20, color: color.ink },
+  demo: { fontFamily: font.semibold, fontSize: 13, color: color.warnInk, marginTop: 2 },
+  times: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 12, alignItems: "center" },
+  time: { minHeight: 44, minWidth: 64, paddingHorizontal: 10, borderRadius: 12, borderWidth: 1.5, borderColor: color.cedar, alignItems: "center", justifyContent: "center" },
+  timeText: { fontFamily: font.score, fontSize: 18, color: color.cedarDeep },
+  more: { minHeight: 44, justifyContent: "center", paddingHorizontal: 8 },
+  moreText: { fontFamily: font.semibold, fontSize: 15, color: color.cedarDeep },
 });
