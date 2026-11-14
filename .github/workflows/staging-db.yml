@@ -16,7 +16,7 @@ on:
       action:
         description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up)"
         type: choice
-        options: [check, apply, smoke, api]
+        options: [check, apply, smoke, api, reset_demo]
         default: check
       up_to:
         description: "apply only: highest migration number to apply, e.g. 0064 (leave empty for all on this branch)"
@@ -152,6 +152,10 @@ jobs:
       - name: Web app log (api, on failure)
         if: failure() && inputs.action == 'api'
         run: tail -60 /tmp/next.log || true
+
+      - name: Put the demo club back to its seeded payment mode (reset_demo)
+        if: inputs.action == 'reset_demo'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "update clubs set payment_mode = 'simulated' where slug = 'batroun' returning name || ' -> ' || payment_mode"
 
       - name: Booking-protection checks on staging
         if: inputs.action == 'smoke'
