@@ -14,6 +14,7 @@ import {
 import { sportName } from "../lib/days";
 import { color, font, radius, space } from "../lib/theme";
 import { haptic } from "../lib/haptics";
+import { fade } from "../lib/motion";
 
 /**
  * The club's Info tab: what a player wants to know before going — where it is, what is there, what it
@@ -44,7 +45,7 @@ export function ClubInfoView({ query, onBook }: {
       {/* Hero: the club's own photo when it has one, otherwise its court marking on night green. */}
       <View style={[styles.hero, !cover && styles.heroEdge]}>
         {cover && (
-          <Image source={{ uri: cover }} style={styles.cover} contentFit="cover" transition={200} accessibilityLabel={`${club.name}, main photo`} />
+          <Image source={{ uri: cover }} style={styles.cover} contentFit="cover" transition={fade(200)} accessibilityLabel={`${club.name}, main photo`} />
         )}
         <View style={styles.heroBody}>
           <View style={styles.heroTop}>
@@ -100,7 +101,7 @@ export function ClubInfoView({ query, onBook }: {
             if (!uri) return null;
             return (
               <View key={m.id} style={styles.photo}>
-                <Image source={{ uri }} style={styles.photoImg} contentFit="cover" transition={200} accessibilityLabel={m.caption ?? `${club.name}, photo ${i + 1}`} />
+                <Image source={{ uri }} style={styles.photoImg} contentFit="cover" transition={fade(200)} accessibilityLabel={m.caption ?? `${club.name}, photo ${i + 1}`} />
                 {m.caption && <Text variant="caption" numberOfLines={1} style={styles.photoCaption}>{m.caption}</Text>}
               </View>
             );

@@ -10,6 +10,7 @@ import { SportMark, SPORTS } from "../../components/SportMark";
 import { CourtLines } from "../../components/CourtLines";
 import { Image } from "expo-image";
 import { useClubCovers } from "../../lib/clubInfo";
+import { fade } from "../../lib/motion";
 import { Freshness } from "../../components/Freshness";
 import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { clubsFromSlots, type ClubDay } from "../../lib/courts";
@@ -91,7 +92,7 @@ function ClubCard({ club, date, sport, cover }: { club: ClubDay; date: string; s
       <Pressable accessibilityRole="button" accessibilityLabel={[club.name, club.town, courts, from !== null ? `from ${from} dollars an hour` : null].filter(Boolean).join(", ")} onPress={() => go()} style={styles.cardTop}>
         <View style={styles.thumb}>
           {cover ? (
-            <Image source={{ uri: cover }} style={styles.thumbImg} contentFit="cover" transition={150} accessible={false} />
+            <Image source={{ uri: cover }} style={styles.thumbImg} contentFit="cover" transition={fade(150)} accessible={false} />
           ) : (
             <CourtLines opacity={0.3} width={64} height={64} right={0} top={0} />
           )}
