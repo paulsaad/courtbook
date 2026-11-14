@@ -183,29 +183,6 @@ try {
   const p3 = await holder.client.rpc("confirm_payment", { p_payment: hold.payment_id, p_provider_ref: "x", p_total_usd: 21 });
   record("R14", "the owner cannot confirm their own payment directly (server only)", !!p3.error && sql(`select status from payments where id='${hold.payment_id}'`) === "pending", errOf(p3) ?? "confirmed!");
 
-  // ---------------------------------------------------------------- M. staff moves (0066)
-  console.log("--- M. move_booking through the API: staff moves keep the club's length limits (0066) and the slot rules");
-  sql(`update clubs set payment_mode='at_desk' where id='${CLUB}'; insert into club_staff (club_id, profile_id) values ('${CLUB}', '${U1.id}') on conflict do nothing;`);
-  const limits = sql(`select slot_minutes||'/'||min_booking_minutes||'/'||max_booking_minutes from clubs where id='${CLUB}'`);
-  record("M0", "club limits for this test (grid / minimum / maximum, minutes)", limits === "30/60/180", limits);
-  const wk = await U1.client.rpc("staff_book", { p_club: CLUB, p_court: COURT3, p_start: at("09:00"), p_end: at("10:00"), p_name: "api-move", p_phone: null });
-  const MB = wk.data;
-  record("M1", "staff books a 1 h walk-in through the API", !wk.error && typeof MB === "string", errOf(wk) ?? "");
-  const move = (u, court, s0, e0) => u.client.rpc("move_booking", { p_booking: MB, p_court: court, p_start: at(s0), p_end: at(e0) });
-  const span = () => sql(`select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'-'||to_char(end_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='${MB}'`);
-  let m = await move(U1, COURT3, "09:00", "09:30");
-  record("M2", "move to 30 min (below the 1 h minimum): bad_duration", errOf(m)?.includes("bad_duration"), errOf(m) ?? "moved!");
-  m = await move(U1, COURT3, "09:00", "13:00");
-  record("M3", "move to 4 h (above the 3 h maximum): bad_duration", errOf(m)?.includes("bad_duration"), errOf(m) ?? "moved!");
-  record("M4", "...booking unchanged", span() === "09:00-10:00", span());
-  m = await move(U1, COURT3, "11:00", "12:30");
-  record("M5", "move to 1 h 30 at another time: accepted", !m.error && span() === "11:00-12:30", errOf(m) ?? span());
-  m = await move(U1, COURT3, "11:10", "12:40");
-  record("M6", "off the grid: not_on_grid (slot trigger)", errOf(m)?.includes("not_on_grid"), errOf(m) ?? "moved!");
-  m = await move(U2, COURT3, "13:00", "14:00");
-  record("M7", "a player who is not staff: forbidden", errOf(m)?.includes("forbidden"), errOf(m) ?? "moved!");
-  sql(`delete from club_staff where profile_id='${U1.id}'`);
-
   // ---------------------------------------------------------------- P. the web payment route
   console.log(`--- P. /api/pay/simulate and /api/notify/email (this branch's web app at ${APP_URL}, pointed at staging)`);
   const pay = (body, headers = {}) => fetch(`${APP_URL}/api/pay/simulate`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
@@ -250,6 +227,30 @@ try {
   const n1 = await fetch(`${APP_URL}/api/notify/email`, { method: "POST", headers: bearer(holder.token) });
   const n2 = await fetch(`${APP_URL}/api/notify/email`, { method: "POST", headers: { authorization: "Bearer x.y.z" } });
   record("P12", "/api/notify/email: app token accepted, invalid token 401", n1.status === 200 && n2.status === 401, `${n1.status} / ${n2.status}`);
+  // ---------------------------------------------------------------- M. staff moves (0066)
+  console.log("--- M. move_booking through the API: staff moves keep the club's length limits (0066) and the slot rules");
+  // after P: switching the club to pay-at-the-club expires every open hold, by design
+  sql(`update clubs set payment_mode='at_desk' where id='${CLUB}'; insert into club_staff (club_id, profile_id) values ('${CLUB}', '${U1.id}') on conflict do nothing;`);
+  const limits = sql(`select slot_minutes||'/'||min_booking_minutes||'/'||max_booking_minutes from clubs where id='${CLUB}'`);
+  record("M0", "club limits for this test (grid / minimum / maximum, minutes)", limits === "30/60/180", limits);
+  const wk = await U1.client.rpc("staff_book", { p_club: CLUB, p_court: COURT3, p_start: at("09:00"), p_end: at("10:00"), p_name: "api-move", p_phone: null });
+  const MB = wk.data;
+  record("M1", "staff books a 1 h walk-in through the API", !wk.error && typeof MB === "string", errOf(wk) ?? "");
+  const move = (u, court, s0, e0) => u.client.rpc("move_booking", { p_booking: MB, p_court: court, p_start: at(s0), p_end: at(e0) });
+  const span = () => sql(`select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'-'||to_char(end_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='${MB}'`);
+  let m = await move(U1, COURT3, "09:00", "09:30");
+  record("M2", "move to 30 min (below the 1 h minimum): bad_duration", errOf(m)?.includes("bad_duration"), errOf(m) ?? "moved!");
+  m = await move(U1, COURT3, "09:00", "13:00");
+  record("M3", "move to 4 h (above the 3 h maximum): bad_duration", errOf(m)?.includes("bad_duration"), errOf(m) ?? "moved!");
+  record("M4", "...booking unchanged", span() === "09:00-10:00", span());
+  m = await move(U1, COURT3, "11:00", "12:30");
+  record("M5", "move to 1 h 30 at another time: accepted", !m.error && span() === "11:00-12:30", errOf(m) ?? span());
+  m = await move(U1, COURT3, "11:10", "12:40");
+  record("M6", "off the grid: not_on_grid (slot trigger)", errOf(m)?.includes("not_on_grid"), errOf(m) ?? "moved!");
+  m = await move(U2, COURT3, "13:00", "14:00");
+  record("M7", "a player who is not staff: forbidden", errOf(m)?.includes("forbidden"), errOf(m) ?? "moved!");
+  sql(`delete from club_staff where profile_id='${U1.id}'`);
+
 } catch (e) {
   record("X", "test run stopped", false, e.message);
 } finally {
