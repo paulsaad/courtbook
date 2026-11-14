@@ -70,22 +70,27 @@ function ClubCard({ club, date, sport }: { club: ClubDay; date: string; sport: s
   const go = (at?: string) =>
     router.push({ pathname: "/club/[id]", params: { id: club.id, name: club.name, date, ...(sport ? { sport } : {}), ...(at ? { at } : {}) } });
   const shown = club.starts.slice(0, 3);
+  // club_day_slots' price_from is the cheapest rule across the whole club, every sport. It is only
+  // honest as "from" when no sport is chosen; with a sport, the exact prices are on the club screen.
+  const from = sport ? null : club.priceFrom;
+  // Only courts with at least one free start that day come back, so this counts free courts.
+  const courts = `${club.courtCount} ${sport ? `${sportName(sport).toLowerCase()} ` : ""}${club.courtCount === 1 ? "court" : "courts"} free`;
   const more = club.starts.length - shown.length;
   return (
     <View style={styles.card}>
-      <Pressable accessibilityRole="button" accessibilityLabel={`${club.name}, ${club.town ?? ""}, from ${club.priceFrom ?? "?"} dollars an hour`} onPress={() => go()} style={styles.cardTop}>
+      <Pressable accessibilityRole="button" accessibilityLabel={[club.name, club.town, courts, from !== null ? `from ${from} dollars an hour` : null].filter(Boolean).join(", ")} onPress={() => go()} style={styles.cardTop}>
         <View style={styles.thumb}>
           <CourtLines opacity={0.3} width={64} height={64} right={0} top={0} />
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <View style={styles.nameRow}>
             <Text style={styles.name} numberOfLines={2}>{club.name}</Text>
-            {club.priceFrom !== null && (
-              <Text style={styles.from}>from <Text style={styles.price}>${club.priceFrom}</Text>/h</Text>
+            {from !== null && (
+              <Text style={styles.from}>from <Text style={styles.price}>${from}</Text>/h</Text>
             )}
           </View>
           <Text variant="secondary">
-            {[club.town, `${club.courtCount} ${club.courtCount === 1 ? "court" : "courts"}`].filter(Boolean).join(" · ")}
+            {[club.town, courts].filter(Boolean).join(" · ")}
           </Text>
           {club.isDemo && <Text style={styles.demo}>Demo club — not a real venue</Text>}
         </View>

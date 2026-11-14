@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
-import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { RefreshControl, ScrollView, StyleSheet, View, type ScrollViewInstance } from "react-native";
+import { router, Stack, useLocalSearchParams, usePathname } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { hhmm } from "@shared/time";
 import { Text } from "../../components/Text";
@@ -11,14 +12,18 @@ import { Button } from "../../components/Button";
 import { Freshness } from "../../components/Freshness";
 import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { clubsFromSlots, durationLabel, durationOptions, partOfDay, sameInstant, tilesFor } from "../../lib/courts";
-import { BEIRUT, useDaySlots, useQuote } from "../../lib/queries";
+import { BEIRUT, money, tilePriceLabel, useClubMode, useDaySlots, useQuote, useTilePrices } from "../../lib/queries";
+import { useSession } from "../../lib/session";
+import { newAttempt, reserve, type Attempt } from "../../lib/reserve";
+import { haptic } from "../../lib/haptics";
 import { bookingDays, shortDate, sportName } from "../../lib/days";
 import { color, font, radius, space } from "../../lib/theme";
 
 /**
  * A club's availability, times first (approved design 3). Every free/not-free state comes from
- * club_day_slots; the total comes from quote_price for the exact court, start and duration.
- * Reserving is not wired in this update: it lands with the retry-safe reserve step (G2).
+ * club_day_slots; every price shown comes from quote_price for that exact court, start and
+ * duration. Reserving goes through the database (book_at_desk with a retry token) — the app only
+ * asks. Clubs that take payment in the app wait for the retry-safe hold (G2, migration 0065).
  */
 export default function Club() {
   const p = useLocalSearchParams<{ id: string; name?: string; date?: string; sport?: string; at?: string }>();
@@ -51,15 +56,73 @@ export default function Club() {
     }
   }, [tile, start, q.isSuccess, club, dur]);
 
+  const prices = useTilePrices(club?.id ?? null, dur, tiles);
   const quote = useQuote(court?.id ?? null, tile ? tile.start : null, dur);
+  const panelPrice = (tile && court && prices.data?.get(tile.start)?.get(court.id)?.price) ?? (quote.isSuccess ? quote.data : null);
+  const mode = useClubMode(club?.id ?? null);
+  const session = useSession();
+  const path = usePathname();
+  const queryClient = useQueryClient();
+  // One attempt per selection. A retry after an uncertain result reuses it, so the database
+  // returns the same booking instead of making a second one. Any change of selection starts afresh.
+  const attempt = useRef<{ key: string; a: Attempt } | null>(null);
+  const [reserving, setReserving] = useState(false);
+  const [problem, setProblem] = useState<{ text: string; retry: boolean } | null>(null);
+  const selKey = tile && court && dur ? `${court.id}|${tile.start}|${dur}` : "";
+  useEffect(() => setProblem(null), [selKey]);
+
+  // jump between morning / afternoon / evening when the list is long
+  const scroller = useRef<ScrollViewInstance | null>(null);
+  const groupY = useRef<Record<string, number>>({});
   const name = club?.name ?? p.name ?? "Club";
+
+  async function onReserve() {
+    if (!tile || !court || !dur || !club) return;
+    if (session.status !== "signed-in") {
+      router.push({ pathname: "/sign-in", params: { returnTo: path } });
+      return;
+    }
+    if (!attempt.current || attempt.current.key !== selKey) {
+      attempt.current = {
+        key: selKey,
+        a: newAttempt({ mode: mode.data ?? "", clubId: club.id, courtId: court.id, start: new Date(tile.start), end: new Date(Date.parse(tile.start) + dur * 60_000) }),
+      };
+    }
+    setReserving(true);
+    setProblem(null);
+    const r = await reserve(attempt.current.a);
+    setReserving(false);
+    void queryClient.invalidateQueries({ queryKey: ["day-slots"] });
+    if (r.kind === "reserved") {
+      attempt.current = null;
+      haptic.success();
+      void queryClient.invalidateQueries({ queryKey: ["my-agenda"] });
+      router.replace({ pathname: "/booking/[id]", params: { id: r.value.bookingId, new: "1" } });
+    } else if (r.kind === "refused") {
+      attempt.current = null; // the database said no; a new tap is a new attempt
+      setProblem({ text: r.failure.message, retry: false });
+    } else {
+      // The request may or may not have reached the server. Trying again with the same token is
+      // safe: if the first one went through, the database hands back that same booking.
+      setProblem({ text: "We couldn't hear back from the server. Your booking may or may not have gone through.", retry: true });
+    }
+  }
+
+  const atDesk = mode.data === "at_desk";
+  const reserveLabel =
+    session.status !== "signed-in" ? "Sign in to reserve"
+    : mode.isPending ? "Checking the club…"
+    : !atDesk ? "Reserve on the website for now"
+    : problem?.retry ? "Try again (safe)"
+    : "Reserve court";
   const groups = groupTiles(tiles, club?.timezone ?? BEIRUT);
 
   return (
     <View style={styles.page}>
       <Stack.Screen options={{ title: name, headerBackTitle: "Courts" }} />
       <ScrollView
-        contentContainerStyle={{ paddingBottom: tile ? 300 : 40 }}
+        ref={scroller}
+        contentContainerStyle={{ paddingBottom: tile ? 340 : 40 }}
         refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => void q.refetch()} tintColor={color.cedar} />}
       >
         <View style={styles.head}>
@@ -86,6 +149,13 @@ export default function Club() {
           <Freshness lastSuccessAt={q.dataUpdatedAt} fetching={q.isFetching} failedSinceSuccess={q.isError && q.dataUpdatedAt > 0} />
           {notice && <Text style={styles.notice} accessibilityRole="alert">{notice}</Text>}
         </View>
+        {groups.length > 1 && tiles.length > 12 && (
+          <View style={styles.jumpRow}>
+            {groups.map((g) => (
+              <Chip key={g.label} label={g.label} onPress={() => scroller.current?.scrollTo({ y: Math.max(0, (groupY.current[g.label] ?? 0) - 8), animated: true })} />
+            ))}
+          </View>
+        )}
 
         {q.isPending ? (
           <Loading label="Loading times" />
@@ -95,13 +165,14 @@ export default function Club() {
           <Empty title="Nothing free on this day" body="Try another day, or a shorter time." />
         ) : (
           groups.map((g) => (
-            <View key={g.label} style={styles.group}>
+            <View key={g.label} style={styles.group} onLayout={(e) => { groupY.current[g.label] = e.nativeEvent.layout.y; }}>
               <Text variant="heading" style={styles.groupTitle}>{g.label}</Text>
               <View style={styles.grid}>
                 {g.tiles.map((t) => (
                   <View key={t.start} style={styles.cell}>
                     <TimeTile
                       time={hhmm(t.start, club.timezone)}
+                      price={tilePriceLabel(prices.data?.get(t.start))}
                       freeCourts={t.freeCourts.length}
                       selected={sameInstant(t.start, start)}
                       onPress={() => { setStart(t.start); setCourtId(null); setNotice(null); }}
@@ -120,7 +191,7 @@ export default function Club() {
             <Text variant="label" style={{ width: 52 }}>Court</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
               {freeCourts.map((c) => (
-                <Chip key={c.id} label={c.name} selected={c.id === court.id} onPress={() => setCourtId(c.id)} />
+                <Chip key={c.id} label={courtLabel(c, prices.data?.get(tile.start))} selected={c.id === court.id} onPress={() => setCourtId(c.id)} />
               ))}
             </ScrollView>
           </View>
@@ -131,21 +202,38 @@ export default function Club() {
               <Text variant="secondary">{[sport ? sportName(sport) : null, court.name, durationLabel(dur)].filter(Boolean).join(" · ")}</Text>
             </View>
             <View style={{ alignItems: "flex-end" }}>
-              {quote.isSuccess ? (
-                <Text style={styles.total} accessibilityLabel={`Total ${quote.data} dollars`}>${quote.data}</Text>
+              {panelPrice !== null && panelPrice !== undefined ? (
+                <Text style={styles.total} accessibilityLabel={`Total ${panelPrice} dollars`}>{money(panelPrice)}</Text>
               ) : quote.isError ? (
                 <Text variant="caption" style={{ color: color.danger }}>Price unavailable</Text>
               ) : (
                 <Text variant="caption">Getting price…</Text>
               )}
-              <Text variant="caption">court price</Text>
+              <Text variant="caption">{atDesk ? "pay at the club" : "court price"}</Text>
             </View>
           </View>
-          <Button label="Reserving arrives in the next update" variant="secondary" disabled onPress={() => {}} />
+          {atDesk && <Text variant="caption">Nothing is charged in the app. Free cancellation up to {club.cancelCutoffHours} h before.</Text>}
+          {mode.isSuccess && !atDesk && (
+            <Text variant="caption">This club takes payment in the app. That arrives in the next update — reserve it on the website for now.</Text>
+          )}
+          {problem && <Text style={styles.problem} accessibilityRole="alert">{problem.text}</Text>}
+          <Button
+            label={reserveLabel}
+            busy={reserving}
+            disabled={session.status === "signed-in" && (!atDesk || panelPrice === null || panelPrice === undefined)}
+            onPress={onReserve}
+          />
         </View>
       )}
     </View>
   );
+}
+
+/** Court name, plus its price when the free courts at this time are not all the same price. */
+function courtLabel(c: { id: string; name: string }, prices: Map<string, { price: number | null }> | undefined) {
+  const known = prices ? [...prices.values()].map((p) => p.price).filter((p): p is number => p !== null) : [];
+  const mine = prices?.get(c.id)?.price;
+  return known.length > 1 && new Set(known).size > 1 && mine != null ? `${c.name} · ${money(mine)}` : c.name;
 }
 
 function groupTiles<T extends { start: string }>(tiles: T[], tz: string) {
@@ -175,4 +263,6 @@ const styles = StyleSheet.create({
   courtRow: { flexDirection: "row", alignItems: "center" },
   summaryRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", gap: 12 },
   total: { fontFamily: font.score, fontSize: 30, lineHeight: 32, color: color.ink },
+  problem: { fontFamily: font.semibold, fontSize: 15, color: color.danger },
+  jumpRow: { flexDirection: "row", gap: 8, paddingHorizontal: 20, paddingTop: space.md },
 });
