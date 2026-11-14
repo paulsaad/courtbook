@@ -4,6 +4,9 @@
 --         by later migrations and are already correct on live)
 --   0021  "coach_clubs: coach withdraws" also allows withdrawing a 'removed' link
 --   0023  availability_exceptions.club_id (+ foreign key), its read policy, coach_availability()
+-- DATA: 0023 deletes coach availability exceptions it cannot give a club. This repair deletes none:
+-- each such exception gets the club reviewed and approved below, and the repair stops (changing
+-- nothing) if any exception would still be left without a club, or if the count of exceptions changes.
 -- All or nothing: it first checks that live is in exactly the state the read-only inspection found,
 -- applies the three, then checks the result equals the repository baseline. Any failure rolls back
 -- everything. Running it a second time stops at the first check and changes nothing.
@@ -27,11 +30,43 @@ begin
   if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'availability_exceptions' and column_name = 'club_id') then
     raise exception 'STOPPED, nothing changed: availability_exceptions.club_id already exists';
   end if;
+  if (select count(*) from availability_exceptions) <> 1 then
+    raise exception 'STOPPED, nothing changed: expected 1 coach availability exception (as inspected), found %', (select count(*) from availability_exceptions);
+  end if;
   if (select left(md5(regexp_replace(prosrc, '[ \t\r]+(\n|$)', '\1', 'g')), 12) from pg_proc
       where oid = 'public.coach_availability(uuid,uuid,date,integer)'::regprocedure) <> '69c35ce7627e' then
     raise exception 'STOPPED, nothing changed: coach_availability() is not the 0022 version';
   end if;
 end $pre$;
+
+-- ===== Reviewed assignments: exception → club (from exception_inspect.sql, approved by Paul) =====
+-- Filled in only after review. Placeholders are not valid ids, so an unfilled file stops here.
+create temp table reviewed_exception_club (exception_id uuid primary key, coach_id uuid not null, club_id uuid not null) on commit drop;
+insert into reviewed_exception_club (exception_id, coach_id, club_id) values
+  ('REVIEWED-EXCEPTION-ID', 'REVIEWED-COACH-ID', 'REVIEWED-CLUB-ID');
+
+create temp table exceptions_before on commit drop as select count(*) as n from availability_exceptions;
+
+do $map$
+declare unassignable int; covered int; bad int;
+begin
+  -- the exceptions 0023's own rule cannot assign (coach approved at exactly one club)
+  select count(*) into unassignable from availability_exceptions e
+  where e.coach_id not in (select coach_id from coach_clubs where status = 'approved' group by coach_id having count(*) = 1);
+  select count(*) into covered from availability_exceptions e join reviewed_exception_club m on m.exception_id = e.id and m.coach_id = e.coach_id
+  where e.coach_id not in (select coach_id from coach_clubs where status = 'approved' group by coach_id having count(*) = 1);
+  if covered <> unassignable or (select count(*) from reviewed_exception_club) <> unassignable then
+    raise exception 'STOPPED, nothing changed: % exception(s) need a club, % reviewed assignment(s) match them', unassignable, covered;
+  end if;
+  -- an assignment must name a club the coach is actually linked to
+  select count(*) into bad from reviewed_exception_club m
+  where not exists (select 1 from coach_clubs cc where cc.coach_id = m.coach_id and cc.club_id = m.club_id);
+  if bad > 0 then raise exception 'STOPPED, nothing changed: a reviewed club is not one the coach is linked to'; end if;
+end $map$;
+
+-- the column first (0023's own first statement, so 0023 below finds it in place), then the assignments
+alter table availability_exceptions add column if not exists club_id uuid references clubs(id) on delete cascade;
+update availability_exceptions e set club_id = m.club_id from reviewed_exception_club m where e.id = m.exception_id and e.coach_id = m.coach_id;
 
 -- ===== 0004 (the trigger statement only, unchanged) =====
 create trigger bookings_slot_validation
@@ -116,6 +151,10 @@ $$;
 
 do $post$
 begin
+  if (select count(*) from availability_exceptions) <> (select n from exceptions_before)
+     or exists (select 1 from availability_exceptions where club_id is null) then
+    raise exception 'ROLLED BACK: an availability exception would have been lost or left without a club';
+  end if;
   if (select pg_get_triggerdef(oid) from pg_trigger where tgname = 'bookings_slot_validation' and tgrelid = 'public.bookings'::regclass)
      is distinct from 'CREATE TRIGGER bookings_slot_validation BEFORE INSERT OR UPDATE OF court_id, start_at, end_at ON public.bookings FOR EACH ROW EXECUTE FUNCTION bookings_validate_slot()' then
     raise exception 'ROLLED BACK: trigger is not the repository version';

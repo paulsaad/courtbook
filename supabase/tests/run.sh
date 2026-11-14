@@ -1493,6 +1493,21 @@ $PSQL -q -d $DB -c "update clubs set payment_mode='at_desk' where id='$CB';" >/d
 # That is only true if each file is safe to apply twice, and 0061 shipped a create policy without a
 # drop, which failed on Paul's database. Applying them all a second time is the cheapest way to keep
 # the promise honest. 0040 is excluded: it adds an enum value and must run alone.
+echo "--- AN. a staff move keeps the club's minimum and maximum booking length (0066)"
+# found while checking live drift: the slot trigger checks grid/whole slots/hours, not min/max
+at13() { echo "((current_date + 13 + time '$1') at time zone 'Asia/Beirut')"; }
+MB=$({ who_sql $ADMIN; echo "select staff_book('$CLUB','$COURT3', $(at13 09:00), $(at13 10:00), 'Mover', null);"; } | $PSQL -At -d $DB 2>&1 | grep -E '^[0-9a-f-]{36}$' | tail -1)
+check service "AN0 fixture: a 1 h desk booking" "select count(*) from bookings where id='$MB' and status='confirmed';" 1
+fails_with $ADMIN "AN1 moving it to 30 min (club minimum 1 h) is refused" "select move_booking('$MB','$COURT3', $(at13 09:00), $(at13 09:30));" bad_duration
+fails_with $ADMIN "AN2 moving it to 4 h (club maximum 3 h) is refused" "select move_booking('$MB','$COURT3', $(at13 09:00), $(at13 13:00));" bad_duration
+check service "AN3 ...and it is unchanged" "select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'-'||to_char(end_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='$MB';" "09:00-10:00"
+check $ADMIN "AN4 a new length within the limits is accepted (1 h 30)" "select move_booking('$MB','$COURT3', $(at13 11:00), $(at13 12:30))::text || 'ok';" ok
+$PSQL -q -d $DB -c "update clubs set min_booking_minutes = 120 where id='$CLUB';" >/dev/null
+check $ADMIN "AN5 after the club raises its minimum to 2 h, the booking can still move at its existing length" "select move_booking('$MB','$COURT2', $(at13 14:00), $(at13 15:30))::text || 'ok';" ok
+fails_with $ADMIN "AN6 ...but not to another length below the new minimum" "select move_booking('$MB','$COURT2', $(at13 14:00), $(at13 15:00));" bad_duration
+$PSQL -q -d $DB -c "update clubs set min_booking_minutes = 60 where id='$CLUB';" >/dev/null
+fails_with $ADMIN "AN7 the slot trigger still refuses an off-grid move" "select move_booking('$MB','$COURT2', $(at13 14:10), $(at13 15:40));" not_on_grid
+
 echo "--- AL. every migration from 0041 can be applied twice"
 # What this asserts: re-application raises no error. It does NOT assert that a second application
 # leaves the data identical — a migration that rewrites rows would pass this and still change them.
