@@ -14,9 +14,7 @@ appId: app.courtbook.mobile.staging
 - tapOn: "Reserve court"
 - extendedWaitUntil: { visible: "Check now", timeout: 90000 }
 - takeScreenshot: shots/07-unresolved-club
-- back
-- extendedWaitUntil: { visible: "Home", timeout: 20000 }
-- tapOn: "Home"
+- openLink: "courtbook-staging://"
 - extendedWaitUntil: { visible: "Booking not confirmed yet", timeout: 20000 }
 - takeScreenshot: shots/08-unresolved-home
 - tapOn: "Profile"

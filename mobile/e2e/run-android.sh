@@ -26,7 +26,7 @@ adb logcat -d -v brief ReactNativeJS:V ReactNative:W AndroidRuntime:E ActivityMa
 echo "::endgroup::"
 
 # 1. Behaviour: book and cancel, unresolved recovery, offline.
-for f in 01-book-and-cancel 02-answer-lost-recovery 03-offline; do
+for f in 01-book-and-cancel 02-answer-lost-recovery 03-offline 04-link-then-back; do
   echo "::group::flow $f"
   if (cd "$OUT" && maestro test "${envs[@]}" "../flows/$f.yaml" --format junit --output "$f.xml"); then
     echo "flow $f: PASS"

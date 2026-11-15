@@ -1,0 +1,11 @@
+# A club link opened from outside (WhatsApp, a notification), then Back: the player must land in
+# the app (Home), not be thrown out of it.
+appId: app.courtbook.mobile.staging
+---
+- launchApp
+- runFlow: _dismiss-anr.yaml
+- extendedWaitUntil: { visible: "Home", timeout: 120000 }
+- openLink: "courtbook-staging://club/${E2E_CLUB}?date=${E2E_DATE}"
+- extendedWaitUntil: { visible: "Book", timeout: 30000 }
+- back
+- extendedWaitUntil: { visible: "Book a court", timeout: 20000 }
