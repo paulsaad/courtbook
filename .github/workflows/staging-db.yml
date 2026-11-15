@@ -14,9 +14,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up)"
+        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk"
         type: choice
-        options: [check, apply, smoke, api, reset_demo]
+        options: [check, apply, smoke, api, reset_demo, tester]
         default: check
       up_to:
         description: "apply only: highest migration number to apply, e.g. 0064 (leave empty for all on this branch)"
@@ -154,6 +154,15 @@ jobs:
       - name: Web app log (api, on failure)
         if: failure() && inputs.action == 'api'
         run: tail -60 /tmp/next.log || true
+
+      - name: Paul's sign-in for the staging app (tester)
+        if: inputs.action == 'tester'
+        env:
+          STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          STAGING_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SERVICE_ROLE_KEY }}
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+          STAGING_TESTER_PASSWORD: ${{ secrets.STAGING_TESTER_PASSWORD }}
+        run: node mobile/e2e/staging-tester.mjs
 
       - name: Put the demo club back to its seeded payment mode (reset_demo)
         if: inputs.action == 'reset_demo'
