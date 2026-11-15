@@ -62,10 +62,24 @@ export function startCrashReporting(dsn = process.env.EXPO_PUBLIC_SENTRY_DSN) {
     tracesSampleRate: 0,
     attachScreenshot: false,
     attachViewHierarchy: false,
-    beforeSend: (event) => scrubEvent(event),
+    beforeSend: (event) => {
+      const out = scrubEvent(event);
+      if (process.env.EXPO_PUBLIC_E2E === "1") logForTests(out);
+      return out;
+    },
     beforeBreadcrumb: (b) => scrubBreadcrumb(b),
   });
   return true;
+}
+
+/**
+ * Emulator test builds only: write the exact report that leaves the phone to the device log, in
+ * pieces (the log truncates long lines), so the test can check its contents.
+ */
+function logForTests(event: unknown) {
+  const json = JSON.stringify(event);
+  const n = Math.ceil(json.length / 3000);
+  for (let i = 0; i < n; i++) console.log(`SENTRY_EVENT ${i + 1}/${n} ${json.slice(i * 3000, (i + 1) * 3000)}`);
 }
 
 /** For the Test tools: a handled test error, so a report can be checked end to end. */

@@ -28,7 +28,12 @@ fi
 # Crash reporting: the same Sentry project for both apps (reports are told apart by environment,
 # "production" or "staging", which the app sets from its bundle ID). Copied from the GitHub secret
 # when present; without it the app sends nothing.
-if [ -n "${SENTRY_DSN:-}" ]; then
+# The live app stays off until Paul decides to switch it on (2026-11-15): only staging gets the DSN,
+# and the live environment has it removed if it was ever set.
+if [ "$APP" = live ]; then
+  eas env:delete "$EAS_ENV" --variable-name EXPO_PUBLIC_SENTRY_DSN --non-interactive >/dev/null 2>&1 || true
+  echo "Crash reporting: off for the live app (not yet approved)"
+elif [ -n "${SENTRY_DSN:-}" ]; then
   eas env:set "$EAS_ENV" --name EXPO_PUBLIC_SENTRY_DSN --value "$SENTRY_DSN" --visibility plaintext --non-interactive >/dev/null
   echo "Crash reporting: on (DSN from the SENTRY_DSN secret)"
 else

@@ -29,6 +29,7 @@ jobs:
       EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
       EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.STAGING_ANON_KEY }}
       EXPO_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+      EXPO_PUBLIC_E2E: "1"
       STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
       STAGING_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SERVICE_ROLE_KEY }}
       STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
@@ -63,7 +64,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: mobile/e2e/app-release.apk
-          key: e2e-apk-${{ hashFiles('mobile/app/**', 'mobile/components/**', 'mobile/lib/**', 'mobile/shared/**', 'mobile/assets/**', 'mobile/package-lock.json', 'mobile/app.json', 'mobile/app.config.ts') }}
+          key: e2e-apk-${{ hashFiles('.github/workflows/mobile-android-e2e.yml', 'mobile/app/**', 'mobile/components/**', 'mobile/lib/**', 'mobile/shared/**', 'mobile/assets/**', 'mobile/package-lock.json', 'mobile/app.json', 'mobile/app.config.ts') }}
 
       - name: Build the Android test app (CourtBook Staging, x86_64)
         if: steps.apk.outputs.cache-hit != 'true'

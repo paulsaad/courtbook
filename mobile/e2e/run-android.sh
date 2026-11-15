@@ -39,6 +39,12 @@ for f in 01-book-and-cancel 02-answer-lost-recovery 03-offline 04-link-then-back
   echo "::endgroup::"
 done
 
+# 1b. The crash report flow 05 sent: exactly what left the phone.
+echo "::group::crash report check"
+adb logcat -d -v raw ReactNativeJS:V '*:S' > "$OUT/logcat-js.txt"
+python3 e2e/check_report.py "$OUT/logcat-js.txt" || status=1
+echo "::endgroup::"
+
 # 2. Sizes: small phone (360 dp), large phone (412 dp); text at 100%, 130%, and the app's maximum.
 density=$(adb shell wm density | tr -dc '0-9\n' | tail -1)
 for cfg in "1080x2400 420 412dp" "1080x1920 480 360dp"; do
