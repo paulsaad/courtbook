@@ -37,6 +37,10 @@ final class AuditTests: XCTestCase {
     while !(el.exists && el.isHittable) && n < 6 { app.swipeUp(); n += 1 }
   }
 
+  private func tapCentre(_ el: XCUIElement) {
+    el.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+  }
+
   private func signInIfNeeded() {
     open("profile")
     let signIn = app.buttons["Sign in"]
@@ -47,17 +51,20 @@ final class AuditTests: XCTestCase {
       XCTFail("profile did not settle"); return
     }
     open("sign-in")
+    // Typing "\n" closes the keyboard (single-line fields blur on return), so the next field and the
+    // button are not hidden behind it. A tap at the element's centre works even when XCUITest calls
+    // a control inside a sheet "not hittable".
     let email = app.textFields["staging-email"]
     reveal(email)
-    email.tap()
-    email.typeText(env["E2E_EMAIL"] ?? "")
+    tapCentre(email)
+    email.typeText((env["E2E_EMAIL"] ?? "") + "\n")
     let password = app.secureTextFields["staging-password"]
     reveal(password)
-    password.tap()
-    password.typeText(env["E2E_PASSWORD"] ?? "")
+    tapCentre(password)
+    password.typeText((env["E2E_PASSWORD"] ?? "") + "\n")
     let button = app.buttons["staging-sign-in"]
     reveal(button)
-    button.tap()
+    tapCentre(button)
     let ready = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Ready to play'")).firstMatch
     XCTAssertTrue(ready.waitForExistence(timeout: 30), "sign-in to the staging test account")
     log("signed in")
