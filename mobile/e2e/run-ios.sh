@@ -8,6 +8,8 @@ OUT="$PWD/e2e/out"; mkdir -p "$OUT"
 APP_PATH="$PWD/e2e/CourtBookStaging.app"
 status=0
 
+echo "staging database in the app bundle: $(grep -a -c pwznauyioqykdwodwpvx "$APP_PATH/main.jsbundle" || true) reference(s)"
+codesign -d --entitlements - "$APP_PATH" 2>&1 | grep -E "Identifier|keychain|application-identifier" || echo "no entitlements"
 read -r RUNTIME SMALL LARGE < <(python3 e2e/ios-pick.py)
 (cd e2e/ios-audit && xcodegen generate --quiet) || exit 1
 

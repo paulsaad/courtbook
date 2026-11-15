@@ -40,7 +40,12 @@ final class AuditTests: XCTestCase {
   private func signInIfNeeded() {
     open("profile")
     let signIn = app.buttons["Sign in"]
-    guard signIn.waitForExistence(timeout: 10) else { log("already signed in"); return }
+    let signedIn = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '@courtbook.test'")).firstMatch
+    if signedIn.waitForExistence(timeout: 3) { log("already signed in"); return }
+    guard signIn.waitForExistence(timeout: 20) else {
+      log("neither signed in nor a Sign in button: \(app.staticTexts.allElementsBoundByIndex.prefix(15).map(\.label))")
+      XCTFail("profile did not settle"); return
+    }
     open("sign-in")
     let email = app.textFields["staging-email"]
     reveal(email)
@@ -84,7 +89,32 @@ final class AuditTests: XCTestCase {
     log("SCREEN \(tag) \(screen): \(count) issue(s)")
   }
 
-  func testAuditMainScreens() throws {
+  /// Positive control: the audit must report problems on the host's deliberately broken screen.
+  func testA_AuditFindsKnownProblems() throws {
+    let host = XCUIApplication()
+    host.launch()
+    var found: [String] = []
+    try host.performAccessibilityAudit(for: .all) { issue in
+      found.append(self.kind(issue.auditType)); return true
+    }
+    log("CONTROL \(tag) broken screen: \(found.count) issue(s) \(found)")
+    XCTAssertFalse(found.isEmpty, "the audit found nothing on a deliberately broken screen, so it cannot be trusted")
+    host.terminate()
+  }
+
+  /// Can the simulator reach the staging database at all (independently of the app)?
+  private func networkCheck() {
+    let done = expectation(description: "network")
+    let url = URL(string: "https://pwznauyioqykdwodwpvx.supabase.co/auth/v1/health")!
+    URLSession.shared.dataTask(with: url) { _, response, error in
+      self.log("NETWORK staging: \((response as? HTTPURLResponse)?.statusCode.description ?? "no answer") \(error.map { "\($0)" } ?? "")")
+      done.fulfill()
+    }.resume()
+    wait(for: [done], timeout: 20)
+  }
+
+  func testB_AuditMainScreens() throws {
+    networkCheck()
     app.launch()
     let any = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Book a court' OR label BEGINSWITH 'Ready to play'")).firstMatch
     XCTAssertTrue(any.waitForExistence(timeout: 120), "app started")

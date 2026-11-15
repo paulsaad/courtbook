@@ -206,10 +206,11 @@ jobs:
           echo "workspace $ws, scheme $scheme"
           xcodebuild -workspace "$ws" -scheme "$scheme" -configuration Release -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/build \
-            CODE_SIGNING_ALLOWED=NO -quiet build
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= -quiet build
           rm -rf e2e/CourtBookStaging.app
           cp -R "$(ls -d ios/build/Build/Products/Release-iphonesimulator/*.app | head -1)" e2e/CourtBookStaging.app
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" e2e/CourtBookStaging.app/Info.plist
+          codesign -d --entitlements - e2e/CourtBookStaging.app 2>&1 | head -20
 
       - name: Keep the simulator build
         if: steps.app.outputs.cache-hit != 'true'
