@@ -109,7 +109,6 @@ final class AuditTests: XCTestCase {
     tapCentre(button)
     sleep(3)
     dismissSystemSheets()
-    log("typed email: \(email.value as? String ?? "?")")
     let ready = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Ready to play'")).firstMatch
     // iOS's Save Password sheet can appear several seconds after sign-in and hides the app beneath it.
     var done = false
