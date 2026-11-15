@@ -13,6 +13,9 @@ concurrency:
   group: android-e2e-staging
   cancel-in-progress: false
 
+permissions:
+  contents: write   # only to publish the screenshots to the e2e-screenshots branch
+
 jobs:
   e2e:
     runs-on: ubuntu-latest
@@ -109,6 +112,20 @@ jobs:
       - name: Clean up staging
         if: always()
         run: node e2e/staging.mjs cleanup || true
+
+      # Screenshots also go to a branch of their own (replaced each run), so they can be looked at
+      # without downloading the artifact. Nothing else is committed.
+      - name: Publish screenshots to the e2e-screenshots branch
+        if: always()
+        working-directory: .
+        run: |
+          [ -d mobile/e2e/out ] || exit 0
+          mkdir -p /tmp/shots && find mobile/e2e/out ~/.maestro/tests -name '*.png' -exec cp --backup=numbered {} /tmp/shots/ \; 2>/dev/null || true
+          cp mobile/e2e/out/a11y.txt /tmp/shots/ 2>/dev/null || true
+          cd /tmp/shots && git init -q && git checkout -q -b e2e-screenshots
+          git -c user.name=e2e -c user.email=e2e@courtbook.test add -A
+          git -c user.name=e2e -c user.email=e2e@courtbook.test commit -q -m "Android test screenshots, run ${{ github.run_id }} (${{ github.sha }})"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" e2e-screenshots
 
       - name: Results
         if: always()
