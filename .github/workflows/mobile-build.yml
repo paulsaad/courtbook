@@ -68,6 +68,7 @@ jobs:
         env:
           STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
           STAGING_ANON_KEY: ${{ secrets.STAGING_ANON_KEY }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: bash ../.github/scripts/eas-app-env.sh "${{ inputs.app }}"
 
       - name: Type-check

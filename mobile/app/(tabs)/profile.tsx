@@ -12,6 +12,7 @@ import { Loading } from "../../components/StateView";
 import { SignInPrompt } from "../../components/SignInPrompt";
 import { Segmented } from "../../components/Segmented";
 import { FAULT_LABEL, currentFault, faultsAvailable, setFault, subscribeFault, type Fault } from "../../lib/testFaults";
+import { sendTestReport } from "../../lib/crash";
 import { color, font, radius, space, text, MAX_FONT_SCALE } from "../../lib/theme";
 
 /**
@@ -26,6 +27,7 @@ export default function Profile() {
     ...currentBuild(),
   ];
   const fault = useSyncExternalStore(subscribeFault, currentFault);
+  const [reportSent, setReportSent] = useState(false);
   const name = useProfileName(session.status === "signed-in" ? session.session.user.id : null);
   const email = session.status === "signed-in" ? session.session.user.email ?? null : null;
   const shownName = name.data?.trim() || null;
@@ -91,6 +93,11 @@ export default function Profile() {
               Request lost: nothing is sent; the app acts as if the request never left.{"\n"}
               While on, the app cannot check bookings either. Closing the app turns this off.
             </Text>
+            <Button
+              label={reportSent ? "Test report sent" : "Send a test crash report"}
+              variant="secondary"
+              onPress={() => { sendTestReport(); setReportSent(true); }}
+            />
           </View>
         </>
       )}

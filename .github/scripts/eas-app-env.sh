@@ -25,6 +25,16 @@ if [ "$APP" = staging ]; then
   eas env:set "$EAS_ENV" --name APP_VARIANT --value staging --visibility plaintext --non-interactive >/dev/null
 fi
 
+# Crash reporting: the same Sentry project for both apps (reports are told apart by environment,
+# "production" or "staging", which the app sets from its bundle ID). Copied from the GitHub secret
+# when present; without it the app sends nothing.
+if [ -n "${SENTRY_DSN:-}" ]; then
+  eas env:set "$EAS_ENV" --name EXPO_PUBLIC_SENTRY_DSN --value "$SENTRY_DSN" --visibility plaintext --non-interactive >/dev/null
+  echo "Crash reporting: on (DSN from the SENTRY_DSN secret)"
+else
+  echo "Crash reporting: off (no SENTRY_DSN secret)"
+fi
+
 eas env:pull "$EAS_ENV" --path /tmp/app.env --non-interactive >/dev/null
 url=$(grep -E '^EXPO_PUBLIC_SUPABASE_URL=' /tmp/app.env | head -1 | cut -d= -f2- | tr -d '"'"'"' ')
 rm -f /tmp/app.env
