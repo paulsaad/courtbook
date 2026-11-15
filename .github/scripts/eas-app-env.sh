@@ -36,5 +36,5 @@ fi
 echo "App: $APP · EAS environment: $EAS_ENV · channel: $CHANNEL · database project: $ref (correct for this app)"
 {
   echo "EAS_ENV=$EAS_ENV"; echo "CHANNEL=$CHANNEL"; echo "PROFILE=$PROFILE"
-  [ -n "$VARIANT" ] && echo "APP_VARIANT=$VARIANT"
+  if [ -n "$VARIANT" ]; then echo "APP_VARIANT=$VARIANT"; fi
 } >> "${GITHUB_ENV:-/dev/null}"
