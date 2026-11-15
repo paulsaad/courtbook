@@ -1,4 +1,5 @@
 name: Mobile Android tests (emulator, staging)
+# (also the iOS simulator accessibility audit: run with platform = ios)
 
 # Builds CourtBook Staging for Android on GitHub (no EAS, no store signing: a test build), starts an
 # Android emulator, and drives the real app against the STAGING database with Maestro:
@@ -8,6 +9,12 @@ name: Mobile Android tests (emulator, staging)
 # the helper refuses anything else, and the app itself refuses a database that doesn't match it.
 on:
   workflow_dispatch:
+    inputs:
+      platform:
+        description: "android = emulator flows, sizes and TalkBack audit; ios = simulator accessibility audit (Apple's audit, three sizes)"
+        type: choice
+        options: [android, ios]
+        default: android
 
 concurrency:
   group: android-e2e-staging
@@ -18,6 +25,7 @@ permissions:
 
 jobs:
   e2e:
+    if: inputs.platform != 'ios'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     defaults:
@@ -141,3 +149,92 @@ jobs:
             mobile/e2e/out/
             ~/.maestro/tests/
           if-no-files-found: warn
+
+  ios-a11y:
+    if: inputs.platform == 'ios'
+    runs-on: macos-latest
+    timeout-minutes: 150
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      APP_VARIANT: staging
+      E2E_BUILD: "1"
+      EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.STAGING_ANON_KEY }}
+      EXPO_PUBLIC_E2E: "1"
+      SENTRY_DISABLE_AUTO_UPLOAD: "true"   # no crash reporting in this build (no DSN), so no upload
+      STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+      STAGING_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SERVICE_ROLE_KEY }}
+      STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Staging settings only
+        run: |
+          case "$EXPO_PUBLIC_SUPABASE_URL" in
+            https://pwznauyioqykdwodwpvx.supabase.co*) echo "staging project: ok" ;;
+            *) echo "::error::STAGING_SUPABASE_URL is not the staging project. Nothing was built."; exit 1 ;;
+          esac
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Tools (psql for the staging helper, XcodeGen for the audit project)
+        run: |
+          brew install -q libpq xcodegen
+          echo "$(brew --prefix libpq)/bin" >> "$GITHUB_PATH"
+          xcodebuild -version
+
+      - run: npm ci
+
+      - name: Reuse the simulator build if the app code is unchanged
+        id: app
+        uses: actions/cache/restore@v4
+        with:
+          path: mobile/e2e/CourtBookStaging.app
+          key: e2e-ios-app-${{ hashFiles('.github/workflows/mobile-android-e2e.yml', 'mobile/app/**', 'mobile/components/**', 'mobile/lib/**', 'mobile/shared/**', 'mobile/assets/**', 'mobile/package-lock.json', 'mobile/app.json', 'mobile/app.config.ts') }}
+
+      - name: Build CourtBook Staging for the iOS simulator (Release, unsigned)
+        if: steps.app.outputs.cache-hit != 'true'
+        run: |
+          npx expo prebuild --platform ios --clean
+          ws=$(ls -d ios/*.xcworkspace | head -1)
+          scheme=$(xcodebuild -list -json -workspace "$ws" | python3 -c "import json,sys; d=json.load(sys.stdin)['workspace']['schemes']; print(next(s for s in d if not s.startswith('Pods') and 'Expo' not in s and 'React' not in s))")
+          echo "workspace $ws, scheme $scheme"
+          xcodebuild -workspace "$ws" -scheme "$scheme" -configuration Release -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/build \
+            CODE_SIGNING_ALLOWED=NO -quiet build
+          rm -rf e2e/CourtBookStaging.app
+          cp -R "$(ls -d ios/build/Build/Products/Release-iphonesimulator/*.app | head -1)" e2e/CourtBookStaging.app
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" e2e/CourtBookStaging.app/Info.plist
+
+      - name: Keep the simulator build
+        if: steps.app.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: mobile/e2e/CourtBookStaging.app
+          key: ${{ steps.app.outputs.cache-primary-key }}
+
+      - name: Prepare staging (test account, demo club takes payment at the desk)
+        run: node e2e/staging.mjs prepare
+
+      - name: Accessibility audit (Apple's audit on the iOS simulator)
+        run: bash e2e/run-ios.sh
+
+      - name: Clean up staging
+        if: always()
+        run: node e2e/staging.mjs cleanup || true
+
+      - name: Publish screenshots and audit to the e2e-screenshots-ios branch
+        if: always()
+        working-directory: .
+        run: |
+          [ -d mobile/e2e/out ] || exit 0
+          mkdir -p /tmp/shots && cp mobile/e2e/out/*.png mobile/e2e/out/ios-audit-*.txt /tmp/shots/ 2>/dev/null || true
+          cd /tmp/shots && git init -q && git checkout -q -b e2e-screenshots-ios
+          git -c user.name=e2e -c user.email=e2e@courtbook.test add -A
+          git -c user.name=e2e -c user.email=e2e@courtbook.test commit -q -m "iOS audit, run ${{ github.run_id }} (${{ github.sha }})"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" e2e-screenshots-ios
