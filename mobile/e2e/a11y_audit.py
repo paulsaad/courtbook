@@ -2,7 +2,8 @@
 
 Fails (exit 1) on a control that can be tapped but has nothing to announce: no text and no
 content description on it or anything inside it. Reports, without failing, tap targets smaller than
-44 x 44 dp (Apple's minimum; Android recommends 48, which the app reaches with extra touch area), ignoring controls partly scrolled off screen. Usage: a11y_audit.py <dump.xml> <screen> <density-dpi>
+44 x 44 dp (Apple's minimum; Android recommends 48, which the app reaches with extra touch area), ignoring controls partly scrolled out of view (cut by the screen edge or by
+the edge of the list they scroll in). Usage: a11y_audit.py <dump.xml> <screen> <density-dpi>
 """
 import sys
 import xml.etree.ElementTree as ET
@@ -31,11 +32,24 @@ def bounds(n):
 
 screen_w = max(bounds(n)[2] for n in root.iter("node"))
 screen_h = max(bounds(n)[3] for n in root.iter("node"))
+parent = {c: p for p in root.iter() for c in p}
+
+
+def scroll_edges(n):
+    """Bounds of every scrolling list n sits in: what scrolls out of view is cut at their edges."""
+    p = parent.get(n)
+    while p is not None:
+        if p.get("scrollable") == "true":
+            yield bounds(p)
+        p = parent.get(p)
+
+
 problems, small = [], []
 for n in root.iter("node"):
     x1, y1, x2, y2 = bounds(n)
-    # Partly scrolled off screen: its visible size says nothing about its real size.
-    clipped = x1 <= 0 or y1 <= 0 or x2 >= screen_w or y2 >= screen_h
+    # Partly scrolled out of view: its visible size says nothing about its real size.
+    clipped = x1 <= 0 or y1 <= 0 or x2 >= screen_w or y2 >= screen_h or any(
+        x1 <= sx1 or y1 <= sy1 or x2 >= sx2 or y2 >= sy2 for sx1, sy1, sx2, sy2 in scroll_edges(n))
     if n.get("package", "").startswith("com.android.systemui"):
         continue
     if n.get("clickable") == "true" and n.get("enabled") == "true":
