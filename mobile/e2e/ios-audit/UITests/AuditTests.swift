@@ -109,7 +109,8 @@ final class AuditTests: XCTestCase {
     tapCentre(button)
     sleep(3)
     dismissSystemSheets()
-    let ready = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Ready to play'")).firstMatch
+    // Sign-in returns to where it was opened from (Home, or Profile): either shows the account.
+    let ready = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Ready to play' OR label CONTAINS '@courtbook.test'")).firstMatch
     // iOS's Save Password sheet can appear several seconds after sign-in and hides the app beneath it.
     var done = false
     for _ in 0..<10 {
