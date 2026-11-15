@@ -19,11 +19,12 @@ for cfg in "small $SMALL large" "small $SMALL accessibility-extra-extra-extra-la
   xcrun simctl boot "$udid" && xcrun simctl bootstatus "$udid" -b >/dev/null
   xcrun simctl ui "$udid" content_size "$size"
   xcrun simctl install "$udid" "$APP_PATH" || { echo "::error::install failed"; status=1; continue; }
-  if ! (cd e2e/ios-audit && xcodebuild test -project CourtBookAudit.xcodeproj -scheme Audit \
-        -destination "id=$udid" -derivedDataPath "$RUNNER_TEMP/audit-dd" CODE_SIGNING_ALLOWED=NO \
-        TEST_RUNNER_OUT_DIR="$OUT" TEST_RUNNER_AUDIT_TAG="$tag" \
+  # TEST_RUNNER_* environment variables reach the test process without the prefix.
+  if ! (cd e2e/ios-audit && env TEST_RUNNER_OUT_DIR="$OUT" TEST_RUNNER_AUDIT_TAG="$tag" \
         TEST_RUNNER_E2E_EMAIL="$E2E_EMAIL" TEST_RUNNER_E2E_PASSWORD="$E2E_PASSWORD" \
-        TEST_RUNNER_E2E_CLUB="$E2E_CLUB" TEST_RUNNER_E2E_DATE="$E2E_DATE" 2>&1 \
+        TEST_RUNNER_E2E_CLUB="$E2E_CLUB" TEST_RUNNER_E2E_DATE="$E2E_DATE" \
+        xcodebuild test -project CourtBookAudit.xcodeproj -scheme Audit \
+        -destination "id=$udid" -derivedDataPath "$RUNNER_TEMP/audit-dd" CODE_SIGNING_ALLOWED=NO 2>&1 \
         | tee "$OUT/xcodebuild-$tag.log" | grep -E "AUDIT\||error:|failed|passed|Test Suite" ); then
     echo "::error::audit run $tag failed"; status=1
   fi

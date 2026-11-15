@@ -22,6 +22,9 @@ final class AuditTests: XCTestCase {
   private func open(_ path: String, settle: UInt32 = 5) {
     app.open(URL(string: "courtbook-staging://\(path)")!)
     sleep(settle)
+    // What is on screen now, so a run that never reached the screen is visible in the log.
+    let texts = app.staticTexts.allElementsBoundByIndex.prefix(12).map(\.label).filter { !$0.isEmpty }
+    log("OPEN /\(path.split(separator: "?").first.map(String.init) ?? "") state=\(app.state.rawValue) shows: \(texts)")
   }
 
   private func shot(_ name: String) {
@@ -96,7 +99,7 @@ final class AuditTests: XCTestCase {
     if time.waitForExistence(timeout: 10) {
       reveal(time); time.tap(); sleep(3); audit("club-selected")
     } else { log("no free time to select on \(date)") }
-    let info = app.buttons["Info"]
+    let info = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Info'")).firstMatch
     if info.waitForExistence(timeout: 5) { info.tap(); sleep(4); audit("club-info") }
     open("bookings"); audit("bookings")
     open("profile"); audit("profile")
