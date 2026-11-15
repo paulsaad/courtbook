@@ -72,6 +72,13 @@ jobs:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: bash ../.github/scripts/eas-app-env.sh "${{ inputs.app }}"
 
+      - name: Signing credentials are in EAS (read only)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          BUNDLE=$( [ "${{ inputs.app }}" = staging ] && echo app.courtbook.mobile.staging || echo app.courtbook.mobile )
+          node ../.github/scripts/eas-credentials-check.mjs "$BUNDLE" "${{ inputs.platform }}"
+
       - name: Type-check
         run: npm run typecheck
 
