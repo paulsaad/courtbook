@@ -49,6 +49,30 @@ final class AuditTests: XCTestCase {
     return Array(out.prefix(max))
   }
 
+  /// Focus, wait for the keyboard (keys typed before it is up are lost), type, close the keyboard.
+  /// For a visible field, check the text arrived whole and retype if not.
+  private func type(into field: XCUIElement, _ text: String, check: Bool) {
+    for attempt in 1...3 {
+      tapCentre(field)
+      _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
+      sleep(1)
+      if let old = field.value as? String, !old.isEmpty, old != field.placeholderValue {
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count + 2))
+      }
+      field.typeText(text)
+      let got = field.value as? String ?? ""
+      field.typeText("\n")
+      if !check || got == text { return }
+      log("typing attempt \(attempt) gave \(got.count) of \(text.count) characters; retrying")
+    }
+  }
+
+  /// iOS offers to save the password after sign-in; that sheet covers the app.
+  private func dismissSystemSheets() {
+    let notNow = app.buttons["Not Now"]
+    if notNow.waitForExistence(timeout: 3) { notNow.tap(); log("dismissed Save Password"); sleep(1) }
+  }
+
   private func tapCentre(_ el: XCUIElement) {
     el.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
   }
@@ -68,19 +92,19 @@ final class AuditTests: XCTestCase {
     // a control inside a sheet "not hittable".
     let email = app.textFields["staging-email"]
     reveal(email)
-    tapCentre(email)
-    email.typeText((env["E2E_EMAIL"] ?? "") + "\n")
+    type(into: email, (env["E2E_EMAIL"] ?? ""), check: true)
     let password = app.secureTextFields["staging-password"]
     reveal(password)
-    tapCentre(password)
-    password.typeText((env["E2E_PASSWORD"] ?? "") + "\n")
+    type(into: password, (env["E2E_PASSWORD"] ?? ""), check: false)
     let button = app.buttons["staging-sign-in"]
     reveal(button)
     tapCentre(button)
     log("typed email: \(email.value as? String ?? "?")")
     let ready = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Ready to play'")).firstMatch
+    dismissSystemSheets()
     if ready.waitForExistence(timeout: 30) {
       log("signed in")
+      dismissSystemSheets()
     } else {
       shot("signin-failed")
       log("sign-in did not finish; on screen: \(labels(40))")
@@ -152,7 +176,7 @@ final class AuditTests: XCTestCase {
     open("club/\(club)?date=\(date)", settle: 8); audit("club-book")
     let time = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'time-'")).firstMatch
     if time.waitForExistence(timeout: 10) {
-      reveal(time); time.tap(); sleep(3); audit("club-selected")
+      reveal(time); tapCentre(time); sleep(3); audit("club-selected")
     } else { log("no free time to select on \(date)") }
     let info = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Info'")).firstMatch
     if info.waitForExistence(timeout: 5) { info.tap(); sleep(4); audit("club-info") }
