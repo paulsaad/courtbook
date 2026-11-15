@@ -61,10 +61,11 @@ export function TimeTile({ time, price = null, freeCourts, selected, onPress, di
     >
       {state === "booked" && <Hatch />}
       <View style={styles.top}>
-        <Text style={[styles.time, s.time]}>{time}</Text>
+        {/* At the largest text sizes on a narrow phone, shrink rather than break "08:00" over two lines. */}
+        <Text style={[styles.time, s.time]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{time}</Text>
         {state === "selected" && <Icon name="check" size={18} color={color.onDark} strokeWidth={3} />}
       </View>
-      <Text style={[styles.label, s.label]}>{tileLabel(state, price, freeCourts)}</Text>
+      <Text style={[styles.label, s.label]} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{tileLabel(state, price, freeCourts)}</Text>
     </Pressable>
   );
 }
@@ -93,6 +94,6 @@ const styles = StyleSheet.create({
   tile: { minHeight: 72, borderRadius: radius.md, paddingHorizontal: 11, paddingVertical: 9, justifyContent: "space-between", overflow: "hidden", flex: 1 },
   pressed: { opacity: 0.85 },
   top: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  time: { fontFamily: font.score, fontSize: 26, lineHeight: 28 },
+  time: { fontFamily: font.score, fontSize: 26, lineHeight: 28, flexShrink: 1 },
   label: { fontFamily: font.semibold, fontSize: 13, lineHeight: 17 },
 });

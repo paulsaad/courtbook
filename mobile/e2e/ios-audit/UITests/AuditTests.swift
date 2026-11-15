@@ -191,6 +191,12 @@ final class AuditTests: XCTestCase {
     let time = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'time-'")).firstMatch
     if time.waitForExistence(timeout: 10) {
       reveal(time); tapCentre(time); sleep(3); audit("club-selected")
+      // Apple's audit doesn't see text that wraps inside its box; a time tile that grew far taller
+      // than it is wide means "08:00" or its label broke over lines.
+      let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'time-'")).allElementsBoundByIndex
+      for t in tiles where t.exists && t.frame.height > t.frame.width * 1.3 {
+        log("ISSUE \(tag) club-book [layout] time tile too tall, its text wrapped — label='\(t.label)' id='\(t.identifier)' frame=\(NSCoder.string(for: t.frame))")
+      }
     } else { log("no free time to select on \(date)") }
     let info = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Info'")).firstMatch
     if info.waitForExistence(timeout: 5) { info.tap(); sleep(4); audit("club-info") }
