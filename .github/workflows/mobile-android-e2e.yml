@@ -13,10 +13,13 @@ concurrency:
   group: android-e2e-staging
   cancel-in-progress: false
 
+permissions:
+  contents: write   # only to publish the screenshots to the e2e-screenshots branch
+
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: mobile
@@ -53,11 +56,28 @@ jobs:
       - run: npm ci
       - run: npm run typecheck && npm test -- --ci
 
+      # The test build only depends on the app code; reuse it when nothing but the tests changed.
+      - name: Reuse the test build if the app code is unchanged
+        id: apk
+        uses: actions/cache/restore@v4
+        with:
+          path: mobile/e2e/app-release.apk
+          key: e2e-apk-${{ hashFiles('mobile/app/**', 'mobile/components/**', 'mobile/lib/**', 'mobile/shared/**', 'mobile/assets/**', 'mobile/package-lock.json', 'mobile/app.json', 'mobile/app.config.ts') }}
+
       - name: Build the Android test app (CourtBook Staging, x86_64)
+        if: steps.apk.outputs.cache-hit != 'true'
         run: |
           npx expo prebuild --platform android --no-install --clean
           cd android && ./gradlew assembleRelease -PreactNativeArchitectures=x86_64 --no-daemon -q
-          ls -la app/build/outputs/apk/release/
+          cp app/build/outputs/apk/release/app-release.apk ../e2e/app-release.apk
+
+      # Saved straight away, so a later failure in the tests doesn't throw the build away.
+      - name: Keep the test build
+        if: steps.apk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: mobile/e2e/app-release.apk
+          key: ${{ steps.apk.outputs.cache-primary-key }}
 
       - name: Prepare staging (test account, demo club takes payment at the desk)
         run: node e2e/staging.mjs prepare
@@ -74,13 +94,16 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
 
-      - name: Emulator tests (Android 14, Pixel 6)
+      - name: Emulator tests (Android 12, Pixel 6)
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 34
-          target: google_apis
+          api-level: 31
+          target: default
           arch: x86_64
           profile: pixel_6
+          cores: 4
+          ram-size: 4096M
+          heap-size: 1024M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           working-directory: mobile
@@ -89,6 +112,20 @@ jobs:
       - name: Clean up staging
         if: always()
         run: node e2e/staging.mjs cleanup || true
+
+      # Screenshots also go to a branch of their own (replaced each run), so they can be looked at
+      # without downloading the artifact. Nothing else is committed.
+      - name: Publish screenshots to the e2e-screenshots branch
+        if: always()
+        working-directory: .
+        run: |
+          [ -d mobile/e2e/out ] || exit 0
+          mkdir -p /tmp/shots && find mobile/e2e/out ~/.maestro/tests -name '*.png' -exec cp --backup=numbered {} /tmp/shots/ \; 2>/dev/null || true
+          cp mobile/e2e/out/a11y.txt /tmp/shots/ 2>/dev/null || true
+          cd /tmp/shots && git init -q && git checkout -q -b e2e-screenshots
+          git -c user.name=e2e -c user.email=e2e@courtbook.test add -A
+          git -c user.name=e2e -c user.email=e2e@courtbook.test commit -q -m "Android test screenshots, run ${{ github.run_id }} (${{ github.sha }})"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" e2e-screenshots
 
       - name: Results
         if: always()

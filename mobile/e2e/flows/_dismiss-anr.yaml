@@ -1,0 +1,9 @@
+# The emulator on GitHub has no graphics card; a slow first frame can trigger Android's
+# "isn't responding" dialog. That is the test machine, not the app: choose Wait and carry on.
+appId: app.courtbook.mobile.staging
+---
+- runFlow:
+    when:
+      visible: "Wait"
+    commands:
+      - tapOn: "Wait"

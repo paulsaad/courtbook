@@ -80,7 +80,7 @@ export default function Home() {
         <View style={styles.section}>
           <View style={styles.sectionHead}>
             <Text variant="heading">Your next booking</Text>
-            <Pressable accessibilityRole="link" onPress={() => router.navigate("/bookings")} hitSlop={12}>
+            <Pressable accessibilityRole="link" onPress={() => router.navigate("/bookings")} hitSlop={{ left: 12, right: 12 }} style={{ minHeight: 44, justifyContent: "center" }}>
               <Text style={styles.link}>All bookings</Text>
             </Pressable>
           </View>
@@ -121,7 +121,8 @@ const styles = StyleSheet.create({
   bookSub: { fontFamily: font.regular, fontSize: 15, color: color.onDarkMuted },
   sportRow: { gap: 8, paddingHorizontal: space.lg, paddingBottom: space.lg },
   section: { gap: space.md },
-  sectionHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  // Wraps at large text sizes so "All bookings" drops below the heading instead of off the screen.
+  sectionHead: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", columnGap: 12 },
   link: { fontFamily: font.semibold, fontSize: 15, color: color.cedar },
   empty: { gap: space.md },
 });

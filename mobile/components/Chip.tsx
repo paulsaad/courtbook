@@ -17,6 +17,8 @@ export function Chip({ label, selected = false, onPress, icon, style, tone = "fi
       accessibilityRole="button"
       accessibilityState={{ selected, disabled }}
       disabled={disabled}
+      // Drawn 44 tall; the touch area reaches 48 (TOUCH) so it meets Android's target size too.
+      hitSlop={{ top: 2, bottom: 2 }}
       onPress={() => {
         haptic.select();
         onPress();

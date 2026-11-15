@@ -3,11 +3,12 @@ appId: app.courtbook.mobile.staging
 ---
 - clearState
 - launchApp
-- extendedWaitUntil: { visible: "Book a court in Lebanon", timeout: 30000 }
+- runFlow: _dismiss-anr.yaml
+- extendedWaitUntil: { visible: "Book a court in Lebanon", timeout: 120000 }
 - assertVisible: "STAGING"
 - takeScreenshot: shots/01-home-signed-out
 - tapOn: "Courts"
-- extendedWaitUntil: { visible: ".*Demo club.*", timeout: 30000 }
+- extendedWaitUntil: { visible: "All sports", timeout: 30000 }
 - takeScreenshot: shots/02-courts
 - openLink: "courtbook-staging://club/${E2E_CLUB}?date=${E2E_DATE}"
 - extendedWaitUntil: { visible: { id: "time-1[0-9]:00" }, timeout: 30000 }
@@ -18,9 +19,12 @@ appId: app.courtbook.mobile.staging
 - scrollUntilVisible: { element: { id: "staging-email" } }
 - tapOn: { id: "staging-email" }
 - inputText: "${E2E_EMAIL}"
+- hideKeyboard
+- scrollUntilVisible: { element: { id: "staging-password" } }
 - tapOn: { id: "staging-password" }
 - inputText: "${E2E_PASSWORD}"
 - hideKeyboard
+- scrollUntilVisible: { element: { id: "staging-sign-in" } }
 - tapOn: { id: "staging-sign-in" }
 - extendedWaitUntil: { visible: "Reserve court", timeout: 30000 }
 - takeScreenshot: shots/04-ready

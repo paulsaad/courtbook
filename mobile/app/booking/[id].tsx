@@ -1,4 +1,5 @@
 import { Alert, Linking, ScrollView, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatInTimeZone } from "date-fns-tz";
@@ -26,6 +27,7 @@ import { color, font, radius, space } from "../../lib/theme";
 export default function Booking() {
   const p = useLocalSearchParams<{ id: string; new?: string }>();
   const session = useSession();
+  const insets = useSafeAreaInsets();
   const signedIn = session.status === "signed-in";
   const q = useBooking(signedIn ? p.id : undefined);
   const b = q.data;
@@ -71,7 +73,8 @@ export default function Booking() {
     b.status === "cancelled" ? "Cancelled" : b.status === "no_show" ? "Marked as a no-show" : b.status === "pending" ? "Waiting for payment" : null;
 
   return (
-    <ScrollView style={styles.page} contentContainerStyle={styles.content}>
+    // The last line must clear the phone's navigation bar (Android draws the app behind it).
+    <ScrollView style={styles.page} contentContainerStyle={[styles.content, { paddingBottom: 48 + insets.bottom }]}>
       <Stack.Screen options={{ title: isNew ? "" : "Booking", headerBackVisible: !isNew, gestureEnabled: !isNew }} />
       {isNew && (
         <View style={styles.hero} accessibilityRole="header">

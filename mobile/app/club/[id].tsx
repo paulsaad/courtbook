@@ -14,6 +14,7 @@ import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { Segmented } from "../../components/Segmented";
 import { ClubInfoView } from "../../components/ClubInfoView";
 import { useClubInfo } from "../../lib/clubInfo";
+import { animate } from "../../lib/motion";
 import { PendingReservationBanner } from "../../components/PendingReservation";
 import { clubsFromSlots, durationLabel, durationOptions, partOfDay, sameInstant, tilesFor } from "../../lib/courts";
 import { BEIRUT, money, tilePriceLabel, useClubMode, useDaySlots, useQuote, useTilePrices } from "../../lib/queries";
@@ -108,9 +109,9 @@ export default function Club() {
     cell.measureLayout(content.current, (_x: number, y: number, _w: number, h: number) => {
       const margin = 12;
       if (y + h + margin > scrollY.current + viewport.current) {
-        scroller.current?.scrollTo({ y: y + h + margin - viewport.current, animated: true });
+        scroller.current?.scrollTo({ y: y + h + margin - viewport.current, animated: animate() });
       } else if (y - margin < scrollY.current) {
-        scroller.current?.scrollTo({ y: Math.max(0, y - margin), animated: true });
+        scroller.current?.scrollTo({ y: Math.max(0, y - margin), animated: animate() });
       }
     }, () => {});
   }, [tile]);
@@ -206,7 +207,7 @@ export default function Club() {
         {groups.length > 1 && tiles.length > 12 && (
           <View style={styles.jumpRow}>
             {groups.map((g) => (
-              <Chip key={g.label} label={g.label} onPress={() => scroller.current?.scrollTo({ y: Math.max(0, (groupY.current[g.label] ?? 0) - 8), animated: true })} />
+              <Chip key={g.label} label={g.label} onPress={() => scroller.current?.scrollTo({ y: Math.max(0, (groupY.current[g.label] ?? 0) - 8), animated: animate() })} />
             ))}
           </View>
         )}

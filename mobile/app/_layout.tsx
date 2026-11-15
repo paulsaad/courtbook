@@ -20,6 +20,10 @@ import { color, font } from "../lib/theme";
 
 startCrashReporting();
 wireAppLifecycle();
+
+// A link straight to a screen (courtbook://club/…, courtbook://booking/…, from WhatsApp or a
+// notification) opens it on top of the tabs, so Back goes to Home instead of leaving the app.
+export const unstable_settings = { initialRouteName: "(tabs)" };
 // Keep the splash screen up until the typefaces are ready, so no screen flashes in system fonts.
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 

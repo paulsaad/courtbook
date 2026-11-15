@@ -77,7 +77,7 @@ function Row({ r, past = false }: { r: AgendaRow; past?: boolean }) {
       <View style={[styles.edge, past && { backgroundColor: color.line }]} />
       <View style={styles.when}>
         <Text style={[styles.date, past && { color: color.muted }]}>{date.toUpperCase()}</Text>
-        <Text style={styles.time}>{time}</Text>
+        <Text style={styles.time} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{time}</Text>
       </View>
       <View style={{ flex: 1, gap: 2 }}>
         <Text variant="strong" numberOfLines={2}>{r.club_name}</Text>
@@ -98,7 +98,8 @@ const styles = StyleSheet.create({
   },
   rowPast: { backgroundColor: "#FAF8F3" },
   edge: { width: 5, alignSelf: "stretch", backgroundColor: color.red },
-  when: { width: 96, gap: 2, paddingVertical: space.md },
+  // Grows with large text so a time range is never split mid-number ("10:30–1 / 2:00", Android 1.6×).
+  when: { minWidth: 96, maxWidth: "45%", gap: 2, paddingVertical: space.md },
   date: { fontFamily: font.bold, fontSize: 14, letterSpacing: 0.6, color: color.red },
   time: { fontFamily: font.score, fontSize: 18, color: color.ink },
 });

@@ -24,7 +24,7 @@ export function DateStrip({ days, selected, onSelect, disabled = false }: { days
             }}
             style={[styles.day, on && styles.dayOn, disabled && !on && { opacity: 0.5 }]}
           >
-            <Text style={[styles.weekday, on && styles.onText]}>{d.weekday}</Text>
+            <Text numberOfLines={1} style={[styles.weekday, on && styles.onText]}>{d.weekday}</Text>
             <Text style={[styles.num, on && styles.onText]}>{d.day}</Text>
             <View style={[styles.mark, on && styles.markOn]} />
           </Pressable>
@@ -36,7 +36,8 @@ export function DateStrip({ days, selected, onSelect, disabled = false }: { days
 
 const styles = StyleSheet.create({
   row: { gap: 4, paddingHorizontal: 20 },
-  day: { width: 54, height: 60, borderRadius: radius.sm + 2, alignItems: "center", justifyContent: "center" },
+  // Grows with the phone's text size instead of cutting "Today" or the date off (Android, text 1.6×).
+  day: { minWidth: 54, minHeight: 60, paddingHorizontal: 6, paddingTop: 6, paddingBottom: 12, borderRadius: radius.sm + 2, alignItems: "center", justifyContent: "center" },
   dayOn: { backgroundColor: color.ink },
   weekday: { fontFamily: font.regular, fontSize: 13, lineHeight: 16, color: color.muted },
   num: { fontFamily: font.score, fontSize: 22, lineHeight: 24, color: color.ink },
