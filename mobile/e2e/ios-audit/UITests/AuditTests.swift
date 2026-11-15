@@ -23,7 +23,7 @@ final class AuditTests: XCTestCase {
     app.open(URL(string: "courtbook-staging://\(path)")!)
     sleep(settle)
     // What is on screen now, so a run that never reached the screen is visible in the log.
-    let texts = app.staticTexts.allElementsBoundByIndex.prefix(12).map(\.label).filter { !$0.isEmpty }
+    let texts = labels(14)
     log("OPEN /\(path.split(separator: "?").first.map(String.init) ?? "") state=\(app.state.rawValue) shows: \(texts)")
   }
 
@@ -37,6 +37,18 @@ final class AuditTests: XCTestCase {
     while !(el.exists && el.isHittable) && n < 6 { app.swipeUp(); n += 1 }
   }
 
+  /// Labels on screen, read from one snapshot (stable while the screen changes).
+  private func labels(_ max: Int = 25) -> [String] {
+    guard let root = try? app.snapshot() else { return [] }
+    var out: [String] = []
+    func walk(_ e: XCUIElementSnapshot) {
+      if !e.label.isEmpty && out.last != e.label { out.append(e.label) }
+      e.children.forEach(walk)
+    }
+    walk(root)
+    return Array(out.prefix(max))
+  }
+
   private func tapCentre(_ el: XCUIElement) {
     el.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
   }
@@ -47,7 +59,7 @@ final class AuditTests: XCTestCase {
     let signedIn = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '@courtbook.test'")).firstMatch
     if signedIn.waitForExistence(timeout: 3) { log("already signed in"); return }
     guard signIn.waitForExistence(timeout: 20) else {
-      log("neither signed in nor a Sign in button: \(app.staticTexts.allElementsBoundByIndex.prefix(15).map(\.label))")
+      log("neither signed in nor a Sign in button: \(labels())")
       XCTFail("profile did not settle"); return
     }
     open("sign-in")
@@ -65,9 +77,15 @@ final class AuditTests: XCTestCase {
     let button = app.buttons["staging-sign-in"]
     reveal(button)
     tapCentre(button)
+    log("typed email: \(email.value as? String ?? "?")")
     let ready = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Ready to play'")).firstMatch
-    XCTAssertTrue(ready.waitForExistence(timeout: 30), "sign-in to the staging test account")
-    log("signed in")
+    if ready.waitForExistence(timeout: 30) {
+      log("signed in")
+    } else {
+      shot("signin-failed")
+      log("sign-in did not finish; on screen: \(labels(40))")
+      XCTFail("sign-in to the staging test account")
+    }
   }
 
   private func kind(_ t: XCUIAccessibilityAuditType) -> String {
