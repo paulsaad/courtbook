@@ -39,4 +39,14 @@ echo "::group::summary"
 cat "$OUT"/ios-audit-*.txt 2>/dev/null | grep -E "^(SCREEN|ERROR)" || echo "no audit output"
 echo "issues by kind:"; cat "$OUT"/ios-audit-*.txt 2>/dev/null | grep -oE "^ISSUE [^ ]+ [^ ]+ \[[^]]+\]" | awk '{print $4}' | sort | uniq -c
 echo "::endgroup::"
+
+# Every finding must be fixed or reviewed and listed in ios-audit/accepted.txt.
+grep -hE "^ISSUE " "$OUT"/ios-audit-*.txt 2>/dev/null > "$OUT/issues.txt" || true
+grep -vE '^(#|$)' e2e/ios-audit/accepted.txt > "$OUT/accepted.re"
+new=$(grep -vEf "$OUT/accepted.re" "$OUT/issues.txt" || true)
+if [ -n "$new" ]; then
+  echo "::error::accessibility findings not yet fixed or accepted:"; echo "$new"; status=1
+else
+  echo "accessibility audit: no open findings ($(wc -l < "$OUT/issues.txt" | tr -d ' ') accepted)"
+fi
 exit $status

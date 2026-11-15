@@ -33,9 +33,15 @@ final class AuditTests: XCTestCase {
     try? png.write(to: out.appendingPathComponent("ios-\(name)-\(tag).png"))
   }
 
-  private func reveal(_ el: XCUIElement) {
+  /// Wait for the element, then scroll it into reach if it is below the fold.
+  @discardableResult
+  private func reveal(_ el: XCUIElement) -> Bool {
+    guard el.waitForExistence(timeout: 15) else {
+      log("not on screen: \(el.description); showing \(labels())"); return false
+    }
     var n = 0
-    while !(el.exists && el.isHittable) && n < 6 { app.swipeUp(); n += 1 }
+    while !el.isHittable && n < 4 { app.swipeUp(); n += 1 }
+    return true
   }
 
   /// Labels on screen, read from one snapshot (stable while the screen changes).
@@ -93,7 +99,7 @@ final class AuditTests: XCTestCase {
     // button are not hidden behind it. A tap at the element's centre works even when XCUITest calls
     // a control inside a sheet "not hittable".
     let email = app.textFields["staging-email"]
-    reveal(email)
+    guard reveal(email) else { XCTFail("sign-in screen did not show the test account fields"); return }
     type(into: email, (env["E2E_EMAIL"] ?? ""), check: true)
     let password = app.secureTextFields["staging-password"]
     reveal(password)
@@ -105,10 +111,14 @@ final class AuditTests: XCTestCase {
     dismissSystemSheets()
     log("typed email: \(email.value as? String ?? "?")")
     let ready = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Ready to play'")).firstMatch
-    dismissSystemSheets()
-    if ready.waitForExistence(timeout: 30) {
-      log("signed in")
+    // iOS's Save Password sheet can appear several seconds after sign-in and hides the app beneath it.
+    var done = false
+    for _ in 0..<10 {
       dismissSystemSheets()
+      if ready.waitForExistence(timeout: 3) { done = true; break }
+    }
+    if done {
+      log("signed in")
     } else {
       shot("signin-failed")
       log("sign-in did not finish; on screen: \(labels(40))")
