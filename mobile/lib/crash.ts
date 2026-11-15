@@ -14,8 +14,9 @@ import { installedVariant } from "./appIdentity";
  *     response bodies, no headers or cookies, no query strings (filters and tokens);
  *   - any email address that reaches a message, exception or breadcrumb is masked.
  * What it does contain: the error and stack, the screen path, app (environment "production" or
- * "staging", from the installed bundle ID), version and build, and the update ID (dist), so a crash
- * ties to exact code.
+ * "staging", from the installed bundle ID), version and build, and the update ID (tag update_id), so
+ * a crash ties to exact code. Release and dist use the same names the build's source-map upload uses
+ * (bundle ID@version+build, dist = build), so each report sits under the release its maps belong to.
  */
 const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 
@@ -57,8 +58,9 @@ export function startCrashReporting(dsn = process.env.EXPO_PUBLIC_SENTRY_DSN) {
     dsn,
     sendDefaultPii: false,
     environment: installedVariant ?? "development",
-    release: `courtbook@${Application.nativeApplicationVersion ?? "?"}+${Application.nativeBuildVersion ?? "?"}`,
-    dist: Updates.updateId ?? "built-in",
+    release: `${Application.applicationId ?? "?"}@${Application.nativeApplicationVersion ?? "?"}+${Application.nativeBuildVersion ?? "?"}`,
+    dist: Application.nativeBuildVersion ?? undefined,
+    initialScope: { tags: { update_id: Updates.updateId ?? "built-in" } },
     tracesSampleRate: 0,
     attachScreenshot: false,
     attachViewHierarchy: false,

@@ -14,6 +14,7 @@ describe("crash reports carry no personal information", () => {
   it("drops the user, device name, server name, request body, headers, cookies and query strings", () => {
     const event = {
       message: "boom",
+      release: "app.courtbook.mobile.staging@0.3.0+12",
       user: { id: "u1", email: "p@x.com", ip_address: "1.2.3.4" },
       server_name: "Pauls-iPhone",
       request: { url: "https://x.supabase.co/rest/v1/bookings?client_token=eq.abc", method: "GET", headers: { Authorization: "Bearer t" }, cookies: { a: "b" }, data: { email: "p@x.com" } },
@@ -25,6 +26,7 @@ describe("crash reports carry no personal information", () => {
       ],
     } as unknown as ErrorEvent;
     const s = scrubEvent(event);
+    expect(s.release).toBe("app.courtbook.mobile.staging@0.3.0+12"); // the "@" is not an email
     expect(s.user).toBeUndefined();
     expect(s.server_name).toBeUndefined();
     expect(s.request).toEqual({ url: "https://x.supabase.co/rest/v1/bookings", method: "GET" });
@@ -52,6 +54,6 @@ describe("configuration", () => {
   it("tags the app (staging vs live), version, build and update; never sends default personal data", () => {
     expect(startCrashReporting("https://key@o1.ingest.sentry.io/2")).toBe(true);
     const o = mockInit.mock.calls[0][0];
-    expect(o).toMatchObject({ environment: "staging", release: "courtbook@0.3.0+7", dist: "upd-1", sendDefaultPii: false, attachScreenshot: false, attachViewHierarchy: false });
+    expect(o).toMatchObject({ environment: "staging", release: "app.courtbook.mobile.staging@0.3.0+7", dist: "7", initialScope: { tags: { update_id: "upd-1" } }, sendDefaultPii: false, attachScreenshot: false, attachViewHierarchy: false });
   });
 });

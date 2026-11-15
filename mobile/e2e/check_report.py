@@ -21,8 +21,9 @@ problems = []
 want = {"environment": "staging"}
 for k, v in want.items():
     if ev.get(k) != v: problems.append(f"{k} is {ev.get(k)!r}, expected {v!r}")
-if not str(ev.get("release", "")).startswith("courtbook@0.3.0+"): problems.append(f"release {ev.get('release')!r}")
-if not ev.get("dist"): problems.append("no dist (update ID)")
+if not str(ev.get("release", "")).startswith("app.courtbook.mobile.staging@0.3.0+"): problems.append(f"release {ev.get('release')!r}")
+if not ev.get("dist"): problems.append("no dist (build)")
+if not (ev.get("tags") or {}).get("update_id"): problems.append("no update_id tag")
 if ev.get("user"): problems.append("user present")
 if ev.get("server_name"): problems.append("server_name present")
 if ((ev.get("contexts") or {}).get("device") or {}).get("name"): problems.append("device name present")
@@ -37,7 +38,7 @@ for needle in filter(None, [os.environ.get("E2E_EMAIL"), "Emma Tester", os.envir
 if re.search(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", raw, re.I): problems.append("contains an email address")
 if re.search(r"\b\d{1,3}(\.\d{1,3}){3}\b", raw): problems.append("contains an IP-like address")
 msg = ((ev.get("exception") or {}).get("values") or [{}])[0].get("value")
-print(f"report: environment={ev.get('environment')} release={ev.get('release')} dist={ev.get('dist')} event_id={ev.get('event_id')}")
+print(f"report: environment={ev.get('environment')} release={ev.get('release')} dist={ev.get('dist')} update_id={(ev.get('tags') or {}).get('update_id')} event_id={ev.get('event_id')}")
 print(f"report: message={msg!r}; {len(ev.get('breadcrumbs') or [])} breadcrumbs; top-level keys {sorted(ev)}")
 for p in problems: print("FAIL", p)
 print("crash report: " + ("OK, nothing personal" if not problems else f"{len(problems)} problem(s)"))
