@@ -20,7 +20,7 @@ appId: app.courtbook.mobile.staging
 - tapOn: "Profile"
 - scrollUntilVisible: { element: "Off" }
 - tapOn: "Off"
-- tapOn: "Home"
+- openLink: "courtbook-staging://"   # not tapOn "Home": that can hit Android's own Home button
 - tapOn: "Check now"
 - extendedWaitUntil: { visible: "Your booking went through", timeout: 60000 }
 - takeScreenshot: shots/09-recovered

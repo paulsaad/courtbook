@@ -4,7 +4,7 @@ appId: app.courtbook.mobile.staging
 ---
 - launchApp
 - runFlow: _dismiss-anr.yaml
-- extendedWaitUntil: { visible: "Home", timeout: 120000 }
+- extendedWaitUntil: { visible: "Book a court", timeout: 120000 }
 - takeScreenshot: shots/sizes/home-${SUFFIX}
 - tapOn: "Courts"
 - extendedWaitUntil: { visible: "All sports", timeout: 20000, optional: true }

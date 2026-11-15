@@ -4,7 +4,7 @@ appId: app.courtbook.mobile.staging
 ---
 - launchApp
 - runFlow: _dismiss-anr.yaml
-- extendedWaitUntil: { visible: "Home", timeout: 120000 }
+- extendedWaitUntil: { visible: "Book a court", timeout: 120000 }
 - openLink: "courtbook-staging://club/${E2E_CLUB}?date=${E2E_DATE}"
 - extendedWaitUntil: { visible: "Book", timeout: 30000 }
 - back
