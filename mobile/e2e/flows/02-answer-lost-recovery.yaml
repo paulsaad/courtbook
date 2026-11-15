@@ -21,7 +21,12 @@ appId: app.courtbook.mobile.staging
 - scrollUntilVisible: { element: "Off" }
 - tapOn: "Off"
 - openLink: "courtbook-staging://"   # not tapOn "Home": that can hit Android's own Home button
-- tapOn: "Check now"
+# The app may already have looked again on its own (it does on return to the app); if not, ask it to.
+- runFlow:
+    when:
+      visible: "Check now"
+    commands:
+      - tapOn: "Check now"
 - extendedWaitUntil: { visible: "Your booking went through", timeout: 60000 }
 - takeScreenshot: shots/09-recovered
 - tapOn: "View booking"
