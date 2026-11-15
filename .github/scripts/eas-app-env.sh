@@ -40,6 +40,19 @@ else
   echo "Crash reporting: off (no SENTRY_DSN secret)"
 fi
 
+# Readable crash locations (source maps): uploaded by the build with SENTRY_AUTH_TOKEN (a secret
+# EAS keeps hidden). Staging only for now, like crash reporting itself. Without the token, upload is
+# switched off so a build never fails for want of it.
+if [ "$APP" = staging ] && [ -n "${SENTRY_AUTH_TOKEN:-}" ]; then
+  eas env:set "$EAS_ENV" --name SENTRY_AUTH_TOKEN --value "$SENTRY_AUTH_TOKEN" --visibility secret --non-interactive >/dev/null
+  eas env:set "$EAS_ENV" --name SENTRY_DISABLE_AUTO_UPLOAD --value false --visibility plaintext --non-interactive >/dev/null
+  echo "Source maps: uploaded to Sentry by builds"
+else
+  eas env:delete "$EAS_ENV" --variable-name SENTRY_AUTH_TOKEN --non-interactive >/dev/null 2>&1 || true
+  eas env:set "$EAS_ENV" --name SENTRY_DISABLE_AUTO_UPLOAD --value true --visibility plaintext --non-interactive >/dev/null
+  echo "Source maps: not uploaded"
+fi
+
 eas env:pull "$EAS_ENV" --path /tmp/app.env --non-interactive >/dev/null
 url=$(grep -E '^EXPO_PUBLIC_SUPABASE_URL=' /tmp/app.env | head -1 | cut -d= -f2- | tr -d '"'"'"' ')
 rm -f /tmp/app.env

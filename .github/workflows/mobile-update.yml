@@ -95,6 +95,7 @@ jobs:
           STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
           STAGING_ANON_KEY: ${{ secrets.STAGING_ANON_KEY }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: bash ../.github/scripts/eas-app-env.sh "${{ inputs.app }}"
 
       - name: Checks (publish only)
@@ -157,6 +158,18 @@ jobs:
           jq -r '.[] | "- \(.platform): update \(.id) · group \(.group) · runtime \(.runtimeVersion)"' /tmp/update.json >> "$GITHUB_STEP_SUMMARY" || true
           # The raw result always goes to the log, whatever its exact shape.
           cat /tmp/update.json
+
+      # Staging only, while crash reporting is staging only: the update's source maps go to Sentry so
+      # its reports show real file names and lines. Skipped without the token.
+      - name: Source maps to Sentry (staging)
+        if: inputs.action == 'publish' && inputs.app == 'staging'
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: courtbook
+          SENTRY_PROJECT: react-native
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then echo "No SENTRY_AUTH_TOKEN: skipped"; exit 0; fi
+          npx sentry-expo-upload-sourcemaps dist
 
       - name: Roll back to an earlier update
         if: inputs.action == 'rollback-to-previous'
