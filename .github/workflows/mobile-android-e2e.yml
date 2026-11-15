@@ -202,7 +202,7 @@ jobs:
         run: |
           npx expo prebuild --platform ios --clean
           ws=$(ls -d ios/*.xcworkspace | head -1)
-          scheme=$(xcodebuild -list -json -workspace "$ws" | python3 -c "import json,sys; d=json.load(sys.stdin)['workspace']['schemes']; print(next(s for s in d if not s.startswith('Pods') and 'Expo' not in s and 'React' not in s))")
+          scheme=$(basename "$ws" .xcworkspace)   # the app's own scheme has the workspace's name
           echo "workspace $ws, scheme $scheme"
           xcodebuild -workspace "$ws" -scheme "$scheme" -configuration Release -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/build \
