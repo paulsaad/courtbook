@@ -121,7 +121,8 @@ const styles = StyleSheet.create({
   bookSub: { fontFamily: font.regular, fontSize: 15, color: color.onDarkMuted },
   sportRow: { gap: 8, paddingHorizontal: space.lg, paddingBottom: space.lg },
   section: { gap: space.md },
-  sectionHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  // Wraps at large text sizes so "All bookings" drops below the heading instead of off the screen.
+  sectionHead: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", columnGap: 12 },
   link: { fontFamily: font.semibold, fontSize: 15, color: color.cedar },
   empty: { gap: space.md },
 });

@@ -91,7 +91,7 @@ export function ClubInfoView({ query, onBook }: {
         <View style={styles.factRule} />
         <Fact label="Play" value={length} />
         <View style={styles.factRule} />
-        <Fact label="Free cancellation" value={`${club.cancel_cutoff_hours} h before`} />
+        <Fact label="Free to cancel" value={`${club.cancel_cutoff_hours} h before`} />
       </View>
 
       {gallery.length > 0 && (

@@ -1,4 +1,4 @@
-import { View } from "react-native";
+import { Text, View } from "react-native";
 import { Tabs } from "expo-router";
 import { Icon, type IconName } from "../../components/Icon";
 import { color, font } from "../../lib/theme";
@@ -16,8 +16,13 @@ function TabIcon({ name, focused }: { name: IconName; focused: boolean }) {
   );
 }
 
+// Labels follow the phone's text size, but only up to 1.3×: beyond that the tab bar can't grow and
+// the words were cut off (Android, text 1.6×). Icons and the red line still mark the active tab.
 const tab = (title: string, icon: IconName) => ({
   title,
+  tabBarLabel: ({ focused, color: c }: { focused: boolean; color: import("react-native").ColorValue }) => (
+    <Text maxFontSizeMultiplier={1.3} numberOfLines={1} style={{ fontSize: 12, fontFamily: focused ? font.bold : font.semibold, color: c }}>{title}</Text>
+  ),
   tabBarIcon: ({ focused }: { focused: boolean }) => <TabIcon name={icon} focused={focused} />,
 });
 
