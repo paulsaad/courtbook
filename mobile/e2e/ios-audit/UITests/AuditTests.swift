@@ -20,6 +20,7 @@ final class AuditTests: XCTestCase {
   }
 
   private func open(_ path: String, settle: UInt32 = 5) {
+    dismissSystemSheets()
     app.open(URL(string: "courtbook-staging://\(path)")!)
     sleep(settle)
     // What is on screen now, so a run that never reached the screen is visible in the log.
@@ -49,17 +50,18 @@ final class AuditTests: XCTestCase {
     return Array(out.prefix(max))
   }
 
-  /// Focus, wait for the keyboard (keys typed before it is up are lost), type, close the keyboard.
-  /// For a visible field, check the text arrived whole and retype if not.
+  /// Focus, wait for the keyboard, then type one character at a time: the app's text fields are
+  /// re-rendered on every keystroke, and fast typing on CI simulators drops or repeats characters.
+  /// A visible field is checked; if the text is wrong, the field is emptied and typed again.
   private func type(into field: XCUIElement, _ text: String, check: Bool) {
     for attempt in 1...3 {
       tapCentre(field)
       _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
       sleep(1)
-      if let old = field.value as? String, !old.isEmpty, old != field.placeholderValue {
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count + 2))
+      if check, let old = field.value as? String, !old.isEmpty, old != field.placeholderValue {
+        for _ in 0..<(old.count + 2) { field.typeText(XCUIKeyboardKey.delete.rawValue); usleep(60_000) }
       }
-      field.typeText(text)
+      for ch in text { field.typeText(String(ch)); usleep(120_000) }
       let got = field.value as? String ?? ""
       field.typeText("\n")
       if !check || got == text { return }
@@ -70,7 +72,7 @@ final class AuditTests: XCTestCase {
   /// iOS offers to save the password after sign-in; that sheet covers the app.
   private func dismissSystemSheets() {
     let notNow = app.buttons["Not Now"]
-    if notNow.waitForExistence(timeout: 3) { notNow.tap(); log("dismissed Save Password"); sleep(1) }
+    if notNow.waitForExistence(timeout: 2) { notNow.tap(); log("dismissed Save Password"); sleep(1) }
   }
 
   private func tapCentre(_ el: XCUIElement) {
@@ -99,6 +101,8 @@ final class AuditTests: XCTestCase {
     let button = app.buttons["staging-sign-in"]
     reveal(button)
     tapCentre(button)
+    sleep(3)
+    dismissSystemSheets()
     log("typed email: \(email.value as? String ?? "?")")
     let ready = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Ready to play'")).firstMatch
     dismissSystemSheets()
@@ -129,7 +133,7 @@ final class AuditTests: XCTestCase {
         count += 1
         let el = issue.element
         let who = el.map { "label='\($0.label)' id='\($0.identifier)' type=\($0.elementType.rawValue) frame=\(NSCoder.string(for: $0.frame))" } ?? "no element"
-        self.log("ISSUE \(self.tag) \(screen) [\(self.kind(issue.auditType))] \(issue.compactDescription) — \(who)")
+        self.log("ISSUE \(self.tag) \(screen) [\(self.kind(issue.auditType))] \(issue.compactDescription) — \(who) — \(issue.detailedDescription.replacingOccurrences(of: "\n", with: " "))")
         return true // recorded; the CI script decides
       }
     } catch {
