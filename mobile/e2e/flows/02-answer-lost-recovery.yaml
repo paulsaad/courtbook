@@ -2,9 +2,7 @@
 # unresolved, block nothing else silently, show the banner, and recover the same booking by its token.
 appId: app.courtbook.mobile.staging
 ---
-- launchApp
-- runFlow: _dismiss-anr.yaml
-- extendedWaitUntil: { visible: "Home", timeout: 120000 }
+- runFlow: _sign-in.yaml
 - tapOn: "Profile"
 - scrollUntilVisible: { element: "Answer lost" }
 - tapOn: "Answer lost"
@@ -17,6 +15,7 @@ appId: app.courtbook.mobile.staging
 - extendedWaitUntil: { visible: "Check now", timeout: 90000 }
 - takeScreenshot: shots/07-unresolved-club
 - back
+- extendedWaitUntil: { visible: "Home", timeout: 20000 }
 - tapOn: "Home"
 - extendedWaitUntil: { visible: "Booking not confirmed yet", timeout: 20000 }
 - takeScreenshot: shots/08-unresolved-home

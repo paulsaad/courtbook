@@ -32,6 +32,9 @@ for f in 01-book-and-cancel 02-answer-lost-recovery 03-offline; do
     echo "flow $f: PASS"
   else
     echo "::error::flow $f failed"; status=1
+    # What was on screen when it failed (artifacts can't always be fetched).
+    adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/fail-$f.xml" >/dev/null
+    python3 -c "import re; t=open('$OUT/fail-$f.xml').read(); print('on screen at failure:', [x for x in re.findall(r'(?:text|content-desc)=\"([^\"]+)\"', t) if x][:60])"
   fi
   echo "::endgroup::"
 done

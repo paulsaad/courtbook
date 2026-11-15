@@ -80,7 +80,7 @@ export default function Home() {
         <View style={styles.section}>
           <View style={styles.sectionHead}>
             <Text variant="heading">Your next booking</Text>
-            <Pressable accessibilityRole="link" onPress={() => router.navigate("/bookings")} hitSlop={12}>
+            <Pressable accessibilityRole="link" onPress={() => router.navigate("/bookings")} hitSlop={{ left: 12, right: 12 }} style={{ minHeight: 44, justifyContent: "center" }}>
               <Text style={styles.link}>All bookings</Text>
             </Pressable>
           </View>

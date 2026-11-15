@@ -1,9 +1,7 @@
 # Offline at the moment of reserving: nothing is sent, and the player is told so.
 appId: app.courtbook.mobile.staging
 ---
-- launchApp
-- runFlow: _dismiss-anr.yaml
-- extendedWaitUntil: { visible: "Home", timeout: 120000 }
+- runFlow: _sign-in.yaml
 - openLink: "courtbook-staging://club/${E2E_CLUB}?date=${E2E_DATE}"
 - extendedWaitUntil: { visible: { id: "time-1[0-9]:00" }, timeout: 30000 }
 - tapOn: { id: "time-1[0-9]:00", index: 0 }

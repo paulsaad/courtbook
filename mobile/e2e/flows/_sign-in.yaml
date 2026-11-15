@@ -1,0 +1,19 @@
+# Fresh app, signed in to the run's staging test account, on Home.
+appId: app.courtbook.mobile.staging
+---
+- clearState
+- launchApp
+- runFlow: _dismiss-anr.yaml
+- extendedWaitUntil: { visible: "Book a court in Lebanon", timeout: 120000 }
+- openLink: "courtbook-staging://sign-in"
+- scrollUntilVisible: { element: { id: "staging-email" } }
+- tapOn: { id: "staging-email" }
+- inputText: "${E2E_EMAIL}"
+- hideKeyboard
+- scrollUntilVisible: { element: { id: "staging-password" } }
+- tapOn: { id: "staging-password" }
+- inputText: "${E2E_PASSWORD}"
+- hideKeyboard
+- scrollUntilVisible: { element: { id: "staging-sign-in" } }
+- tapOn: { id: "staging-sign-in" }
+- extendedWaitUntil: { visible: "Ready to play.*", timeout: 30000 }
