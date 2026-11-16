@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
-import { authenticateRequest } from "@/lib/supabase/request";
+import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
@@ -10,8 +10,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * (GMAIL_USER / GMAIL_APP_PASSWORD) until a domain + Resend exist. No-op when unset.
  */
 export async function POST(request: Request) {
-  const auth = await authenticateRequest(request);
-  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "not_authenticated" }, { status: 401 });
 
   const smtpUser = process.env.GMAIL_USER, smtpPass = process.env.GMAIL_APP_PASSWORD;
   if (!smtpUser || !smtpPass) return NextResponse.json({ sent: 0, reason: "email not configured" });
