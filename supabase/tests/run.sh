@@ -675,7 +675,9 @@ echo "--- Z. public browsing (Phase 6 review) — anon sees availability and pri
 check  anon "82a anon club_discovery returns clubs"        "select count(*) > 0 from club_discovery();" t
 check  anon "82b anon areas() has 9 governorates"           "select jsonb_array_length(areas());" 9
 check  anon "82c public_occupancy has no id/mine/status"    "select count(*) from information_schema.columns where table_name='public_occupancy' and column_name in ('id','mine','status','player_id');" 0
-check  anon "82d anon quote_price works"                    "select quote_price('$COURT', (current_date + 12 + time '10:00') at time zone 'Asia/Beirut', (current_date + 12 + time '11:00') at time zone 'Asia/Beirut');" 20.00
+# Day 12 or 13 from today, never a Saturday: the suite adds a Saturday-only $25 rule for 10:00-12:00 above.
+D82="(current_date + 12 + (extract(isodow from current_date + 12) = 6)::int)"
+check  anon "82d anon quote_price works"                    "select quote_price('$COURT', ($D82 + time '10:00') at time zone 'Asia/Beirut', ($D82 + time '11:00') at time zone 'Asia/Beirut');" 20.00
 check  anon "82e anon reads town geography columns"         "select count(*) > 300 from towns;" t
 denied anon "82f anon cannot read towns.created_by"         "select created_by from towns limit 1;"
 denied anon "82g anon cannot read towns.*"                  "select * from towns limit 1;"
