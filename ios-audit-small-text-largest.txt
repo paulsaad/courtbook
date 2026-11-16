@@ -1,0 +1,18 @@
+NETWORK staging: 401 
+OPEN /profile state=4 shows: ["CourtBook Staging", "Profile", "Your profile", "Sign in to set your levels, see your activity and manage your account.", "Sign in", "About this app", "App", "CourtBook Staging (test database)", "Version", "0.3.0 (build 1)", "Runtime", "Channel", "Code", "Built-in"]
+OPEN /sign-in state=4 shows: ["CourtBook Staging", "Sign in", "Continue with Apple", "Continue with Google", "or", "Email address", "Email me a code", "Staging test account", "Test account email", "Test account password", "Sign in to the test account", "Vertical scroll bar, 3 pages", "Horizontal scroll bar, 1 page", "Vertical scroll bar, 3 pages"]
+signed in
+OPEN / state=4 shows: ["CourtBook Staging", "Save Password?", "Securely store your password so it’s filled automatically the next time you need it.", "Vertical scroll bar, 2 pages", "Horizontal scroll bar, 1 page", "Vertical scroll bar, 2 pages", "Horizontal scroll bar, 1 page", "Save", "Not Now", "Vertical scroll bar, 1 page", "Horizontal scroll bar, 1 page", "Vertical scroll bar, 1 page", "Horizontal scroll bar, 1 page"]
+dismissed Save Password
+SCREEN small-text-largest home: 0 issue(s)
+OPEN /courts state=4 shows: ["CourtBook Staging", "Courts", "All sports", "Padel", "Tennis", "Football", "Basketball", "Volleyball", "Squash", "Badminton", "Vertical scroll bar, 4 pages", "Today, Mon 16 November", "Tue 17 November", "Wed 18 November"]
+SCREEN small-text-largest courts: 0 issue(s)
+OPEN /club/16020754-ccbe-4068-aa97-ca7f46ff9f99 state=4 shows: ["CourtBook Staging", "(tabs)", "Batroun Padel & Tennis Club", "Book", "Info", "Free cancellation up to 6 h before", "Demo club — not a real venue", "Today, Mon 16 November", "Tue 17 November", "Wed 18 November", "Thu 19 November", "Fri 20 November", "Sat 21 November", "Sun 22 November"]
+SCREEN small-text-largest club-book: 0 issue(s)
+SCREEN small-text-largest club-selected: 0 issue(s)
+SCREEN small-text-largest club-info: 0 issue(s)
+OPEN /bookings state=4 shows: ["CourtBook Staging", "Bookings", "Courts", "Games", "No bookings yet", "Courts you reserve show up here.", "Find a court", "Vertical scroll bar, 1 page", "Horizontal scroll bar, 1 page", "Vertical scroll bar, 1 page", "Horizontal scroll bar, 1 page", "Home", "Courts", "Bookings"]
+SCREEN small-text-largest bookings: 0 issue(s)
+OPEN /profile state=4 shows: ["CourtBook Staging", "Profile", "Emma Tester", "ET", "e2e-android-43925098227@courtbook.test", "Sign out", "About this app", "App", "CourtBook Staging (test database)", "Version", "0.3.0 (build 1)", "Runtime", "Channel", "Code"]
+ISSUE small-text-largest profile [description] Label not human-readable — label='e2e-android-43925098227@courtbook.test' id='' type=48 frame={{101, 141.5}, {237, 26}} — The accessibilityLabel of this RCTAccessibilityElement is not human-readable.
+SCREEN small-text-largest profile: 1 issue(s)
