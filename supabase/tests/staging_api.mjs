@@ -250,11 +250,12 @@ try {
   m = await move(U1, COURT3, "09:00", "13:00");
   record("M3", "move to 4 h (above the 3 h maximum): bad_duration", errOf(m)?.includes("bad_duration"), errOf(m) ?? "moved!");
   record("M4", "...booking unchanged", span() === "09:00-10:00", span());
-  m = await move(U1, COURT3, "11:00", "12:30");
-  record("M5", "move to 1 h 30 at another time: accepted", !m.error && span() === "11:00-12:30", errOf(m) ?? span());
-  m = await move(U1, COURT3, "11:10", "12:40");
+  // 14:00 onwards is free on Padel 3 whether or not section P ran (P replaces a player's 12:00 hold).
+  m = await move(U1, COURT3, "14:00", "15:30");
+  record("M5", "move to 1 h 30 at another time: accepted", !m.error && span() === "14:00-15:30", errOf(m) ?? span());
+  m = await move(U1, COURT3, "14:10", "15:40");
   record("M6", "off the grid: not_on_grid (slot trigger)", errOf(m)?.includes("not_on_grid"), errOf(m) ?? "moved!");
-  m = await move(U2, COURT3, "13:00", "14:00");
+  m = await move(U2, COURT3, "16:00", "17:00");
   record("M7", "a player who is not staff: forbidden", errOf(m)?.includes("forbidden"), errOf(m) ?? "moved!");
   sql(`delete from club_staff where profile_id='${U1.id}'`);
 
