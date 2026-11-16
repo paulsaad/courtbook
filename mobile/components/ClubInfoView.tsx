@@ -37,6 +37,8 @@ export function ClubInfoView({ query, onBook }: {
   const stackRules = narrow || fontScale >= 1.3;
   // At large text three columns can't hold "Free cancellation" without cutting it: one row per stat.
   const stackStats = fontScale >= 1.3;
+  // Two buttons side by side only fit their labels at normal text sizes ("Directio-ns" otherwise).
+  const stackActions = narrow || fontScale >= 1.3;
 
   const { club, courts, rules, gallery } = query.data;
   const sports = clubSports(courts);
@@ -74,7 +76,7 @@ export function ClubInfoView({ query, onBook }: {
             <Text style={styles.placeText}>{place.join(" · ")}</Text>
           </View>
         )}
-        <View style={[styles.actions, narrow && styles.actionsStacked]}>
+        <View style={[styles.actions, stackActions && styles.actionsStacked]}>
           <Pressable accessibilityRole="button" onPress={onBook} style={({ pressed }) => [styles.btn, styles.btnPrimary, pressed && styles.pressed]}>
             <Icon name="calendar" size={18} color={color.night} strokeWidth={2} />
             <Text style={styles.btnPrimaryText} numberOfLines={2}>See free times</Text>
@@ -258,8 +260,8 @@ const styles = StyleSheet.create({
   placeText: { fontFamily: font.regular, fontSize: 14, lineHeight: 19, color: "rgba(255,255,255,0.8)", flexShrink: 1 },
   actions: { flexDirection: "row", gap: space.sm, marginTop: space.xs },
   actionsStacked: { flexDirection: "column" },
-  // The primary label is the longer one, so it gets a little more of the row; at the largest text a
-  // label wraps to a second line rather than being cut off.
+  // The primary label is the longer one, so it gets a little more of the row. Below 340 pt or at
+  // large text the buttons stack, each full width.
   btn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 48, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14 },
   btnPrimary: { backgroundColor: color.card, flexGrow: 1.25 },
   btnPrimaryText: { fontFamily: font.bold, fontSize: 15, color: color.night, flexShrink: 1, textAlign: "center" },
