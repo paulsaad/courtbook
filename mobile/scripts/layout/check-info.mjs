@@ -34,9 +34,9 @@ const courts = [
   { id: "k4", name: "Pitch 1", sport: "football", surface: null },
 ];
 const rules = [
-  { start_time: "08:00:00", end_time: "17:00:00", price_usd: "20.00", label: "Day", court_id: null },
-  { start_time: "17:00:00", end_time: "23:00:00", price_usd: "30.00", label: "Evening", court_id: null },
-  { start_time: "17:00:00", end_time: "23:00:00", price_usd: "34.00", label: null, court_id: "k2" },
+  { start_time: "08:00:00", end_time: "17:00:00", price_usd: "20.00", label: "off-peak", court_id: null, weekday_mask: 127 },
+  { start_time: "17:00:00", end_time: "23:00:00", price_usd: "30.00", label: "peak", court_id: null, weekday_mask: 127 },
+  { start_time: "17:00:00", end_time: "23:00:00", price_usd: "34.00", label: null, court_id: "k2", weekday_mask: 96 },
 ];
 const gallery = [
   { id: "g1", kind: "gallery", path: "club-1/g1.webp", external_url: null, caption: "Padel 1 at sunset", sort: 0, width: 1600, height: 1066 },
@@ -46,11 +46,14 @@ const sparse = { ...full, description: null, arrival_notes: null, address: null,
   has_parking: null, has_changing_rooms: null, has_showers: null, has_equipment_rental: null, has_cafe: null, has_floodlights: null, has_drinking_water: null };
 
 const photo = fs.readFileSync(process.env.PHOTO ?? "/tmp/courtbook-photo.png");
+const real = { ...full, is_demo: false };
 const cases = [
-  { name: "full, iPhone 15", w: 393, h: 852, club: full, gallery, expect: ["About", "Getting there", "Facilities", "Courts", "Prices per hour", "Booking", "Directions", "Demo club"] },
-  { name: "full, iPhone SE", w: 375, h: 667, club: full, gallery, expect: ["About", "Facilities", "Prices per hour"] },
-  { name: "full, iPhone SE text 140%", w: 375, h: 667, zoom: 1.4, club: full, gallery, expect: ["About", "Booking"] },
-  { name: "sparse, iPhone 15", w: 393, h: 852, club: sparse, gallery: [], expect: ["Courts", "Prices per hour", "Booking"], absent: ["About", "Getting there", "Facilities", "Directions"] },
+  { name: "full, iPhone 15", w: 393, h: 852, club: full, gallery, expect: ["See free times", "Directions", "Demo club", "Hourly rates", "Example prices", "Off-peak", "Padel 2 only", "Location", "About", "Facilities", "Not available", "Courts & surfaces", "4 courts", "Booking rules", "Pay the court at the club"], absent: ["pending venue verification", "Prices per hour", "Getting there", "Open in Maps"] },
+  { name: "real club, iPhone 15", w: 393, h: 852, club: real, gallery, expect: ["Rates vary by court and time. Exact price is shown when booking."], absent: ["Example prices", "Demo club", "pending venue verification"] },
+  { name: "full, iPhone SE", w: 375, h: 667, club: full, gallery, expect: ["About", "Facilities", "Hourly rates"] },
+  { name: "full, iPhone SE text 140%", w: 375, h: 667, zoom: 1.4, club: full, gallery, expect: ["About", "Booking rules"] },
+  { name: "full, 320 pt", w: 320, h: 640, club: full, gallery, expect: ["See free times", "Directions", "Hourly rates", "Booking rules"] },
+  { name: "sparse, iPhone 15", w: 393, h: 852, club: sparse, gallery: [], expect: ["Courts & surfaces", "Hourly rates", "Booking rules"], absent: ["About", "Facilities", "Directions"] },
 ];
 
 const browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", args: ["--no-sandbox"] });
@@ -79,7 +82,7 @@ for (const c of cases) {
     }, c.zoom);
   }
   await page.goto(`http://localhost:8099/club/club-1?name=Batroun&tab=info`);
-  await page.getByText("Prices per hour").first().waitFor({ timeout: 20000 });
+  await page.getByText("Hourly rates").first().waitFor({ timeout: 20000 });
   await page.waitForTimeout(1200);
   const text = await page.evaluate(() => document.body.innerText);
   // Section titles are drawn in capitals (text-transform), so compare without case.
@@ -90,6 +93,11 @@ for (const c of cases) {
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.right > w + 1 && getComputedStyle(el).overflowX !== "scroll" && !el.closest('[aria-label="Photos"]');
   }).length, c.w);
+  // The hero buttons' labels must show whole, never "See free ti…".
+  const cut = await page.evaluate(() => [...document.querySelectorAll("div")].filter((el) =>
+    el.childElementCount === 0 && ["See free times", "Directions"].includes(el.textContent) &&
+    (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)).map((el) => el.textContent));
+  if (cut.length) missing.push(`cut off: ${cut.join(", ")}`);
   const tag = c.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
   await page.screenshot({ path: `${SHOTS}/info-${tag}.png`, fullPage: false });
   // the whole tab, by scrolling the inner list and stitching is overkill: take screens down the page

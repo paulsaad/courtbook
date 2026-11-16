@@ -48,3 +48,64 @@ describe("club info", () => {
     expect(feeSummary("simulated", "1.00").payment).toBe("Demo payment — no real money is charged.");
   });
 });
+
+import { clubPhotos, courtDetail, notAvailableSentence, rateCards, ratesNote, weekdayLabel } from "../lib/clubInfo";
+
+describe("club info, approved design (2026-11-16)", () => {
+  const courts = [
+    { id: "k1", name: "Padel 1", sport: "padel", surface: "artificial grass" },
+    { id: "k2", name: "Court 3", sport: "padel", surface: "clay" },
+    { id: "k3", name: "Pitch 1", sport: "football", surface: null },
+  ];
+
+  test("rate cards come from the club's rules: label, times, days, court; club-wide first", () => {
+    const cards = rateCards([
+      { start_time: "17:00:00", end_time: "23:00:00", price_usd: "34.00", label: null, court_id: "k2", weekday_mask: 96 },
+      { start_time: "17:00:00", end_time: "23:00:00", price_usd: "30.00", label: "peak", court_id: null, weekday_mask: 127 },
+      { start_time: "08:00:00", end_time: "17:00:00", price_usd: 20, label: "off-peak", court_id: null },
+    ], courts);
+    expect(cards.map((c) => [c.title, c.period, c.court, c.price])).toEqual([
+      ["Off-peak", "08:00–17:00", null, "$20"],
+      ["Peak", "17:00–23:00", null, "$30"],
+      ["17:00–23:00", "Sat, Sun", "Court 3 only", "$34"],
+    ]);
+    expect(rateCards([])).toEqual([]);
+  });
+
+  test("weekdays: every day says nothing; runs and single days read naturally", () => {
+    expect(weekdayLabel(127)).toBeNull();
+    expect(weekdayLabel(null)).toBeNull();
+    expect(weekdayLabel(31)).toBe("Mon–Fri");
+    expect(weekdayLabel(96)).toBe("Sat, Sun");
+    expect(weekdayLabel(5)).toBe("Mon, Wed");
+    expect(weekdayLabel(0b1011011)).toBe("Mon, Tue, Thu, Fri, Sun");
+  });
+
+  test("a real club's prices are never called unverified; a demo club's are examples", () => {
+    expect(ratesNote(false)).toBe("Rates vary by court and time. Exact price is shown when booking.");
+    expect(ratesNote(true)).toMatch(/^Example prices for a demo club\./);
+    expect(ratesNote(false)).not.toMatch(/verif/i);
+  });
+
+  test("court detail: the surface as written; the sport when the name doesn't say it", () => {
+    expect(courtDetail(courts[0])).toBe("artificial grass");
+    expect(courtDetail(courts[1])).toBe("Padel · clay");
+    expect(courtDetail(courts[2])).toBe("Football");
+  });
+
+  test("facilities the club does not have", () => {
+    expect(notAvailableSentence(["Parking", "Café", "Floodlights"])).toBe("Not available: Parking, café, floodlights");
+    expect(notAvailableSentence([])).toBeNull();
+  });
+
+  test("photos: cover first, then the gallery, each image once", () => {
+    const g = [
+      { id: "g1", kind: "gallery" as const, path: "c/cover.webp", external_url: null, caption: null, sort: 0, width: null, height: null },
+      { id: "g2", kind: "gallery" as const, path: "c/2.webp", external_url: null, caption: "Courts", sort: 1, width: null, height: null },
+    ];
+    const ph = clubPhotos("/storage/v1/object/public/club-media/c/cover.webp", g, "Club");
+    expect(ph.map((p) => p.key)).toEqual(["cover", "g2"]);
+    expect(ph[1].label).toBe("Courts");
+    expect(clubPhotos(null, [], "Club")).toEqual([]);
+  });
+});

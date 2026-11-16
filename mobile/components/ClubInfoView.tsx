@@ -1,15 +1,14 @@
 import type { ReactNode } from "react";
-import { Linking, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Linking, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
 import { Image } from "expo-image";
 import { feeSummary } from "@shared/fees";
 import { Text } from "./Text";
 import { Icon } from "./Icon";
 import { SportMark } from "./SportMark";
-import { CourtLines } from "./CourtLines";
 import { Empty, ErrorState, Loading } from "./StateView";
 import {
-  clubSports, courtLine, facilityGroups, imageUrl, infoDuration, lengthRange, mapsUrl, missingSentence, priceRow,
-  type ClubInfo,
+  clubPhotos, clubSports, courtDetail, facilityGroups, infoDuration, lengthRange, mapsUrl, notAvailableSentence,
+  rateCards, ratesNote, type ClubInfo,
 } from "../lib/clubInfo";
 import { sportName } from "../lib/days";
 import { color, font, radius, space } from "../lib/theme";
@@ -17,248 +16,316 @@ import { haptic } from "../lib/haptics";
 import { fade } from "../lib/motion";
 
 /**
- * The club's Info tab: what a player wants to know before going — where it is, what is there, what it
- * costs and the house rules. Same content and wording as the website's Info page; a section the club
- * has not filled in is left out rather than shown empty.
+ * The club's Info tab, built to the approved design "CourtBook — Club Info (Definitive Master)"
+ * (mobile/design/club-info/). Every value comes from the club's own data; the handoff's example
+ * values are only the demo club's at the time of the review. A section the club has not filled in
+ * is left out. Additions agreed with Paul on 2026-11-16, for data the design did not show: the
+ * club's photos (below the quick stats), About as its own section, arrival notes in the Location card.
  */
 export function ClubInfoView({ query, onBook }: {
   query: { data?: ClubInfo; isPending: boolean; isError: boolean; error: unknown; refetch: () => unknown };
   onBook: () => void;
 }) {
+  const { width, fontScale } = useWindowDimensions();
   if (query.isPending) return <Loading label="Loading club details" />;
   if (query.isError && !query.data) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   if (!query.data) return <Empty title="Club not found" body="It may no longer take bookings." />;
 
+  // Handoff §5: below 340 pt the margins tighten, the hero buttons and rate cards stack, and the
+  // quick-stat figures step down. Large text stacks the booking rules (label above value).
+  const narrow = width < 340;
+  const stackRules = narrow || fontScale >= 1.3;
+  // At large text three columns can't hold "Free cancellation" without cutting it: one row per stat.
+  const stackStats = fontScale >= 1.3;
+
   const { club, courts, rules, gallery } = query.data;
-  const cover = imageUrl(club.cover_url);
   const sports = clubSports(courts);
   const maps = mapsUrl(club);
+  const photos = clubPhotos(club.cover_url, gallery, club.name);
   const { has, hasNot } = facilityGroups(club);
-  const missing = missingSentence(hasNot);
+  const notAvailable = notAvailableSentence(hasNot);
   const fees = feeSummary(club.payment_mode, club.service_fee_usd);
-  const length = lengthRange(club.min_booking_minutes, club.max_booking_minutes);
+  const cards = rateCards(rules, courts);
+  const place = [club.address, club.town?.name_en].filter(Boolean);
 
   const openMaps = () => { if (maps) { haptic.select(); void Linking.openURL(maps); } };
 
   return (
-    <View style={styles.wrap}>
-      {/* Hero: the club's own photo when it has one, otherwise its court marking on night green. */}
-      <View style={[styles.hero, !cover && styles.heroEdge]}>
-        {cover && (
-          <Image source={{ uri: cover }} style={styles.cover} contentFit="cover" transition={fade(200)} accessibilityLabel={`${club.name}, main photo`} />
+    <View style={[styles.wrap, narrow && { paddingHorizontal: space.md }]}>
+      {/* Hero: night green with the Lebanese red crown along its top edge. */}
+      <View style={styles.hero}>
+        {sports.length > 0 && (
+          <View style={styles.pills}>
+            {sports.map((s) => (
+              <View key={s} style={styles.pill}><Text style={styles.pillText}>{sportName(s)}</Text></View>
+            ))}
+          </View>
         )}
-        <View style={styles.heroBody}>
-          <View style={styles.heroTop}>
-            <View style={styles.sportRow}>
-              {sports.map((s) => (
-                <View key={s} style={styles.sportTag}>
-                  <SportMark sport={s} size={16} color={color.redOnDark} />
-                  <Text style={styles.sportText}>{sportName(s)}</Text>
-                </View>
-              ))}
-            </View>
-            {/* No photo yet: the court marking stands in, beside the sports — never under any text. */}
-            {!cover && <CourtLines inline opacity={0.22} width={66} height={54} />}
+        {club.is_demo && (
+          <View style={styles.demo}>
+            <Icon name="info" size={14} color={color.warnInk} strokeWidth={2} />
+            <Text style={styles.demoText}>Demo club — not a real venue</Text>
           </View>
-          <Text style={styles.heroName} accessibilityRole="header">{club.name}</Text>
-          {(club.town?.name_en || club.address) && (
-            <View style={styles.placeRow}>
-              <Icon name="pin" size={16} color={color.onDarkMuted} />
-              <Text style={styles.placeText} numberOfLines={2}>{[club.town?.name_en, club.address].filter(Boolean).join(" · ")}</Text>
-            </View>
-          )}
-          {club.is_demo && (
-            <View style={styles.demoPill}><Text style={styles.demoText}>Demo club — not a real venue</Text></View>
-          )}
-          <View style={styles.heroActions}>
-            <Pressable accessibilityRole="button" onPress={onBook} style={({ pressed }) => [styles.heroBtn, styles.heroBook, pressed && styles.pressed]}>
-              <Icon name="calendar" size={18} color={color.onDark} />
-              <Text style={styles.heroBookText} numberOfLines={1}>Free times</Text>
+        )}
+        <Text style={styles.heroName} accessibilityRole="header">{club.name}</Text>
+        {place.length > 0 && (
+          <View style={styles.placeRow}>
+            <Icon name="pin" size={16} color="rgba(255,255,255,0.8)" />
+            <Text style={styles.placeText}>{place.join(" · ")}</Text>
+          </View>
+        )}
+        <View style={[styles.actions, narrow && styles.actionsStacked]}>
+          <Pressable accessibilityRole="button" onPress={onBook} style={({ pressed }) => [styles.btn, styles.btnPrimary, pressed && styles.pressed]}>
+            <Icon name="calendar" size={18} color={color.night} strokeWidth={2} />
+            <Text style={styles.btnPrimaryText} numberOfLines={2}>See free times</Text>
+          </Pressable>
+          {maps && (
+            <Pressable accessibilityRole="link" accessibilityHint="Opens the map" onPress={openMaps} style={({ pressed }) => [styles.btn, styles.btnSecondary, pressed && styles.pressed]}>
+              <Icon name="compass" size={18} color={color.onDark} strokeWidth={2} />
+              <Text style={styles.btnSecondaryText} numberOfLines={2}>Directions</Text>
             </Pressable>
-            {maps && (
-              <Pressable accessibilityRole="link" accessibilityHint="Opens the map" onPress={openMaps} style={({ pressed }) => [styles.heroBtn, styles.heroMap, pressed && styles.pressed]}>
-                <Icon name="pin" size={18} color={color.ink} />
-                <Text style={styles.heroMapText} numberOfLines={1}>Directions</Text>
-              </Pressable>
-            )}
-          </View>
+          )}
         </View>
       </View>
 
-      {/* The three numbers players ask about first, scoreboard style. */}
-      <View style={styles.facts}>
-        <Fact wide label="Open daily" value={`${club.open_time.slice(0, 5)}–${club.close_time.slice(0, 5)}`} />
-        <View style={styles.factRule} />
-        <Fact label="Play" value={length} />
-        <View style={styles.factRule} />
-        <Fact label="Free to cancel" value={`${club.cancel_cutoff_hours} h before`} />
+      {/* Quick stats: the three numbers players ask about first. */}
+      <View style={[styles.stats, stackStats && styles.statsStacked]}>
+        <Stat value={`${club.open_time.slice(0, 5)}–${club.close_time.slice(0, 5)}`} label="Open daily" narrow={narrow} stacked={stackStats} wide />
+        <View style={stackStats ? styles.statRuleH : styles.statRule} />
+        <Stat value={lengthRange(club.min_booking_minutes, club.max_booking_minutes)} label="Play window" narrow={narrow} stacked={stackStats} />
+        <View style={stackStats ? styles.statRuleH : styles.statRule} />
+        <Stat value={`${club.cancel_cutoff_hours} h before`} label="Free cancellation" narrow={narrow} stacked={stackStats} />
       </View>
 
-      {gallery.length > 0 && (
+      {photos.length > 0 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.gallery} accessibilityLabel="Photos">
-          {gallery.map((m, i) => {
-            const uri = imageUrl(m);
-            if (!uri) return null;
-            return (
-              <View key={m.id} style={styles.photo}>
-                <Image source={{ uri }} style={styles.photoImg} contentFit="cover" transition={fade(200)} accessibilityLabel={m.caption ?? `${club.name}, photo ${i + 1}`} />
-                {m.caption && <Text variant="caption" numberOfLines={1} style={styles.photoCaption}>{m.caption}</Text>}
-              </View>
-            );
-          })}
+          {photos.map((ph) => (
+            <View key={ph.key} style={styles.photo}>
+              <Image source={{ uri: ph.uri }} style={styles.photoImg} contentFit="cover" transition={fade(200)} accessibilityLabel={ph.label} />
+              {ph.caption && <Text variant="caption" numberOfLines={1} style={styles.photoCaption}>{ph.caption}</Text>}
+            </View>
+          ))}
         </ScrollView>
+      )}
+
+      <Section title="Hourly rates">
+        <Text style={styles.ratesNote}>{ratesNote(club.is_demo)}</Text>
+        {cards.length === 0 ? (
+          <View style={styles.card}><Text variant="secondary">Prices are shown when you pick a time.</Text></View>
+        ) : (
+          <View style={styles.rateGrid}>
+            {cards.map((r) => (
+              <View key={r.key} style={[styles.card, styles.rateCard, narrow && styles.rateCardFull]}
+                accessible accessibilityLabel={[r.title, r.period, r.court, `${r.price} per hour`].filter(Boolean).join(", ")}>
+                <Text style={styles.rateTitle}>{r.title}</Text>
+                {r.period && <Text style={styles.ratePeriod}>{r.period}</Text>}
+                {r.court && <Text style={styles.rateCourt}>{r.court}</Text>}
+                <View style={styles.rateLine}>
+                  <Text style={styles.ratePrice}>{r.price}</Text>
+                  <Text style={styles.rateUnit}>/ hr</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+      </Section>
+
+      {(place.length > 0 || club.arrival_notes) && (
+        <Section title="Location">
+          <View style={styles.card}>
+            {place.length > 0 && (
+              <View style={styles.locationRow}>
+                <View style={styles.locationIcon}><Icon name="pin" size={18} color={color.cedarDeep} strokeWidth={2} /></View>
+                <Text style={styles.locationText}>{place.join(", ")}</Text>
+              </View>
+            )}
+            {club.arrival_notes && <Text style={[styles.body, place.length > 0 && { marginTop: space.md }]}>{club.arrival_notes}</Text>}
+          </View>
+        </Section>
       )}
 
       {club.description && (
         <Section title="About">
-          <Text variant="body" style={styles.prose}>{club.description}</Text>
+          <View style={styles.card}><Text style={styles.body}>{club.description}</Text></View>
         </Section>
       )}
 
-      {(club.address || club.arrival_notes || maps) && (
-        <Section title="Getting there">
-          {club.address && <Text variant="strong">{club.address}</Text>}
-          {club.arrival_notes && <Text variant="secondary" style={styles.prose}>{club.arrival_notes}</Text>}
-          {maps && (
-            <Pressable accessibilityRole="link" onPress={openMaps} style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}>
-              <Text style={styles.link}>Open in Maps</Text>
-              <Icon name="chevronRight" size={18} color={color.cedarDeep} />
-            </Pressable>
-          )}
-        </Section>
-      )}
-
-      {(has.length > 0 || missing) && (
+      {(has.length > 0 || notAvailable) && (
         <Section title="Facilities">
-          {has.length > 0 && (
-            <View style={styles.facilityWrap}>
-              {has.map((label) => (
-                <View key={label} style={styles.facility}>
-                  <Icon name="check" size={15} color={color.cedarDeep} strokeWidth={2.4} />
-                  <Text style={styles.facilityText}>{label}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-          {missing && <Text variant="caption">{missing}</Text>}
+          <View style={styles.card}>
+            {has.length > 0 && (
+              <View style={styles.chips}>
+                {has.map((label) => (
+                  <View key={label} style={styles.chip}>
+                    <Icon name="check" size={15} color={color.cedarDeep} strokeWidth={2.4} />
+                    <Text style={styles.chipText}>{label}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+            {notAvailable && (
+              <View style={[styles.notAvailable, has.length > 0 && { marginTop: space.md }]}>
+                <Text style={styles.notAvailableText}>• {notAvailable}</Text>
+              </View>
+            )}
+          </View>
         </Section>
       )}
 
       {courts.length > 0 && (
-        <Section title="Courts">
-          {courts.map((c, i) => (
-            <Row key={c.id} first={i === 0} left={
-              <View style={styles.courtLeft}>
-                <SportMark sport={c.sport} size={22} />
-                <Text variant="strong" style={{ flexShrink: 1 }}>{c.name}</Text>
+        <Section title="Courts & surfaces" aside={`${courts.length} ${courts.length === 1 ? "court" : "courts"}`}>
+          <View style={[styles.card, styles.courtsCard]}>
+            {courts.map((c, i) => (
+              <View key={c.id} style={styles.courtRow} accessible accessibilityLabel={`${c.name}, ${courtDetail(c)}`}>
+                <View style={styles.courtMark}><SportMark sport={c.sport} size={22} /></View>
+                <View style={[styles.courtText, i > 0 && styles.courtDivider]}>
+                  <Text style={styles.courtName}>{c.name}</Text>
+                  <Text style={styles.courtDetail}>{courtDetail(c)}</Text>
+                </View>
               </View>
-            } right={<Text variant="secondary" style={styles.right}>{courtLine(c)}</Text>} />
-          ))}
+            ))}
+          </View>
         </Section>
       )}
 
-      <Section title="Prices per hour">
-        {rules.length === 0 ? (
-          <Text variant="secondary">Prices shown when you pick a time.</Text>
-        ) : (
-          rules.map((r, i) => {
-            const row = priceRow(r, courts);
-            return (
-              <Row key={i} first={i === 0} left={
-                <View style={{ flexShrink: 1 }}>
-                  <Text style={styles.when}>{row.when}</Text>
-                  {row.note && <Text variant="caption">{row.note}</Text>}
-                </View>
-              } right={<Text style={styles.price}>{row.price}</Text>} />
-            );
-          })
-        )}
-      </Section>
-
-      <Section title="Booking">
-        <Row fixed first left={<Text variant="secondary">Book ahead</Text>} right={<Text variant="label" style={styles.right}>up to {club.booking_window_days} days</Text>} />
-        <Row fixed left={<Text variant="secondary">Booking length</Text>} right={<Text variant="label" style={styles.right}>{infoDuration(club.min_booking_minutes)} to {infoDuration(club.max_booking_minutes)}, {club.slot_minutes}-min steps</Text>} />
-        <Row fixed left={<Text variant="secondary">Free cancellation</Text>} right={<Text variant="label" style={styles.right}>until {club.cancel_cutoff_hours} h before; no refund after</Text>} />
-        <Row fixed left={<Text variant="secondary">Booking fee</Text>} right={<Text variant="label" style={styles.right}>{fees.fee}</Text>} />
-        {fees.payment && <Row fixed left={<Text variant="secondary">Payment</Text>} right={<Text variant="label" style={styles.right}>{fees.payment}</Text>} />}
+      <Section title="Booking rules">
+        <View style={[styles.card, styles.rulesCard]}>
+          <Rule stacked={stackRules} label="Book ahead" value={`Up to ${club.booking_window_days} days`} />
+          <Rule stacked={stackRules} label="Booking length" value={`${infoDuration(club.min_booking_minutes)} to ${infoDuration(club.max_booking_minutes)}, ${club.slot_minutes}-min steps`} />
+          <Rule stacked={stackRules} label="Free cancellation" value={`Until ${club.cancel_cutoff_hours} h before; no refund after`} />
+          <Rule stacked={stackRules} label="Booking fee" value={fees.fee} />
+          {fees.payment && <Rule stacked={stackRules} strong label="Payment" value={fees.payment} />}
+        </View>
       </Section>
     </View>
   );
 }
 
 /** `wide`: the opening hours ("08:00–23:00") get a little more room, so they never shrink or cut off. */
-function Fact({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
+function Stat({ value, label, narrow, stacked, wide = false }: { value: string; label: string; narrow: boolean; stacked: boolean; wide?: boolean }) {
+  if (stacked) {
+    return (
+      <View style={styles.statRow} accessible accessibilityLabel={`${label}: ${value}`}>
+        <Text style={styles.statValue}>{value}</Text>
+        <Text style={[styles.statLabel, { textAlign: "left", flexShrink: 1 }]}>{label}</Text>
+      </View>
+    );
+  }
   return (
-    <View style={[styles.fact, wide && { flex: 1.3 }]} accessible accessibilityLabel={`${label}: ${value}`}>
-      <Text style={styles.factValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{value}</Text>
-      <Text variant="caption" numberOfLines={2} style={{ textAlign: "center" }}>{label}</Text>
+    <View style={[styles.stat, wide && { flex: 1.3 }]} accessible accessibilityLabel={`${label}: ${value}`}>
+      <Text style={[styles.statValue, narrow && styles.statValueNarrow]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{value}</Text>
+      <Text style={styles.statLabel} numberOfLines={2}>{label}</Text>
     </View>
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, aside, children }: { title: string; aside?: string; children: ReactNode }) {
   return (
     <View style={styles.section}>
-      <Text variant="eyebrow" accessibilityRole="header">{title}</Text>
-      <View style={styles.card}>{children}</View>
+      <View style={styles.sectionHead}>
+        <Text style={styles.eyebrow} accessibilityRole="header">{title}</Text>
+        {aside && <Text style={styles.sectionAside}>{aside}</Text>}
+      </View>
+      {children}
     </View>
   );
 }
 
-/** A two-sided row. `fixed`: the label keeps its width and the value wraps instead. */
-function Row({ left, right, first = false, fixed = false }: { left: ReactNode; right: ReactNode; first?: boolean; fixed?: boolean }) {
+/** A booking rule: label and value side by side, or stacked when the text is large or the screen narrow. */
+function Rule({ label, value, stacked, strong = false }: { label: string; value: string; stacked: boolean; strong?: boolean }) {
   return (
-    <View style={[styles.row, !first && styles.rowRule]}>
-      <View style={fixed ? { flexShrink: 0 } : { flexShrink: 1 }}>{left}</View>
-      <View style={fixed ? { flex: 1, alignItems: "flex-end" } : { flexShrink: 1, maxWidth: "60%", alignItems: "flex-end" }}>{right}</View>
+    <View style={stacked ? styles.ruleStacked : styles.rule} accessible accessibilityLabel={`${label}: ${value}`}>
+      <Text style={styles.ruleLabel}>{label}</Text>
+      <Text style={[styles.ruleValue, strong && styles.ruleValueStrong, !stacked && styles.ruleValueSide]}>{value}</Text>
     </View>
   );
 }
+
+const HAIRLINE = 1;
 
 const styles = StyleSheet.create({
   wrap: { paddingHorizontal: space.lg, paddingTop: space.lg, gap: space.xl },
-  hero: { backgroundColor: color.night, borderRadius: radius.xl, overflow: "hidden" },
-  heroEdge: { borderTopWidth: 4, borderTopColor: color.red },
-  cover: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#0B3A27" },
-  heroBody: { padding: space.xl, paddingTop: space.lg, gap: space.sm },
-  heroTop: { flexDirection: "row", alignItems: "flex-start", gap: space.md },
-  sportRow: { flex: 1, flexDirection: "row", flexWrap: "wrap", gap: 12, paddingTop: 2 },
-  sportTag: { flexDirection: "row", alignItems: "center", gap: 6 },
-  sportText: { fontFamily: font.bold, fontSize: 14, letterSpacing: 0.6, textTransform: "uppercase", color: color.redOnDark },
-  // The navigation bar already names the club; here it is the card's title, not the page's.
-  heroName: { fontFamily: font.display, fontSize: 22, lineHeight: 27, letterSpacing: -0.2, color: color.onDark },
-  placeRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  placeText: { fontFamily: font.medium, fontSize: 15, lineHeight: 20, color: color.onDarkMuted, flexShrink: 1 },
-  demoPill: { alignSelf: "flex-start", backgroundColor: color.warnSoft, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4, marginTop: 2 },
-  demoText: { fontFamily: font.semibold, fontSize: 13, color: color.warnInk },
-  // Two equal buttons on one row, down to the iPhone SE; they stack only at very large text sizes.
-  heroActions: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: space.sm },
-  heroBtn: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 48, paddingHorizontal: 16, borderRadius: radius.md },
-  heroBook: { backgroundColor: color.cedar, flexGrow: 1, flexBasis: 120, justifyContent: "center" },
-  heroBookText: { fontFamily: font.bold, fontSize: 16, color: color.onDark },
-  heroMap: { backgroundColor: color.card, flexGrow: 1, flexBasis: 120, justifyContent: "center" },
-  heroMapText: { fontFamily: font.bold, fontSize: 16, color: color.ink },
+
+  // Hero (§4B)
+  hero: { backgroundColor: color.night, borderRadius: 20, overflow: "hidden", borderTopWidth: 3.5, borderTopColor: color.red, padding: space.xl, gap: space.md },
+  pills: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
+  pill: { backgroundColor: "rgba(255,255,255,0.12)", borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 },
+  pillText: { fontFamily: font.bold, fontSize: 12, lineHeight: 16, letterSpacing: 0.8, textTransform: "uppercase", color: color.onDark },
+  demo: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", backgroundColor: color.warnSoft, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 },
+  demoText: { fontFamily: font.regular, fontSize: 12, lineHeight: 16, color: color.warnInk },
+  heroName: { fontFamily: font.displayHeavy, fontSize: 26, lineHeight: 32, color: color.onDark },
+  placeRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: -4 },
+  placeText: { fontFamily: font.regular, fontSize: 14, lineHeight: 19, color: "rgba(255,255,255,0.8)", flexShrink: 1 },
+  actions: { flexDirection: "row", gap: space.sm, marginTop: space.xs },
+  actionsStacked: { flexDirection: "column" },
+  // The primary label is the longer one, so it gets a little more of the row; at the largest text a
+  // label wraps to a second line rather than being cut off.
+  btn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 48, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14 },
+  btnPrimary: { backgroundColor: color.card, flexGrow: 1.25 },
+  btnPrimaryText: { fontFamily: font.bold, fontSize: 15, color: color.night, flexShrink: 1, textAlign: "center" },
+  btnSecondary: { backgroundColor: "rgba(255,255,255,0.15)", borderWidth: HAIRLINE, borderColor: "rgba(255,255,255,0.25)" },
+  btnSecondaryText: { fontFamily: font.semibold, fontSize: 15, color: color.onDark, flexShrink: 1, textAlign: "center" },
   pressed: { opacity: 0.85 },
-  facts: { flexDirection: "row", backgroundColor: color.card, borderRadius: radius.lg, borderWidth: 1, borderColor: color.line, paddingVertical: 14 },
-  fact: { flex: 1, alignItems: "center", gap: 2, paddingHorizontal: 6 },
-  factValue: { fontFamily: font.score, fontSize: 20, lineHeight: 24, color: color.ink },
-  factRule: { width: 1, backgroundColor: color.line, marginVertical: 2 },
+
+  // Quick stats (§4C)
+  stats: { flexDirection: "row", backgroundColor: color.card, borderRadius: 16, borderWidth: HAIRLINE, borderColor: color.line, paddingVertical: space.lg, paddingHorizontal: space.sm },
+  stat: { flex: 1, alignItems: "center", gap: 2, paddingHorizontal: 4 },
+  statValue: { fontFamily: font.score, fontSize: 22, lineHeight: 26, color: color.ink },
+  statValueNarrow: { fontSize: 18, lineHeight: 22 },
+  statLabel: { fontFamily: font.regular, fontSize: 13, lineHeight: 17, color: color.muted, textAlign: "center" },
+  statRule: { width: HAIRLINE, backgroundColor: color.line, marginVertical: 2 },
+  statsStacked: { flexDirection: "column", paddingHorizontal: space.lg, paddingVertical: space.sm },
+  statRow: { flexDirection: "row", alignItems: "baseline", flexWrap: "wrap", columnGap: space.md, paddingVertical: space.sm },
+  statRuleH: { height: HAIRLINE, backgroundColor: color.line },
+
   gallery: { gap: 10, paddingRight: space.lg },
   photo: { width: 240, gap: 6 },
   photoImg: { width: 240, height: 160, borderRadius: radius.md, backgroundColor: color.line },
   photoCaption: { paddingHorizontal: 2 },
+
+  // Sections (§4D–H)
   section: { gap: space.sm },
-  card: { backgroundColor: color.card, borderRadius: radius.lg, borderWidth: 1, borderColor: color.line, paddingHorizontal: space.lg, paddingVertical: space.md, gap: space.sm },
-  prose: { lineHeight: 23 },
-  linkRow: { flexDirection: "row", alignItems: "center", gap: 4, minHeight: 44 },
-  link: { fontFamily: font.bold, fontSize: 16, color: color.cedarDeep },
-  facilityWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  facility: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: color.cedarSoft, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 7 },
-  facilityText: { fontFamily: font.semibold, fontSize: 14, color: color.cedarDeep },
-  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: space.md, paddingVertical: 10 },
-  rowRule: { borderTopWidth: 1, borderTopColor: color.line },
-  right: { textAlign: "right" },
-  courtLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
-  when: { fontFamily: font.scoreSemi, fontSize: 18, lineHeight: 22, color: color.ink },
-  price: { fontFamily: font.score, fontSize: 22, lineHeight: 26, color: color.ink },
+  sectionHead: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: space.md, flexWrap: "wrap" },
+  eyebrow: { fontFamily: font.bold, fontSize: 12, lineHeight: 16, letterSpacing: 0.8, textTransform: "uppercase", color: color.ink },
+  sectionAside: { fontFamily: font.regular, fontSize: 13, lineHeight: 17, color: color.muted },
+  card: { backgroundColor: color.card, borderRadius: 16, borderWidth: HAIRLINE, borderColor: color.line, padding: space.lg },
+  body: { fontFamily: font.regular, fontSize: 16, lineHeight: 22, color: color.ink },
+
+  ratesNote: { fontFamily: font.regular, fontSize: 14, lineHeight: 19, color: color.muted },
+  rateGrid: { flexDirection: "row", flexWrap: "wrap", gap: space.md },
+  rateCard: { flexGrow: 1, flexBasis: "45%", gap: 2 },
+  rateCardFull: { flexBasis: "100%" },
+  rateTitle: { fontFamily: font.semibold, fontSize: 15, lineHeight: 20, color: color.ink },
+  ratePeriod: { fontFamily: font.regular, fontSize: 13, lineHeight: 17, color: color.muted },
+  rateCourt: { fontFamily: font.semibold, fontSize: 13, lineHeight: 17, color: color.cedarDeep },
+  rateLine: { flexDirection: "row", alignItems: "baseline", gap: 4, marginTop: space.sm },
+  ratePrice: { fontFamily: font.score, fontSize: 30, lineHeight: 34, letterSpacing: -0.5, color: color.ink },
+  rateUnit: { fontFamily: font.regular, fontSize: 14, lineHeight: 19, color: color.muted },
+
+  locationRow: { flexDirection: "row", alignItems: "center", gap: space.md },
+  locationIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: color.cedarSoft, alignItems: "center", justifyContent: "center" },
+  locationText: { fontFamily: font.display, fontSize: 16, lineHeight: 22, color: color.ink, flexShrink: 1 },
+
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
+  chip: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: color.cedarSoft, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 8 },
+  chipText: { fontFamily: font.semibold, fontSize: 14, lineHeight: 18, color: color.cedarDeep },
+  notAvailable: { backgroundColor: "#F7F3EB", borderRadius: 10, padding: 10 },
+  notAvailableText: { fontFamily: font.regular, fontSize: 13, lineHeight: 17, color: color.muted },
+
+  courtsCard: { paddingVertical: 0, paddingRight: 0 },
+  courtRow: { flexDirection: "row", alignItems: "stretch", gap: space.md },
+  courtMark: { width: 28, height: 28, borderRadius: 6, borderWidth: HAIRLINE, borderColor: color.line, alignItems: "center", justifyContent: "center", alignSelf: "center" },
+  // The divider runs from the text's left edge to the card's right edge (§4G).
+  courtText: { flex: 1, minHeight: 54, justifyContent: "center", paddingVertical: 10, paddingRight: space.lg },
+  courtDivider: { borderTopWidth: HAIRLINE, borderTopColor: color.line },
+  courtName: { fontFamily: font.display, fontSize: 16, lineHeight: 22, color: color.ink },
+  courtDetail: { fontFamily: font.regular, fontSize: 14, lineHeight: 19, color: color.muted },
+
+  rulesCard: { padding: space.xl, gap: space.md },
+  rule: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: space.md },
+  ruleStacked: { gap: 2 },
+  ruleLabel: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, color: color.muted, flexShrink: 0 },
+  ruleValue: { fontFamily: font.semibold, fontSize: 15, lineHeight: 20, color: color.ink },
+  ruleValueSide: { flex: 1, textAlign: "right" },
+  ruleValueStrong: { fontFamily: font.bold },
 });
