@@ -63,17 +63,20 @@ Order, top to bottom:
   players, 2 spots left, asks to join."
 - Fit wording from `levels.ts` `fitLabel` (copied to `mobile/shared/`): "Your level" (cedarDeep),
   "Above your level" / "Below your level" (warnInk on warnSoft pill), "Set your level" (muted).
-- No court → "No court booked yet" in muted text (never red).
+- No court → "No court booked" in muted text (never red).
 
 ## 4.4 Screen: Game (detail)
 
 1. Hero on `night` with Court Lines decoration (same treatment as the booking ticket hero): sport
-   mark, day + time (scoreboard 34–40), club, court / "No court booked yet". Status pill under the
-   time: "Open", "Full", "Private", "Playing now", "Played", "Cancelled" (white text on translucent
+   mark, day + time (scoreboard 34–40), club, court / "No court booked". Status pill under the
+   time: "Open", "Full", "Private", "Court cancelled", "Playing now", "Played", "Cancelled" (white text on translucent
    white; cancelled uses words, not red).
-2. My status banner (only when I'm involved): pending (warnSoft) "Request sent — Rami will accept or
-   decline."; accepted (cedarSoft) "You're in."; declined (white) "Rami didn't accept your request.";
-   waiting (warnSoft) "You're on the waiting list."
+2. Banners, in this order, only when they apply (states and wording: `03-journeys.md` J2):
+   court booking cancelled (warnSoft, clock-off icon, always first) "The court booking for this game
+   was cancelled. Joining is paused until Rami decides."; then my status — pending (warnSoft)
+   "Request sent — Rami will accept or decline."; waiting (warnSoft) "The game is full. You're on the
+   waiting list."; accepted (cedarSoft) "You're in."; declined or removed (white) "Rami didn't accept
+   you for this game."
 3. Primary action area (one green button): Join / Ask to join / Chat (members).
    Secondary text actions below: Withdraw request · Leave game · Directions (club address, reuse
    Club Info's map link).
@@ -82,7 +85,8 @@ Order, top to bottom:
 5. Requests (organiser only): rows with name, "Level 5 · Intermediate", "asked 2 h ago",
    Accept (green secondary) / Decline (plain). Count in the section title.
 6. Details: level range, join mode, note, "Organised by Rami".
-7. Organiser: "Manage game" row → sheet (§4.6).
+7. Organiser: "Manage game" row → sheet (§4.6). When the court booking was cancelled, a primary
+   "Choose what to do" button opens the court sheet (§4.6) instead.
 8. Footer: "Report this game" (non-organiser, small, muted).
 
 ## 4.5 Screen: Chat
@@ -108,11 +112,18 @@ Order, top to bottom:
   start time, duration chips (60 / 90 / 120). Primary: "Post game". Review line above it:
   "Your game will appear on the board for players at Batroun."
 - **Manage game:** Edit details · Make private / Open to players · Remove a player · Cancel game
-  (last, separated, words "Cancel game" in danger colour with the confirm in §3 J7).
+  (last, separated, words "Cancel game" in danger colour with the confirm in J7). Items not allowed
+  now (GR-8) are shown disabled with the reason, not hidden.
+- **Court booking cancelled (organiser):** title "Your court booking was cancelled"; one line on
+  what players see; three rows: "Use another of my bookings" (opens a list of own confirmed future
+  bookings for this sport, each with club, court, day and time), "Go ahead without a CourtBook
+  court", "Cancel the game" (danger). Each ends in a confirm that says who will be told.
 - **Community rules (once):** five short rules + link "Terms of use"; "I agree" (green).
-- **Report:** reasons (Spam · Abuse or harassment · Inappropriate · Something else) + optional
-  note → "Send report". Confirmation: "Thanks. We'll review this within 24 hours. You can also block
-  this player."
+- **Report:** reasons (Spam · Abuse or harassment · Inappropriate · Threat or danger · Something
+  else) + optional note → "Send report". Confirmation: "Thanks for reporting this. We review every
+  report and act when our community rules are broken. You can also block this player now." For
+  "Threat or danger": add "If anyone is in danger, contact the police or emergency services now."
+  No response time is promised (moderation process: `05-architecture.md` §5.6).
 - **Push permission (pre-prompt):** title "Get told when players reply?" body "We'll notify you about
   requests, messages and changes to your games. You can change this any time in Profile."
   Buttons: "Allow notifications" (green) / "Not now".
@@ -133,10 +144,10 @@ Native keeps its own map (in `mobile/lib/errors.ts`), because the web map says "
 | Code | App message |
 | --- | --- |
 | `not_authenticated` | (session flow — sign-in prompt) |
-| `not_found` | "This game isn't available. It may have been made private or removed." |
+| `not_found` | "This game isn't open any more, or isn't available to you." |
 | `forbidden` | "Only the organiser can do that." |
 | `match_full` | "This game just filled up." |
-| `match_closed` | "This game is no longer open." |
+| `match_closed` | "This game is no longer open." — or, when the refetched detail shows the court booking was cancelled, "Joining is paused: the court booking was cancelled." |
 | `match_started` | "This game has already started." |
 | `match_not_finished` | "You can delete the conversation once the game is over." |
 | `join_declined` | "The organiser didn't accept your request for this game." |
@@ -157,6 +168,10 @@ Native keeps its own map (in `mobile/lib/errors.ts`), because the web map says "
 | new `match_cancelled` | "This game was cancelled." |
 | new `blocked` | "You can't join this game." |
 | new `message_not_allowed` | "This message can't be sent. Check our community rules." |
+| new `match_over` | "This game has already been played." |
+| new `court_not_lost` | (not reachable from the app; generic message) |
+| new `court_lost` | "Sort out the court first: use another booking, go ahead without one, or cancel." |
+| new `account_suspended` | "Your account is suspended. Contact courtbook.contact@gmail.com." |
 | new `rules_not_accepted` | (opens the Community rules sheet) |
 | new `slow_down` | "You're sending messages quickly. Wait a moment." |
 | new `too_many_games` | "You already have 10 open games. Close one to post another." |
@@ -176,7 +191,8 @@ Native keeps its own map (in `mobile/lib/errors.ts`), because the web map says "
 | `match_cancelled` | Game cancelled | "Padel, Sat 18:00 at Batroun was cancelled." | Game |
 | `match_message` | New message | "In your padel game, Sat 18:00." | Chat |
 | `booking_moved` | Court time changed | "Your padel game now starts at 19:00." | Game |
-| `booking_unlinked` | Court no longer booked | "Your padel game, Sat 18:00 has no court booked." | Game |
+| `booking_unlinked` | Court booking cancelled | "Padel, Sat 18:00: joining is paused until the organiser decides." (organiser: "Choose what to do with your padel game, Sat 18:00.") | Game |
+| `court_resolved` (new) | Game update | "Your padel game, Sat 18:00 has an update about the court." | Game |
 | `player_removed` (new, D3) | Removed from a game | "The organiser removed you from padel, Sat 18:00." | Game |
 | `match_full_waiting` (new) | Game full | "You're on the waiting list for padel, Sat 18:00." | Game |
 
@@ -190,9 +206,9 @@ Per the Stitch workflow doc, step 3 ("Find a Game, before M3 code"):
 | Screen | Stitch review? | Why |
 | --- | --- | --- |
 | Find a game board + game card | **Yes, first** | Highest-traffic new screen; density vs readability of the card is a real hierarchy question |
-| Game detail | **Yes** | Many states (open, pending, full, private, playing, played, cancelled) and two roles on one screen |
+| Game detail | **Yes** | Many states (open, pending, waiting, full, private, court booking cancelled, playing, played, cancelled) and two roles (player, organiser) on one screen |
 | Chat | **Yes, lightweight** | Standard pattern; review only bubble hierarchy, day separators, report affordance |
-| Sheets (post, manage, report, rules, push pre-prompt) | No — build from existing components | Standard forms |
+| Sheets (post, manage, court booking cancelled, report, rules, push pre-prompt) | No — build from existing components | Standard forms |
 | Activity | No | List of rows; same as web |
 
 Process (unchanged): Paul runs Stitch with `mobile/DESIGN.md`, a screenshot of the web Play board

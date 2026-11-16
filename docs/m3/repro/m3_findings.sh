@@ -120,6 +120,18 @@ again=$(q -c "select count(*) from claim_notifications_to_email(50) where id='$N
 echo "  after the user's update: '$row'; picked again by the email claim: $again"
 [ "$again" = 1 ] && echo "  REPRODUCED: an already-emailed notice goes back in the queue with user-chosen text; repeated, this spends the shared Gmail quota (recipient is always the user, profile_id is pinned by the policy)" || echo "  NOT REPRODUCED"
 
+echo "== F10 marking a played booking as no-show unlinks its game and tells players the court was cancelled =="
+COURT10=$(q -c "select id from courts where club_id='$CLUB' and name='Padel 1'")
+BK10=$(q -c "insert into bookings (club_id, court_id, player_id, start_at, end_at, status, source, created_by)
+             values ('$CLUB','$COURT10','$O', date_trunc('hour', now()) - interval '3 hours', date_trunc('hour', now()) - interval '90 minutes','confirmed','app','$O') returning id" | head -1)
+M10=$(q -c "insert into matches (club_id, sport, organizer_id, start_at, end_at, players_needed, booking_id) values ('$CLUB','padel','$O', date_trunc('hour', now()) - interval '3 hours', date_trunc('hour', now()) - interval '90 minutes', 3, '$BK10') returning id" | head -1)
+q -c "insert into match_players (match_id, profile_id, status) values ('$M10','$A','accepted');" >/dev/null
+q -c "update bookings set status='no_show' where id='$BK10';" >/dev/null
+n10=$(q -c "select count(*) from notifications where match_id='$M10' and profile_id='$A' and kind='booking_unlinked'")
+l10=$(q -c "select coalesce(booking_id::text,'none') from matches where id='$M10'")
+echo "  played game, booking marked no_show: game booking now $l10; Adam's 'court booking was cancelled' notices: $n10"
+[ "$n10" = 1 ] && echo "  REPRODUCED: a no-show mark after play is treated as a cancellation" || echo "  NOT REPRODUCED"
+
 echo "== C1 concurrency control: two players take the last place at once =="
 M7=$(post 1 open)
 { as $A; echo "begin; select join_match('$M7'); select pg_sleep(1); commit;"; } | q > /tmp/m3_c1a.log &

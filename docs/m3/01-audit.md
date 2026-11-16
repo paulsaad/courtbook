@@ -13,7 +13,7 @@ Legend: **Done** = works end to end and is covered by the SQL suite or web tests
 | --- | --- | --- | --- | --- | --- |
 | A1 | Find open games (board) | Done — `open_matches(sport, fit, from, to, governorate, district, limit≤100)`; excludes own and non-open; signed-in only | Done — `/play` (`PlayBoard.tsx`: sport, today / week / any, "My level", area) | Missing | Suite §Y 81, §Z (anon sees no matches) |
 | A2 | Games at one club | Done — `match_board(p_club, p_days)` | Done — club page `MatchBoard.tsx` | Missing | Club page has Book · Info only |
-| A3 | Match detail | **Partial** — no single-match read. `match_board` is used for it, and it returns future matches only, ≤ 60 days ahead | Partial — `/matches/[id]` 404s once a match starts (finding S6) | Missing | `finished` branch on the web page is unreachable for the same reason |
+| A3 | Match detail | **Partial** — no single-match read. `match_board` is used for it, and it returns future matches only, ≤ 60 days ahead | Partial — `/matches/[id]` 404s once a match starts (finding S6) | Missing | Fix: `match_detail` (0067), draft validated — `02-safety-review.md` S6 |
 | A4 | Participants | Done — `match_participants` (organiser sees pending; accepted members see accepted), `player_names` scoped | Done | Missing | Suite §T 55, §H 27 |
 | A5 | Join / ask to join | Done — `join_match` (row lock, idempotent, auto-close when full) | Done | Missing | Suite §T 54, §U 58, §V 63–65 |
 | A6 | Withdraw / leave | Done with a defect — `leave_match` deletes a *declined* row (S4) | Done | Missing | Suite §T 55, §V 66 |
@@ -32,7 +32,7 @@ Legend: **Done** = works end to end and is covered by the SQL suite or web tests
 | A19 | Push | Missing (G3) | — | Missing | Planned for M3 |
 | A20 | Levels on games | Done — `player_levels`, `match_level_bounds`, `my_level` on board rows | Done — `levels.ts` (`rangeLabel`, `fitLabel`, guide) | Partial — not copied into `mobile/shared/` yet | Setting levels in the app is M4 |
 | A21 | Bookings → Games | Done — `my_agenda` returns `kind='match'` rows | Done | **Partial** — Games segment lists rows; rows are not tappable; empty state says "arrives in the next milestone" | `app/(tabs)/bookings.tsx` |
-| A22 | Booking ↔ game link | Done — trigger `sync_match_with_booking`: time follows a staff move; cancel unlinks; notices to organiser and accepted | Done | — | Suite §V 68, §W 72; pending not told (S8) |
+| A22 | Booking ↔ game link | **Partial** — trigger `sync_match_with_booking`: time follows a staff move; cancel unlinks but the game stays open to joins (S19); a no-show mark is treated as a cancellation (S18); pending not told (S8) | Done (same behaviour) | — | Suite §V 68, §W 72; redesign GR-9 |
 | A23 | Staff view of games | Done — staff can read their club's games (RLS) | Web staff pages | Not in native scope (native app plan D4: staff stay on web) | — |
 
 ## 1.2 What the native app can reuse unchanged
@@ -64,8 +64,8 @@ the iOS accessibility audit, the staging tester account.
 
 | Layer | Item |
 | --- | --- |
-| Database | One hardening migration (S1, S2, S4, S5, S6, S8, S9, S10 fixes), `match_detail`, `remove_player` (recommended), report / block tables + RPCs, `push_tokens` + preferences |
-| Server | A dispatcher for push and email that does not depend on a browser cookie (Supabase Database Webhook → Edge Function), or G1 for `/api/notify/email` |
+| Database | Four migrations (`02-safety-review.md` §2.3): 0067 `match_detail`; 0068 hardening incl. court-lost handling and `remove_player`; 0069 report / block / moderation; 0070 push delivery |
+| Server | One Edge Function `deliver` draining the `notifications` queue on a schedule, for push and email (`05-architecture.md` §5.5) |
 | Native | Find a Game board; match detail; join / request / withdraw / leave; organiser approve / decline / edit / private / reopen / cancel / remove; post from a booking and without one; chat; Activity with unread badge; push permission, registration, deep links; Club → Games section |
 | Design | Board, match detail and chat designs approved before code (Stitch workflow, step 3) |
 

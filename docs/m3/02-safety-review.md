@@ -28,7 +28,7 @@ Severity:
 | S5 | A user can rewrite their notifications and put them back in the email queue | table grant `UPDATE` on all columns of `notifications` | **Medium** | Reproduced (F9) |
 | S6 | No read path for a game once it starts (or > 60 days ahead); web page 404s, chat unreachable | `match_board` (only single-game read) | **Medium** (functional; blocks native detail) | Reproduced (F7) |
 | S7 | Push would put chat text and names on the lock screen | `match_message_notify` body = `name: first 80 chars` | **Medium** (design rule for G3) | By inspection |
-| S8 | Pending requesters are not told when the linked booking is moved or cancelled | `sync_match_with_booking` | **Low** | Reproduced (F4) |
+| S8 | Pending requesters are not told when the linked booking is moved or cancelled | `sync_match_with_booking` | **Low** (folded into S19) | Reproduced (F4) |
 | S9 | Chat insert: a row inserted as "deleted" skips the 1–1000 length check; messages accepted on cancelled games (web hides the box, database does not) | `match_messages` check + insert policy | **Low** | Reproduced (F8) |
 | S10 | A game without a booking needs no club and has no date limit; club-less games never appear anywhere | `post_match` | **Low** | Reproduced (F6) |
 | S11 | Game fills through approvals; other requests stay pending forever, no notice | `decide_join`, `join_match` | **Info** (define) | Reproduced (F5) |
@@ -38,6 +38,8 @@ Severity:
 | S15 | Switching approval → open leaves earlier requests pending while newcomers get in directly | `update_match` | **Low** | By inspection |
 | S16 | Native cannot trigger email fan-out (route accepts the web cookie only) | `/api/notify/email` | **Info** (architecture) | By inspection |
 | S17 | Web marks *all* notices read when any game is opened | `src/app/matches/[id]/page.tsx:28` | **Info** — leave web as is; native does it per game | By inspection |
+| S18 | Marking a played booking *no-show* unlinks its game and tells players the court booking was cancelled | `sync_match_with_booking` (fires on any non-confirmed status) | **Low** | Reproduced (F10) |
+| S19 | A cancelled court booking leaves the game open to new joins and approvals, with no warning to joiners | `sync_match_with_booking`, `join_match`, `decide_join` | **Medium** (review finding 1) | Reproduced (F4 shows the game stays `open` with no booking) |
 
 **Controls verified (no defect):**
 
@@ -110,10 +112,10 @@ Severity:
     Effects: blocked player's messages are hidden from the blocker (`match_messages_list` filters);
     neither sees the other's open games on the board; `join_match` refuses
     when either has blocked the other (`blocked`), with neutral copy.
-  - Report confirmation tells the reporter what happens next; reports go to the support address
-    `courtbook.contact@gmail.com` (daily check) until an admin page exists.
+  - Moderation process (who receives reports, review, serious incidents): `05-architecture.md`
+    §5.6. No response-time promise is shown to players until that process has run for a while.
   - The S1 fix is a precondition (chat must not be deletable by the organiser).
-- **Settled by:** T-S3a–e and native journey J8.
+- **Settled by:** T-S3a–h, T-MOD1–MOD5 and journey J8.
 
 ### S4 — Decline bypass · Medium
 
@@ -152,11 +154,21 @@ Severity:
 - **Impact:** web `/matches/[id]` 404s from start time (its `finished` branch and "Delete
   conversation" are unreachable); the chat for a game in progress — when players most need "running
   late" — cannot be opened. Same for games > 60 days ahead.
-- **Correction:** new read-only `match_detail(p_match uuid)` (security definer, stable) returning
-  the `match_board` columns plus `club_timezone`, `finished`, `hidden`; visible when the caller is
-  the organiser, has any row in `match_players`, the game is open, or the caller is staff/admin —
-  the same rule as the `matches` read policy. Anon gets nothing.
-- **Settled by:** T-S6a–d.
+- **Correction (first M3 migration, before any native detail screen):** read-only
+  `match_detail(p_match)` — draft `docs/m3/sql/0067_match_detail.draft.sql`. Visibility = GR-2:
+  organiser, accepted and pending players always; anyone signed in only while `open` and not started
+  (so declined, removed and departed players lose sight of it once it stops being joinable); club
+  staff and admin always; anon not executable. Returns the board columns plus timezone, town,
+  `court_lost`, `started`, `finished`, `hidden`; the request count only to the organiser; no
+  player names (those stay behind `match_participants`). It exposes nothing the caller cannot
+  already read under the `matches` RLS policy, except that it is *narrower* for started open games.
+- **Validated (16 Nov, local replica, rolled-back transaction):**
+  `docs/m3/repro/match_detail_matrix.sh` — 8 roles × 7 states (open, full, private, cancelled,
+  playing, played, court lost): `MATRIX PASS`; declined player sees `my_status = declined`;
+  organiser gets the request count, players get null; anon → `permission denied`. Mutation check:
+  dropping the "not started" condition makes the matrix fail (strangers see playing and played
+  games). Re-runnable (applied twice in one transaction).
+- **Settled by:** T-MD1–MD5.
 
 ### S7 — Push content on the lock screen · Medium (design rule)
 
@@ -168,7 +180,7 @@ Severity:
   (`"New message in your padel game, Sat 18:00"`), never from `body`; names only for kinds where
   the recipient already sees the name in the app (join request to the organiser). Data payload
   carries `notification_id`, `kind`, `match_id` only. Exact copy in `04-ux-spec.md` §4.9.
-- **Settled by:** T-P3 (sender unit tests on payload construction).
+- **Settled by:** U5 (push copy builder never uses `notifications.body`).
 
 ### S8 — Pending players not told the court moved or vanished · Low
 
@@ -176,8 +188,8 @@ Severity:
 - **Reproduction (F4):** booking cancelled; notices: accepted 1, pending 0; game stays open with no
   booking.
 - **Correction:** include `status in ('accepted','pending')` in the recipient set for
-  `booking_moved` and `booking_unlinked`.
-- **Settled by:** T-S8.
+  `booking_moved` and `booking_unlinked`; the cancellation case is redesigned in S19.
+- **Settled by:** T-S8, T-CL1.
 
 ### S9 — Chat insert rules only the web enforces · Low
 
@@ -204,10 +216,11 @@ Severity:
 
 - **Reproduction (F5):** Bana requested; organiser accepted others until full; Bana: `pending`, no
   notice. If a place reopens the organiser can still accept her.
-- **Recommended default (D5):** keep pending as the waiting list; when a game becomes full, each
+- **Rule (GR-4, default kept):** keep pending as the waiting list; when a game becomes full, each
   pending requester gets one `match_full_waiting` notice ("The game is full. You're on the waiting
   list; the organiser can still add you if a place opens."). The board shows "Waiting list" for
-  them. Cancel and make-private already clear requests with a notice.
+  them. Making the game private removes waiting requests with a notice; cancelling keeps them and
+  tells them (current behaviour). Full rule: GR-4.
 - **Settled by:** T-S11.
 
 ### S12 — No rate limits · Low (pilot)
@@ -242,8 +255,9 @@ Severity:
 
 The web triggers email after an action by calling `/api/notify/email` with its cookie. The app has
 none. Options: (a) G1 `authenticateRequest()` on that route (exists on `payments-g1`); (b) a
-server-side dispatcher fired by the database (webhook → Edge Function) that sends push and email
-for every new notice, whoever caused it. **Recommendation: (b)** — it makes delivery independent of
+server-side dispatcher driven by the database (a queue in `notifications`, drained by an Edge
+Function on a schedule) that sends push and email for every new notice, whoever caused it.
+**Recommendation: (b)** — it makes delivery independent of
 the client, covers trigger-created notices (booking moved/unlinked) that today are emailed only when
 someone happens to call the route, and is where push must live anyway. Details in
 `05-architecture.md` §5.5.
@@ -252,34 +266,74 @@ someone happens to call the route, and is where push must live anyway. Details i
 
 Kept as is (web is production; not part of M3). Native marks only the opened game's notices read.
 
-## 2.3 Hardening migration — one change set, staging first
+### S18 — No-show treated as a cancelled court · Low
 
-Proposed as one migration (number assigned when written, after Paul's approval):
+- **Object:** `sync_match_with_booking` acts on any status other than `confirmed`, so staff marking a
+  played booking *no-show* unlinks the game and sends "the court booking was cancelled".
+- **Reproduction (F10):** game played, booking set to `no_show` → booking link `none`, Adam's notices 1.
+- **Correction:** act only on `confirmed → cancelled` (GR-9). `no_show` changes nothing.
+- **Settled by:** T-CL10.
 
-| Item | Fixes |
-| --- | --- |
-| Drop organiser DELETE policy; revoke DELETE on `matches` | S1 |
-| `match_messages` BEFORE INSERT trigger: server time, `deleted_at` null, game not cancelled, rate limit | S2, S9, S12 |
-| `leave_match`: declined row kept | S4 |
-| `notifications`: UPDATE only on `read_at` | S5 |
-| `match_detail(p_match)` | S6 |
-| `sync_match_with_booking`: pending recipients too | S8 |
-| `post_match`: club required and 60-day horizon without a booking | S10 |
-| `match_full_waiting` notice | S11 (if D5 = recommended) |
-| Counters in `post_match` / `join_match` | S12 |
-| `match_message_notify` skips hidden | S14 |
-| `update_match` approval → open | S15 |
-| `remove_player(p_match, p_player)` | A11 (D3) |
-| `reports`, `blocks` + RPCs | S3 |
-| `push_tokens`, `notification_prefs` | G3 |
+### S19 — Game stays joinable after its court booking is cancelled · Medium
 
-Web compatibility: every item keeps the existing function signatures and the direct chat insert;
-the only new refusals the web can meet are `match_cancelled` (not reachable from its UI),
-`club_required` (its form always sends one), `too_far_ahead` (its date picker — to be checked when
-the migration is written), and the rate limits. Each will be listed with its web copy before the
-migration is applied anywhere.
+- **Object:** `sync_match_with_booking` unlinks the booking and notifies, but leaves the game `open`;
+  `join_match` and `decide_join` keep admitting players to a game with no court; joiners are not
+  warned (F4 output: "match still open with booking none").
+- **Correction (GR-9, Paul's review point 1):**
+  - Trigger, on `confirmed → cancelled` only, before the game is played: keep game, players and
+    chat; set `court_lost_at`; remove the link; `open` or `full` → `closed` / `no_court`; private
+    stays private; notify organiser, accepted and pending players (`booking_unlinked`, new copy
+    "Joining is paused until the organiser decides").
+  - Joins and approvals pause without touching `join_match` / `decide_join`: both already refuse any
+    status other than `open` (`match_closed`). `leave_match`, `update_match` and the new
+    `remove_player` reopen only `full` games, so nothing reopens a `no_court` game by accident
+    (checked in the current function bodies).
+  - New `resolve_court(p_match, p_booking uuid default null)`, organiser or admin, before the game is
+    played, only while `court_lost_at` is set: with a booking — same checks as `post_match`
+    (own, confirmed, future, same sport, not already linked to a live game) and the game takes that
+    booking's club, time and end; without — the game goes ahead with "No court booked". Then
+    `court_lost_at := null`; status `open`, or `closed`/`full` if full; a game that was private stays
+    private. Accepted and pending players get `court_resolved`.
+  - `set_match_status(open|closed)` refuses while the court is lost (`court_lost`), so there is one
+    resolution path; cancel stays available.
+  - No booking is ever made or changed automatically.
+- **Web impact:** the web shows `closed` games with an unknown reason as "Private" and offers the
+  organiser "Open it to players again" (which will answer `court_lost`) and "Cancel". Two web strings
+  should change with this migration (board badge "Court cancelled", organiser hint) — listed in
+  §2.5 as a pre-migration change needing approval.
+- **Settled by:** T-CL1–CL12.
 
-## 2.4 Not changed by this review
+## 2.3 Migration plan — four migrations, each staging first
 
-No migration was written or applied. No function, policy or grant was changed on any database.
-The replica `courtbook_test` was used for the reproductions only.
+Numbers follow the last migration (0066). Each is shown to Paul with its web-facing effects, applied
+to staging, tested there (staging API + repro scripts), then applied to live only with Paul's
+explicit approval. Each is re-runnable (suite §AL rule).
+
+| # | Migration | Contents | Fixes | Needed before |
+| --- | --- | --- | --- | --- |
+| 0067 | `match_detail` | `matches.court_lost_at`; `closed_reason` may be `no_court`; `match_detail()` (draft in `docs/m3/sql/`) | S6, GR-2 | Stage 1 screens |
+| 0068 | Game hardening | Drop organiser DELETE policy + revoke DELETE (S1); chat insert trigger: server time, `deleted_at` null, not cancelled, rate (S2, S9, S12); `leave_match` keeps declined (S4); `notifications` UPDATE only `read_at` (S5); booking trigger GR-9 + pending recipients + ignore no-show (S8, S18, S19); `resolve_court`; `set_match_status` time limits and `court_lost` refusal (GR-8); `post_match` club + 60 days (S10); `match_full_waiting` (S11); counters (S12); hidden games not notified (S14); approval → open (S15); `remove_player` (GR-6) | S1–S2, S4–S5, S8–S12, S14–S15, S18–S19 | Stage 3 write screens |
+| 0069 | Safety | `reports`, `blocks`, `blocked_terms`, `profiles.rules_accepted_at`, `profiles.suspended_at`; RPCs; block effects in `open_matches`, `match_board`, `match_detail`, `join_match`, `match_messages_list`, `match_message_notify`; admin RPCs (§5.6) | S3, S13 | Stage 4 chat |
+| 0070 | Delivery | `push_tokens`, `notification_prefs`, push claim columns, `push_tickets`, claim RPCs (service role), cron jobs (staging only until approved) | S7, S16 | Stage 6 push |
+
+## 2.5 Changes and checks before any migration
+
+| Before | Item | Kind |
+| --- | --- | --- |
+| 0067 | Read `rolconfig` of `authenticated` on staging and live (read-only) to confirm the 8 s statement timeout the chat cursor relies on (§5.4) | check |
+| 0067 | Confirm `matches_closed_reason_check` has the same definition on staging and live as in the migrations (read-only) | check |
+| 0067 | Paul approves applying 0067 to staging, then to live | approval |
+| 0068 | Web: two strings for `no_court` (board badge, organiser hint) and, recommended, switch `/matches/[id]` from `match_board` to `match_detail` (fixes the 404 after start) | web change, needs approval |
+| 0068 | List every new refusal the web can meet (`court_lost`, `match_cancelled`, `too_far_ahead`, `slow_down`, `too_many_games`, time limits of GR-8) with its web copy | review |
+| 0068 | Existing suite sections that encode replaced behaviour updated in the same change: §V 68 (cancel → game now `closed`/`no_court`, not `open`) | test change |
+| 0068 | Repro script before / after on the replica and on staging | check |
+| 0069 | Check existing `profiles.name` values against the new length rule (S13) before adding it | check (read-only) |
+| 0069 | Paul confirms the moderation decisions (`09-decisions.md` P2, P3) | approval |
+| 0070 | FCM v1 and APNs credentials in EAS (Paul, guided); Expo access token as a per-project secret; live delivery stays disabled until approved | setup, approval |
+
+## 2.6 Not changed by this review
+
+No migration was written or applied. No function, policy or grant was changed on any staging or
+live database. On the local replica `courtbook_test`: the reproductions created test rows; the
+`match_detail` draft was loaded only inside transactions that were rolled back (checked afterwards:
+no `match_detail` function, no `court_lost_at` column, original check constraint).

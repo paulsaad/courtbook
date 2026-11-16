@@ -1,22 +1,30 @@
-# M3 — 9. Decisions for Paul
+# M3 — 9. Decisions
 
-Each has my recommended default. Where you don't answer, the default stands (per your instruction:
-"document your recommended default and proceed").
+## 9.1 Settled engineering defaults (no approval needed)
 
-| # | Decision | Recommended default | Why | Alternative |
+| # | Decision | Status after review |
+| --- | --- | --- |
+| D1 | Fix the reproduced defects before native write screens | Kept. Now four migrations (0067–0070), each approved separately (`02-safety-review.md` §2.3) |
+| D2 | Delivery driven by the database | Kept, **one change I am making on my own judgement:** a scheduled job drains the `notifications` queue every 15 s instead of a webhook per row. Reason: webhooks run on `pg_net`, which does not retry failed calls; the scheduled job is one mechanism that also does retries and recovery (`05-architecture.md` §5.5). At-least-once, duplicates possible only in a narrow crash window — stated, not hidden |
+| D3 | Organiser can remove an accepted player before start; removal is final for that game | Kept (GR-6) |
+| D4 | Report, block, filter, community rules in M3 | Kept (review point 5) |
+| D5 | Waiting list = pending requests on a full approval game; one notice per fill; no automatic promotion | Kept (GR-4) |
+| D6 | Court booking cancelled | **Replaced by Paul's rule** (GR-9): game, players and chat kept; joins and approvals paused; everyone told; organiser links another of their bookings, goes ahead without a CourtBook court (P1) or cancels; nothing booked automatically |
+| D7 | Chat polling every 4 s, no Realtime | Kept; cursor verified, corrected client rule (`05-architecture.md` §5.4) |
+| D8 | Push permission asked after first post or join | Kept |
+| D9 | App wording "game", "organiser" | Kept |
+| D10 | No fifth tab; Find a game from Home, Club → Games, Bookings → Games | Kept |
+| D11 | Stitch review for board and detail before stage 1 screens; chat before stage 4 | Kept (`07-roadmap.md` §7.1) |
+| D12 | Out of M3: hand-over, invites, Realtime, chat images, read receipts, automatic re-booking | Kept |
+
+## 9.2 Product decisions that need Paul
+
+| # | Question | Recommended | Why | If no |
 | --- | --- | --- | --- | --- |
-| D1 | Approve the hardening migration (S1, S2, S4, S5, S6, S8–S12, S14, S15) — staging first, live after your check | **Yes** | Fixes defects present on live today; the app's write screens should never run on them; web unaffected (checked) | Fix only S1, S2, S4, S5, S6 now (minimum for M3), rest later |
-| D2 | How push and email are sent | **Database webhook → Supabase Edge Function** | Delivery no longer depends on the phone or browser calling a route; covers staff booking moves; no new paid tool | Bring G1 (`authenticateRequest`) from `payments-g1` for email only, and build push separately |
-| D3 | Organiser can remove a player | **Yes, minimal** (before start, with notice; removal acts as a decline) | Otherwise the only remedy for a no-show or abusive player is cancelling the whole game | Not in M3 |
-| D4 | Report, block, word filter, community rules | **Yes, in M3** (stage 4) | Required by Apple 1.2 and Google Play UGC for chat; cheap to build now | Defer to M5 (risks a store rejection late) |
-| D5 | Requests on a full game | **Waiting list:** they stay pending, get one notice "You're on the waiting list", organiser can still accept if a place opens | Matches current data; no new concept | Auto-decline all pending when full |
-| D6 | Game whose booking is cancelled | **Game stays open, labelled "No court booked yet"; organiser is told; the booking screen warns before cancelling a booking with players** | Current behaviour, made visible; organiser decides | Auto-cancel the game |
-| D7 | Chat transport | **Polling every 4 s while open** | Boring, cheap, already the web's approach; Realtime can come later | Supabase Realtime now |
-| D8 | When to ask for push permission | **After the first post or join/request**, with a pre-prompt | Asked when the value is obvious; one OS prompt only | At first launch |
-| D9 | Wording in the app | **"game"** and **"organiser"** (web keeps "match") | Already used in Bookings → Games | "match" everywhere |
-| D10 | Where Find a game lives | **Home entry + Club → Games + Bookings → Games; no fifth tab** | Keeps the approved four tabs | A "Play" tab |
-| D11 | Design approval | **Stitch round for board, detail, chat before any screen code**; data layer may start once M3 is authorised | Follows the agreed workflow; avoids rework | Build from this spec and review on the phone |
-| D12 | Out of M3 | Organiser hand-over, invites, Realtime, images in chat, read receipts | Not needed for the pilot; each adds risk | Pull any one in |
+| **P1** | When the court booking is cancelled, may the organiser choose "go ahead without a CourtBook court" (players then see "No court booked" and are told)? | **Yes** | The organiser may have arranged a court by phone or at a club not on CourtBook; without this the only options are re-booking in CourtBook or cancelling. Joiners are always warned (GR-10) | Resolution = link another CourtBook booking or cancel |
+| **P2** | Who moderates, and with what tool? | **Paul is the moderator during the pilot; a small admin "Reports" page is added to the existing web admin area in stage 4** (a production web change) | Paul is not a developer, so moderation needs a page, not SQL; reports also arrive by email | Reports by email only; actions done by me on request (slower) |
+| **P3** | When a player deletes their own message, is the text kept for moderation? | **No** — deletion stays real (current behaviour); a report stores a snapshot of what was reported | Simplest and matches what players expect; evidence exists for anything reported before deletion | Keep deleted text hidden for 30 days (privacy policy must say so) |
+| **P4** | Approve the web changes that go with 0068: two strings for "court booking cancelled", and the web game page reading `match_detail` (fixes its 404 after start) | **Yes** | Without them the web shows such games as "Private" | Web keeps current behaviour; native correct, web misleading |
 
-Also to note (no decision needed now): live push stays off until you approve, like live crash
-reporting; the hardening migration is shown to you with its web-facing copy before staging.
+Nothing else needs your approval before implementation, beyond the per-migration and live-release
+approvals that are already standing rules.

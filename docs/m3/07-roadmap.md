@@ -1,66 +1,88 @@
-# M3 — 7. Staged roadmap and first slice
+# M3 — 7. Staged roadmap, first slice and implementation order
 
-Precondition for all stages: M2 closed and merged (Galaxy A17 pass on Wed 18 Nov, final checks),
-and Paul's authorisation of M3 after the ChatGPT review of this package. Each stage ends with a
-staging build/update, Paul's phone check against its device list, and a short report. Database
-changes: staging first, live only with Paul's explicit approval. Live push stays off until approved.
+Preconditions: M2 closed and merged (Galaxy A17 pass, Wed 18 Nov; final checks); Paul authorises M3.
+Every migration: shown to Paul → staging → tested → live only with explicit approval. Live push stays
+off until approved. Each stage ends with a staging update or build, Paul's device checks, and a short
+report.
 
-| Stage | Content | Database change | Native build needed | Acceptance (all must hold) |
+| Stage | Content | Migration | Native build | Acceptance |
 | --- | --- | --- | --- | --- |
-| **0. Approvals** | ChatGPT review of this package; decisions D1–D12; Stitch round for board, detail, chat (Paul) | none | — | Decisions recorded; designs approved by Paul |
-| **1. Read-only games (first slice)** | Board, game detail (future games), Bookings → Games tappable, Club → Games segment | **none** | no (EAS update) | §7.1 |
-| **2. Hardening migration** | §2.3 items S1, S2, S4, S5, S6 (`match_detail`), S8, S9, S10, S11, S12, S14, S15, `remove_player` | one migration | — | AO, AP, AR green on replica with mutations; repro script: none reproduced on replica **and** staging; web smoke on staging unchanged; Paul approves before live |
-| **3. Taking part** | Join / ask, withdraw, leave, organiser accept / decline / remove, manage (edit, private, reopen, cancel), post from booking and from board | (uses stage 2) | no | E2E 07, 09, 10; device D-2 without chat; every error code in UX §4.8 reachable or proven unreachable |
-| **4. Chat + safety** | Chat (polling), delete, hide, community rules, report, block, blocked-terms filter | report / block / rules (second migration, or folded into stage 2 if approved together) | no | AQ green; E2E 08; device D-5; store UGC checklist (filter, report, block, contact) ticked |
-| **5. Activity** | Activity list, per-game mark read, unread badge on Home and Profile | none | no | Unit U1–U3; badge correct across two phones within one refresh |
-| **6. Push (G3)** | `push_tokens`, prefs, `deliver` Edge Function + webhook, receipts job, pre-prompt, routing, Profile → Notifications | push tables; webhook + function on staging | **yes** (`expo-notifications`, version bump) | AS green; staging API G6; E2E 12; device D-3, D-4 on iPhone and A17 incl. killed app |
-| **7. M3 close** | Full regression, accessibility audits, usability sessions (≈5 players), closure report | — | — | `06-test-plan.md` §6.7 exit criteria; release-plan M3 acceptance |
+| **0. Ready** | Decisions P1–P4 (`09-decisions.md`); Stitch round for board and detail (Paul) | — | — | Decisions recorded; board and detail designs approved |
+| **1. Read-only games** | 0067; board; game detail (all states); Club → Games; Bookings → Games tappable | **0067** | no (EAS update) | §7.2 |
+| **2. Hardening** | 0068 + its web strings | **0068** | — | AP and AR green with mutations; `m3_findings.sh`: nothing reproduced on replica and staging; G6, G7; web smoke on staging; Paul approves live |
+| **3. Taking part** | Join / ask, withdraw, leave; accept / decline; remove; manage (edit, private, reopen, cancel); court booking cancelled sheet; post from booking and from the board | (0068) | no | E2E 10–13; D-2 without chat, D-7; every code in UX §4.8 for these actions reachable or proven unreachable |
+| **4. Chat and safety** | Chat (4 s polling), delete, hide, community rules, report, block, filter; web admin "Reports" page (P2) | **0069** | no | AQ, AT; E2E 14–15; D-5; store UGC checklist (filter, report, block, contact, terms) |
+| **5. Activity** | Activity list, per-game mark read, unread badge on Home and Profile | — | no | U1–U3; badge consistent across two phones within one refresh |
+| **6. Push** | `deliver`, cron jobs (staging), tokens, pre-prompt, routing, Profile → Notifications | **0070** | **yes** (`expo-notifications`, version bump) | AS; T-DL1–DL9 on staging; E2E 16; D-3, D-4 on iPhone and A17 incl. killed app |
+| **7. Close** | Full regression, accessibility audits, usability sessions (about 5 players), closure report | — | — | `06-test-plan.md` §6.8; release-plan M3 acceptance |
 
-Order rationale: read-only first (no risk, earliest feedback on the board design); hardening before
-any write screen, so no native write ever runs on the defective paths; chat only after S2 is fixed;
-push last because it needs a native build and new credentials, and is useless before there is
-something to be told about.
+Why this order: the detail screen is built on `match_detail` from its first line (review point 2);
+hardening lands before any native write; chat only after the timestamp fix; push last (needs a build
+and credentials, and needs something to notify about).
 
-## 7.1 First safe slice — read-only games
+## 7.1 Stitch review (already planned) — which screens, when
 
-**Why it is safe:** it calls only existing read functions already used by the web in production
-(`open_matches`, `match_board`, `my_agenda`), under the same RLS; it writes nothing; it changes no
-database, no web file, no payment code; it ships to staging only as an EAS update on the M2 build
-(no native module).
-
-**Scope:**
-
-1. `mobile/shared/levels.ts` (byte copy; `npm run check:shared` covers every file in that folder
-   automatically).
-2. `lib/games.ts`: `useOpenGames(filters)`, `useClubGames(clubId)`, `useGame(id)` (from
-   `match_board(null, 60)` filtered by id until `match_detail` exists), `gameState()` pure function.
-3. `lib/errors.ts`: game copy map (read errors only used yet).
-4. Screens: Find a game (Home entry), Game detail (read-only: hero, status, `PlayerSlots`, level,
-   note, organiser; the action area says "Joining from the app arrives in the next update." — no
-   button), Club → Games segment, Bookings → Games rows
-   tappable for future games (past rows stay as now).
-5. States: signed-out prompt, empty, error, offline, "isn't available".
-
-**Out of the slice:** every write, chat, Activity, push, past/under-way detail (needs
-`match_detail`).
-
-**Acceptance (all to be run, none assumed):**
-
-| # | Check | How |
+| Screen | When | Must show |
 | --- | --- | --- |
-| 1 | Board shows the same games as the web `/play` for the same filters and account | staging, side by side, 3 filter combinations |
-| 2 | Signed-out user sees the sign-in prompt, never game data | E2E + network log: no `open_matches` call without a session |
-| 3 | A private or cancelled game is not on the board; its detail shows the right state to a member and "isn't available" to a stranger | staging seed + E2E 06 |
-| 4 | Bookings → Games: future rows open the game; past rows unchanged | E2E |
-| 5 | Unit U1, U2, U6, U7 green | CI |
-| 6 | Accessibility audits clean on the new screens (Android and iOS, normal and largest text) | CI / simulator |
-| 7 | No change outside `mobile/`; no migration; web tests and SQL suite unchanged | diff review |
-| 8 | Paul: D-1 and D-6 on iPhone and A17 | phones |
+| Find a game board + game card | Before stage 1 screens | dense vs readable card; filters; empty and offline states |
+| Game detail | Before stage 1 screens | all GR-1 states incl. waiting list and court booking cancelled; player vs organiser |
+| Chat | Before stage 4 | bubble hierarchy, day separators, report affordance, read-only states |
 
-**Effort:** small (the data layer is a thin wrapper; screens use existing components).
-**Rollback:** republish the previous staging update (pipeline already proven in M1).
+Not reviewed in Stitch: sheets, Activity (built from existing components). Stitch output is a
+reference only; Paul approves; the Club Info design is not touched.
 
-## 7.2 What I will not do without a further go-ahead
+## 7.2 First slice — exact scope and acceptance
 
-Write the hardening migration (stage 2) or apply anything to staging or live; enable live push;
-upload FCM/APNs credentials; change any web file; touch the M2 branch.
+**Scope**
+
+1. Migration 0067 (`docs/m3/sql/0067_match_detail.draft.sql` becomes the migration) + suite §AO
+   (T-MD1–MD5) + staging API G1.
+2. `mobile/shared/levels.ts` (byte copy).
+3. `lib/games.ts`: `useOpenGames(filters)` (`open_matches`), `useClubGames(clubId)` (`match_board`,
+   list only), `useGame(id)` (`match_detail`), `gameState(detail, now)`; hooks disabled when signed
+   out. `lib/errors.ts`: game copy map.
+4. Screens: Find a game (Home entry), Game detail (read-only), Club → Games segment, Bookings →
+   Games rows tappable (future and past).
+5. Read-only means: no write call exists in the slice. Action areas say "Joining from the app arrives
+   in the next update." (non-members), "Managing games from the app arrives in the next update."
+   (organiser); members see "Chat arrives in a later update."
+
+**Not in the slice:** writes, chat, Activity, push, organiser actions.
+
+**Acceptance (each item names how it is checked; none is assumed):**
+
+| # | Requirement | Achievable with | Check |
+| --- | --- | --- | --- |
+| 1 | Board shows exactly what `open_matches` returns for the chosen filters | existing `open_matches` | U6 (params) + E2E 06 (seeded game appears, filtered-out game does not) |
+| 2 | Signed-out users see the sign-in prompt and no game data; no game call is made | client gating | U9 + E2E 08 |
+| 3 | Detail shows the right state, banner and wording for open, waiting, full, private, court booking cancelled, cancelled, playing, played — as organiser, accepted, pending and stranger | `match_detail` (0067); court-lost and played games seeded by service role on staging test data | E2E 07 + U1 |
+| 4 | A stranger opening a private, cancelled or started game gets "isn't open any more, or isn't available to you" | `match_detail` returns no row (GR-2) | G1 + E2E 07 |
+| 5 | Bookings → Games: every row opens its game, past ones included; hidden games stay out of the list | `my_agenda` (id = game id) + `match_detail` | E2E 09 |
+| 6 | Club → Games lists that club's open games and mine, each opening its detail | `match_board(club, 14)` | E2E 06 variant |
+| 7 | Unit U1, U2, U6, U7, U9 green | — | CI |
+| 8 | Accessibility audits clean on the new screens (Android and iOS, normal and largest text) | — | CI / simulator |
+| 9 | Change set limited to: `mobile/`, migration 0067, suite §AO, staging API G1. No web, payment, booking or M2-closed-work file changed | — | diff review |
+| 10 | 0067 on staging: T-MD1–MD5 green on replica first, then G1 on staging; applied to live only after Paul's approval | — | run logs |
+| 11 | Paul: D-1 and D-6 on iPhone and Galaxy A17 | — | phones |
+
+Rollback: republish the previous staging update; 0067 is additive (a function and a nullable column
+nothing else uses), so it can stay in place.
+
+## 7.3 Implementation order (stage 1)
+
+| Step | Work | Needs | Done when |
+| --- | --- | --- | --- |
+| 1 | 0067 migration + §AO tests (from the validated draft and matrix) | M3 authorised | replica green; mutations fail it |
+| 2 | Show 0067 to Paul; apply to staging; G1 | Paul's go-ahead for staging | G1 green on staging |
+| 3 | `shared/levels.ts`, `lib/games.ts`, `gameState`, error map, U1/U2/U6/U7/U9 | step 1 (types) | CI green |
+| 4 | `GameCard`, detail sections, Club and Bookings wiring | approved Stitch designs | screens match the approved designs |
+| 5 | E2E 06–09, accessibility audits; staging seed for states | steps 2–4 | CI green |
+| 6 | Staging update; Paul's D-1, D-6 | step 5 | Paul's pass |
+| 7 | 0067 to live (approval); stage report | Paul's approval | — |
+
+Steps 1–3 need no design; step 4 waits for the Stitch approval.
+
+## 7.4 Not done without a further go-ahead
+
+Writing or applying any migration; any web change; enabling live push or cron jobs on live;
+uploading FCM / APNs credentials; touching `mobile-m2-native`, `main` or `payments-g1`.
