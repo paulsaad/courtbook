@@ -59,14 +59,16 @@ function RootLayout() {
                 headerTintColor: color.ink,
                 headerTitleStyle: { fontFamily: font.display, fontSize: 18 },
                 headerShadowVisible: false,
-                headerBackTitle: "Back",
+                // Back is the system chevron alone (iOS reads it as "Back"): the title gets the room,
+                // and the button never names a screen the person may not have come from.
+                headerBackButtonDisplayMode: "minimal",
                 contentStyle: { backgroundColor: color.ground },
               }}
             >
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               <Stack.Screen name="sign-in" options={{ title: "Sign in", presentation: "modal" }} />
               <Stack.Screen name="booking/[id]" options={{ title: "Booking" }} />
-              <Stack.Screen name="design-preview" options={{ title: "Component preview", headerBackTitle: "Profile" }} />
+              <Stack.Screen name="design-preview" options={{ title: "Component preview" }} />
               <Stack.Screen name="club/[id]" options={{ title: "" }} />
             </Stack>
             <OfflineBanner />

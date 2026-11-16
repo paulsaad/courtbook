@@ -152,7 +152,7 @@ export default function Club() {
 
   return (
     <View style={styles.page}>
-      <Stack.Screen options={{ title: name, headerBackTitle: "Courts" }} />
+      <Stack.Screen options={{ title: name }} />
       <View style={styles.tabs}>
         <Segmented
           options={[{ key: "book", label: "Book" }, { key: "info", label: "Info" }]}
