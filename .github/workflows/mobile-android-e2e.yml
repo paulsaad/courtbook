@@ -223,6 +223,7 @@ jobs:
         run: node e2e/staging.mjs prepare
 
       - name: Accessibility audit (Apple's audit on the iOS simulator)
+        timeout-minutes: 75
         run: bash e2e/run-ios.sh
 
       - name: Clean up staging

@@ -7,6 +7,8 @@ set -uo pipefail
 OUT="$PWD/e2e/out"; mkdir -p "$OUT"
 APP_PATH="$PWD/e2e/CourtBookStaging.app"
 status=0
+# macOS has no `timeout`; a simulator that never finishes booting must not hold the job for hours.
+limit() { local secs=$1; shift; perl -e 'alarm shift; exec @ARGV' "$secs" "$@"; }
 
 echo "staging database in the app bundle: $(grep -a -c pwznauyioqykdwodwpvx "$APP_PATH/main.jsbundle" || true) reference(s)"
 codesign -d --entitlements - "$APP_PATH" 2>&1 | grep -E "Identifier|keychain|application-identifier" || echo "no entitlements"
@@ -18,14 +20,15 @@ for cfg in "small $SMALL large" "small $SMALL accessibility-extra-extra-extra-la
   tag="$name-$( [ "$size" = large ] && echo text-normal || echo text-largest )"
   echo "::group::audit $tag"
   udid=$(xcrun simctl create "audit-$tag" "$type" "$RUNTIME")
-  xcrun simctl boot "$udid" && xcrun simctl bootstatus "$udid" -b >/dev/null
+  xcrun simctl boot "$udid" && limit 300 xcrun simctl bootstatus "$udid" -b >/dev/null \
+    || { echo "::error::simulator $tag did not boot within 5 min"; status=1; echo "::endgroup::"; continue; }
   xcrun simctl ui "$udid" content_size "$size"
   xcrun simctl install "$udid" "$APP_PATH" || { echo "::error::install failed"; status=1; continue; }
   # TEST_RUNNER_* environment variables reach the test process without the prefix.
   if ! (cd e2e/ios-audit && env TEST_RUNNER_OUT_DIR="$OUT" TEST_RUNNER_AUDIT_TAG="$tag" \
         TEST_RUNNER_E2E_EMAIL="$E2E_EMAIL" TEST_RUNNER_E2E_PASSWORD="$E2E_PASSWORD" \
         TEST_RUNNER_E2E_CLUB="$E2E_CLUB" TEST_RUNNER_E2E_DATE="$E2E_DATE" \
-        xcodebuild test -project CourtBookAudit.xcodeproj -scheme Audit \
+        perl -e 'alarm shift; exec @ARGV' 1200 xcodebuild test -project CourtBookAudit.xcodeproj -scheme Audit \
         -destination "id=$udid" -derivedDataPath "$RUNNER_TEMP/audit-dd" CODE_SIGNING_ALLOWED=NO 2>&1 \
         | tee "$OUT/xcodebuild-$tag.log" | grep -E "AUDIT\||error:|failed|passed|Test Suite" ); then
     echo "::error::audit run $tag failed"; status=1
