@@ -137,6 +137,7 @@ final class AuditTests: XCTestCase {
 
   /// One audit pass: each issue as (kind, text) so two passes can be compared.
   private func auditPass() -> [(String, String)] {
+    let before = labels(400)
     var found: [(String, String)] = []
     do {
       try app.performAccessibilityAudit(for: .all) { issue in
@@ -147,6 +148,16 @@ final class AuditTests: XCTestCase {
       }
     } catch {
       log("ERROR \(tag) audit could not run: \(error)")
+    }
+    // The "potentially inaccessible text" check compares a picture of the screen with the
+    // accessibility tree. If any text on screen changed while the audit ran ("Checked 30 s ago"
+    // becoming "35 s ago"), an unattributed finding of that kind says nothing about the screen.
+    if labels(400) != before {
+      let unattributed = found.filter { $0.0 == "element-detection" && $0.1.contains("— no element —") }
+      if !unattributed.isEmpty {
+        log("TRANSIENT \(tag) screen text changed during the audit; \(unattributed.count) unattributed text finding(s) set aside")
+        found.removeAll { $0.0 == "element-detection" && $0.1.contains("— no element —") }
+      }
     }
     return found
   }
