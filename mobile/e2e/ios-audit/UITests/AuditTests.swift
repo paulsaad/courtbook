@@ -135,25 +135,41 @@ final class AuditTests: XCTestCase {
     return names.filter { t.contains($0.0) }.map(\.1).joined(separator: "+").ifEmpty("other")
   }
 
-  private func audit(_ screen: String) {
-    dismissSystemSheets()   // a late Save Password sheet would be audited instead of the screen
-    shot(screen)
-    var count = 0
+  /// One audit pass: each issue as (kind, text) so two passes can be compared.
+  private func auditPass() -> [(String, String)] {
+    var found: [(String, String)] = []
     do {
       try app.performAccessibilityAudit(for: .all) { issue in
-        count += 1
         let el = issue.element
         let who = el.map { "label='\($0.label)' id='\($0.identifier)' type=\($0.elementType.rawValue) frame=\(NSCoder.string(for: $0.frame))" } ?? "no element"
-        self.log("ISSUE \(self.tag) \(screen) [\(self.kind(issue.auditType))] \(issue.compactDescription) — \(who) — \(issue.detailedDescription.replacingOccurrences(of: "\n", with: " "))")
+        found.append((self.kind(issue.auditType), "\(issue.compactDescription) — \(who) — \(issue.detailedDescription.replacingOccurrences(of: "\n", with: " "))"))
         return true // recorded; the CI script decides
       }
     } catch {
-      log("ERROR \(tag) \(screen) audit could not run: \(error)")
+      log("ERROR \(tag) audit could not run: \(error)")
     }
-    log("SCREEN \(tag) \(screen): \(count) issue(s)")
+    return found
   }
 
-  /// Positive control: the audit must report problems on the host's deliberately broken screen.
+  /// Audits the screen. A finding must show up in two passes a few seconds apart: Apple's "potentially
+  /// inaccessible text" check compares a picture of the screen with the accessibility tree, and text
+  /// that changes in between (a sheet animating away, "Checked 33 s ago" ticking) is reported once
+  /// with no element. Real problems are still there on the second pass.
+  private func audit(_ screen: String) {
+    dismissSystemSheets()   // a late Save Password sheet would be audited instead of the screen
+    shot(screen)
+    let first = auditPass()
+    var confirmed = first
+    if !first.isEmpty {
+      sleep(3)
+      let second = auditPass().map { "\($0.0)|\($0.1)" }
+      confirmed = first.filter { second.contains("\($0.0)|\($0.1)") }
+      for f in first where !second.contains("\(f.0)|\(f.1)") { log("TRANSIENT \(tag) \(screen) [\(f.0)] \(f.1)") }
+    }
+    for f in confirmed { log("ISSUE \(tag) \(screen) [\(f.0)] \(f.1)") }
+    log("SCREEN \(tag) \(screen): \(confirmed.count) issue(s)")
+  }
+
   func testA_AuditFindsKnownProblems() throws {
     let host = XCUIApplication()
     host.launch()
