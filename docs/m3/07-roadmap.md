@@ -7,13 +7,13 @@ report.
 
 | Stage | Content | Migration | Native build | Acceptance |
 | --- | --- | --- | --- | --- |
-| **0. Ready** | Decisions P1–P4 (`09-decisions.md`); Stitch round for board and detail (Paul) | — | — | Decisions recorded; board and detail designs approved |
+| **0. Ready** | P1–P4 accepted (16 Nov); M2 closed; Stitch round for board and detail (Paul) | — | — | Board and detail designs approved |
 | **1. Read-only games** | 0067; board; game detail (all states); Club → Games; Bookings → Games tappable | **0067** | no (EAS update) | §7.2 |
-| **2. Hardening** | 0068 + its web strings | **0068** | — | AP and AR green with mutations; `m3_findings.sh`: nothing reproduced on replica and staging; G6, G7; web smoke on staging; Paul approves live |
+| **2. Hardening** | 0068 + its web adjustments (P4) | **0068** | — | AP and AR green with mutations; `m3_findings.sh`: nothing reproduced on replica and staging; G6, G7; web regression on staging (web tests, smoke and API scripts, changed pages against the staging database) before any live release; Paul approves live |
 | **3. Taking part** | Join / ask, withdraw, leave; accept / decline; remove; manage (edit, private, reopen, cancel); court booking cancelled sheet; post from booking and from the board | (0068) | no | E2E 10–13; D-2 without chat, D-7; every code in UX §4.8 for these actions reachable or proven unreachable |
 | **4. Chat and safety** | Chat (4 s polling), delete, hide, community rules, report, block, filter; web admin "Reports" page (P2) | **0069** | no | AQ, AT; E2E 14–15; D-5; store UGC checklist (filter, report, block, contact, terms) |
 | **5. Activity** | Activity list, per-game mark read, unread badge on Home and Profile | — | no | U1–U3; badge consistent across two phones within one refresh |
-| **6. Push** | `deliver`, cron jobs (staging), tokens, pre-prompt, routing, Profile → Notifications | **0070** | **yes** (`expo-notifications`, version bump) | AS; T-DL1–DL9 on staging; E2E 16; D-3, D-4 on iPhone and A17 incl. killed app |
+| **6. Push** | T-DL10–DL16 first (replica), then `deliver`, cron jobs (staging), tokens, pre-prompt, routing, Profile → Notifications | **0070** | **yes** (`expo-notifications`, version bump) | AS incl. T-DL10–DL16 before any delivery code; T-DL1–DL9 on staging; E2E 16; D-3, D-4 on iPhone and A17 incl. killed app. Production push only with explicit approval |
 | **7. Close** | Full regression, accessibility audits, usability sessions (about 5 players), closure report | — | — | `06-test-plan.md` §6.8; release-plan M3 acceptance |
 
 Why this order: the detail screen is built on `match_detail` from its first line (review point 2);
@@ -36,7 +36,7 @@ reference only; Paul approves; the Club Info design is not touched.
 **Scope**
 
 1. Migration 0067 (`docs/m3/sql/0067_match_detail.draft.sql` becomes the migration) + suite §AO
-   (T-MD1–MD5) + staging API G1.
+   (T-MD1–MD6) + staging API G1.
 2. `mobile/shared/levels.ts` (byte copy).
 3. `lib/games.ts`: `useOpenGames(filters)` (`open_matches`), `useClubGames(clubId)` (`match_board`,
    list only), `useGame(id)` (`match_detail`), `gameState(detail, now)`; hooks disabled when signed
@@ -72,8 +72,8 @@ nothing else uses), so it can stay in place.
 
 | Step | Work | Needs | Done when |
 | --- | --- | --- | --- |
-| 1 | 0067 migration + §AO tests (from the validated draft and matrix) | M3 authorised | replica green; mutations fail it |
-| 2 | Show 0067 to Paul; apply to staging; G1 | Paul's go-ahead for staging | G1 green on staging |
+| 1 | 0067 migration + §AO tests (from the validated draft, matrix and field check); repeat the field review on the final text | M3 authorised (after M2 closes) | replica green incl. T-MD6; mutations fail it |
+| 2 | Show 0067 to Paul; apply to staging; G1 | **Paul's separate approval for staging** | G1 green on staging |
 | 3 | `shared/levels.ts`, `lib/games.ts`, `gameState`, error map, U1/U2/U6/U7/U9 | step 1 (types) | CI green |
 | 4 | `GameCard`, detail sections, Club and Bookings wiring | approved Stitch designs | screens match the approved designs |
 | 5 | E2E 06–09, accessibility audits; staging seed for states | steps 2–4 | CI green |

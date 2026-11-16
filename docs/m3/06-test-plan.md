@@ -20,7 +20,7 @@ output recorded. Rule IDs (GR-n) are in `03-journeys.md` §3.0.
 | Script | Result | Becomes |
 | --- | --- | --- |
 | `repro/m3_findings.sh` | F1–F10 reproduced (F5 behaviour, F8 two parts); C1, C2 control OK | 0068 acceptance: run before (all reproduced) and after (none) on replica and staging |
-| `repro/match_detail_matrix.sh` | `MATRIX PASS` (8 roles × 7 states); mutation "no start-time limit" → `MATRIX FAIL`; anon → permission denied | T-MD1–MD4 in suite §AO |
+| `repro/match_detail_matrix.sh` | `MATRIX PASS` (8 roles × 7 states), `FIELDS PASS`; mutations "no start-time limit" → `MATRIX FAIL`, "booking id to everyone" → `FIELDS FAIL`; anon → permission denied | T-MD1–MD6 in suite §AO |
 | `repro/chat_cursor.sh` | strict cursor loses a delayed commit, overlap recovers it; deletion seen only by full reload — both CONFIRMED | U3 cases and T-CH1–CH2 |
 
 ## 6.2 SQL tests
@@ -34,6 +34,7 @@ output recorded. Rule IDs (GR-n) are in `03-journeys.md` §3.0.
 | T-MD3 | Request count | organiser: number; others: null | return it to all |
 | T-MD4 | Flags | `started`, `finished` (end, or start + 3 h), `court_lost`, `hidden`, `my_status` incl. `declined` | — |
 | T-MD5 | Migration applied twice | no error, one function | — |
+| T-MD6 | Field review: every column for each role (`02-safety-review.md` S6 table) — `organizer_id`, `booking_id` only for organiser, accepted, staff, admin; `has_court` and court name for all who see the game; `note` only where the game is visible | as the table | return identifiers to all |
 
 ### AP — 0068 hardening (stage 2)
 
@@ -96,6 +97,8 @@ output recorded. Rule IDs (GR-n) are in `03-journeys.md` §3.0.
 | T-MOD3 | `admin_suspend`; suspended user joins, posts, writes | `account_suspended` each |
 | T-MOD4 | Admin RPCs called by a player | `forbidden` |
 | T-MOD5 | New report → one email to the support address (staging, test SMTP) | 1 email, `emailed_at` set |
+| T-MOD6 | Retention job: report closed 181 days ago; another under `legal_hold` | first: snapshot and note cleared, row kept; second: untouched |
+| T-MOD7 | Reported player and reporter read the report (table, RPCs) | nothing beyond the reporter's own "sent" state |
 
 ### AR — RLS regression ("a non-member cannot read")
 
@@ -116,7 +119,21 @@ output recorded. Rule IDs (GR-n) are in `03-journeys.md` §3.0.
 | T-P4 | `unregister_push_token` | gone |
 | T-DL2 | Two concurrent push claims | disjoint sets (mirror of suite 69) |
 | T-DL3 | Claim, no stamp, lease expiry | claimable again; `push_attempts` 2 |
-| T-DL4 | 6 failed attempts or older than 24 h | `push_failed_at`, never claimed again |
+| T-DL4 | 3 attempts or older than 24 h | `push_failed_at`, never claimed again |
+
+**Lease and overlapping-worker tests (Paul's safeguard 2) — must exist and pass on the replica before
+`deliver` is written.** They drive the claim / re-check / stamp SQL functions directly from two
+sessions, so the race is reproduced exactly rather than hoped for.
+
+| ID | Scenario | Expected | Mutation that must fail it |
+| --- | --- | --- | --- |
+| T-DL10 | Worker A claims a batch; worker B claims while A's lease is live | B gets none of A's rows | claim without the lease condition |
+| T-DL11 | A claims; lease forced to expire; B reclaims the same row; then A runs its pre-send re-check | A's re-check returns 0 rows → A sends nothing | re-check without `push_claim_id = mine` |
+| T-DL12 | Same as T-DL11, then A tries to stamp its stale result | 0 rows updated; B's stamp intact | stamp without the claim-id condition |
+| T-DL13 | A "sends" (ticket logged), dies before stamping; lease expires; B reclaims and sends | exactly 2 tickets for the notice, `push_attempts = 2`; stamped once | — |
+| T-DL14 | Repeat T-DL13 until the cap | ≤ 3 tickets per notice, then `push_failed_at`; never claimed again | remove the attempt cap |
+| T-DL15 | `deliver` started with lease < 2 × its deadline | refuses to start | remove the guard |
+| T-DL16 | Email claim: stamp fails 3 times after sending | ≤ 3 claims of the row, then not claimable; web route still works with the same claim | remove `email_attempts` |
 
 ### AT — chat cursor (with 0068 trigger)
 

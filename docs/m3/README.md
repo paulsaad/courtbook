@@ -3,6 +3,13 @@
 Branch `m3-prep` (from `cec5a95`, the frozen M2 head). **Documentation, test specifications and
 local-replica scripts only.** Revision 2, 16 Nov 2026, after Paul's review with ChatGPT.
 
+> **Status: accepted by Paul, 16 Nov 2026 — preserved for implementation.** P1–P4 accepted
+> (`09-decisions.md` §9.2); safeguards S-A (field review, done on the draft) and S-B (delivery tests
+> before code) added (§9.3). Implementation starts after M2 closes and Paul authorises it, in the
+> stages of `07-roadmap.md`. Migration 0067 still needs Paul's separate approval for staging and for
+> live; board and game-detail screens wait for the Stitch review; no live database change and no
+> production push without explicit approval.
+
 | File | Contents |
 | --- | --- |
 | `01-audit.md` | What exists (database, web, native), what is partial or missing, what is reusable |
@@ -29,8 +36,8 @@ PSQL="sudo -u postgres psql" bash docs/m3/repro/match_detail_matrix.sh
 PSQL="sudo -u postgres psql" bash docs/m3/repro/chat_cursor.sh
 ```
 
-Results on 16 Nov 2026: F1–F10 reproduced, C1–C2 control OK; matrix PASS (and FAIL under its
-mutation); chat cursor hazards confirmed and the planned client rule recovers both.
+Results on 16 Nov 2026: F1–F10 reproduced, C1–C2 control OK; `MATRIX PASS` and `FIELDS PASS` (each
+fails under its mutation); chat cursor hazards confirmed and the planned client rule recovers both.
 
 ## Readiness report (revision 2)
 
@@ -49,7 +56,7 @@ mutation); chat cursor hazards confirmed and the planned client rule recovers bo
 **Remaining blockers before implementation**
 
 1. M2 closure: Galaxy A17 test (Wed 18 Nov), final checks, merge.
-2. Paul's authorisation of M3 and answers to P1–P4 (defaults stand if unanswered).
+2. Paul's authorisation of M3 (P1–P4 accepted 16 Nov).
 3. Stitch approval of board and detail (blocks stage 1 screens only; migration 0067 and the data
    layer can proceed).
 4. Paul's go-ahead to apply 0067 to staging.

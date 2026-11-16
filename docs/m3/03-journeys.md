@@ -21,7 +21,7 @@ Wording in the app: "game", "organiser", British spelling (as in Bookings → Ga
 | GR-7 | **Leaving.** Accepted or pending player, before start. Declined row is kept (M). Accepted leaver → organiser told; a `full` game reopens; other closed games stay closed | `leave_match` | §T 55, T-S4, T-CL11 |
 | GR-8 | **Organiser actions and time limits.** Edit details: not cancelled, before start (now). Accept: `open`, before start, capacity (now). Decline: any time (now). Remove: GR-6. Make private / reopen: before start (M adds the time limit), not while `no_court` (M), not after cancel (now). Cancel: until the game is played (M adds the limit). Resolve a lost court: GR-9. The organiser cannot leave; to stop organising, cancel. Admin may change status (now) | `update_match`, `decide_join`, `set_match_status`, `resolve_court` | T-GR8a–e |
 | GR-9 | **Court booking cancelled** (M). When a linked booking goes from `confirmed` to `cancelled` before the game is played: the game keeps its record, players and chat; `court_lost_at` is set; the link is removed; an `open` or `full` game becomes `closed`/`no_court` (joins and approvals paused); a private game stays private. Organiser, accepted and pending players are told. The organiser resolves with `resolve_court`: link another of their confirmed bookings (club, court and time follow it), or confirm the game goes ahead without a CourtBook court; or cancels. Resolution → `open` (or `full` if full; private stays private), players told (`court_resolved`). A `no_show` mark is not a cancellation and changes nothing (S18). No automatic re-booking | `sync_match_with_booking`, `resolve_court` | T-CL1–CL12 |
-| GR-10 | **Games without a court.** Allowed when posted that way (club required, ≤ 60 days, M) or after GR-9 resolution. The card and detail say "No court booked"; joining asks for confirmation | `post_match`, app | T-S10a–b, U1 |
+| GR-10 | **Games without a court** (P1 approved). Allowed when posted that way (club required, ≤ 60 days, M) or after GR-9 resolution. Card, detail and push say "No court booked through CourtBook"; joining asks for an explicit confirmation; the wording never suggests CourtBook has reserved anything | `post_match`, app | T-S10a–b, U1 |
 | GR-11 | **Cancelling.** Final. Accepted and pending players told. Members can still open the game and read the chat; nobody can write (M). Members may hide it | `set_match_status`, chat trigger | §U 62, T-S9b |
 | GR-12 | **Chat.** Read and write: organiser and accepted players. Pending, declined, removed, left: none. Write refused when cancelled (M), when the sender's text is blocked (M), over rate (M), before accepting the community rules (M). Timestamps set by the server (M). Own messages can be deleted (soft) | RLS, chat trigger, `delete_match_message` | T-S2, T-S9, T-S3f–h, T-R1–R4 |
 
@@ -32,7 +32,7 @@ Wording in the app: "game", "organiser", British spelling (as in Bookings → Ga
 **Path:** Home → "Find a game" (or Club → Games) → board.
 
 1. Board loads `open_matches` with the saved filters (sport, date window, area, "My level").
-2. Each card: sport mark, day and time, club and town, court or "No court booked", level range + fit,
+2. Each card: sport mark, day and time, club and town, court or "No court booked through CourtBook", level range + fit,
    `PlayerSlots`, join mode ("Ask to join" / "Join straight away").
 3. Pull to refresh; refetch on focus and reconnect; `Freshness` line.
 
@@ -52,7 +52,7 @@ Wording in the app: "game", "organiser", British spelling (as in Bookings → Ga
 **Path:** board card · Bookings → Games row · Club → Games · notification · push · link `courtbook://match/<id>`.
 
 1. Detail loads `match_detail(id)` (M, first migration) — the only source; never `match_board`.
-2. Shows hero (sport, date, time, club, court or "No court booked"), status, level + fit, organiser,
+2. Shows hero (sport, date, time, club, court or "No court booked through CourtBook"), status, level + fit, organiser,
    `PlayerSlots` (names for members), note, join mode, my status.
 3. Opening marks this game's unread notices read (their ids), not all notices.
 
@@ -76,8 +76,8 @@ Wording in the app: "game", "organiser", British spelling (as in Bookings → Ga
 1. Tap → one call `join_match(id)` (busy state, haptic on success).
 2. `accepted` → "You're in." · `pending` → "Request sent."
 3. Detail, board and Bookings → Games refetch.
-4. Game without a court (GR-10): confirm first — "No court is booked for this game yet. Rami will
-   arrange it. Join anyway?"
+4. Game without a court (GR-10): confirm first — "No court is booked through CourtBook for this
+   game. Rami says they are arranging the court. Join anyway?"
 5. Level outside the range: confirm — "This game is for levels 6–8. You're 4. Ask to join anyway?"
 
 | Edge case | Message |
@@ -147,7 +147,7 @@ away").
 | Open to players again | `set_match_status(open)` | Not after cancel (`cannot_reopen`); not while the court booking is cancelled (`court_lost` → "Sort out the court first.") |
 | Remove a player | `remove_player` (M) | "Remove Nour from this game? They'll be told and can't ask to join it again." |
 | Cancel game | `set_match_status(cancelled)` | "Cancel this game? Everyone is told. This can't be undone." The booking itself is not cancelled |
-| **Court booking cancelled** (GR-9) | `resolve_court` (M) | Sheet "Your court booking was cancelled" with three choices: **Use another of my bookings** (list of own confirmed future bookings for this sport → link; "Players will be told the new time and place."); **Go ahead without a CourtBook court** ("Players will see 'No court booked' and be told you're arranging the court."); **Cancel the game**. No automatic booking is made |
+| **Court booking cancelled** (GR-9) | `resolve_court` (M) | Sheet "Your court booking was cancelled" with three choices: **Use another of my bookings** (list of own confirmed future bookings for this sport → link; "Players will be told the new time and place."); **Go ahead without a CourtBook court** ("Players will see 'No court booked through CourtBook' and be told you're arranging the court."); **Cancel the game**. No automatic booking is made |
 | Booking moved by the club | trigger | Notice "Your court time changed"; game follows |
 | Cancel my booking that has a game | Bookings | Warning first: "Players are in your game for this booking. If you cancel the court, joining is paused until you choose what to do." |
 

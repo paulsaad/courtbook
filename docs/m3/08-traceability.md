@@ -30,6 +30,10 @@ Rows: every M3 requirement (release plan scope and acceptance, store rules, Paul
 | R21 | Waiting list, removal, cancellation and organiser permissions consistent across UX, DB, tests (review 6) | GR-4, GR-6, GR-8, GR-11 | J2, J5, J7 | §4.4, §4.6 | — | — | T-S11, T-RP*, T-GR8a–e, §U 62 | 2–3 |
 | R22 | Every stage-1 acceptance item achievable with available backend functions (review 6) | — | — | — | — | — | `07-roadmap.md` §7.2 column "Achievable with" | 1 |
 | R23 | Design approved before screen code | — | — | §4.10 | — | — | Paul's approval | 0, 4 |
+| R24 | `match_detail` exposes nothing private to non-participants (safeguard S-A) | GR-2 | J2 | — | — | S6 | T-MD6, `FIELDS PASS` | 1 |
+| R25 | Lease expiry and overlapping workers tested; duplicates bounded (safeguard S-B) | — | J10 | — | §5.5 | S16 | T-DL10–DL16 | 6 (before code) |
+| R26 | "No court booked through CourtBook" is unmistakable (P1) | GR-10 | J2, J3, J7 | §4.3, §4.4, §4.9 | — | — | U1, E2E 07, D-7 | 1–3 |
+| R27 | Report snapshots: admin-only, retention with legal hold (P3) | — | J8 | — | §5.6 | S3 | T-MOD1, T-MOD6, T-MOD7 | 4 |
 
 ## 8.2 Findings → fix → test → migration
 

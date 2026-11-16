@@ -88,21 +88,22 @@ in a response table to be retried by the caller. A scheduled job that only looks
 gives the same latency class (≤ 15 s plus sending time) with one mechanism, and recovers from every
 failure below without extra code. Supabase Cron supports intervals down to one second.
 
-**Columns (0070):** `notifications.push_claimed_at, push_attempts, pushed_at, push_failed_at`
+**Columns (0070):** `notifications.push_claim_id, push_claimed_at, push_attempts, pushed_at, push_failed_at`
 (email keeps its existing `email_claimed_at, emailed_at`). `push_tokens (token unique, profile_id,
 platform, app_variant, created_at, last_seen_at)`. `push_tickets (ticket_id, token, notification_id,
 created_at)`.
 
 | Concern | Mechanism | Guarantee stated honestly |
 | --- | --- | --- |
-| Duplicate triggers (two cron runs overlap, a slow function still running) | Claim = `update … set push_claimed_at = now(), push_attempts += 1 where id in (select … for update skip locked limit 100) and pushed_at is null and (push_claimed_at is null or push_claimed_at < now() - lease)`; lease 2 min | Two workers never claim the same row while a lease is live (tested T-DL2, mirror of suite 69 for email) |
+| Duplicate triggers (two cron runs overlap) | Claim = `update … set push_claim_id = <new uuid per worker run>, push_claimed_at = now(), push_attempts += 1 where id in (select … for update skip locked limit 100) and pushed_at is null and push_failed_at is null and (push_claimed_at is null or push_claimed_at < now() - lease)` | Two workers never hold the same row at once (T-DL2, T-DL10) |
+| A worker still running after its lease expired and another worker reclaimed the row | (1) **Lease longer than any worker can live:** lease 10 min; an Edge Function is stopped by the platform after 150 s (Free) or 400 s (paid) of wall-clock time, so a lease cannot expire while its worker runs. `deliver` refuses to start if its configured lease is not at least twice its own deadline. (2) **Fencing anyway:** immediately before each Expo call the worker re-checks its rows (`… where push_claim_id = mine and pushed_at is null for update skip locked`) and sends only those; every stamp is conditional on `push_claim_id = mine`, so a stale worker can neither send reclaimed rows nor overwrite another worker's result | Covered by T-DL11–DL12, which simulate the stalled worker directly in SQL |
 | Failed or interrupted delivery | Row stays unsent; claimable again after the lease | Every notice is attempted until sent or given up |
-| Retries and recovery | Backoff by lease: next claim after `2^attempts` min (max 30); give up after 6 attempts or 24 h → `push_failed_at` (visible in a staging check query) | A notice older than 24 h is never pushed (stale) |
-| Crash after Expo accepted, before the stamp | Re-sent after the lease | **At-least-once, not exactly-once.** Window: between Expo's reply and the stamp (one SQL call). Rows are stamped right after each Expo batch reply to keep it small. A duplicate opens the same screen |
+| Retries and recovery | Next claim after the lease (10 min), then `2^attempts × 10` min; give up after **3 attempts** or 24 h → `push_failed_at` | A notice older than 24 h is never pushed (stale) |
+| Crash after Expo accepted, before the stamp | Re-sent after the lease | **At-least-once, bounded:** every send attempt is counted at claim time, so a notice is sent **at most 3 times** in the worst case, and a second send happens only if a worker dies in the gap between Expo's reply and the stamp (one SQL call; rows are stamped right after each Expo batch reply). Every Expo ticket is logged with its notice and claim id, so duplicates are measured, not guessed (T-DL13–DL15) |
 | Concurrent workers | `skip locked` + lease; function processes only what it claimed | No ordering promise across notices; each notice is independent |
 | Expired tokens | Ticket error `DeviceNotRegistered` → delete token at once; receipts job deletes tokens whose receipt says `DeviceNotRegistered`; tickets older than 24 h are discarded (Expo clears receipts after 24 h); tokens not refreshed for 60 days are pruned | Dead tokens stop costing calls within ~15 min |
 | Staging / live separation | Separate Supabase projects, each with its own cron job, function deployment and secrets (`EXPO_ACCESS_TOKEN`, SMTP, `DELIVERY_ENABLED`, `EXPECTED_APP_VARIANT`). Tokens reach a project only from the app variant bound to it (bundle id → project, as today). The function skips any token whose `app_variant` differs from `EXPECTED_APP_VARIANT`. **Live: cron job not created and `DELIVERY_ENABLED=false` until Paul approves** | A staging push can't reach a live user without two independent mistakes |
-| Email | Same function calls the existing `claim_notifications_to_email` (unchanged). The web route `/api/notify/email` may keep running; both use the same claim, so they never send the same row concurrently | Same at-least-once statement as push |
+| Email | Same function calls `claim_notifications_to_email`. Today that claim has a 5-min lease but **no attempt limit**: if sending succeeds and the stamp keeps failing, the same email would go out every 5 minutes. 0070 keeps its signature (the web route `/api/notify/email` keeps working) and adds `email_attempts`, incremented at claim, with a cap of 3. Both callers use the same claim, so they never hold the same row at once | Bounded like push: at most 3 sends per notice (T-DL16) |
 | Content | Copy built from `kind` + game context; never `notifications.body` (S7) | — |
 
 **Demonstrating it (staging, before live):** T-DL1–DL8 in `06-test-plan.md` — kill the function
@@ -116,7 +117,7 @@ well inside the Supabase Free allowance of 500K Edge Function invocations a mont
 **Data (0069):**
 - `reports (id, reporter_id, target_kind 'message'|'player'|'game', message_id, profile_id, match_id,
   reason, note ≤ 500, snapshot text, created_at, status 'open'|'actioned'|'dismissed', handled_by,
-  handled_at, action, emailed_at)`. `snapshot` = the message text or display name at report time, so a later
+  handled_at, action, emailed_at, legal_hold, closed_at)`. `snapshot` = the message text or display name at report time, so a later
   deletion does not erase the evidence. Insert only via `report_content`; read by admin only.
 - `blocks (blocker_id, blocked_id)`, `block_player`, `unblock_player`. Effects in the database:
   games of either side hidden from the other's board; `join_match` → `blocked`; blocked sender's
@@ -133,12 +134,14 @@ well inside the Supabase Free allowance of 500K Edge Function invocations a mont
 
 | Step | Who / how |
 | --- | --- |
-| Receives reports | The CourtBook moderator — **Paul** during the pilot (decision P2). Each new report is emailed to `courtbook.contact@gmail.com` by `deliver` (subject "Report: message / player / game"), with the snapshot, reason and a link to the admin page |
+| Receives reports | The CourtBook moderator — **Paul** during the pilot (P2 approved for the page and workflow). Each new report is emailed to `courtbook.contact@gmail.com` by `deliver` (subject "Report: message / player / game"), with the snapshot, reason and a link to the admin page |
 | Reviews | Admin page "Reports" in the existing web admin area (decision P2): open reports, snapshot, surrounding messages, reporter and reported player's history (earlier reports, blocks received) |
-| Target, not a promise | Checked once a day on working days during the pilot. Players are **not** told a response time; the in-app copy says reports are reviewed and acted on. Blocking is instant and self-service, so a player never waits on moderation to stop contact |
+| Review frequency | **Not set.** Paul has not committed to a frequency; nothing assumes one. Players are never told a response time. Blocking is instant and self-service, so nobody waits on moderation to stop contact. Before store submission (Apple asks for timely responses) the moderator and frequency must be explicitly accepted (`02-safety-review.md` §2.5) |
 | Actions (in order of severity) | Dismiss · hide the message (`admin_hide_message`) · warning email from the support address · remove from the game (organiser can; admin via `remove_player` as admin) · suspend the account (`admin_suspend`) · delete the account (M4 account deletion) |
 | Serious incidents — threats of violence, sexual content, anything involving a minor, sharing someone's private details, real-world danger | Suspend at once; keep the evidence (report snapshot, messages are not hard-deleted); tell the reporter to contact the police or emergency services if anyone is in danger; respond to lawful requests from Lebanese authorities after taking legal advice (D6 lawyer); record what was done in the report |
-| Records | Every action stored on the report (`action`, `handled_by`, `handled_at`); retention follows the privacy policy draft |
+| Records | Every action stored on the report (`action`, `handled_by`, `handled_at`) |
+| Snapshot access (P3) | Only admins, only through the admin RPCs and the Reports page; no client read policy on `reports`; the reported player never sees the report or who made it; the reporter sees only "sent" |
+| Snapshot retention (P3) | Snapshot text and note cleared 180 days after a report is closed, by a daily job; reports marked `legal_hold` (serious incidents) keep them until the hold is lifted; the report row itself (who, when, action) stays for audit. The privacy policy states this (D6 lawyer review). Period adjustable before launch |
 | When Paul is away | Reports wait; nothing is promised to players; blocking still works. Before store submission, name a backup moderator or keep the no-promise wording |
 
 **Store requirements covered:** filter (blocked terms), report (in app, on messages, players and

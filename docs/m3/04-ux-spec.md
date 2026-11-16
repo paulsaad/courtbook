@@ -63,12 +63,12 @@ Order, top to bottom:
   players, 2 spots left, asks to join."
 - Fit wording from `levels.ts` `fitLabel` (copied to `mobile/shared/`): "Your level" (cedarDeep),
   "Above your level" / "Below your level" (warnInk on warnSoft pill), "Set your level" (muted).
-- No court → "No court booked" in muted text (never red).
+- No court → "No court booked through CourtBook" in muted text (never red).
 
 ## 4.4 Screen: Game (detail)
 
 1. Hero on `night` with Court Lines decoration (same treatment as the booking ticket hero): sport
-   mark, day + time (scoreboard 34–40), club, court / "No court booked". Status pill under the
+   mark, day + time (scoreboard 34–40), club, court / "No court booked through CourtBook". Status pill under the
    time: "Open", "Full", "Private", "Court cancelled", "Playing now", "Played", "Cancelled" (white text on translucent
    white; cancelled uses words, not red).
 2. Banners, in this order, only when they apply (states and wording: `03-journeys.md` J2):
@@ -192,7 +192,7 @@ Native keeps its own map (in `mobile/lib/errors.ts`), because the web map says "
 | `match_message` | New message | "In your padel game, Sat 18:00." | Chat |
 | `booking_moved` | Court time changed | "Your padel game now starts at 19:00." | Game |
 | `booking_unlinked` | Court booking cancelled | "Padel, Sat 18:00: joining is paused until the organiser decides." (organiser: "Choose what to do with your padel game, Sat 18:00.") | Game |
-| `court_resolved` (new) | Game update | "Your padel game, Sat 18:00 has an update about the court." | Game |
+| `court_resolved` (new) | Game update | Booking linked: "Your padel game is now at Batroun, Court 2, Sat 19:00." Without: "Padel, Sat 18:00 goes ahead. No court is booked through CourtBook — the organiser is arranging it." | Game |
 | `player_removed` (new, D3) | Removed from a game | "The organiser removed you from padel, Sat 18:00." | Game |
 | `match_full_waiting` (new) | Game full | "You're on the waiting list for padel, Sat 18:00." | Game |
 

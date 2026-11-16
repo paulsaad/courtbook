@@ -168,7 +168,30 @@ Severity:
   organiser gets the request count, players get null; anon → `permission denied`. Mutation check:
   dropping the "not started" condition makes the matrix fail (strangers see playing and played
   games). Re-runnable (applied twice in one transaction).
-- **Settled by:** T-MD1–MD5.
+- **Field review (Paul's safeguard 1, done on the draft 16 Nov; repeated on the final migration):**
+  what a signed-in non-participant (stranger, declined, removed, left — and pending players for the
+  identifier fields) receives, compared with what discovery already shows on the board
+  (`open_matches`):
+
+  | Field | Non-participant gets | Already on the board? | Verdict |
+  | --- | --- | --- | --- |
+  | game id, club id / name / slug / timezone, town | yes | yes (clubs are public) | keep |
+  | sport, start, end, level range, players needed, joined | yes | yes | keep |
+  | `note` | yes | yes — the organiser's public description | keep; post sheet tells the organiser "Anyone who can see the game can read this note" |
+  | `join_mode`, `organizer_name`, `court_name` | yes | yes | keep |
+  | `has_court` | yes | (implied by court name) | keep — needed for "No court booked through CourtBook" |
+  | `organizer_id` | **null** | not in `open_matches` | withheld — discovery doesn't need it |
+  | `booking_id` | **null** | yes in `open_matches` today (harmless: every booking read is owner-checked, e.g. `booking_match`) | withheld anyway — data minimisation |
+  | `pending` (request count) | **null** | no | organiser only |
+  | `my_level`, `my_status`, `i_organize`, `hidden` | caller's own values | — | keep |
+  | `status`, `closed_reason`, `court_lost`, `started`, `finished` | only `open`, not started, no court lost (others don't see the game) | yes | keep |
+  | player names | not returned | no | stay behind `match_participants` |
+
+  Run: `match_detail_matrix.sh` → `FIELDS PASS` (identifiers only for organiser, accepted players
+  and staff; court name and `has_court` for all; request count for the organiser only). Mutation
+  check: returning `booking_id` to everyone → `FIELDS FAIL`. `open_matches` keeps returning
+  `booking_id` (web uses it); not changed in M3.
+- **Settled by:** T-MD1–MD6.
 
 ### S7 — Push content on the lock screen · Medium (design rule)
 
@@ -291,7 +314,7 @@ Kept as is (web is production; not part of M3). Native marks only the opened gam
   - New `resolve_court(p_match, p_booking uuid default null)`, organiser or admin, before the game is
     played, only while `court_lost_at` is set: with a booking — same checks as `post_match`
     (own, confirmed, future, same sport, not already linked to a live game) and the game takes that
-    booking's club, time and end; without — the game goes ahead with "No court booked". Then
+    booking's club, time and end; without — the game goes ahead with "No court booked through CourtBook". Then
     `court_lost_at := null`; status `open`, or `closed`/`full` if full; a game that was private stays
     private. Accepted and pending players get `court_resolved`.
   - `set_match_status(open|closed)` refuses while the court is lost (`court_lost`), so there is one
@@ -314,7 +337,7 @@ explicit approval. Each is re-runnable (suite §AL rule).
 | 0067 | `match_detail` | `matches.court_lost_at`; `closed_reason` may be `no_court`; `match_detail()` (draft in `docs/m3/sql/`) | S6, GR-2 | Stage 1 screens |
 | 0068 | Game hardening | Drop organiser DELETE policy + revoke DELETE (S1); chat insert trigger: server time, `deleted_at` null, not cancelled, rate (S2, S9, S12); `leave_match` keeps declined (S4); `notifications` UPDATE only `read_at` (S5); booking trigger GR-9 + pending recipients + ignore no-show (S8, S18, S19); `resolve_court`; `set_match_status` time limits and `court_lost` refusal (GR-8); `post_match` club + 60 days (S10); `match_full_waiting` (S11); counters (S12); hidden games not notified (S14); approval → open (S15); `remove_player` (GR-6) | S1–S2, S4–S5, S8–S12, S14–S15, S18–S19 | Stage 3 write screens |
 | 0069 | Safety | `reports`, `blocks`, `blocked_terms`, `profiles.rules_accepted_at`, `profiles.suspended_at`; RPCs; block effects in `open_matches`, `match_board`, `match_detail`, `join_match`, `match_messages_list`, `match_message_notify`; admin RPCs (§5.6) | S3, S13 | Stage 4 chat |
-| 0070 | Delivery | `push_tokens`, `notification_prefs`, push claim columns, `push_tickets`, claim RPCs (service role), cron jobs (staging only until approved) | S7, S16 | Stage 6 push |
+| 0070 | Delivery | `push_tokens`, `notification_prefs`, push claim columns incl. claim id, `push_tickets`, claim RPCs (service role), attempt cap on the existing email claim, cron jobs (staging only until approved) | S7, S16 | Stage 6 push |
 
 ## 2.5 Changes and checks before any migration
 
@@ -322,13 +345,16 @@ explicit approval. Each is re-runnable (suite §AL rule).
 | --- | --- | --- |
 | 0067 | Read `rolconfig` of `authenticated` on staging and live (read-only) to confirm the 8 s statement timeout the chat cursor relies on (§5.4) | check |
 | 0067 | Confirm `matches_closed_reason_check` has the same definition on staging and live as in the migrations (read-only) | check |
-| 0067 | Paul approves applying 0067 to staging, then to live | approval |
-| 0068 | Web: two strings for `no_court` (board badge, organiser hint) and, recommended, switch `/matches/[id]` from `match_board` to `match_detail` (fixes the 404 after start) | web change, needs approval |
+| 0067 | Field review of every returned column against discovery permissions (Paul's safeguard 1) — done on the draft (`FIELDS PASS`); repeat on the final migration text | check |
+| 0067 | Paul approves applying 0067 to staging, then separately to live | approval |
+| 0068 | Web (P4 approved): two strings for `no_court` (board badge, organiser hint) and `/matches/[id]` reading `match_detail` (fixes the 404 after start). Before any live release: web tests, staging smoke and API scripts, and the changed pages checked against the staging database | web change, staging regression first |
 | 0068 | List every new refusal the web can meet (`court_lost`, `match_cancelled`, `too_far_ahead`, `slow_down`, `too_many_games`, time limits of GR-8) with its web copy | review |
 | 0068 | Existing suite sections that encode replaced behaviour updated in the same change: §V 68 (cancel → game now `closed`/`no_court`, not `open`) | test change |
 | 0068 | Repro script before / after on the replica and on staging | check |
 | 0069 | Check existing `profiles.name` values against the new length rule (S13) before adding it | check (read-only) |
-| 0069 | Paul confirms the moderation decisions (`09-decisions.md` P2, P3) | approval |
+| 0069 | P2, P3 approved. Snapshot access and retention safeguards in place (`05-architecture.md` §5.6) | check |
+| store submission | Paul explicitly accepts the moderator role and a review frequency (or names someone else) — not assumed before then | approval |
+| 0070 | Lease-expiry and overlapping-worker tests T-DL10–DL15 written and passing on the replica **before** `deliver` is implemented (Paul's safeguard 2) | test-first |
 | 0070 | FCM v1 and APNs credentials in EAS (Paul, guided); Expo access token as a per-project secret; live delivery stays disabled until approved | setup, approval |
 
 ## 2.6 Not changed by this review

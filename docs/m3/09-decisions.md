@@ -17,14 +17,23 @@
 | D11 | Stitch review for board and detail before stage 1 screens; chat before stage 4 | Kept (`07-roadmap.md` §7.1) |
 | D12 | Out of M3: hand-over, invites, Realtime, chat images, read receipts, automatic re-booking | Kept |
 
-## 9.2 Product decisions that need Paul
+## 9.2 Product decisions — accepted by Paul, 16 Nov 2026 (final)
 
-| # | Question | Recommended | Why | If no |
-| --- | --- | --- | --- | --- |
-| **P1** | When the court booking is cancelled, may the organiser choose "go ahead without a CourtBook court" (players then see "No court booked" and are told)? | **Yes** | The organiser may have arranged a court by phone or at a club not on CourtBook; without this the only options are re-booking in CourtBook or cancelling. Joiners are always warned (GR-10) | Resolution = link another CourtBook booking or cancel |
-| **P2** | Who moderates, and with what tool? | **Paul is the moderator during the pilot; a small admin "Reports" page is added to the existing web admin area in stage 4** (a production web change) | Paul is not a developer, so moderation needs a page, not SQL; reports also arrive by email | Reports by email only; actions done by me on request (slower) |
-| **P3** | When a player deletes their own message, is the text kept for moderation? | **No** — deletion stays real (current behaviour); a report stores a snapshot of what was reported | Simplest and matches what players expect; evidence exists for anything reported before deletion | Keep deleted text hidden for 30 days (privacy policy must say so) |
-| **P4** | Approve the web changes that go with 0068: two strings for "court booking cancelled", and the web game page reading `match_detail` (fixes its 404 after start) | **Yes** | Without them the web shows such games as "Private" | Web keeps current behaviour; native correct, web misleading |
+| # | Decision | Accepted with | Where it lands |
+| --- | --- | --- | --- |
+| **P1** | A game may go ahead without a CourtBook court reservation (after a cancelled booking, or posted that way) | Players must clearly understand that no court is booked through CourtBook | GR-10; card, detail, join confirmation and push say "No court booked through CourtBook"; `court_resolved` copy (`04-ux-spec.md` §4.9) |
+| **P2** | Reports admin page on the web and the moderation workflow | **No commitment to a review frequency is assumed** until Paul explicitly accepts the moderator responsibility | `05-architecture.md` §5.6 ("Review frequency: not set"); acceptance required before store submission (`02-safety-review.md` §2.5) |
+| **P3** | Deleted messages stay deleted; report snapshots keep evidence of content reported before deletion | With access and retention safeguards | Admin-only access; snapshot cleared 180 days after closing unless on legal hold; tests T-MOD1, T-MOD6, T-MOD7 |
+| **P4** | Web adjustments with 0068 (court-cancelled wording; game page on `match_detail`) | Staging regression checks before any live release | `02-safety-review.md` §2.5; `07-roadmap.md` stage 2 |
 
-Nothing else needs your approval before implementation, beyond the per-migration and live-release
-approvals that are already standing rules.
+## 9.3 Engineering safeguards added by Paul (16 Nov)
+
+| # | Safeguard | Status |
+| --- | --- | --- |
+| S-A | Before 0067: check every `match_detail` field against discovery permissions for signed-in non-participants (notes, booking identifiers…) | Done on the draft: field table in `02-safety-review.md` S6; `organizer_id` and `booking_id` withheld from non-participants; `FIELDS PASS`, mutation-checked. Repeat on the final migration (T-MD6) |
+| S-B | Before delivery code: tests for lease expiry and overlapping workers, incl. a worker still running after another reclaims; no uncontrolled duplicates | Design: lease longer than any worker's lifetime + claim-id fencing + attempt cap 3 (push and email). Tests T-DL10–DL16 specified, required to pass before `deliver` is written |
+
+## 9.4 Standing approvals still required
+
+0067 (and each later migration) to staging, then separately to live; any live database change;
+enabling production push or the live delivery job; the moderator role before store submission.
