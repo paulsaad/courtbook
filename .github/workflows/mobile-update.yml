@@ -145,31 +145,32 @@ jobs:
           path: /tmp/compare.json
           if-no-files-found: ignore
 
+      # One platform at a time: "eas update --platform all" also exports a web bundle, which this
+      # app does not have. Each platform's source maps go to Sentry right after its export (staging
+      # only, while crash reporting is staging only; skipped without the token).
       - name: Publish
         if: inputs.action == 'publish'
         env:
           MESSAGE: ${{ inputs.message }}
-        run: |
-          msg="${MESSAGE:-$(git log -1 --pretty=%s)} [${GITHUB_REF_NAME}@${GITHUB_SHA::7}]"
-          eas update --channel "$CHANNEL" --environment "$EAS_ENV" --platform "$PLATFORM" \
-            --message "$msg" --non-interactive --json > /tmp/update.json
-          echo "## Published to $CHANNEL" >> "$GITHUB_STEP_SUMMARY"
-          echo "Message: $msg" >> "$GITHUB_STEP_SUMMARY"
-          jq -r '.[] | "- \(.platform): update \(.id) · group \(.group) · runtime \(.runtimeVersion)"' /tmp/update.json >> "$GITHUB_STEP_SUMMARY" || true
-          # The raw result always goes to the log, whatever its exact shape.
-          cat /tmp/update.json
-
-      # Staging only, while crash reporting is staging only: the update's source maps go to Sentry so
-      # its reports show real file names and lines. Skipped without the token.
-      - name: Source maps to Sentry (staging)
-        if: inputs.action == 'publish' && inputs.app == 'staging'
-        env:
+          APP: ${{ inputs.app }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: courtbook
           SENTRY_PROJECT: react-native
         run: |
-          if [ -z "$SENTRY_AUTH_TOKEN" ]; then echo "No SENTRY_AUTH_TOKEN: skipped"; exit 0; fi
-          npx sentry-expo-upload-sourcemaps dist
+          msg="${MESSAGE:-$(git log -1 --pretty=%s)} [${GITHUB_REF_NAME}@${GITHUB_SHA::7}]"
+          platforms=$( [ "$PLATFORM" = all ] && echo "ios android" || echo "$PLATFORM" )
+          echo "## Published to $CHANNEL" >> "$GITHUB_STEP_SUMMARY"
+          echo "Message: $msg" >> "$GITHUB_STEP_SUMMARY"
+          for p in $platforms; do
+            eas update --channel "$CHANNEL" --environment "$EAS_ENV" --platform "$p" \
+              --message "$msg" --non-interactive --json > /tmp/update-$p.json
+            jq -r '.[] | "- \(.platform): update \(.id) · group \(.group) · runtime \(.runtimeVersion)"' /tmp/update-$p.json >> "$GITHUB_STEP_SUMMARY" || true
+            # The raw result always goes to the log, whatever its exact shape.
+            cat /tmp/update-$p.json
+            if [ "$APP" = staging ]; then
+              if [ -n "$SENTRY_AUTH_TOKEN" ]; then npx sentry-expo-upload-sourcemaps dist; else echo "No SENTRY_AUTH_TOKEN: source maps skipped"; fi
+            fi
+          done
 
       - name: Roll back to an earlier update
         if: inputs.action == 'rollback-to-previous'
