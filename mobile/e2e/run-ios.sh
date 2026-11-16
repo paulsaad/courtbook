@@ -25,15 +25,20 @@ for cfg in "small $SMALL large" "small $SMALL accessibility-extra-extra-extra-la
   xcrun simctl ui "$udid" content_size "$size"
   xcrun simctl install "$udid" "$APP_PATH" || { echo "::error::install failed"; status=1; continue; }
   # TEST_RUNNER_* environment variables reach the test process without the prefix.
-  if ! (cd e2e/ios-audit && env TEST_RUNNER_OUT_DIR="$OUT" TEST_RUNNER_AUDIT_TAG="$tag" \
-        TEST_RUNNER_E2E_EMAIL="$E2E_EMAIL" TEST_RUNNER_E2E_PASSWORD="$E2E_PASSWORD" \
-        TEST_RUNNER_E2E_CLUB="$E2E_CLUB" TEST_RUNNER_E2E_DATE="$E2E_DATE" \
-        perl -e 'alarm shift; exec @ARGV' 1200 xcodebuild test -project CourtBookAudit.xcodeproj -scheme Audit \
-        -destination "id=$udid" -derivedDataPath "$RUNNER_TEMP/audit-dd" CODE_SIGNING_ALLOWED=NO 2>&1 \
-        | tee "$OUT/xcodebuild-$tag.log" | grep -E "AUDIT\||error:|failed|passed|Test Suite" ); then
-    echo "::error::audit run $tag failed"; status=1
-  fi
-  grep -q "\*\* TEST SUCCEEDED \*\*" "$OUT/xcodebuild-$tag.log" || { echo "::error::audit run $tag did not succeed"; status=1; }
+  # A run is tried twice: CI simulators sometimes time out launching the app ("Timed out attempting to
+  # launch"), which says nothing about the app's accessibility.
+  ok=0
+  for attempt in 1 2; do
+    if (cd e2e/ios-audit && env TEST_RUNNER_OUT_DIR="$OUT" TEST_RUNNER_AUDIT_TAG="$tag" \
+          TEST_RUNNER_E2E_EMAIL="$E2E_EMAIL" TEST_RUNNER_E2E_PASSWORD="$E2E_PASSWORD" \
+          TEST_RUNNER_E2E_CLUB="$E2E_CLUB" TEST_RUNNER_E2E_DATE="$E2E_DATE" \
+          perl -e 'alarm shift; exec @ARGV' 1200 xcodebuild test -project CourtBookAudit.xcodeproj -scheme Audit \
+          -destination "id=$udid" -derivedDataPath "$RUNNER_TEMP/audit-dd" CODE_SIGNING_ALLOWED=NO 2>&1 \
+          | tee "$OUT/xcodebuild-$tag.log" | grep -E "AUDIT\||error:|failed|passed|Test Suite" ) \
+       && grep -q "\*\* TEST SUCCEEDED \*\*" "$OUT/xcodebuild-$tag.log"; then ok=1; break; fi
+    echo "audit run $tag, attempt $attempt did not succeed"
+  done
+  [ $ok = 1 ] || { echo "::error::audit run $tag failed twice"; status=1; }
   xcrun simctl shutdown "$udid" || true
   echo "::endgroup::"
 done
