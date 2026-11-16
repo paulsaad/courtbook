@@ -136,6 +136,7 @@ final class AuditTests: XCTestCase {
   }
 
   private func audit(_ screen: String) {
+    dismissSystemSheets()   // a late Save Password sheet would be audited instead of the screen
     shot(screen)
     var count = 0
     do {
