@@ -8,6 +8,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
 const { STAGING_SUPABASE_URL: RAW_URL, STAGING_ANON_KEY: ANON, STAGING_SERVICE_ROLE_KEY: SERVICE, DB, EXPECTED_REF, LIVE_REF, APP_URL } = process.env;
@@ -183,50 +184,56 @@ try {
   const p3 = await holder.client.rpc("confirm_payment", { p_payment: hold.payment_id, p_provider_ref: "x", p_total_usd: 21 });
   record("R14", "the owner cannot confirm their own payment directly (server only)", !!p3.error && sql(`select status from payments where id='${hold.payment_id}'`) === "pending", errOf(p3) ?? "confirmed!");
 
-  // ---------------------------------------------------------------- P. the web payment route
-  console.log(`--- P. /api/pay/simulate and /api/notify/email (this branch's web app at ${APP_URL}, pointed at staging)`);
-  const pay = (body, headers = {}) => fetch(`${APP_URL}/api/pay/simulate`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
-  const bearer = (t) => ({ authorization: `Bearer ${t}` });
-  const PAY = hold.payment_id;
-  const status = () => sql(`select p.status||'/'||b.status from payments p join bookings b on b.id=p.booking_id where p.id='${PAY}'`);
-  let r = await pay({ paymentId: PAY });
-  record("P1", "no sign-in at all: 401", r.status === 401, `HTTP ${r.status} ${await r.text()}`);
-  r = await pay({ paymentId: PAY }, { authorization: "Bearer not-a-token" });
-  record("P2", "malformed bearer token: 401", r.status === 401, `HTTP ${r.status}`);
-  r = await pay({ paymentId: PAY }, { authorization: `Basic ${Buffer.from("a:b").toString("base64")}` });
-  record("P3", "'Basic' credentials: 401", r.status === 401, `HTTP ${r.status}`);
-  const [h, , sig] = holder.token.split(".");
-  const forged = `${h}.${Buffer.from(JSON.stringify({ sub: holder.id, role: "authenticated", aud: "authenticated", exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url")}.${sig}`;
-  r = await pay({ paymentId: PAY }, bearer(forged));
-  record("P4", "a token that decodes but is not signed by staging (owner's id inside): 401", r.status === 401, `HTTP ${r.status}`);
-  r = await pay({ paymentId: PAY }, bearer(other.token));
-  record("P5", "another player's real token for this payment: 404, nothing changes", r.status === 404 && status() === "pending/pending", `HTTP ${r.status}, ${status()}`);
-  r = await pay({ paymentId: PAY, user_id: holder.id, profile_id: holder.id, userId: holder.id }, bearer(other.token));
-  record("P6", "...even with the owner's id in the body: 404 (identity is never read from the body)", r.status === 404 && status() === "pending/pending", `HTTP ${r.status}`);
-  const U3 = await player(3);
-  await admin.auth.admin.deleteUser(U3.id);
-  r = await pay({ paymentId: PAY }, bearer(U3.token));
-  record("P7", "the token of a deleted account: 401", r.status === 401, `HTTP ${r.status}`);
-  r = await pay({ paymentId: PAY }, bearer(holder.token));
-  const body7 = await r.text();
-  record("P8", "the owner's app token: paid, booking confirmed", r.status === 200 && status() === "paid/confirmed", `HTTP ${r.status} ${body7}, ${status()}`);
-  r = await pay({ paymentId: PAY }, bearer(holder.token));
-  record("P9", "paying again: 409 not_payable, still one payment", r.status === 409 && status() === "paid/confirmed", `HTTP ${r.status}`);
+  // P needs the app sign-in on the payment routes (G1), kept on branch payments-g1 until in-app
+  // payment is built; M2 leaves the website's routes as they are on main.
+  const G1 = existsSync(new URL("../../src/lib/supabase/request.ts", import.meta.url));
+  if (!G1) console.log("--- P. skipped: this branch's website has no app sign-in on the payment routes (G1 is on branch payments-g1)");
+  if (G1) {
+    // ---------------------------------------------------------------- P. the web payment route
+    console.log(`--- P. /api/pay/simulate and /api/notify/email (this branch's web app at ${APP_URL}, pointed at staging)`);
+    const pay = (body, headers = {}) => fetch(`${APP_URL}/api/pay/simulate`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+    const bearer = (t) => ({ authorization: `Bearer ${t}` });
+    const PAY = hold.payment_id;
+    const status = () => sql(`select p.status||'/'||b.status from payments p join bookings b on b.id=p.booking_id where p.id='${PAY}'`);
+    let r = await pay({ paymentId: PAY });
+    record("P1", "no sign-in at all: 401", r.status === 401, `HTTP ${r.status} ${await r.text()}`);
+    r = await pay({ paymentId: PAY }, { authorization: "Bearer not-a-token" });
+    record("P2", "malformed bearer token: 401", r.status === 401, `HTTP ${r.status}`);
+    r = await pay({ paymentId: PAY }, { authorization: `Basic ${Buffer.from("a:b").toString("base64")}` });
+    record("P3", "'Basic' credentials: 401", r.status === 401, `HTTP ${r.status}`);
+    const [h, , sig] = holder.token.split(".");
+    const forged = `${h}.${Buffer.from(JSON.stringify({ sub: holder.id, role: "authenticated", aud: "authenticated", exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url")}.${sig}`;
+    r = await pay({ paymentId: PAY }, bearer(forged));
+    record("P4", "a token that decodes but is not signed by staging (owner's id inside): 401", r.status === 401, `HTTP ${r.status}`);
+    r = await pay({ paymentId: PAY }, bearer(other.token));
+    record("P5", "another player's real token for this payment: 404, nothing changes", r.status === 404 && status() === "pending/pending", `HTTP ${r.status}, ${status()}`);
+    r = await pay({ paymentId: PAY, user_id: holder.id, profile_id: holder.id, userId: holder.id }, bearer(other.token));
+    record("P6", "...even with the owner's id in the body: 404 (identity is never read from the body)", r.status === 404 && status() === "pending/pending", `HTTP ${r.status}`);
+    const U3 = await player(3);
+    await admin.auth.admin.deleteUser(U3.id);
+    r = await pay({ paymentId: PAY }, bearer(U3.token));
+    record("P7", "the token of a deleted account: 401", r.status === 401, `HTTP ${r.status}`);
+    r = await pay({ paymentId: PAY }, bearer(holder.token));
+    const body7 = await r.text();
+    record("P8", "the owner's app token: paid, booking confirmed", r.status === 200 && status() === "paid/confirmed", `HTTP ${r.status} ${body7}, ${status()}`);
+    r = await pay({ paymentId: PAY }, bearer(holder.token));
+    record("P9", "paying again: 409 not_payable, still one payment", r.status === 409 && status() === "paid/confirmed", `HTTP ${r.status}`);
 
-  // the website: cookie session made by the same library the web app uses
-  const jar = new Map();
-  const ssr = createServerClient(URL_, ANON, { cookies: { getAll: () => [...jar].map(([name, value]) => ({ name, value })), setAll: (cs) => cs.forEach(({ name, value }) => jar.set(name, value)) } });
-  const s1 = await ssr.auth.signInWithPassword({ email: other.email, password: PW });
-  const cookie = [...jar].map(([n, v]) => `${n}=${v}`).join("; ");
-  const wh = await web(other, COURT3, "21:00", "22:00");
-  const WPAY = rowOf(wh)?.payment_id;
-  r = await pay({ paymentId: WPAY }, { cookie, authorization: "Bearer not-a-token" });
-  record("P10", "website cookie plus a bad Authorization header: 401 (never falls back to the cookie)", r.status === 401, `HTTP ${r.status}`);
-  r = await pay({ paymentId: WPAY }, { cookie });
-  record("P11", "the website's cookie sign-in, unchanged: paid", !s1.error && r.status === 200 && sql(`select status from payments where id='${WPAY}'`) === "paid", `HTTP ${r.status} ${await r.text()}`);
-  const n1 = await fetch(`${APP_URL}/api/notify/email`, { method: "POST", headers: bearer(holder.token) });
-  const n2 = await fetch(`${APP_URL}/api/notify/email`, { method: "POST", headers: { authorization: "Bearer x.y.z" } });
-  record("P12", "/api/notify/email: app token accepted, invalid token 401", n1.status === 200 && n2.status === 401, `${n1.status} / ${n2.status}`);
+    // the website: cookie session made by the same library the web app uses
+    const jar = new Map();
+    const ssr = createServerClient(URL_, ANON, { cookies: { getAll: () => [...jar].map(([name, value]) => ({ name, value })), setAll: (cs) => cs.forEach(({ name, value }) => jar.set(name, value)) } });
+    const s1 = await ssr.auth.signInWithPassword({ email: other.email, password: PW });
+    const cookie = [...jar].map(([n, v]) => `${n}=${v}`).join("; ");
+    const wh = await web(other, COURT3, "21:00", "22:00");
+    const WPAY = rowOf(wh)?.payment_id;
+    r = await pay({ paymentId: WPAY }, { cookie, authorization: "Bearer not-a-token" });
+    record("P10", "website cookie plus a bad Authorization header: 401 (never falls back to the cookie)", r.status === 401, `HTTP ${r.status}`);
+    r = await pay({ paymentId: WPAY }, { cookie });
+    record("P11", "the website's cookie sign-in, unchanged: paid", !s1.error && r.status === 200 && sql(`select status from payments where id='${WPAY}'`) === "paid", `HTTP ${r.status} ${await r.text()}`);
+    const n1 = await fetch(`${APP_URL}/api/notify/email`, { method: "POST", headers: bearer(holder.token) });
+    const n2 = await fetch(`${APP_URL}/api/notify/email`, { method: "POST", headers: { authorization: "Bearer x.y.z" } });
+    record("P12", "/api/notify/email: app token accepted, invalid token 401", n1.status === 200 && n2.status === 401, `${n1.status} / ${n2.status}`);
+  }
   // ---------------------------------------------------------------- M. staff moves (0066)
   console.log("--- M. move_booking through the API: staff moves keep the club's length limits (0066) and the slot rules");
   // after P: switching the club to pay-at-the-club expires every open hold, by design
