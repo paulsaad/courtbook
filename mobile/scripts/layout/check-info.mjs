@@ -98,6 +98,20 @@ for (const c of cases) {
     el.childElementCount === 0 && ["See free times", "Directions"].includes(el.textContent) &&
     (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)).map((el) => el.textContent));
   if (cut.length) missing.push(`cut off: ${cut.join(", ")}`);
+  // Booking rules: short values beside their label; long ones under it, left-aligned (Paul, 2026-11-16).
+  const rule = await page.evaluate(() => {
+    const leaf = (t) => [...document.querySelectorAll("div")].find((el) => el.childElementCount === 0 && el.textContent === t);
+    const box = (t) => { const el = leaf(t); if (!el) return null; const r = el.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; };
+    const cancelValue = [...document.querySelectorAll("div")].find((el) => el.childElementCount === 0 && /^Until \d+ h before; no refund after$/.test(el.textContent));
+    const cv = cancelValue && cancelValue.getBoundingClientRect();
+    return { aheadL: box("Book ahead"), aheadV: [...document.querySelectorAll("div")].map((el) => el.childElementCount === 0 && /^Up to \d+ days$/.test(el.textContent) ? el.getBoundingClientRect() : null).find(Boolean),
+             cancelL: box("Free cancellation") && [...document.querySelectorAll("div")].filter((el) => el.childElementCount === 0 && el.textContent === "Free cancellation").map((el) => el.getBoundingClientRect()).pop(),
+             cancelV: cv && { l: cv.left, t: cv.top } };
+  });
+  if (c.w >= 340 && rule.aheadL && rule.aheadV && !(rule.aheadV.top < rule.aheadL.b && rule.aheadV.left > rule.aheadL.r))
+    missing.push("'Book ahead' value is not beside its label");
+  if (rule.cancelL && rule.cancelV && !(rule.cancelV.t >= rule.cancelL.bottom - 1 && Math.abs(rule.cancelV.l - rule.cancelL.left) < 2))
+    missing.push("'Free cancellation' value is not under its label, left-aligned");
   const tag = c.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
   await page.screenshot({ path: `${SHOTS}/info-${tag}.png`, fullPage: false });
   // the whole tab, by scrolling the inner list and stitching is overkill: take screens down the page

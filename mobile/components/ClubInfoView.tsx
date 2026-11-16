@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
 import { Image } from "expo-image";
 import { feeSummary } from "@shared/fees";
@@ -191,7 +191,7 @@ export function ClubInfoView({ query, onBook }: {
       )}
 
       <Section title="Booking rules">
-        <View style={[styles.card, styles.rulesCard]}>
+        <View style={[styles.card, styles.rulesCard]} key={`${width}-${fontScale}`}>
           <Rule stacked={stackRules} label="Book ahead" value={`Up to ${club.booking_window_days} days`} />
           <Rule stacked={stackRules} label="Booking length" value={`${infoDuration(club.min_booking_minutes)} to ${infoDuration(club.max_booking_minutes)}, ${club.slot_minutes}-min steps`} />
           <Rule stacked={stackRules} label="Free cancellation" value={`Until ${club.cancel_cutoff_hours} h before; no refund after`} />
@@ -233,12 +233,25 @@ function Section({ title, aside, children }: { title: string; aside?: string; ch
   );
 }
 
-/** A booking rule: label and value side by side, or stacked when the text is large or the screen narrow. */
+/** Values longer than this read better under their label than squeezed into the right-hand column. */
+export const RULE_SIDE_MAX_CHARS = 26;
+
+/**
+ * A booking rule. Short values ("Up to 14 days", "None") sit beside the label, right-aligned. A long
+ * value ("Until 6 h before; no refund after", the payment sentence), or any value that would wrap
+ * beside its label on this screen and text size, goes under the label, left-aligned, wrapping
+ * naturally. Large text or a narrow screen stacks every rule.
+ */
 function Rule({ label, value, stacked, strong = false }: { label: string; value: string; stacked: boolean; strong?: boolean }) {
+  const [wraps, setWraps] = useState(false);
+  const under = stacked || wraps || value.length > RULE_SIDE_MAX_CHARS;
   return (
-    <View style={stacked ? styles.ruleStacked : styles.rule} accessible accessibilityLabel={`${label}: ${value}`}>
+    <View style={under ? styles.ruleStacked : styles.rule} accessible accessibilityLabel={`${label}: ${value}`}>
       <Text style={styles.ruleLabel}>{label}</Text>
-      <Text style={[styles.ruleValue, strong && styles.ruleValueStrong, !stacked && styles.ruleValueSide]}>{value}</Text>
+      <Text
+        style={[styles.ruleValue, strong && styles.ruleValueStrong, !under && styles.ruleValueSide]}
+        onTextLayout={under ? undefined : (e) => { if (e.nativeEvent.lines.length > 1) setWraps(true); }}
+      >{value}</Text>
     </View>
   );
 }
