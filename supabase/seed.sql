@@ -3,8 +3,10 @@
 
 -- Seeded clubs are fictional, and every surface that shows one has to say so. 0063 marks the ones
 -- that already exist in a live database; this marks them where the seed creates them.
-insert into clubs (name, slug, location_url, slot_minutes, cancel_cutoff_hours, open_time, close_time, min_booking_minutes, max_booking_minutes, is_demo)
-values ('Batroun Padel & Tennis Club', 'batroun', 'https://maps.google.com/?q=Batroun', 30, 6, '08:00', '23:00', 60, 180, true)
+-- The demo club pays "in the app" (simulated); since 0070 that must be explicit, because new clubs
+-- default to paying at the desk and only a demo club may be simulated.
+insert into clubs (name, slug, location_url, slot_minutes, cancel_cutoff_hours, open_time, close_time, min_booking_minutes, max_booking_minutes, is_demo, payment_mode)
+values ('Batroun Padel & Tennis Club', 'batroun', 'https://maps.google.com/?q=Batroun', 30, 6, '08:00', '23:00', 60, 180, true, 'simulated')
 on conflict (slug) do nothing;
 update clubs set is_demo = true where slug = 'batroun';
 

@@ -16,7 +16,16 @@ cd "$(dirname "$0")/../../.."
 PSQL=${PSQL:-psql}
 DB=courtbook_audit
 RACE=courtbook_audit_race
-bash supabase/tests/audit/build_db.sh "${1:-origin/mobile-m2-native}" || exit 2
+REF=${1:-origin/mobile-m2-native}
+bash supabase/tests/audit/build_db.sh "$REF" || exit 2
+# A finding is expected to pass on a schema that contains its fix (docs/audit/fixes.md), and to be a
+# KNOWN finding on one that does not (e.g. the live-equivalent default ref).
+src_has() { if [ "$REF" = WORKTREE ]; then ls supabase/migrations/"$1"_*.sql >/dev/null 2>&1
+            else git ls-tree --name-only "$REF" supabase/migrations/ | grep -q "/$1_"; fi; }
+fixed_by() { if src_has "$1"; then echo pass; else echo "known:$2"; fi; }
+R2=$(fixed_by 0068 R2); S1=$(fixed_by 0069 S1); S5=$(fixed_by 0069 S5); D1=$(fixed_by 0070 D1); D3=$(fixed_by 0071 D3)
+MATCHES_DELETE=$([ "$S1" = pass ] || echo "matches.DELETE,")  # S1 removes that policy
+echo "== expectations for this schema: R2 $R2, S1 $S1, S5 $S5, D1 $D1, D3 $D3"
 
 fails=0; xpass=0; known=0; oks=0
 report() { # id, pass(t/f), expectation(pass|known:<F>), detail
@@ -68,7 +77,7 @@ insert into r select 'CAT6 anonymous visitors can read nothing from personal or 
 -- Any new client write path must be reviewed: the exact set of write policies is pinned here.
 insert into r select 'CAT7 write policies are exactly the reviewed set (a new one must be reviewed and added here)',
   string_agg(tablename || '.' || cmd, ',' order by tablename, cmd, policyname) =
-  'availability_exceptions.ALL,availability_rules.ALL,blocks.ALL,bookings.DELETE,club_staff.ALL,clubs.ALL,coach_clubs.DELETE,coach_clubs.INSERT,coaches.DELETE,coaches.INSERT,coaches.UPDATE,courts.ALL,credit_packs.ALL,credit_transactions.INSERT,districts.ALL,governorates.ALL,match_messages.INSERT,matches.DELETE,notifications.UPDATE,price_rules.ALL,profiles.UPDATE,sports.ALL,towns.ALL',
+  'availability_exceptions.ALL,availability_rules.ALL,blocks.ALL,bookings.DELETE,club_staff.ALL,clubs.ALL,coach_clubs.DELETE,coach_clubs.INSERT,coaches.DELETE,coaches.INSERT,coaches.UPDATE,courts.ALL,credit_packs.ALL,credit_transactions.INSERT,districts.ALL,governorates.ALL,match_messages.INSERT,${MATCHES_DELETE}notifications.UPDATE,price_rules.ALL,profiles.UPDATE,sports.ALL,towns.ALL',
   'pass', string_agg(tablename || '.' || cmd, ',' order by tablename, cmd, policyname)
   from pg_policies where schemaname = 'public' and cmd in ('INSERT','UPDATE','DELETE','ALL');
 insert into r select 'CAT8 bookings and payments have no client write policy (all writes go through checked functions)',
@@ -77,9 +86,9 @@ insert into r select 'CAT8 bookings and payments have no client write policy (al
 -- known findings carried from the M3 review, pinned so they show up here until fixed
 insert into r select 'CAT9 players can update only notifications.read_at (M3 finding S5)',
   not exists (select 1 from information_schema.column_privileges where grantee = 'authenticated' and table_name = 'notifications'
-              and privilege_type = 'UPDATE' and column_name <> 'read_at'), 'known:S5 (M3 review)', '';
+              and privilege_type = 'UPDATE' and column_name <> 'read_at'), '$S5', '';
 insert into r select 'CAT10 the organiser has no direct DELETE on matches (M3 finding S1)',
-  not exists (select 1 from pg_policies where tablename = 'matches' and cmd = 'DELETE'), 'known:S1 (M3 review)', '';
+  not exists (select 1 from pg_policies where tablename = 'matches' and cmd = 'DELETE'), '$S1', '';
 
 -- ===== 2. roles =====
 insert into auth.users (id, email) values ('$P1','p1@audit.test'), ('$P2','p2@audit.test'), ('$SA','sa@audit.test'), ('$SB','sb@audit.test'), ('$CO','co@audit.test');
@@ -109,8 +118,8 @@ exception when insufficient_privilege then insert into r values ('PRIV6 a player
 do \$\$ begin perform staff_book((select id from clubs where slug = 'batroun'), (select id from courts where name = 'Padel 2'), $(AT 5 12:00), $(AT 5 13:00), 'Me', null);
   insert into r values ('PRIV7 a player cannot make a desk booking', false, 'pass', 'allowed');
 exception when others then insert into r values ('PRIV7 a player cannot make a desk booking', sqlerrm = 'forbidden', 'pass', sqlerrm); end \$\$;
-insert into r select 'PRIV8 a player cannot read the free-text reason of club blocks', coalesce(max(reason), '') = '', 'known:R2', coalesce(max(reason), 'none') from blocks;
-insert into r select 'PRIV8b ... nor which staff member created them', coalesce(max(created_by::text), '') = '', 'known:R2', coalesce(max(created_by::text), 'none') from blocks;
+insert into r select 'PRIV8 a player cannot read the free-text reason of club blocks', coalesce(max(reason), '') = '', '$R2', coalesce(max(reason), 'none') from blocks;
+insert into r select 'PRIV8b ... nor which staff member created them', coalesce(max(created_by::text), '') = '', '$R2', coalesce(max(created_by::text), 'none') from blocks;
 reset role;
 
 set role authenticated; select set_config('request.jwt.claim.sub', '$P2', false) \\g /dev/null
@@ -155,12 +164,12 @@ do \$\$ begin perform move_booking((select id from w), (select id from courts wh
   insert into r select 'BOOK1 a staff move onto an expired (unswept) hold succeeds and the hold is expired', (select status from bookings where id = (select booking_id from h)) = 'expired', 'pass', '';
 exception when others then insert into r values ('BOOK1 a staff move onto an expired (unswept) hold succeeds and the hold is expired', false, 'pass', sqlerrm); end \$\$;
 do \$\$ begin perform staff_book((select id from clubs where slug = 'batroun'), (select id from courts where name = 'Padel 2'), $(AT -1 10:00), $(AT -1 11:00), 'Past', null);
-  insert into r values ('BOOK2 a desk booking in the past is refused (or deliberately allowed — decision D3)', false, 'known:D3', 'allowed');
-exception when others then insert into r values ('BOOK2 a desk booking in the past is refused (or deliberately allowed — decision D3)', true, 'known:D3', sqlerrm); end \$\$;
+  insert into r values ('BOOK2 a desk booking that started more than 2 hours ago is refused (decision D3)', false, '$D3', 'allowed');
+exception when others then insert into r values ('BOOK2 a desk booking that started more than 2 hours ago is refused (decision D3)', sqlerrm = 'walk_in_too_old', '$D3', sqlerrm); end \$\$;
 reset role;
-insert into r select 'BOOK3 new clubs default to taking payment at the desk (decision D1)', (select column_default from information_schema.columns where table_name = 'clubs' and column_name = 'payment_mode') not like '%simulated%', 'known:D1', (select column_default from information_schema.columns where table_name = 'clubs' and column_name = 'payment_mode');
+insert into r select 'BOOK3 new clubs default to taking payment at the desk (decision D1)', (select column_default from information_schema.columns where table_name = 'clubs' and column_name = 'payment_mode') not like '%simulated%', '$D1', (select column_default from information_schema.columns where table_name = 'clubs' and column_name = 'payment_mode');
 insert into r select 'BOOK4 the database refuses simulated payment for a real (non-demo) club (decision D1)',
-  exists (select 1 from pg_constraint where conrelid = 'clubs'::regclass and pg_get_constraintdef(oid) ~ 'is_demo'), 'known:D1', '';
+  exists (select 1 from pg_constraint where conrelid = 'clubs'::regclass and pg_get_constraintdef(oid) ~ 'is_demo'), '$D1', '';
 
 -- Daylight saving: Beirut clocks go back at midnight on Sat 30 Oct 2027 (UTC+3 -> UTC+2), so the hour
 -- 23:00-24:00 happens twice. A club open all night should offer every real half hour.
