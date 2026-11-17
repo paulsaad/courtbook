@@ -46,6 +46,7 @@ export function StagingPasswordSignIn({ onDone }: { onDone: () => void }) {
   return (
     <View style={styles.staging}>
       <Text style={styles.stagingTitle}>Staging test account</Text>
+      {diag !== "" && <Text testID="staging-diag" style={styles.error}>{diag}</Text>}
       <TextInput testID="staging-email" accessibilityLabel="Test account email" style={styles.input} value={email} onChangeText={setEmail}
         autoCapitalize="none" autoCorrect={false} keyboardType="email-address" placeholder="test email" placeholderTextColor="#9a9a9a"
         autoComplete="off" importantForAutofill="no" textContentType="none" />
@@ -56,7 +57,6 @@ export function StagingPasswordSignIn({ onDone }: { onDone: () => void }) {
         <Text style={styles.secondaryText}>Sign in to the test account</Text>
       </Pressable>
       {error !== null && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
-      {diag !== "" && <Text testID="staging-diag" style={styles.error}>{diag}</Text>}
     </View>
   );
 }

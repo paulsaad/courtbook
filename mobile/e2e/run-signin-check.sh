@@ -15,6 +15,7 @@ check() { # label email password
   if (cd "$OUT" && maestro test -e "E2E_EMAIL=$2" -e "E2E_PASSWORD=$3" ../flows/_sign-in.yaml --format junit --output "signin-$1.xml" >/dev/null 2>&1); then
     echo "RESULT $1: signed in (Home shows 'Ready to play')"
   else
+    adb shell input swipe 540 900 540 1700 300; sleep 1   # scroll up a little, towards the top of the form
     adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/ui-$1.xml" >/dev/null
     msg=$(python3 -c "import re; t=open('$OUT/ui-$1.xml').read(); print(' | '.join(x for x in re.findall(r'text=\"([^\"]+)\"', t) if re.search(r'sign-in failed|Invalid|error|Ready to play|Staging test account', x, re.I)))")
     echo "RESULT $1: NOT signed in; on screen: ${msg:-(no error text found)}"; status=1
@@ -28,13 +29,16 @@ paste() { # label first_wrong
   if (cd "$OUT" && maestro test -e "E2E_EMAIL=paul.tester@courtbook.test" -e "E2E_PASSWORD=$E2E_TESTER_PASSWORD" -e "FIRST_WRONG=$2" ../flows/_diag-paste.yaml --format junit --output "paste-$1.xml" > "paste-$1.log" 2>&1); then
     echo "RESULT $1: signed in (Home shows 'Ready to play')"
   else
+    adb shell input swipe 540 900 540 1700 300; sleep 1   # scroll up a little, towards the top of the form
     adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/ui-$1.xml" >/dev/null
     msg=$(python3 -c "import re; t=open('$OUT/ui-$1.xml').read(); print(' | '.join(x for x in re.findall(r'text=\"([^\"]+)\"', t) if re.search(r'sign-in failed|Invalid|error|Ready to play', x, re.I) and '[diag]' not in x))")
     diag=$(python3 - "$OUT/ui-$1.xml" <<'PY'
 import os, re, sys
 t = open(sys.argv[1]).read()
 m = re.search(r'\[diag\] email sent: &quot;(.*?)&quot; \((\d+)\); password sent: (\d+) chars; fp ([0-9a-f]{8})', t)
-if not m: print("(no diagnostic line on screen)"); sys.exit()
+if not m:
+    raw = [x for x in re.findall(r'text="([^"]*)"', t) if 'diag' in x]
+    print("(no diagnostic line parsed; raw: %r)" % raw[:3]); sys.exit()
 secret = os.environ["E2E_TESTER_PASSWORD"]
 h = 0x811c9dc5
 for ch in secret.encode("utf-16-le").decode("utf-16-le"):
