@@ -23,5 +23,19 @@ check() { # label email password
 }
 check control "$E2E_EMAIL" "$E2E_PASSWORD"
 check paul-tester "paul.tester@courtbook.test" "$E2E_TESTER_PASSWORD"
+paste() { # label first_wrong
+  echo "::group::paste: $1"
+  if (cd "$OUT" && maestro test -e "E2E_EMAIL=paul.tester@courtbook.test" -e "E2E_PASSWORD=$E2E_TESTER_PASSWORD" -e "FIRST_WRONG=$2" ../flows/_diag-paste.yaml --format junit --output "paste-$1.xml" > "$OUT/paste-$1.log" 2>&1); then
+    echo "RESULT $1: signed in (Home shows 'Ready to play')"
+  else
+    adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/ui-$1.xml" >/dev/null
+    msg=$(python3 -c "import re; t=open('$OUT/ui-$1.xml').read(); print(' | '.join(x for x in re.findall(r'text=\"([^\"]+)\"', t) if re.search(r'sign-in failed|Invalid|error|Ready to play', x, re.I)))")
+    step=$(grep -E "FAILED|Element not found|Assertion" "$OUT/paste-$1.log" | head -2 | tr '\n' ' ')
+    echo "RESULT $1: NOT signed in; on screen: ${msg:-(no error text)}; maestro: ${step:-?}"
+  fi
+  echo "::endgroup::"
+}
+paste paste-clean no
+paste paste-after-failed-attempt yes
 adb shell am force-stop "$APP"
 exit $status

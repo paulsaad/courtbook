@@ -1,0 +1,40 @@
+# Diagnostic (staging-tester-check only). Fresh app → Staging test account form. The password reaches
+# the field through Android's real clipboard: typed into the email field, Select all → Copy, erased,
+# then long-press the password field → Paste. With FIRST_WRONG=yes a wrong password is entered and
+# submitted first, and the correct one is then pasted into the same field, as a person retrying would.
+appId: app.courtbook.mobile.staging
+---
+- clearState
+- launchApp
+- runFlow: _dismiss-anr.yaml
+- extendedWaitUntil: { visible: "Book a court in Lebanon", timeout: 120000 }
+- openLink: "courtbook-staging://sign-in"
+- scrollUntilVisible: { element: { id: "staging-email" } }
+- runFlow:
+    when: { true: "${FIRST_WRONG == 'yes'}" }
+    commands:
+      - tapOn: { id: "staging-email" }
+      - inputText: "${E2E_EMAIL}"
+      - hideKeyboard
+      - tapOn: { id: "staging-password" }
+      - inputText: "WrongPassword-123"
+      - hideKeyboard
+      - tapOn: { id: "staging-sign-in" }
+      - extendedWaitUntil: { visible: "Test sign-in failed.*", timeout: 30000 }
+      - tapOn: { id: "staging-email" }
+      - eraseText: 60
+# put the correct password on the system clipboard through the visible email field
+- tapOn: { id: "staging-email" }
+- inputText: "${E2E_PASSWORD}"
+- longPressOn: { id: "staging-email" }
+- tapOn: { text: "(?i)select all", optional: true }
+- tapOn: { text: "(?i)copy" }
+- tapOn: { id: "staging-email" }
+- eraseText: 60
+- inputText: "${E2E_EMAIL}"
+- hideKeyboard
+- longPressOn: { id: "staging-password" }
+- tapOn: { text: "(?i)paste" }
+- hideKeyboard
+- tapOn: { id: "staging-sign-in" }
+- extendedWaitUntil: { visible: "Ready to play.*", timeout: 30000 }
