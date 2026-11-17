@@ -1,8 +1,7 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { supabase } from "./supabase";
 import { classify, type Failure } from "./errors";
-import { createSingleFlight } from "./singleFlight";
 
 /**
  * Favourite clubs (docs/favourites/README.md §A). Linked to the account, so they follow the player
@@ -79,49 +78,128 @@ export function withFavourite(ids: string[], clubId: string, favourite: boolean)
 export type ToggleResult = { ok: true; favourite: boolean } | { ok: false; failure: Failure } | { ok: false; skipped: "signed-out" | "unavailable" | "account-changed" };
 
 /**
- * One tap on a heart. Shows the change at once, then keeps whatever the server answers:
- *  - success → the server's state;
- *  - refusal (club gone, cap) → put back, say why;
- *  - no answer (offline, timeout) → put back AND re-read the list, because the change may or may
- *    not have been saved; the re-read shows the truth. Never retried automatically.
- * A second tap on the same club while one is in flight joins it (no duplicate request).
- * If the account changes while a request is in flight, its answer is ignored: it belongs to the
- * previous account and must not touch the new one's list.
+ * Keeps one account's favourites list consistent with the server while hearts are being tapped.
+ *
+ * The cache (["favourites", user]) is the single place the hearts and the list read from. Rules:
+ *  1. A tap writes the wanted state into the cache at once (optimistic), after cancelling any
+ *     fetch in flight so that fetch's older answer can't land on top.
+ *  2. A fetch that STARTS while saves are pending can still return a list from before they were
+ *     saved. Every fetched list is therefore re-applied with the pending wishes before anyone
+ *     sees it (cache listener below) — a refresh never flips a heart back mid-save.
+ *  3. One request per club at a time. Taps during a save only change the wish; when the save
+ *     answers, the latest wish is sent if it differs (on → off → on sends at most two requests and
+ *     ends where the player left it). The server function is idempotent, so this is safe.
+ *  4. Each club's answer is applied to that club only — overlapping saves for different clubs never
+ *     roll each other back.
+ *  5. A refusal puts that club back to its last server-confirmed state, with the reason. No answer
+ *     (offline / timeout / unknown error) does the same and marks the list for a re-read, because
+ *     the change may or may not have been saved. Never retried automatically.
+ *  6. When the last pending save settles, the list is re-read from the server, so whatever
+ *     happened in between, the cache ends equal to the server.
+ *  7. Answers that arrive after the account changed are dropped; nothing is written to any list.
  */
-export async function toggleFavourite(o: {
-  qc: QueryClient; userId: string | null; currentUserId: () => string | null; clubId: string; favourite: boolean;
+export function createFavouriteSync(o: {
+  qc: QueryClient; userId: string; currentUserId: () => string | null;
   available?: boolean; save?: typeof saveFavourite;
-}): Promise<ToggleResult> {
-  const available = o.available ?? FAVOURITES_AVAILABLE;
-  if (!o.userId) return { ok: false, skipped: "signed-out" };
-  if (!available) return { ok: false, skipped: "unavailable" };
+}) {
   const key = favouriteKeys.mine(o.userId);
-  const before = o.qc.getQueryData<string[]>(key) ?? [];
-  o.qc.setQueryData<string[]>(key, withFavourite(before, o.clubId, o.favourite));
-  try {
-    const state = await (o.save ?? saveFavourite)(o.clubId, o.favourite, available);
-    if (o.currentUserId() !== o.userId) return { ok: false, skipped: "account-changed" };
-    o.qc.setQueryData<string[]>(key, (now) => withFavourite(now ?? [], o.clubId, state));
-    return { ok: true, favourite: state };
-  } catch (error) {
-    if (o.currentUserId() !== o.userId) return { ok: false, skipped: "account-changed" };
-    o.qc.setQueryData<string[]>(key, (now) => withFavourite(now ?? [], o.clubId, before.includes(o.clubId)));
-    const failure = favouriteFailure(error);
-    if (failure.kind === "network" || failure.kind === "unknown") void o.qc.invalidateQueries({ queryKey: key });
-    return { ok: false, failure };
+  const available = o.available ?? FAVOURITES_AVAILABLE;
+  const save = o.save ?? saveFavourite;
+  const wish = new Map<string, boolean>();       // latest wanted state per club, not yet confirmed
+  const confirmed = new Map<string, boolean>();  // last state the server confirmed (or the list showed)
+  const running = new Map<string, Promise<ToggleResult>>();
+  let touched = false;
+
+  const read = () => o.qc.getQueryData<string[]>(key) ?? [];
+  const applyWishes = (ids: string[]) => {
+    let out = ids;
+    for (const [club, on] of wish) out = withFavourite(out, club, on);
+    return out;
+  };
+  const set = (club: string, on: boolean) => o.qc.setQueryData<string[]>(key, (now) => withFavourite(now ?? [], club, on));
+  const stale = () => o.currentUserId() !== o.userId;
+
+  // rule 2: a fetched list (not one of our own writes) gets the pending wishes re-applied
+  const unsubscribe = o.qc.getQueryCache().subscribe((e) => {
+    if (e.type !== "updated" || e.action.type !== "success" || e.action.manual) return;
+    if (e.query.queryHash !== o.qc.getQueryCache().find({ queryKey: key, exact: true })?.queryHash) return;
+    if (wish.size === 0) return;
+    const fetched = (e.action.data ?? []) as string[];
+    const merged = applyWishes(fetched);
+    if (merged.join() !== fetched.join()) o.qc.setQueryData<string[]>(key, merged);
+  });
+
+  async function run(club: string): Promise<ToggleResult> {
+    let result: ToggleResult = { ok: false, skipped: "unavailable" };
+    let resync = false;
+    for (;;) {
+      const want = wish.get(club);
+      if (want === undefined) break;
+      try {
+        const state = await save(club, want, available);
+        if (stale()) { result = { ok: false, skipped: "account-changed" }; break; }
+        confirmed.set(club, state);
+        touched = true;
+        if (wish.get(club) === want) {
+          wish.delete(club);
+          set(club, state);
+          result = { ok: true, favourite: state };
+          break;
+        }
+        // the player changed their mind while this was saving: send the newer wish (rule 3)
+      } catch (error) {
+        if (stale()) { result = { ok: false, skipped: "account-changed" }; break; }
+        wish.delete(club);
+        set(club, confirmed.get(club) ?? false);
+        const failure = favouriteFailure(error);
+        if (failure.kind === "network" || failure.kind === "unknown") resync = true;
+        touched = true;
+        result = { ok: false, failure };
+        break;
+      }
+    }
+    running.delete(club);
+    if (!stale() && running.size === 0 && (touched || resync)) {
+      touched = false;
+      void o.qc.invalidateQueries({ queryKey: key }); // rule 6
+    }
+    return result;
   }
+
+  return {
+    /** The player's tap. Resolves when this club's saving is over, with the outcome. */
+    toggle(club: string, on: boolean): Promise<ToggleResult> {
+      if (!available) return Promise.resolve({ ok: false, skipped: "unavailable" });
+      if (stale()) return Promise.resolve({ ok: false, skipped: "account-changed" });
+      if (!confirmed.has(club) && !running.has(club)) confirmed.set(club, read().includes(club));
+      void o.qc.cancelQueries({ queryKey: key }); // rule 1 (reverts to our own last write, if any)
+      wish.set(club, on);
+      set(club, on);
+      const inFlight = running.get(club);
+      if (inFlight) return inFlight;
+      const p = run(club);
+      running.set(club, p);
+      return p;
+    },
+    pending: () => wish.size,
+    dispose: unsubscribe,
+  };
 }
 
-/** Hook wrapper: single flight per club, current user read at answer time. */
+/** Hook wrapper: one sync per signed-in account; signed-out taps send nothing. */
 export function useFavouriteToggle(userId: string | null, available: boolean = FAVOURITES_AVAILABLE) {
   const qc = useQueryClient();
-  const flight = useRef(createSingleFlight()).current;
   const current = useRef(userId);
   current.current = userId;
+  const sync = useMemo(
+    () => (userId ? createFavouriteSync({ qc, userId, currentUserId: () => current.current, available }) : null),
+    [qc, userId, available]
+  );
+  useEffect(() => () => sync?.dispose(), [sync]);
   return useCallback(
-    (clubId: string, favourite: boolean) =>
-      flight.run(`fav:${clubId}`, () => toggleFavourite({ qc, userId, currentUserId: () => current.current, clubId, favourite, available })),
-    [qc, userId, available, flight]
+    (clubId: string, favourite: boolean): Promise<ToggleResult> =>
+      sync ? sync.toggle(clubId, favourite) : Promise.resolve({ ok: false, skipped: available ? "signed-out" : "unavailable" }),
+    [sync, available]
   );
 }
 

@@ -1,8 +1,12 @@
 # Favourite clubs and nearby discovery — foundation and assessment
 
 17 Nov 2026. Branch `favourites-nearby`, from M2 `cec5a95` (M2 itself untouched). Independent of the
-M3 branches; `mobile/lib/singleFlight.ts` and its test are byte-identical to `m3-foundation`'s, so the
-two branches merge without conflict.
+M3 branches, and merges with `m3-foundation` without conflict.
+
+**Review (Paul with ChatGPT, 17 Nov):** design, optional nearby discovery, privacy approach, and the
+Home / Courts direction approved; the read-only coordinates audit on staging and live approved (no
+data changes). Two findings fixed in revision 2: the favourite cap under concurrent requests (§A),
+and optimistic hearts versus overlapping refreshes and saves (§A, "App").
 
 ## Status
 
@@ -28,6 +32,9 @@ reserved for M3):
 - No direct writes: the default Supabase grants are revoked; players get `select` only. The one
   write is `set_club_favourite(club, on/off)`: idempotent (the same request twice changes nothing and
   never errors), refuses inactive or unknown clubs, caps at 50 per player.
+- The cap holds under concurrent requests: additions lock the player's profile row (the same
+  per-player lock the booking functions take), so a second request waits for the first to commit
+  and then counts it.
 - `my_favourite_clubs()`: the caller's favourites among clubs active now, newest first. A favourite
   of a club that goes inactive is kept and comes back if the club returns; it can still be removed.
 - Rows go with the account (`on delete cascade`) and with the club.
@@ -43,12 +50,33 @@ admin can't read players' favourites, account deletion, newest-first order, appl
 **9 deliberate mistakes, each caught** (e.g. letting players write the table, `using (true)`,
 dropping the active check, granting the function to anonymous users). Database left as it was.
 
-**App** (`mobile/lib/favourites.ts`): read hook (per-account cache key, no call when signed out),
-`toggleFavourite` — the heart changes at once, then keeps the server's answer; a refusal puts it back
-with the reason; no answer (offline / timeout) puts it back **and re-reads**, because the change may
-have been saved; never retried automatically; a double tap sends one request; an answer that arrives
-after the account changed is ignored. `heartView` gives the heart's state and spoken label ("Add
-Batroun to favourites"); signed-out taps lead to sign-in.
+**Concurrency test** (`supabase/tests/favourites/club_favourites_concurrency.sh`, local only, in a
+scratch copy of the replica that is dropped afterwards): two real sessions add the 50th and 51st
+favourite at the same moment → 50 kept, the second refused with `too_many_favourites` after waiting
+about 1.3 s for the first; two sessions adding the same club → one row, both succeed. **Control:**
+the same race against the migration with the lock removed ends with 51 — the race is real and the
+test sees it. Passed on three consecutive runs.
+
+**App** (`mobile/lib/favourites.ts`): read hook (per-account cache key, no call when signed out) and
+`createFavouriteSync`, one per signed-in account, which keeps the cached list — the one place hearts
+and lists read from — consistent with the server:
+
+1. A tap shows at once, after cancelling any fetch in flight, so its older answer can't land on top.
+2. A refresh that starts during a save can still return the list from before it; every fetched list
+   is re-applied with the pending choices before it is shown, so a heart never flips back mid-save.
+3. One request per club at a time. Taps during a save only change the wish; the latest wish is sent
+   when the save answers, if it differs (on → off sends two requests and ends off; on → off → on
+   sends one).
+4. Each answer touches only its own club: overlapping saves never roll each other back.
+5. A refusal puts that club back to its last confirmed state, with the reason; no answer puts it back
+   and re-reads. Never retried automatically.
+6. When the last pending save settles, the list is re-read once, so the cache ends equal to the
+   server.
+7. Answers after an account change are dropped; nothing is written to anyone's list.
+
+Regression tests cover each rule; removing rule 2, 3 or 6 from the code makes a test fail (checked).
+`heartView` gives the heart's state and spoken label ("Add Batroun to favourites"); signed-out taps
+lead to sign-in.
 
 ## B. Nearby discovery — assessment
 
@@ -139,12 +167,14 @@ these items is enough):
 | --- | --- | --- |
 | A player reads or changes another's favourites | RLS own-only read; no table writes; function acts on `auth.uid()` only | SQL F3, F5, F6, M2, M3, M9 |
 | Duplicates | Primary key; idempotent function | SQL F2, F4, M4 |
+| Cap exceeded by simultaneous requests | Per-player lock before counting | concurrency test + no-lock control |
+| Hearts out of step with the server (overlapping taps, refreshes, failures) | Sync rules 1–7 above | unit: `favourites` regressions |
 | Inactive / unknown clubs | Refused on add; hidden on list; kept for return; removable | SQL F7, F8, M1, M5 |
 | Anonymous or signed-out calls | No grant to anon; `not_authenticated` | SQL F1, F10, M6, M8 |
 | Location privacy | Never sent; coarse; memory only; only the choice stored | unit: `nearby` (coarsen, prefs), `clubDirectory` (request carries no position) |
 | Missing / bad coordinates | Unusable points dropped; no guessed distance; listed last | unit: `nearby`, `clubSections`; audit + test |
 | Permission refused / blocked / services off / slow fix / errors | Manual areas; one-line notes; never a crash; never a launch prompt | unit: `nearby` (permission and location cases) |
-| Account changed mid-save | Late answer ignored; cache keyed per account (and cleared by M2's session provider) | unit: `favourites` |
+| Account changed mid-save | Late answer dropped, nothing written; cache keyed per account (and cleared by M2's session provider) | unit: `favourites` |
 | Slow connection / offline | Heart reverts and re-reads; lists keep cached data; no automatic write retry | unit: `favourites` |
 | Database errors | Shown with retry; "function missing" is treated as "not available yet", not an error | unit: `favourites`, `clubDirectory` |
 
@@ -152,17 +182,20 @@ these items is enough):
 
 | Check | Result |
 | --- | --- |
-| Mobile unit tests | **222 passed** (153 existing unchanged + 69 new) |
+| Mobile unit tests | **227 passed** (153 existing unchanged + 74 new) |
 | Type check | clean |
 | Shared copies | match the website (`geo.ts` added) |
 | Favourites SQL tests (local copy, rolled back) | 32 / 32; 9 / 9 mutants caught; nothing left behind |
+| Favourites concurrency (scratch copy, dropped) | cap holds with two real sessions; control without the lock breaks it (51) |
 | Coordinates audit test (local copy, rolled back) | 17 / 17 |
 
-## Needs approval
+## Approvals
 
+Approved (17 Nov): the product decisions, the design direction for the five visual items in §C, and
+the read-only coordinates audit on staging and live (no data changes).
+
+Still needed, after M2 closes:
 1. The favourites migration: number, then staging, then live (separately).
-2. Running the coordinates audit read-only on staging and live.
-3. Adding `expo-location` (approximate location only), the iOS and Android permission texts, and the
-   new build it requires.
-4. The five visual items in §C.
-5. Switching `FAVOURITES_AVAILABLE` on, in the same change that ships the migration.
+2. Adding `expo-location` (approximate location only), the permission texts, and the new build.
+3. Switching `FAVOURITES_AVAILABLE` on, in the same change that ships the migration.
+4. Screen implementation and deployment.

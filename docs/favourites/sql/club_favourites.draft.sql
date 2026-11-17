@@ -8,7 +8,8 @@
 --  * players read only their own rows (RLS); nobody else — not other players, not club staff — can
 --    see who favourited a club;
 --  * no client may insert, update or delete rows directly: the only write is set_club_favourite(),
---    which is idempotent (asking twice for the same state changes nothing and never errors);
+--    which is idempotent (asking twice for the same state changes nothing and never errors) and
+--    serialised per player, so the 50-favourite cap holds under concurrent requests;
 --  * a club that is inactive can't be added; a favourite of a club that later becomes inactive is
 --    kept (it reappears if the club returns) but my_favourite_clubs() leaves it out;
 --  * rows go with the account (profiles on delete cascade) and with the club.
@@ -47,6 +48,10 @@ begin
   if not exists (select 1 from clubs where id = p_club and active) then
     raise exception 'club_not_found';
   end if;
+  -- Serialise additions per player, so two requests at the same moment can't both see 49 and both
+  -- insert: the second waits here until the first commits, then counts 50. Same lock the booking
+  -- functions take on the player's profile row (0002, 0007). Held until the transaction ends.
+  perform 1 from profiles where id = me for update;
   if (select count(*) from club_favourites where profile_id = me) >= 50
      and not exists (select 1 from club_favourites where profile_id = me and club_id = p_club) then
     raise exception 'too_many_favourites';

@@ -1,12 +1,12 @@
 jest.mock("../lib/supabase", () => ({ supabase: { rpc: jest.fn(), auth: { signOut: jest.fn() } } }));
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
 import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react-native";
 import { supabase } from "../lib/supabase";
 import {
   FAVOURITE_MESSAGES, FAVOURITES_AVAILABLE, favouriteFailure, favouriteKeys, FavouritesUnavailable, fetchFavourites, heartView,
-  saveFavourite, toggleFavourite, useFavourites, useFavouriteToggle, withFavourite,
+  createFavouriteSync, saveFavourite, useFavourites, useFavouriteToggle, withFavourite,
 } from "../lib/favourites";
 
 // These tests check the PHONE's handling. Who may read or change a favourite is the database's job,
@@ -63,84 +63,211 @@ describe("withFavourite", () => {
   });
 });
 
-describe("toggleFavourite", () => {
-  const setup = (initial: string[]) => {
+// ---- saving -------------------------------------------------------------------------------------
+
+/** A save the test resolves by hand, to hold requests "in flight". */
+function controllableSave() {
+  const calls: { club: string; on: boolean; resolve: (v: boolean) => void; reject: (e: unknown) => void }[] = [];
+  const save = jest.fn((club: string, on: boolean) => new Promise<boolean>((resolve, reject) => { calls.push({ club, on, resolve, reject }); }));
+  return { save, calls };
+}
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+describe("favourite sync — basic outcomes", () => {
+  const setup = (initial: string[], who: () => string | null = () => "u1") => {
     const qc = client();
     qc.setQueryData(favouriteKeys.mine("u1"), initial);
-    return qc;
+    const { save, calls } = controllableSave();
+    const sync = createFavouriteSync({ qc, userId: "u1", currentUserId: who, available: true, save });
+    return { qc, save, calls, sync, list: () => qc.getQueryData<string[]>(favouriteKeys.mine("u1")) };
   };
-  const list = (qc: QueryClient, u = "u1") => qc.getQueryData<string[]>(favouriteKeys.mine(u));
 
-  it("shows the change at once, then keeps the server's answer", async () => {
-    const qc = setup(["a"]);
-    let release!: (v: boolean) => void;
-    const save = jest.fn(() => new Promise<boolean>((r) => { release = r; }));
-    const p = toggleFavourite({ qc, userId: "u1", currentUserId: () => "u1", clubId: "b", favourite: true, available: true, save });
-    expect(list(qc)).toEqual(["b", "a"]); // optimistic
-    release(true);
+  it("shows the change at once, then keeps the server's answer, then re-reads the list once", async () => {
+    const t = setup(["a"]);
+    const spy = jest.spyOn(t.qc, "invalidateQueries");
+    const p = t.sync.toggle("b", true);
+    expect(t.list()).toEqual(["b", "a"]); // optimistic
+    t.calls[0].resolve(true);
     await expect(p).resolves.toEqual({ ok: true, favourite: true });
-    expect(list(qc)).toEqual(["b", "a"]);
-    expect(save).toHaveBeenCalledWith("b", true, true);
-  });
-
-  it("a refusal (club gone) puts it back and says why", async () => {
-    const qc = setup(["a"]);
-    const save = jest.fn().mockRejectedValue({ message: "club_not_found", code: "P0001" });
-    const r = await toggleFavourite({ qc, userId: "u1", currentUserId: () => "u1", clubId: "b", favourite: true, available: true, save });
-    expect(r).toEqual({ ok: false, failure: { kind: "refused", message: FAVOURITE_MESSAGES.club_not_found, reason: "club_not_found" } });
-    expect(list(qc)).toEqual(["a"]);
-  });
-
-  it("the cap is explained", () => {
-    expect(favouriteFailure({ message: "too_many_favourites" })).toEqual({ kind: "refused", message: FAVOURITE_MESSAGES.too_many_favourites, reason: "too_many_favourites" });
-  });
-
-  it("no answer (offline): puts it back AND re-reads, because it may have been saved", async () => {
-    const qc = setup(["a"]);
-    const spy = jest.spyOn(qc, "invalidateQueries");
-    const save = jest.fn().mockRejectedValue(new TypeError("Network request failed"));
-    const r = await toggleFavourite({ qc, userId: "u1", currentUserId: () => "u1", clubId: "a", favourite: false, available: true, save });
-    expect(r).toEqual({ ok: false, failure: { kind: "network", message: FAVOURITE_MESSAGES.network } });
-    expect(list(qc)).toEqual(["a"]);
+    expect(t.list()).toEqual(["b", "a"]);
+    expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenCalledWith({ queryKey: favouriteKeys.mine("u1") });
-    expect(save).toHaveBeenCalledTimes(1); // never retried automatically
   });
 
-  it("an unknown server error is a generic message, with a re-read", async () => {
-    const qc = setup([]);
-    const spy = jest.spyOn(qc, "invalidateQueries");
-    const r = await toggleFavourite({ qc, userId: "u1", currentUserId: () => "u1", clubId: "a", favourite: true, available: true, save: jest.fn().mockRejectedValue({ message: "boom", code: "XX000" }) });
-    expect(r).toEqual({ ok: false, failure: { kind: "unknown", message: FAVOURITE_MESSAGES.unknown } });
+  it("a refusal (club gone) puts that club back and says why", async () => {
+    const t = setup(["a"]);
+    const p = t.sync.toggle("b", true);
+    t.calls[0].reject({ message: "club_not_found", code: "P0001" });
+    await expect(p).resolves.toEqual({ ok: false, failure: { kind: "refused", message: FAVOURITE_MESSAGES.club_not_found, reason: "club_not_found" } });
+    expect(t.list()).toEqual(["a"]);
+  });
+
+  it("no answer (offline): puts it back, re-reads, and is not retried", async () => {
+    const t = setup(["a"]);
+    const spy = jest.spyOn(t.qc, "invalidateQueries");
+    const p = t.sync.toggle("a", false);
+    expect(t.list()).toEqual([]);
+    t.calls[0].reject(new TypeError("Network request failed"));
+    await expect(p).resolves.toEqual({ ok: false, failure: { kind: "network", message: FAVOURITE_MESSAGES.network } });
+    expect(t.list()).toEqual(["a"]);
+    expect(spy).toHaveBeenCalledWith({ queryKey: favouriteKeys.mine("u1") });
+    expect(t.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("an unknown server error: generic message, re-read", async () => {
+    const t = setup([]);
+    const spy = jest.spyOn(t.qc, "invalidateQueries");
+    const p = t.sync.toggle("a", true);
+    t.calls[0].reject({ message: "boom", code: "XX000" });
+    await expect(p).resolves.toEqual({ ok: false, failure: { kind: "unknown", message: FAVOURITE_MESSAGES.unknown } });
     expect(spy).toHaveBeenCalled();
   });
 
-  it("an expired session is reported as auth (the app signs in again)", () => {
+  it("the cap and an expired session are explained", () => {
+    expect(favouriteFailure({ message: "too_many_favourites" })).toEqual({ kind: "refused", message: FAVOURITE_MESSAGES.too_many_favourites, reason: "too_many_favourites" });
     expect(favouriteFailure({ message: "JWT expired", code: "PGRST301" }).kind).toBe("auth");
   });
 
-  it("signed out: nothing is sent", async () => {
-    const save = jest.fn();
-    const r = await toggleFavourite({ qc: client(), userId: null, currentUserId: () => null, clubId: "a", favourite: true, available: true, save });
-    expect(r).toEqual({ ok: false, skipped: "signed-out" });
-    expect(save).not.toHaveBeenCalled();
-  });
-
-  it("account changed while saving: the old account's answer never touches the new account's list", async () => {
-    const qc = setup(["a"]);
-    qc.setQueryData(favouriteKeys.mine("u2"), ["z"]);
+  it("account changed while saving: the old answer is dropped and no list is written", async () => {
     let who = "u1";
-    let release!: (v: boolean) => void;
-    const save = jest.fn(() => new Promise<boolean>((r) => { release = r; }));
-    const p = toggleFavourite({ qc, userId: "u1", currentUserId: () => who, clubId: "b", favourite: true, available: true, save });
-    who = "u2"; // signed out and another person signed in
-    release(true);
+    const t = setup(["a"], () => who);
+    t.qc.setQueryData(favouriteKeys.mine("u2"), ["z"]);
+    const spy = jest.spyOn(t.qc, "invalidateQueries");
+    const p = t.sync.toggle("b", true);
+    who = "u2";
+    t.calls[0].resolve(true);
     await expect(p).resolves.toEqual({ ok: false, skipped: "account-changed" });
-    expect(list(qc, "u2")).toEqual(["z"]);
+    expect(t.qc.getQueryData(favouriteKeys.mine("u2"))).toEqual(["z"]);
+    expect(spy).not.toHaveBeenCalled();
+    await expect(t.sync.toggle("c", true)).resolves.toEqual({ ok: false, skipped: "account-changed" });
+    expect(t.save).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("useFavouriteToggle — double tap", () => {
-  it("two taps on the same heart while saving send one request", async () => {
+describe("favourite sync — overlapping taps and refreshes (regressions)", () => {
+  const setup = (initial: string[]) => {
+    const qc = client();
+    qc.setQueryData(favouriteKeys.mine("u1"), initial);
+    const { save, calls } = controllableSave();
+    const sync = createFavouriteSync({ qc, userId: "u1", currentUserId: () => "u1", available: true, save });
+    return { qc, save, calls, sync, list: () => qc.getQueryData<string[]>(favouriteKeys.mine("u1")) };
+  };
+
+  it("a refresh that lands mid-save with the old list does not flip the heart back", async () => {
+    const t = setup(["a"]);
+    const p = t.sync.toggle("b", true);
+    // e.g. the app came back to the foreground: a fetch returns the list from before the save
+    await t.qc.fetchQuery({ queryKey: favouriteKeys.mine("u1"), queryFn: async () => ["a"], staleTime: 0 });
+    expect(t.list()).toEqual(["b", "a"]);
+    t.calls[0].resolve(true);
+    await p;
+    expect(t.list()).toEqual(["b", "a"]);
+  });
+
+  it("a fetch already in flight when the heart is tapped can't overwrite it when it returns", async () => {
+    const t = setup(["a"]);
+    let answer!: (v: string[]) => void;
+    const fetching = t.qc.fetchQuery({ queryKey: favouriteKeys.mine("u1"), queryFn: () => new Promise<string[]>((r) => { answer = r; }), staleTime: 0 }).catch(() => null);
+    await flush();
+    const p = t.sync.toggle("b", true);
+    answer(["a"]); // the old list arrives after the tap
+    await fetching;
+    await flush();
+    expect(t.list()).toEqual(["b", "a"]);
+    t.calls[0].resolve(true);
+    await p;
+    expect(t.list()).toEqual(["b", "a"]);
+  });
+
+  it("on → off while saving: the latest wish is sent next and is where it ends", async () => {
+    const t = setup([]);
+    const p1 = t.sync.toggle("b", true);
+    const p2 = t.sync.toggle("b", false);
+    expect(t.list()).toEqual([]);
+    expect(t.save).toHaveBeenCalledTimes(1); // one request per club at a time
+    t.calls[0].resolve(true);
+    await flush();
+    expect(t.save).toHaveBeenCalledTimes(2);
+    expect(t.calls[1]).toMatchObject({ club: "b", on: false });
+    expect(t.list()).toEqual([]); // the heart never shows the stale "on" in between
+    t.calls[1].resolve(false);
+    await expect(p1).resolves.toEqual({ ok: true, favourite: false });
+    await expect(p2).resolves.toEqual({ ok: true, favourite: false });
+    expect(t.list()).toEqual([]);
+  });
+
+  it("on → off → on while saving: one request, since the wish ends where the first request went", async () => {
+    const t = setup([]);
+    const p = t.sync.toggle("b", true);
+    void t.sync.toggle("b", false);
+    void t.sync.toggle("b", true);
+    t.calls[0].resolve(true);
+    await expect(p).resolves.toEqual({ ok: true, favourite: true });
+    expect(t.save).toHaveBeenCalledTimes(1);
+    expect(t.list()).toEqual(["b"]);
+  });
+
+  it("a double tap with the same intent sends one request", async () => {
+    const t = setup([]);
+    const a = t.sync.toggle("b", true), b = t.sync.toggle("b", true);
+    expect(t.save).toHaveBeenCalledTimes(1);
+    t.calls[0].resolve(true);
+    await expect(Promise.all([a, b])).resolves.toEqual([{ ok: true, favourite: true }, { ok: true, favourite: true }]);
+  });
+
+  it("overlapping saves for different clubs: one failing never rolls back the other", async () => {
+    const t = setup(["x"]);
+    const pa = t.sync.toggle("a", true);
+    const pb = t.sync.toggle("b", true);
+    expect(t.list()).toEqual(["b", "a", "x"]);
+    t.calls[0].reject({ message: "club_not_found" }); // a refused
+    await pa;
+    expect(t.list()).toEqual(["b", "x"]); // b still shown as pending-on
+    t.calls[1].resolve(true);
+    await pb;
+    expect(t.list()).toEqual(["b", "x"]);
+  });
+
+  it("the list is re-read once, only after the LAST pending save settles", async () => {
+    const t = setup([]);
+    const spy = jest.spyOn(t.qc, "invalidateQueries");
+    const pa = t.sync.toggle("a", true);
+    const pb = t.sync.toggle("b", true);
+    t.calls[0].resolve(true);
+    await pa;
+    expect(spy).not.toHaveBeenCalled(); // b still saving: a re-read now could show b off
+    t.calls[1].resolve(true);
+    await pb;
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("after everything settles, the re-read makes the cache equal to the server", async () => {
+    const qc = client();
+    const server = new Set<string>(["a"]);
+    qc.setQueryData(favouriteKeys.mine("u1"), ["a"]);
+    // keep an observer so the re-read actually refetches
+    const observer = new QueryObserver(qc, { queryKey: favouriteKeys.mine("u1"), queryFn: async () => [...server], staleTime: Infinity });
+    const unsubscribe = observer.subscribe(() => {});
+    const save = jest.fn(async (club: string, on: boolean) => { if (on) server.add(club); else server.delete(club); return on; });
+    const sync = createFavouriteSync({ qc, userId: "u1", currentUserId: () => "u1", available: true, save });
+    await Promise.all([sync.toggle("b", true), sync.toggle("a", false), sync.toggle("c", true), sync.toggle("c", false)]);
+    await waitFor(() => expect(new Set(qc.getQueryData<string[]>(favouriteKeys.mine("u1")))).toEqual(server));
+    expect([...server].sort()).toEqual(["b"]);
+    unsubscribe();
+    sync.dispose();
+  });
+
+  it("not available / signed out: nothing is sent", async () => {
+    const qc = client();
+    const save = jest.fn();
+    const sync = createFavouriteSync({ qc, userId: "u1", currentUserId: () => "u1", available: false, save });
+    await expect(sync.toggle("a", true)).resolves.toEqual({ ok: false, skipped: "unavailable" });
+    expect(save).not.toHaveBeenCalled();
+  });
+});
+
+describe("useFavouriteToggle", () => {
+  it("two taps on the same heart while saving send one request, through the real function", async () => {
     const qc = client();
     qc.setQueryData(favouriteKeys.mine("u1"), []);
     let release!: (v: { data: boolean; error: null }) => void;
@@ -155,6 +282,13 @@ describe("useFavouriteToggle — double tap", () => {
     expect(rpc).toHaveBeenCalledWith("set_club_favourite", { p_club: "c1", p_favourite: true });
     await act(async () => { release({ data: true, error: null }); await Promise.all([a, b]); });
     expect(qc.getQueryData(favouriteKeys.mine("u1"))).toEqual(["c1"]);
+  });
+
+  it("signed out: a tap sends nothing", async () => {
+    const qc = client();
+    const { result } = await renderHook(() => useFavouriteToggle(null, true), { wrapper: wrap(qc) });
+    await expect(result.current("c1", true)).resolves.toEqual({ ok: false, skipped: "signed-out" });
+    expect(rpc).not.toHaveBeenCalled();
   });
 });
 
