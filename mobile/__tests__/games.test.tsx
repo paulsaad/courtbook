@@ -6,7 +6,7 @@ import { renderHook, waitFor } from "@testing-library/react-native";
 import { supabase } from "../lib/supabase";
 import {
   agendaGames, CLUB_GAMES_DAYS, DETAIL_UNAVAILABLE_TEXT, fetchGameDetail, gameKeys, GameDetailUnavailable, invalidateAfterGameChange,
-  loadView, MATCH_DETAIL_AVAILABLE, splitPeople, useClubGames, useGame, useGamePeople, useMyLevels, useOpenGames,
+  loadView, MATCH_DETAIL_AVAILABLE, splitPeople, useAreas, useClubGames, useGame, useGamePeople, useMyLevels, useOpenGames,
 } from "../lib/games";
 import { DEFAULT_FILTERS } from "../lib/gameFilters";
 import type { AgendaRow } from "../lib/bookings";
@@ -22,7 +22,7 @@ function setup() {
 }
 
 describe("signed-out visitors never call a game function (J1, U9)", () => {
-  it("board, club games, detail, people and levels stay idle", async () => {
+  it("board, club games, detail, people, levels and areas stay idle", async () => {
     const { wrapper } = setup();
     const out = { signedIn: false };
     const hooks = [
@@ -31,6 +31,7 @@ describe("signed-out visitors never call a game function (J1, U9)", () => {
       await renderHook(() => useGame("m1", out), { wrapper }),
       await renderHook(() => useGamePeople("m1", { ...out, visible: true }), { wrapper }),
       await renderHook(() => useMyLevels(out), { wrapper }),
+      await renderHook(() => useAreas(out), { wrapper }),
     ];
     for (const h of hooks) expect(h.result.current.fetchStatus).toBe("idle");
     expect(rpc).not.toHaveBeenCalled();
@@ -65,6 +66,15 @@ describe("existing read functions", () => {
     const shown = await renderHook(() => useGamePeople("m1", { signedIn: true, visible: true }), { wrapper });
     await waitFor(() => expect(shown.result.current.isSuccess).toBe(true));
     expect(rpc).toHaveBeenCalledWith("match_participants", { p_match: "m1" });
+  });
+
+  it("areas are read with the areas() function once signed in", async () => {
+    rpc.mockResolvedValueOnce({ data: [{ code: "north", name_en: "North", name_ar: "", districts: [] }], error: null });
+    const { wrapper } = setup();
+    const { result } = await renderHook(() => useAreas({ signedIn: true }), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(rpc).toHaveBeenCalledWith("areas");
+    expect(result.current.data?.[0].code).toBe("north");
   });
 
   it("levels become a sport → level map", async () => {

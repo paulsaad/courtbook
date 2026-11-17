@@ -1,10 +1,23 @@
 import { formatInTimeZone } from "date-fns-tz";
 import { dayBounds, shiftDate } from "@shared/time";
+import { sportName } from "./days";
 
 /**
  * Find a game board filters → open_matches() parameters (docs/m3/03-journeys.md J1, test plan U6).
  * The filters only choose WHICH open games to ask for; the database decides what is open, visible,
  * and fits a level (open_matches' own rules). Nothing here hides or reveals data the server didn't.
+ *
+ * Discovery window — intentionally different from the website (accepted 17 Nov 2026):
+ *
+ *   | Choice           | App (this file)                         | Website /play (unchanged)                      |
+ *   | Today            | until the coming Beirut midnight        | now + 24 h                                     |
+ *   | This week        | today + the next 6 Beirut days          | now + 7 × 24 h                                 |
+ *   | Any time (default) | the next 60 Beirut days               | sends no end, so the server default: now + 14 days |
+ *
+ * The app follows the approved spec: calendar days in the clubs' time zone (U6), and a horizon equal
+ * to the 60-day posting limit (GR-10), so "Any time" can show every game that can be posted. Both
+ * clients call the same open_matches and see the same games inside each window; the website is not
+ * changed to match. The default choice is "Any time", as on the website.
  */
 
 export const BEIRUT = "Asia/Beirut";
@@ -62,14 +75,24 @@ export function activeFilterCount(f: GameFilters): number {
 }
 
 /**
- * The "My level" chip's note. With no level for the chosen sport the server returns every level
- * (open_matches: `pl.level is null` passes), so the chip must say so rather than look broken.
+ * The "My level" chip's note. open_matches applies My level per game, using the caller's level for
+ * THAT game's sport, and lets through every game of a sport the caller has no level for
+ * (`pl.level is null` passes — checked on the local replica, 17 Nov). So:
+ *  - one sport chosen, no level for it      → the filter does nothing: say so;
+ *  - All sports, no level at all            → the filter does nothing: say so;
+ *  - All sports, levels for some sports only → games of those sports are filtered, the rest are
+ *    all shown: say which sports are filtered.
+ * `activeSports` (optional): the sports on offer; when every one has a level, no note is needed.
  */
-export function myLevelNote(f: GameFilters, levels: Record<string, number>): string | null {
+export function myLevelNote(f: GameFilters, levels: Record<string, number>, activeSports?: string[]): string | null {
   if (!f.myLevel) return null;
-  if (f.sport && levels[f.sport] == null) return "Set your level to filter by it";
-  if (!f.sport && Object.keys(levels).length === 0) return "Set your level to filter by it";
-  return null;
+  if (f.sport) return levels[f.sport] == null ? "Set your level to filter by it" : null;
+  const rated = Object.keys(levels).sort();
+  if (rated.length === 0) return "Set your level to filter by it";
+  if (activeSports && activeSports.every((s) => levels[s] != null)) return null;
+  const names = rated.map(sportName);
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `My level uses your ${list} level${rated.length > 1 ? "s" : ""}. Games in other sports show every level.`;
 }
 
 /** "Showing the next 100 games. Narrow the dates to see more." when the server cap was reached. */

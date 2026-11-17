@@ -129,8 +129,14 @@ export function useMyLevels({ signedIn }: Gate) {
   return useQuery({ queryKey: gameKeys.myLevels, enabled: signedIn, staleTime: 60_000, queryFn: fetchMyLevels });
 }
 
-export function useAreas() {
-  return useQuery({ queryKey: gameKeys.areas, staleTime: 24 * 3_600_000, queryFn: fetchAreas });
+/**
+ * Area picker data. Gated like every other game hook (review, 17 Nov): the board that uses it is for
+ * signed-in players only, so signed-out visitors make no call. Note: areas() itself is public
+ * reference data (executable by anon since migrations 0032/0036, for club browsing); the gate is for
+ * consistency, not because the server would refuse.
+ */
+export function useAreas({ signedIn }: Gate) {
+  return useQuery({ queryKey: gameKeys.areas, enabled: signedIn, staleTime: 24 * 3_600_000, queryFn: fetchAreas });
 }
 
 /** Players (organiser first, as the server orders them) and, for the organiser, requests waiting. */

@@ -47,6 +47,12 @@ describe("toOpenMatchesParams — date windows end at a Beirut midnight", () => 
     expect(to.toISOString()).toBe("2027-01-15T22:00:00.000Z"); // end of 15 Jan = 17 Nov + 59 days
   });
 
+  it("the default board asks for 'Any time' = the next 60 Beirut days (not the server's 14-day default)", () => {
+    const now = new Date("2026-11-17T08:00:00Z");
+    expect(DEFAULT_FILTERS.when).toBe("any");
+    expect(toOpenMatchesParams(DEFAULT_FILTERS, now).p_to).toBe("2027-01-15T22:00:00.000Z");
+  });
+
   it("never sends p_from, so the server's own 'not started' rule applies", () => {
     expect(toOpenMatchesParams(f(), new Date()).p_from).toBeNull();
   });
@@ -77,10 +83,26 @@ describe("filter chrome", () => {
     expect(activeFilterCount(f({ sport: "tennis", when: "today", myLevel: true, district: "batroun" }))).toBe(4);
   });
 
-  it("My level without a level for the sport explains itself (the server then returns every level)", () => {
+  // open_matches applies My level per game with the level for that game's sport, and lets every
+  // game of an unrated sport through (verified on the local replica, 17 Nov). The note says so.
+  it("one sport chosen: no level for it → the filter does nothing, and says so", () => {
     expect(myLevelNote(f({ myLevel: true, sport: "padel" }), {})).toBe("Set your level to filter by it");
+    expect(myLevelNote(f({ myLevel: true, sport: "padel" }), { tennis: 4 })).toBe("Set your level to filter by it");
     expect(myLevelNote(f({ myLevel: true, sport: "padel" }), { padel: 5 })).toBeNull();
+  });
+  it("All sports, no level at all → the filter does nothing, and says so", () => {
     expect(myLevelNote(f({ myLevel: true }), {})).toBe("Set your level to filter by it");
+  });
+  it("All sports, levels for some sports only → names the sports it filters", () => {
+    expect(myLevelNote(f({ myLevel: true }), { padel: 5 })).toBe("My level uses your Padel level. Games in other sports show every level.");
+    expect(myLevelNote(f({ myLevel: true }), { tennis: 3, padel: 5 })).toBe("My level uses your Padel and Tennis levels. Games in other sports show every level.");
+    expect(myLevelNote(f({ myLevel: true }), { tennis: 3, padel: 5, squash: 2 })).toBe("My level uses your Padel, Squash and Tennis levels. Games in other sports show every level.");
+  });
+  it("All sports, a level for every sport on offer → no note", () => {
+    expect(myLevelNote(f({ myLevel: true }), { padel: 5, tennis: 3 }, ["padel", "tennis"])).toBeNull();
+    expect(myLevelNote(f({ myLevel: true }), { padel: 5 }, ["padel", "tennis"])).toMatch(/^My level uses your Padel level/);
+  });
+  it("My level off → no note", () => {
     expect(myLevelNote(f({ myLevel: false }), {})).toBeNull();
   });
 
