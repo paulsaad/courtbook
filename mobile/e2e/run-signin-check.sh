@@ -29,7 +29,21 @@ paste() { # label first_wrong
     echo "RESULT $1: signed in (Home shows 'Ready to play')"
   else
     adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/ui-$1.xml" >/dev/null
-    msg=$(python3 -c "import re; t=open('$OUT/ui-$1.xml').read(); print(' | '.join(x for x in re.findall(r'text=\"([^\"]+)\"', t) if re.search(r'sign-in failed|Invalid|error|Ready to play', x, re.I)))")
+    msg=$(python3 -c "import re; t=open('$OUT/ui-$1.xml').read(); print(' | '.join(x for x in re.findall(r'text=\"([^\"]+)\"', t) if re.search(r'sign-in failed|Invalid|error|Ready to play', x, re.I) and '[diag]' not in x))")
+    diag=$(python3 - "$OUT/ui-$1.xml" <<'PY'
+import os, re, sys
+t = open(sys.argv[1]).read()
+m = re.search(r'\[diag\] email sent: &quot;(.*?)&quot; \((\d+)\); password sent: (\d+) chars; fp ([0-9a-f]{8})', t)
+if not m: print("(no diagnostic line on screen)"); sys.exit()
+secret = os.environ["E2E_TESTER_PASSWORD"]
+h = 0x811c9dc5
+for ch in secret.encode("utf-16-le").decode("utf-16-le"):
+    for unit in ([ord(ch)] if ord(ch) < 0x10000 else []):
+        h ^= unit; h = (h * 0x01000193) & 0xffffffff
+print(f"email sent: {m.group(1)!r}; password sent: {m.group(3)} chars (secret: {len(secret)}); equals the secret: {'YES' if m.group(4) == format(h, '08x') else 'NO'}")
+PY
+)
+    echo "DIAG $1: $diag"
     step=$(sed 's/\x1b\[[0-9;]*m//g' "$OUT/paste-$1.log" | grep -v -i "input text" | grep -E "FAILED|❌|Element not found|Assertion|not found" | head -3 | tr '\n' ' ')
     echo "RESULT $1: NOT signed in; on screen: ${msg:-(no error text)}; maestro: ${step:-?}"
   fi

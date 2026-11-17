@@ -17,15 +17,26 @@ export const STAGING_SIGN_IN_RETRY = "The password field has been cleared — en
  * on the same screen failed with "Invalid login credentials" (Galaxy A17 test, 17 Nov 2026; reproduced
  * on an Android emulator). Autofill is off for both fields, so nothing can be filled in unseen.
  */
+// DIAGNOSTIC BUILD ONLY (branch staging-tester-check): FNV-1a 32-bit of the UTF-16 code units, so the
+// test robot can tell whether the password sent equals the secret without either being shown.
+function fnv(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, "0");
+}
+
 export function StagingPasswordSignIn({ onDone }: { onDone: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [diag, setDiag] = useState("");
   async function go() {
     setBusy(true);
     setError(null);
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    const sent = { email: email.trim(), password };
+    setDiag(`[diag] email sent: "${sent.email}" (${sent.email.length}); password sent: ${sent.password.length} chars; fp ${fnv(sent.password)}`);
+    const { error } = await supabase.auth.signInWithPassword(sent);
     setBusy(false);
     if (error) {
       setPassword("");
@@ -45,6 +56,7 @@ export function StagingPasswordSignIn({ onDone }: { onDone: () => void }) {
         <Text style={styles.secondaryText}>Sign in to the test account</Text>
       </Pressable>
       {error !== null && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
+      {diag !== "" && <Text testID="staging-diag" style={styles.error}>{diag}</Text>}
     </View>
   );
 }
