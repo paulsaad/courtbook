@@ -61,6 +61,7 @@ export const ERRORS: Record<string, string> = {
   slot_in_past: "That time has passed.",
   walk_in_too_old: "A walk-in can be entered up to 2 hours after it started.",
   move_into_past: "A booking cannot be moved to a time that has passed.",
+  booking_ended: "This booking has already ended and can't be moved.",
   simulated_demo_only: "Simulated payment is only for demo clubs. A real club takes payment at its desk.",
   no_price_rule: "No price set for this time. Ask the club.",
   price_rule_overlap: "Overlaps an existing rule for the same courts and days. Delete or narrow one of them.",

@@ -1,6 +1,9 @@
--- Release fixes 0068–0071 — PREFLIGHT. READ ONLY: one SELECT, changes nothing.
--- Run in Supabase → SQL Editor on staging, then on live, BEFORE applying any of 0068–0071.
--- Every row in part 1 and 2 must show ok = true. Part 3 lists the clubs; read it before approving 0070.
+-- Release fixes 0068–0071 — FULL PREFLIGHT. READ ONLY: one SELECT, changes nothing.
+-- Run ONCE, in Supabase → SQL Editor, BEFORE the first of 0068–0071 on that database (staging, then
+-- live). Every row must show ok = true. It describes the starting point of the whole sequence, so once
+-- 0068 is applied its rows turn false by design: do not use it between steps. Between steps, each
+-- 00xx_apply.sql checks its own starting point and result. The list of clubs 0070 would change is a
+-- separate file, fixes_0070_clubs.sql, run just before 0070.
 -- Function code is compared ignoring Windows line endings and trailing spaces (as for 0065/0066).
 with
 fn as (
@@ -49,17 +52,5 @@ checks(part, item, ok, detail) as (
   union all select 2, 'no pending payment at a desk club today (invariant INV11)',
     not exists (select 1 from payments p join bookings b on b.id = p.booking_id join clubs c on c.id = b.club_id
                 where p.status = 'pending' and c.payment_mode = 'at_desk'), ''
-  -- 3. data: what 0070 will do (informational; ok = false marks a club 0070 will switch to the desk)
-  union all
-  select 3, 'club ' || c.slug || ' — ' || c.payment_mode || case when c.is_demo then ', demo' else ', real' end
-            || case when c.active then '' else ', inactive' end,
-    not (c.payment_mode = 'simulated' and not c.is_demo),
-    case when c.payment_mode = 'simulated' and not c.is_demo then
-      '0070 WILL SWITCH THIS CLUB TO AT THE DESK; live holds released: '
-      || (select count(*) from bookings b where b.club_id = c.id and b.status = 'pending')
-      || '; confirmed upcoming bookings (kept): '
-      || (select count(*) from bookings b where b.club_id = c.id and b.status = 'confirmed' and b.end_at > now())
-    else 'unchanged by 0070' end
-  from clubs c
 )
 select part, item, ok, detail from checks order by part, item;

@@ -4,12 +4,12 @@
 --   2 hours (start >= now() - 2 h). Older starts are refused with `walk_in_too_old`. Future bookings
 --   are unchanged. The window is measured in real time (UTC), so it behaves the same across local
 --   midnight and on the nights Beirut's clocks change.
--- move_booking: a booking cannot be moved to a time that has passed (`move_into_past`). One case stays
---   allowed because the staff calendar offers "Move" on a booking that is being played: a booking that
---   is in progress (started, not yet ended) may change court or end time as long as it keeps its own
---   start time and still ends in the future. Moving its start earlier or later into the past, or
---   re-timing a booking that has already ended while keeping a past start, is refused. Moving any
---   booking to a future time is unchanged.
+-- move_booking: a booking cannot be moved to a time that has passed (`move_into_past`), and a booking
+--   that has ended cannot be moved at all, to any time or court (`booking_ended`; ended = its end time
+--   is now or earlier). One case stays allowed because the staff calendar offers "Move" on a booking
+--   that is being played: a booking in progress (started, not yet ended) may change court or end time
+--   as long as it keeps its own start time and still ends in the future. Moving its start into the
+--   past is refused. Moving a booking that has not started to a future time is unchanged.
 --
 -- Everything else is unchanged: duration rules, grid and opening hours (assert_valid_court_slot and the
 -- bookings_slot_validation trigger), lock order, and the exclusion constraint that makes a double
@@ -81,7 +81,8 @@ begin
   if b.status <> 'confirmed' then raise exception 'not_confirmed'; end if;
   if b.court_id is null then raise exception 'not_a_court_booking'; end if;
   if p_start >= p_end then raise exception 'bad_range'; end if;
-  if p_start < now() and not (p_start = b.start_at and b.end_at > now() and p_end > now()) then      -- 0071
+  if b.end_at <= now() then raise exception 'booking_ended'; end if;                                -- 0071
+  if p_start < now() and not (p_start = b.start_at and p_end > now()) then                           -- 0071
     raise exception 'move_into_past';                                                                -- 0071
   end if;                                                                                            -- 0071
   if not exists (select 1 from courts where id = p_court and club_id = b.club_id and active) then

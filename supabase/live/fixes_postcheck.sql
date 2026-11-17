@@ -1,5 +1,7 @@
--- Release fixes 0068–0071 — POSTCHECK. READ ONLY: one SELECT. Run after applying; every row ok = true.
--- A row for a migration not applied yet shows false; run it again after each one.
+-- Release fixes 0068–0071 — FULL POSTCHECK. READ ONLY: one SELECT, changes nothing.
+-- Run ONCE, after the LAST of the four has been applied on that database: every row must be true. It
+-- describes the end of the whole sequence, so between steps some rows are false by design: do not use
+-- it between steps. Each 00xx_apply.sql already refuses to commit unless its own result is exact.
 with
 fn as (select proname, md5(regexp_replace(prosrc, '[ \t\r]+(\n|$)', '\1', 'g')) as h, oid from pg_proc where pronamespace = 'public'::regnamespace),
 pol as (select tablename, policyname, cmd, qual from pg_policies where schemaname = 'public'),
@@ -30,7 +32,7 @@ checks(item, ok, detail) as (
   union all select '0071 staff_book is the 0071 version',
     (select count(*) = 1 and max(h) = '4c62c61ff55aa739c65d1135928eadca' from fn where proname = 'staff_book'), (select string_agg(h, ',') from fn where proname = 'staff_book')
   union all select '0071 move_booking is the 0071 version',
-    (select count(*) = 1 and max(h) = 'd031d931c0523ce814808eab7d8dcaa6' from fn where proname = 'move_booking'), (select string_agg(h, ',') from fn where proname = 'move_booking')
+    (select count(*) = 1 and max(h) = 'ea48ad3e1371caf23d1883b45ea16a5d' from fn where proname = 'move_booking'), (select string_agg(h, ',') from fn where proname = 'move_booking')
   union all select 'permissions of the three replaced functions unchanged: anon no, authenticated yes, service_role yes',
     (select bool_and(not has_function_privilege('anon', oid, 'execute') and has_function_privilege('authenticated', oid, 'execute')
                      and has_function_privilege('service_role', oid, 'execute'))

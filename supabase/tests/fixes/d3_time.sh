@@ -96,8 +96,8 @@ select pg_temp.chk('D3-M4 ...and be extended', pg_temp.mv('Playing', 'Padel 1', 
 select pg_temp.chk('D3-M5 ...but its start cannot move earlier', pg_temp.mv('Playing', 'Padel 1', pg_temp.l('2027-11-17 11:00'), pg_temp.l('2027-11-17 12:30')), 'move_into_past');
 select pg_temp.chk('D3-M6 ...nor can it be cut to end before now', pg_temp.mv('Playing', 'Padel 1', pg_temp.l('2027-11-17 11:30'), pg_temp.l('2027-11-17 12:00')), 'move_into_past');
 select pg_temp.chk('D3-M7 ...and moving it onto a taken court still gets slot_taken', pg_temp.mv('Playing', 'Padel 2', pg_temp.l('2027-11-17 11:30'), pg_temp.l('2027-11-17 13:00')), 'slot_taken');
-select pg_temp.chk('D3-M8 a booking that already ended cannot be re-timed or moved in the past', pg_temp.mv('Done', 'Padel 3', pg_temp.l('2027-11-17 08:00'), pg_temp.l('2027-11-17 09:00')), 'move_into_past');
-select pg_temp.chk('D3-M9 moving an ended booking to a future time is unchanged (allowed)', pg_temp.mv('Done', 'Padel 3', pg_temp.l('2027-11-17 18:00'), pg_temp.l('2027-11-17 19:00')), 'no error');
+select pg_temp.chk('D3-M8 a booking that already ended cannot change court', pg_temp.mv('Done', 'Padel 3', pg_temp.l('2027-11-17 08:00'), pg_temp.l('2027-11-17 09:00')), 'booking_ended');
+select pg_temp.chk('D3-M9 ...nor be moved to a future time', pg_temp.mv('Done', 'Padel 3', pg_temp.l('2027-11-17 18:00'), pg_temp.l('2027-11-17 19:00')), 'booking_ended');
 reset role;
 insert into r select 'D3-M10 after all moves: Playing on Padel 1 11:30-13:00, Future 16:00-17:00, no overlap',
   (select string_agg(guest_name || ' ' || to_char(start_at at time zone 'Asia/Beirut', 'HH24:MI') || '-' || to_char(end_at at time zone 'Asia/Beirut', 'HH24:MI'), ', ' order by start_at)
@@ -114,6 +114,25 @@ SQL
 scenario "2027-11-17 10:30:30" <<SQL
 $AS_STAFF
 select pg_temp.chk('D3-B2 at 12:30:30 the same walk-in (2 h 0 m 30 s ago) is refused', pg_temp.walk('Padel 1', pg_temp.l('2027-11-17 10:30'), pg_temp.l('2027-11-17 11:30'), 'B2'), 'walk_in_too_old');
+SQL
+
+# ---- the end of a booking, to within 30 s: "Hour" is 10:00-11:00 local (08:00-09:00Z) on Padel 3
+scenario "2027-11-17 08:59:30" <<SQL
+select pg_temp.fix('Hour', 'Padel 3', pg_temp.l('2027-11-17 10:00'), pg_temp.l('2027-11-17 11:00'));
+$AS_STAFF
+select pg_temp.chk('D3-E1 at 10:59:30 the booking is still being played: it can change court', pg_temp.mv('Hour', 'Padel 1', pg_temp.l('2027-11-17 10:00'), pg_temp.l('2027-11-17 11:00')), 'no error');
+select pg_temp.chk('D3-E2 ...and be extended', pg_temp.mv('Hour', 'Padel 1', pg_temp.l('2027-11-17 10:00'), pg_temp.l('2027-11-17 11:30')), 'no error');
+SQL
+scenario "2027-11-17 09:00:30" <<SQL
+select pg_temp.fix('Hour', 'Padel 3', pg_temp.l('2027-11-17 10:00'), pg_temp.l('2027-11-17 11:00'));
+$AS_STAFF
+select pg_temp.chk('D3-E3 at 11:00:30 it has ended: changing court is refused', pg_temp.mv('Hour', 'Padel 1', pg_temp.l('2027-11-17 10:00'), pg_temp.l('2027-11-17 11:00')), 'booking_ended');
+select pg_temp.chk('D3-E4 ...extending is refused', pg_temp.mv('Hour', 'Padel 3', pg_temp.l('2027-11-17 10:00'), pg_temp.l('2027-11-17 11:30')), 'booking_ended');
+select pg_temp.chk('D3-E5 ...and moving it to a free later time is refused', pg_temp.mv('Hour', 'Padel 3', pg_temp.l('2027-11-17 15:00'), pg_temp.l('2027-11-17 16:00')), 'booking_ended');
+reset role;
+insert into r select 'D3-E6 ...and it is still where it was', (select to_char(start_at at time zone 'Asia/Beirut', 'HH24:MI') || '-' || to_char(end_at at time zone 'Asia/Beirut', 'HH24:MI') || ' ' || k.name
+  from bookings b join courts k on k.id = b.court_id where guest_name = 'Hour') = '10:00-11:00 Padel 3',
+  (select to_char(start_at at time zone 'Asia/Beirut', 'HH24:MI') || '-' || to_char(end_at at time zone 'Asia/Beirut', 'HH24:MI') || ' ' || k.name from bookings b join courts k on k.id = b.court_id where guest_name = 'Hour');
 SQL
 
 # ---- just after local midnight: now = Thu 18 Nov 00:49:30 Beirut = 22:49:30Z Wed

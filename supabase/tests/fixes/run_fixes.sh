@@ -70,7 +70,7 @@ outD=$(bash supabase/tests/fixes/d3_time.sh 2>&1); rcD=$?
 if [ $rcD = 3 ]; then echo "SKIP  $outD"; else
   while IFS='|' read -r id pass detail; do rep "$id" "$pass" "$detail"; done < <(echo "$outD" | grep -E "^D3-")
   ctl=$(CONTROL=1 bash supabase/tests/fixes/d3_time.sh 2>&1 | grep -E "^D3-" | awk -F'|' '$2 != "true" {split($1, a, " "); print a[1]}' | sort | tr '\n' ' ')
-  rep "D-control without the 0071 lines, exactly the 10 guarded checks fail" "$([ "$ctl" = "D3-B2 D3-F2 D3-M1 D3-M5 D3-M6 D3-M8 D3-N2 D3-N4 D3-S2 D3-W2 " ] && echo true)" "$ctl"
+  rep "D-control without the 0071 lines, exactly the 15 guarded checks fail" "$([ "$ctl" = "D3-B2 D3-E3 D3-E4 D3-E5 D3-E6 D3-F2 D3-M1 D3-M5 D3-M6 D3-M8 D3-M9 D3-N2 D3-N4 D3-S2 D3-W2 " ] && echo true)" "$ctl"
 fi
 
 echo "== E. release audit on 0001–0071 (catalog, roles, two-session races, invariants)"
@@ -85,9 +85,11 @@ insync=true; for n in 0068 0069 0070 0071; do cmp -s "$gen/${n}_apply.sql" supab
 rep "F1 the apply scripts are in sync with the migration files" "$insync" "$insync"
 pre_old=$($PSQL -X -At -d $OLD -f supabase/live/fixes_preflight.sql | awk -F'|' '$1 < 3 && $3 != "t"' | wc -l)
 pre_new=$($PSQL -X -At -d $NEW -f supabase/live/fixes_preflight.sql | awk -F'|' '$1 == 1 && $3 == "t"' | wc -l)
-rep "F2 preflight: all ok on 0001–0066; every part-1 row false once applied" "$([ "$pre_old" = 0 ] && [ "$pre_new" = 0 ] && echo true)" "not ok on 0066: $pre_old; still ok on 0071: $pre_new"
+rep "F2 full preflight: all ok on 0001–0066; every part-1 row false once applied" "$([ "$pre_old" = 0 ] && [ "$pre_new" = 0 ] && echo true)" "not ok on 0066: $pre_old; still ok on 0071: $pre_new"
 $PSQL -q -d postgres -c "drop database if exists $APDB" -c "create database $APDB template $OLD" >/dev/null
 $PSQL -X -q -At -d $APDB -v ON_ERROR_STOP=1 -f supabase/tests/fixes/d1_fixtures.sql >/dev/null 2>&1
+review=$($PSQL -X -At -d $APDB -f supabase/live/fixes_0070_clubs.sql | awk -F'|' '{print $1":"$6":"$7}' | tr '\n' ' ')
+rep "F2b the 0070 club review names the real club left simulated and its live hold, and only it" "$([ "$review" = "realsim:t:1 batroun:f:1 realdesk:f:0 " ] && echo true)" "$review"
 applied=""; for n in 0068 0069 0070 0071; do applied="$applied $($PSQL -X -q -At -d $APDB -f supabase/live/${n}_apply.sql 2>&1 | grep -E "^$n applied" | tr '|' ' ')"; done
 rep "F3 the four apply scripts run in order on 0001–0066 with a real club left simulated" "$(echo "$applied" | grep -q "0071 applied" && echo "$applied" | grep -q "realsim (1 hold(s) released)" && echo true)" "$applied"
 post=$($PSQL -X -At -d $APDB -f supabase/live/fixes_postcheck.sql | awk -F'|' '$2 != "t" {print $1}' | tr '\n' ';')

@@ -8,7 +8,7 @@
 --   1. Any existing club that is NOT a demo and is in simulated mode is switched to at_desk with
 --      exactly the steps of set_club_payment_mode: its live holds and their pending payments expire
 --      first, then the mode changes. A NOTICE names each club switched. Confirmed bookings and their
---      payments are not touched. Run supabase/live/fixes_preflight.sql first: it lists these clubs.
+--      payments are not touched. On live, supabase/live/fixes_0070_clubs.sql lists these clubs first.
 --   2. New clubs default to at_desk (the admin "New club" form inserts with defaults).
 --   3. A check constraint makes simulated + non-demo impossible from now on, however the row is
 --      written; set_club_payment_mode refuses it with a readable error first.
