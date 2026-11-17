@@ -69,7 +69,7 @@ The window is real time (UTC), so local midnight and the clock changes behave co
 Unchanged: duration, grid and opening-hours rules, lock order, the exclusion constraint (`slot_taken`),
 and moving any booking to a future time.
 
-Web copy (3 lines in `src/lib/types.ts`) for the new refusals; without it the desk would see the code.
+Web copy (3 lines in `src/lib/types.ts`, and its byte copy `mobile/shared/types.ts`, which CI requires to match) for the new refusals; without it the desk would see the code.
 
 ## 2. Compatibility checks and scripts (`supabase/live/`)
 
@@ -134,6 +134,7 @@ branches are not edited):
 | M3 `match_detail_0067.sh` on the fixed replica | PASS, 9 of 9 mutants detected |
 | Order check (fingerprint) | 0067 before/after 0068–0071, favourites before/after 0067: identical (877 objects) |
 | Web: `tsc`, `vitest` | clean; 41/41 |
+| CI "Mobile checks" on both pushed branches | green |
 | Native: `mobile/scripts/check-native-config.sh` | PASS on `release-native-fixes`; FAIL (10) on `cec5a95` as expected |
 | Native: `tsc`, `jest` | clean; 153/153 |
 
