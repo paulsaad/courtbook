@@ -9,32 +9,43 @@ appId: app.courtbook.mobile.staging
 - runFlow: _dismiss-anr.yaml
 - extendedWaitUntil: { visible: "Book a court in Lebanon", timeout: 120000 }
 - openLink: "courtbook-staging://sign-in"
-- scrollUntilVisible: { element: { id: "staging-email" } }
 - runFlow:
     when: { true: "${FIRST_WRONG == 'yes'}" }
     commands:
+      - scrollUntilVisible: { element: { id: "staging-email" } }
       - tapOn: { id: "staging-email" }
       - inputText: "${E2E_EMAIL}"
       - hideKeyboard
+      - scrollUntilVisible: { element: { id: "staging-password" } }
       - tapOn: { id: "staging-password" }
       - inputText: "WrongPassword-123"
       - hideKeyboard
+      - scrollUntilVisible: { element: { id: "staging-sign-in" } }
       - tapOn: { id: "staging-sign-in" }
       - extendedWaitUntil: { visible: "Test sign-in failed.*", timeout: 30000 }
+      - scrollUntilVisible: { element: { id: "staging-email" } }
       - tapOn: { id: "staging-email" }
       - eraseText: 60
+      - hideKeyboard
 # put the correct password on the system clipboard through the visible email field
+- scrollUntilVisible: { element: { id: "staging-email" } }
 - tapOn: { id: "staging-email" }
 - inputText: "${E2E_PASSWORD}"
+- hideKeyboard
+- scrollUntilVisible: { element: { id: "staging-email" } }
 - longPressOn: { id: "staging-email" }
 - tapOn: { text: "(?i)select all", optional: true }
 - tapOn: { text: "(?i)copy" }
+- hideKeyboard
+- scrollUntilVisible: { element: { id: "staging-email" } }
 - tapOn: { id: "staging-email" }
 - eraseText: 60
 - inputText: "${E2E_EMAIL}"
 - hideKeyboard
+- scrollUntilVisible: { element: { id: "staging-password" } }
 - longPressOn: { id: "staging-password" }
 - tapOn: { text: "(?i)paste" }
 - hideKeyboard
+- scrollUntilVisible: { element: { id: "staging-sign-in" } }
 - tapOn: { id: "staging-sign-in" }
 - extendedWaitUntil: { visible: "Ready to play.*", timeout: 30000 }
