@@ -89,3 +89,7 @@ CONTROL=1 PSQL="sudo -u postgres psql" bash supabase/tests/audit/run_audit.sh   
 
 Local Postgres only (`build_db.sh` refuses a non-local server). `invariants.sql` is read-only and can also be run on a staging snapshot.
 When a finding is fixed its check reports XPASS and the run fails until the expectation is changed to `pass` — so fixes are never silent.
+
+## Follow-up (17 Nov)
+
+Decisions taken the same day: D1 approved, D3 approved with a 2-hour walk-in window and no moves into the past, R2 approved and prioritised, S5/S1 brought forward, A1/I1/N2 approved for the next native build. Migrations 0068–0071, live scripts and tests: `docs/audit/fixes.md`. Native corrections: branch `release-native-fixes`.
