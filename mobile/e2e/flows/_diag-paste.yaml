@@ -22,7 +22,7 @@ appId: app.courtbook.mobile.staging
       - hideKeyboard
       - scrollUntilVisible: { element: { id: "staging-sign-in" } }
       - tapOn: { id: "staging-sign-in" }
-      - extendedWaitUntil: { visible: "Test sign-in failed.*", timeout: 30000 }
+      - extendedWaitUntil: { visible: "(?s)Test sign-in failed.*", timeout: 30000 }
       - scrollUntilVisible: { element: { id: "staging-email" } }
       - tapOn: { id: "staging-email" }
       - eraseText: 60
