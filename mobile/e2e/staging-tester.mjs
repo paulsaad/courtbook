@@ -34,3 +34,16 @@ if (existing) {
 }
 sql(`update profiles set name='Paul Tester' where id='${id}'`);
 console.log(sql(`update clubs set payment_mode='at_desk' where slug='batroun' returning 'demo club ' || name || ': ' || payment_mode`));
+
+// --- diagnostic (branch staging-tester-check only): sign in with the secret the way the app does.
+// Prints only facts about the password, never the password.
+const ANON = process.env.STAGING_ANON_KEY;
+const p = PASSWORD;
+console.log(`secret: ${p.length} characters; leading/trailing space or line break: ${p !== p.trim() ? "YES" : "no"}; line break anywhere: ${/[\r\n]/.test(p) ? "YES" : "no"}; non-ASCII characters: ${/[^\x20-\x7e]/.test(p) ? "YES" : "no"}`);
+const auth = URL_.trim().replace(/\/$/, "") + "/auth/v1/token?grant_type=password";
+for (const [label, pw] of [["exactly as saved", p], ["with spaces trimmed", p.trim()]]) {
+  const r = await fetch(auth, { method: "POST", headers: { apikey: ANON, "content-type": "application/json" }, body: JSON.stringify({ email: EMAIL, password: pw }) });
+  const j = await r.json().catch(() => ({}));
+  console.log(`sign-in with the secret ${label}: ${r.ok ? "OK (user " + j.user?.email + ")" : "FAILED HTTP " + r.status + " " + (j.error_description || j.msg || j.error || "")}`);
+}
+console.log("auth user row:", sql(`select email || ' confirmed=' || (email_confirmed_at is not null) || ' banned=' || coalesce(banned_until::text,'no') || ' providers=' || coalesce(raw_app_meta_data->>'providers','?') from auth.users where email='${EMAIL}'`));

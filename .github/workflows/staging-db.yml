@@ -162,6 +162,7 @@ jobs:
           STAGING_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SERVICE_ROLE_KEY }}
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
           STAGING_TESTER_PASSWORD: ${{ secrets.STAGING_TESTER_PASSWORD }}
+          STAGING_ANON_KEY: ${{ secrets.STAGING_ANON_KEY }}
         run: node mobile/e2e/staging-tester.mjs
 
       - name: Put the demo club back to its seeded payment mode (reset_demo)
