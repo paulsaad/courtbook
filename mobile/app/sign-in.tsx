@@ -8,6 +8,7 @@ import { supabase } from "../lib/supabase";
 import { AUTH_REDIRECT_URL } from "../lib/authRedirect";
 import { appleAvailable, signInWithApple } from "../lib/appleAuth";
 import { installedVariant } from "../lib/appIdentity";
+import { StagingPasswordSignIn } from "../components/StagingPasswordSignIn";
 import { color, radius, TOUCH } from "../lib/theme";
 
 type Stage = "email" | "code";
@@ -204,43 +205,7 @@ export default function SignIn() {
   );
 }
 
-/**
- * CourtBook Staging only: sign in to a test account with a password. Staging cannot send email to
- * arbitrary addresses, and automated tests need to sign in without one. The live app never shows
- * this — the check is on the installed bundle ID, which no over-the-air update can change — and
- * live accounts have no passwords.
- */
-function StagingPasswordSignIn({ onDone }: { onDone: () => void }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  async function go() {
-    setBusy(true);
-    setError(null);
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    setBusy(false);
-    if (error) setError("Test sign-in failed: " + error.message);
-    else onDone();
-  }
-  return (
-    <View style={styles.staging}>
-      <Text style={styles.stagingTitle}>Staging test account</Text>
-      <TextInput testID="staging-email" accessibilityLabel="Test account email" style={styles.input} value={email} onChangeText={setEmail}
-        autoCapitalize="none" autoCorrect={false} keyboardType="email-address" placeholder="test email" placeholderTextColor="#9a9a9a" />
-      <TextInput testID="staging-password" accessibilityLabel="Test account password" style={styles.input} value={password} onChangeText={setPassword}
-        secureTextEntry placeholder="password" placeholderTextColor="#9a9a9a" />
-      <Pressable testID="staging-sign-in" accessibilityRole="button" style={[styles.secondary, busy && styles.disabled]} onPress={go} disabled={busy}>
-        <Text style={styles.secondaryText}>Sign in to the test account</Text>
-      </Pressable>
-      {error !== null && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  staging: { marginTop: 12, padding: 14, gap: 10, borderRadius: radius.md, borderWidth: 1, borderColor: color.warnInk, backgroundColor: color.warnSoft },
-  stagingTitle: { fontSize: 14, fontWeight: "700", color: color.warnInk },
   scroll: { flex: 1, backgroundColor: color.ground },
   page: { flexGrow: 1, padding: 20, gap: 14, justifyContent: "center" },
   heading: { fontSize: 28, fontWeight: "700", color: color.ink, marginBottom: 4 },
