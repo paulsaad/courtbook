@@ -1,0 +1,13 @@
+# Sends one handled test report to Sentry from the staging app (environment "staging"). Checked in
+# Sentry's dashboard; the app must keep working afterwards.
+appId: app.courtbook.mobile.staging
+---
+- launchApp
+- runFlow: _dismiss-anr.yaml
+- extendedWaitUntil: { visible: "Book a court", timeout: 120000 }
+- tapOn: "Profile"
+- scrollUntilVisible: { element: "Send a test crash report" }
+- tapOn: "Send a test crash report"
+- extendedWaitUntil: { visible: "Test report sent", timeout: 10000 }
+- tapOn: "Courts"
+- extendedWaitUntil: { visible: "All sports", timeout: 30000 }

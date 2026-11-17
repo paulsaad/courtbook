@@ -1,0 +1,6 @@
+# Audit findings reviewed and accepted, one regular expression per line (matched against the ISSUE
+# line), each with the reason above it. Anything not matched here fails the run.
+
+# Profile shows the signed-in email address; Apple's heuristic calls an email "not human-readable",
+# but it is exactly what a person needs to hear there.
+\[description\] Label not human-readable — label='[^']*@courtbook\.test'

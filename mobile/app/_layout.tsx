@@ -11,9 +11,19 @@ import { SessionProvider } from "../lib/session";
 import { makeQueryClient, wireAppLifecycle } from "../lib/query";
 import { trackPath } from "../lib/authRecovery";
 import { OfflineBanner } from "../components/OfflineBanner";
+import { PendingReservationWatcher } from "../components/PendingReservation";
+import { TestFaultBanner } from "../components/TestFaultBanner";
+import { ConnectionBlocked } from "../components/ConnectionBlocked";
+import { connectionBlocked } from "../lib/supabase";
+import { startCrashReporting, wrapRoot } from "../lib/crash";
 import { color, font } from "../lib/theme";
 
+startCrashReporting();
 wireAppLifecycle();
+
+// A link straight to a screen (courtbook://club/…, courtbook://booking/…, from WhatsApp or a
+// notification) opens it on top of the tabs, so Back goes to Home instead of leaving the app.
+export const unstable_settings = { initialRouteName: "(tabs)" };
 // Keep the splash screen up until the typefaces are ready, so no screen flashes in system fonts.
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -24,7 +34,7 @@ function PathTracker() {
   return null;
 }
 
-export default function RootLayout() {
+function RootLayout() {
   const [queryClient] = useState(makeQueryClient);
   const [fontsLoaded, fontError] = useFonts(FONTS);
   const ready = fontsLoaded || fontError !== null;
@@ -34,12 +44,14 @@ export default function RootLayout() {
     if (ready) void SplashScreen.hideAsync().catch(() => {});
   }, [ready]);
   if (!ready) return null;
+  if (connectionBlocked) return <ConnectionBlocked message={connectionBlocked} />;
   return (
     <SafeAreaProvider>
       <QueryClientProvider client={queryClient}>
         <SessionProvider>
           <StatusBar style="dark" />
           <PathTracker />
+          <PendingReservationWatcher />
           <View style={{ flex: 1, backgroundColor: color.ground }}>
             <Stack
               screenOptions={{
@@ -47,6 +59,9 @@ export default function RootLayout() {
                 headerTintColor: color.ink,
                 headerTitleStyle: { fontFamily: font.display, fontSize: 18 },
                 headerShadowVisible: false,
+                // Back is the system chevron alone (iOS reads it as "Back"): the title gets the room,
+                // and the button never names a screen the person may not have come from.
+                headerBackButtonDisplayMode: "minimal",
                 contentStyle: { backgroundColor: color.ground },
               }}
             >
@@ -54,11 +69,15 @@ export default function RootLayout() {
               <Stack.Screen name="sign-in" options={{ title: "Sign in", presentation: "modal" }} />
               <Stack.Screen name="booking/[id]" options={{ title: "Booking" }} />
               <Stack.Screen name="design-preview" options={{ title: "Component preview" }} />
+              <Stack.Screen name="club/[id]" options={{ title: "" }} />
             </Stack>
             <OfflineBanner />
+            <TestFaultBanner />
           </View>
         </SessionProvider>
       </QueryClientProvider>
     </SafeAreaProvider>
   );
 }
+
+export default wrapRoot(RootLayout);

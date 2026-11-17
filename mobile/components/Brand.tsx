@@ -2,6 +2,7 @@ import { StyleSheet, View } from "react-native";
 import Svg, { Path, Rect } from "react-native-svg";
 import { Text } from "./Text";
 import { color, font } from "../lib/theme";
+import { installedVariant as appVariant } from "../lib/appIdentity";
 
 /**
  * The CourtBook mark: the green cedar on a white tile edged in red top and bottom — a quiet nod to
@@ -40,6 +41,10 @@ export function Brand({ size = 40 }: { size?: number }) {
     <View style={styles.row}>
       <CedarTile size={size} />
       <Wordmark size={Math.round(size * 0.53)} />
+      {appVariant === "staging" && (
+        // The staging app must never be mistaken for the real one, on any screen that shows the brand.
+        <View style={styles.staging} accessibilityLabel="Staging app, test database"><Text style={styles.stagingText}>STAGING</Text></View>
+      )}
     </View>
   );
 }
@@ -48,4 +53,6 @@ const styles = StyleSheet.create({
   tile: { backgroundColor: color.card, borderColor: color.red, alignItems: "center", justifyContent: "center", borderLeftWidth: 1, borderRightWidth: 1, borderLeftColor: color.line, borderRightColor: color.line },
   row: { flexDirection: "row", alignItems: "center", gap: 10 },
   word: { fontFamily: font.displayHeavy, letterSpacing: -0.4 },
+  staging: { backgroundColor: color.warnSoft, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  stagingText: { fontFamily: font.bold, fontSize: 12, letterSpacing: 0.8, color: color.warnInk },
 });

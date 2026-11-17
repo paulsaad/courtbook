@@ -14,9 +14,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up)"
+        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk"
         type: choice
-        options: [check, apply, smoke, api]
+        options: [check, apply, smoke, api, reset_demo, tester]
         default: check
       up_to:
         description: "apply only: highest migration number to apply, e.g. 0064 (leave empty for all on this branch)"
@@ -64,6 +64,8 @@ jobs:
           select 'public tables:', count(*) from pg_tables where schemaname = 'public';
           select 'staging marker present:', to_regclass('staging_meta.applied') is not null;
           select 'auth users:', count(*) from auth.users;
+          -- The app's "no booking" quiet time (mobile/lib/pendingReservation.ts, QUIET_MS) relies on these.
+          select 'role settings:', rolname, coalesce(array_to_string(rolconfig, ', '), '(none)') from pg_roles where rolname in ('authenticated', 'anon', 'authenticator') order by rolname;
           SQL
 
       - name: Refuse a database that is not ours to initialise
@@ -153,6 +155,19 @@ jobs:
         if: failure() && inputs.action == 'api'
         run: tail -60 /tmp/next.log || true
 
+      - name: Paul's sign-in for the staging app (tester)
+        if: inputs.action == 'tester'
+        env:
+          STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          STAGING_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SERVICE_ROLE_KEY }}
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+          STAGING_TESTER_PASSWORD: ${{ secrets.STAGING_TESTER_PASSWORD }}
+        run: node mobile/e2e/staging-tester.mjs
+
+      - name: Put the demo club back to its seeded payment mode (reset_demo)
+        if: inputs.action == 'reset_demo'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "update clubs set payment_mode = 'simulated' where slug = 'batroun' returning name || ' -> ' || payment_mode"
+
       - name: Booking-protection checks on staging
         if: inputs.action == 'smoke'
         run: bash supabase/tests/staging_smoke.sh
@@ -169,5 +184,11 @@ jobs:
           select 'booking exclusion constraint present:', count(*) > 0 from pg_constraint where conrelid = to_regclass('public.bookings') and contype = 'x';
           select 'demo clubs:', string_agg(name || ' (' || payment_mode || ')', ', ') from public.clubs where is_demo;
           SQL
+          # the live preflight, run read-only here too (staging has 0065: only the hold_slot rows may differ)
+          psql "$DB" -f supabase/live/0065_preflight_v2.sql || true
+          # the 0066 post-check, read only (staging has 0066: every row should be true)
+          psql "$DB" -f supabase/live/0066_postcheck.sql || true
+          # per kind of object: count and hash (the same query can be run read-only on live)
+          psql "$DB" -f supabase/tests/schema_fingerprint_summary.sql || true
           # one line per schema object with a hash of its definition, to compare with a local build
           psql "$DB" -At -f supabase/tests/schema_fingerprint.sql || true

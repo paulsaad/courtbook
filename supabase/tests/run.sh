@@ -675,7 +675,9 @@ echo "--- Z. public browsing (Phase 6 review) — anon sees availability and pri
 check  anon "82a anon club_discovery returns clubs"        "select count(*) > 0 from club_discovery();" t
 check  anon "82b anon areas() has 9 governorates"           "select jsonb_array_length(areas());" 9
 check  anon "82c public_occupancy has no id/mine/status"    "select count(*) from information_schema.columns where table_name='public_occupancy' and column_name in ('id','mine','status','player_id');" 0
-check  anon "82d anon quote_price works"                    "select quote_price('$COURT', (current_date + 12 + time '10:00') at time zone 'Asia/Beirut', (current_date + 12 + time '11:00') at time zone 'Asia/Beirut');" 20.00
+# Day 12 or 13 from today, never a Saturday: the suite adds a Saturday-only $25 rule for 10:00-12:00 above.
+D82="(current_date + 12 + (extract(isodow from current_date + 12) = 6)::int)"
+check  anon "82d anon quote_price works"                    "select quote_price('$COURT', ($D82 + time '10:00') at time zone 'Asia/Beirut', ($D82 + time '11:00') at time zone 'Asia/Beirut');" 20.00
 check  anon "82e anon reads town geography columns"         "select count(*) > 300 from towns;" t
 denied anon "82f anon cannot read towns.created_by"         "select created_by from towns limit 1;"
 denied anon "82g anon cannot read towns.*"                  "select * from towns limit 1;"
@@ -1060,6 +1062,9 @@ AD=$({ as_user $P4; echo "select booking_id from book_at_desk('$COURT', (current
 check service "100k confirmed at once, priced, no CourtBook fee"    "select status||'/'||price_usd||'/'||fee_usd||'/'||source from bookings where id='$AD';" "confirmed/20.00/0.00/app"
 check service "100l and no payment row exists for it"               "select count(*) from payments where booking_id='$AD';" 0
 check $P4 "100m the same token returns the same booking, not a second" "select booking_id='$AD' from book_at_desk('$COURT', (current_date + 9 + time '15:00') at time zone 'Asia/Beirut', (current_date + 9 + time '16:00') at time zone 'Asia/Beirut', '$TK');" "t"
+# the app's reconciliation read after a lost response: find the booking by the token it sent
+check $P4 "100m2 the player finds that booking by its token (app reconciliation)" "select id||'/'||status from bookings where client_token='$TK';" "$AD/confirmed"
+check $P2 "100m3 another player cannot see a booking by someone else's token" "select count(*) from bookings where client_token='$TK';" 0
 check service "100n so the player still has exactly one"            "select count(*) from bookings where player_id='$P4' and club_id='$CB' and start_at > now() and status='confirmed' and client_token='$TK';" 1
 denied $P2 "100o someone else cannot take the same slot"            "select book_at_desk('$COURT', (current_date + 9 + time '15:00') at time zone 'Asia/Beirut', (current_date + 9 + time '16:00') at time zone 'Asia/Beirut', gen_random_uuid());"
 
@@ -1417,11 +1422,94 @@ $PSQL -q -d $DB -c "delete from payments where club_id='$CLUB'; delete from club
 
 check $ADMIN "104at settings are not readable from a browser"         "select count(*) from app_settings;" 0
 check service "104au but the server has the storage address"          "select value like 'https://%' from app_settings where key='storage_base_url';" "t"
+# --- AM. hold_slot retry token (0065, native app plan G2) ------------------------------------------
+echo "--- AM. a retry with the same token gets the same hold back; nothing else changes"
+# fails_with <who> <label> <sql> <reason> : must raise, and for exactly that reason
+fails_with() { CHECKS=$((CHECKS+1)); local got; got=$({ who_sql $1; echo "$3"; } | $PSQL -At -d $DB 2>&1 | grep -m1 ERROR)
+  if echo "$got" | grep -q "ERROR:  $4\$"; then echo "  ok    $2 ($got)"; else echo "  FAIL  $2 — expected ERROR $4 got [$got]"; FAILS=$((FAILS+1)); fi; }
+$PSQL -q -d $DB -c "update clubs set payment_mode='simulated', max_upcoming_bookings=10 where id='$CB';" >/dev/null
+at() { echo "(current_date + 11 + time '$1') at time zone 'Asia/Beirut'"; }
+hs() { { as_user $1; echo "select booking_id||'/'||already from hold_slot('$CB','$2', $(at $3), $(at $4)${5:+, '$5'});"; } | $PSQL -At -d $DB 2>&1 | tail -1; }
+TA=$($PSQL -At -q -d $DB -c "select gen_random_uuid()" | head -1)
+TB=$($PSQL -At -q -d $DB -c "select gen_random_uuid()" | head -1)
+TC=$($PSQL -At -q -d $DB -c "select gen_random_uuid()" | head -1)
+
+check service "107a exactly one hold_slot exists (a second would make PostgREST calls ambiguous)" "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='hold_slot';" 1
+check service "107b and only signed-in players and the server may call it" "select has_function_privilege('anon','hold_slot(uuid,uuid,timestamptz,timestamptz,uuid)','EXECUTE')||'/'||has_function_privilege('authenticated','hold_slot(uuid,uuid,timestamptz,timestamptz,uuid)','EXECUTE');" "false/true"
+
+# the web app's call: four arguments, by position and by name (PostgREST uses names)
+W1=$(hs $P1 $COURT2 10:00 11:00)
+check service "107c the old 4-argument call still works and is not a replay" "select '$W1' like '%/false';" t
+W2=$({ as_user $P1; echo "select booking_id from hold_slot(p_club => '$CB', p_court => '$COURT2', p_start => $(at 12:00), p_end => $(at 13:00));"; } | $PSQL -At -d $DB | tail -1)
+check service "107d so does the named call, and it replaces the first hold as before" "select (select status from bookings where id='${W1%%/*}')||'/'||(select status from bookings where id='$W2');" "expired/pending"
+check service "107e the web's holds carry no token" "select count(*) from bookings where id in ('${W1%%/*}','$W2') and client_token is not null;" 0
+
+# the phone's call, then its retry after a lost response
+R1=$(hs $P1 $COURT2 14:00 15:00 $TA)
+R2=$(hs $P1 $COURT2 14:00 15:00 $TA)
+check service "107f the first call is new" "select '$R1' like '%/false';" t
+check service "107g the retry returns the same booking, marked as a replay" "select '${R2%%/*}' = '${R1%%/*}' and '$R2' like '%/true';" t
+check service "107h one booking for that token, still pending (the retry did not replace it)" "select count(*)||'/'||max(status::text) from bookings where player_id='$P1' and client_token='$TA';" "1/pending"
+check service "107i and its payment is still pending" "select status from payments where booking_id='${R1%%/*}';" pending
+
+fails_with $P1 "107j same token, different time: refused, not a silent old booking" "select hold_slot('$CB','$COURT2', $(at 16:00), $(at 17:00), '$TA');" token_reused
+fails_with $P1 "107k same token, different court: refused" "select hold_slot('$CB','$COURT3', $(at 14:00), $(at 15:00), '$TA');" token_reused
+
+# a new attempt (new token) replaces the hold as before; a late retry of the old one disturbs nothing
+N1=$(hs $P1 $COURT2 18:00 19:00 $TB)
+check service "107l a new attempt replaces the old hold as before" "select (select status from bookings where id='${R1%%/*}')||'/'||(select status from bookings where id='${N1%%/*}');" "expired/pending"
+L1=$(hs $P1 $COURT2 14:00 15:00 $TA)
+check service "107m a late retry of the old attempt gets the old booking back, still expired" "select '${L1%%/*}' = '${R1%%/*}' and '$L1' like '%/true' and (select status from bookings where id='${R1%%/*}') = 'expired';" t
+check service "107n and leaves the newer hold alone" "select status from bookings where id='${N1%%/*}';" pending
+
+# tokens belong to one player
+O1=$(hs $P2 $COURT3 14:00 15:00 $TA)
+check service "107o another player using the same token gets their own new hold" "select '${O1%%/*}' <> '${R1%%/*}' and '$O1' like '%/false';" t
+check service "107p and player 1's booking is untouched" "select status from bookings where id='${R1%%/*}';" expired
+
+# two retries racing each other: the player lock serialises them; one booking results
+ret() { { as_user $P4; echo "begin; select booking_id from hold_slot('$CB','$COURT3', $(at 20:00), $(at 21:00), '$TC'); select pg_sleep(1); commit;"; } | $PSQL -At -d $DB 2>&1; }
+ret > /tmp/cb_r1.log & sleep 0.3; ret > /tmp/cb_r2.log & wait
+B1=$(grep -m1 -E '^[0-9a-f-]{36}$' /tmp/cb_r1.log); B2=$(grep -m1 -E '^[0-9a-f-]{36}$' /tmp/cb_r2.log)
+claim "107q two concurrent calls with one token both return the same booking" $([ -n "$B1" ] && [ "$B1" = "$B2" ] && echo 0 || echo 1)
+check service "107r and exactly one row exists for it" "select count(*) from bookings where player_id='$P4' and client_token='$TC';" 1
+
+# The case only the up-front replay check handles. Without it, the unique-token handler still
+# returns the player's booking in every case above (the failed insert rolls the call back), so those
+# checks pass either way. Here the expired hold's slot has since been taken by someone else: without
+# the up-front check the retry fails with slot_taken instead of getting its own (expired) booking.
+TD=$($PSQL -At -q -d $DB -c "select gen_random_uuid()" | head -1)
+X1=$(hs $P1 $COURT2 21:00 22:00 $TD)
+$PSQL -q -d $DB -c "update bookings set status='expired' where id='${X1%%/*}'; update payments set status='expired' where booking_id='${X1%%/*}';" >/dev/null
+X2=$(hs $P2 $COURT2 21:00 22:00)
+check service "107t someone else then holds that slot" "select status from bookings where id='${X2%%/*}';" pending
+X3=$(hs $P1 $COURT2 21:00 22:00 $TD)
+check service "107u a late retry still gets its own expired booking back, not slot_taken" "select '${X3%%/*}' = '${X1%%/*}' and '$X3' like '%/true';" t
+check service "107v and the other player's hold is untouched" "select status from bookings where id='${X2%%/*}';" pending
+
+fails_with anon "107s a visitor cannot hold a slot" "select hold_slot('$CB','$COURT3', $(at 09:00), $(at 10:00), gen_random_uuid());" "permission denied for function hold_slot"
+$PSQL -q -d $DB -c "update clubs set payment_mode='at_desk' where id='$CB';" >/dev/null
+
 # --- AL. the recovery procedure the status doc promises ------------------------------------------
 # "If a migration ever needs re-running, re-run everything from that number onwards, in order."
 # That is only true if each file is safe to apply twice, and 0061 shipped a create policy without a
 # drop, which failed on Paul's database. Applying them all a second time is the cheapest way to keep
 # the promise honest. 0040 is excluded: it adds an enum value and must run alone.
+echo "--- AN. a staff move keeps the club's minimum and maximum booking length (0066)"
+# found while checking live drift: the slot trigger checks grid/whole slots/hours, not min/max
+at13() { echo "((current_date + 13 + time '$1') at time zone 'Asia/Beirut')"; }
+MB=$({ who_sql $ADMIN; echo "select staff_book('$CLUB','$COURT3', $(at13 09:00), $(at13 10:00), 'Mover', null);"; } | $PSQL -At -d $DB 2>&1 | grep -E '^[0-9a-f-]{36}$' | tail -1)
+check service "AN0 fixture: a 1 h desk booking" "select count(*) from bookings where id='$MB' and status='confirmed';" 1
+fails_with $ADMIN "AN1 moving it to 30 min (club minimum 1 h) is refused" "select move_booking('$MB','$COURT3', $(at13 09:00), $(at13 09:30));" bad_duration
+fails_with $ADMIN "AN2 moving it to 4 h (club maximum 3 h) is refused" "select move_booking('$MB','$COURT3', $(at13 09:00), $(at13 13:00));" bad_duration
+check service "AN3 ...and it is unchanged" "select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'-'||to_char(end_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='$MB';" "09:00-10:00"
+check $ADMIN "AN4 a new length within the limits is accepted (1 h 30)" "select move_booking('$MB','$COURT3', $(at13 11:00), $(at13 12:30))::text || 'ok';" ok
+$PSQL -q -d $DB -c "update clubs set min_booking_minutes = 120 where id='$CLUB';" >/dev/null
+check $ADMIN "AN5 after the club raises its minimum to 2 h, the booking can still move at its existing length" "select move_booking('$MB','$COURT2', $(at13 14:00), $(at13 15:30))::text || 'ok';" ok
+fails_with $ADMIN "AN6 ...but not to another length below the new minimum" "select move_booking('$MB','$COURT2', $(at13 14:00), $(at13 15:00));" bad_duration
+$PSQL -q -d $DB -c "update clubs set min_booking_minutes = 60 where id='$CLUB';" >/dev/null
+fails_with $ADMIN "AN7 the slot trigger still refuses an off-grid move" "select move_booking('$MB','$COURT2', $(at13 14:10), $(at13 15:40));" not_on_grid
+
 echo "--- AL. every migration from 0041 can be applied twice"
 # What this asserts: re-application raises no error. It does NOT assert that a second application
 # leaves the data identical — a migration that rewrites rows would pass this and still change them.
@@ -1439,6 +1527,7 @@ else claim "106a re-applying 0041 onwards raises no error$(printf "$RERUN_FAILS"
 # club_media and 0057 takes it away again; applied in order the result is right, but only because
 # of the order. These two assert the end state rather than trusting it.
 check service "106b and the uploader is still not public afterwards"  "select has_column_privilege('anon','club_media','created_by','SELECT');" "f"
+check service "106d and still exactly one hold_slot after 0051/0052 re-created the old one" "select count(*)||'/'||max(pronargs) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='hold_slot';" "1/5"
 check service "106c and publication is still server-only afterwards"  "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('set_club_image','add_club_gallery','reorder_club_gallery','set_gallery_caption','remove_club_media','record_media_orphan') and has_function_privilege('authenticated', p.oid, 'EXECUTE');" 0
 
 echo

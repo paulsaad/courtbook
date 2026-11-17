@@ -30,7 +30,7 @@ with items as (
   from pg_constraint where connamespace = 'public'::regnamespace
   union all
   select 'trigger ' || tgrelid::regclass::text || ' ' || tgname, md5(pg_get_triggerdef(oid))
-  from pg_trigger where not tgisinternal and tgrelid::regclass::text not like 'storage.%' and tgrelid::regclass::text not like 'auth.%'
+  from pg_trigger where not tgisinternal and tgrelid::regclass::text not like 'storage.%' and tgrelid::regclass::text not like 'auth.%' and tgrelid::regclass::text not like 'realtime.%'
   union all
   select 'rls ' || relname, relrowsecurity::text from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r'
 )

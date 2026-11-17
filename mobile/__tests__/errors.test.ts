@@ -35,3 +35,19 @@ describe("classify", () => {
     expect(f.message).not.toMatch(/duplicate key/);
   });
 });
+
+describe("classify — what a dropped connection looks like through supabase-js", () => {
+  it.each([
+    [{ message: "TypeError: Network request failed", code: "", details: "", hint: "" }],
+    [{ message: "FetchError: The Internet connection appears to be offline.", code: "" }],
+    [{ message: "TypeError: The network connection was lost.", code: "" }],
+    [{ message: "AbortError: Aborted", code: "", hint: "Request was aborted (timeout or manual cancellation)" }],
+  ])("%j is 'no answer', not 'something went wrong'", (e) => {
+    expect(classify(e).kind).toBe("network");
+  });
+
+  it("still reads a database refusal as a refusal", () => {
+    expect(classify({ message: "slot_taken", code: "P0001" }).kind).toBe("refused");
+    expect(classify({ message: "Error: slot_taken", code: "" }).kind).toBe("refused");
+  });
+});

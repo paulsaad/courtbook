@@ -7,6 +7,7 @@ import * as WebBrowser from "expo-web-browser";
 import { supabase } from "../lib/supabase";
 import { AUTH_REDIRECT_URL } from "../lib/authRedirect";
 import { appleAvailable, signInWithApple } from "../lib/appleAuth";
+import { installedVariant } from "../lib/appIdentity";
 import { color, radius, TOUCH } from "../lib/theme";
 
 type Stage = "email" | "code";
@@ -129,12 +130,9 @@ export default function SignIn() {
         />
       )}
 
-      <Pressable style={[styles.secondary, busy && styles.disabled]} onPress={google} disabled={busy}>
+      <Pressable accessibilityRole="button" style={[styles.secondary, busy && styles.disabled]} onPress={google} disabled={busy}>
         <Text style={styles.secondaryText}>Continue with Google</Text>
       </Pressable>
-      {/* Shown so the value can be checked against Supabase during setup
-          without reading the source. Remove once Google sign-in has passed. */}
-      <Text style={styles.mutedSmall}>Returns to {AUTH_REDIRECT_URL}</Text>
 
       <View style={styles.divider}>
         <View style={styles.rule} />
@@ -145,6 +143,8 @@ export default function SignIn() {
       {stage === "email" ? (
         <>
           <TextInput
+            testID="email"
+            accessibilityLabel="Email address"
             style={styles.input}
             placeholder="you@example.com"
             placeholderTextColor="#9a9a9a"
@@ -157,6 +157,8 @@ export default function SignIn() {
             inputMode="email"
           />
           <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy || !email.includes("@") }}
             style={[styles.primary, (busy || !email.includes("@")) && styles.disabled]}
             onPress={sendCode}
             disabled={busy || !email.includes("@")}
@@ -168,6 +170,8 @@ export default function SignIn() {
         <>
           <Text style={styles.muted}>We sent a 6-digit code to {email.trim()}.</Text>
           <TextInput
+            testID="code"
+            accessibilityLabel="6-digit code from the email"
             style={styles.input}
             placeholder="123456"
             placeholderTextColor="#9a9a9a"
@@ -178,17 +182,21 @@ export default function SignIn() {
             maxLength={6}
           />
           <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy || code.trim().length < 6 }}
             style={[styles.primary, (busy || code.trim().length < 6) && styles.disabled]}
             onPress={verifyCode}
             disabled={busy || code.trim().length < 6}
           >
             <Text style={styles.primaryText}>Sign in</Text>
           </Pressable>
-          <Pressable onPress={() => setStage("email")} hitSlop={8} disabled={busy}>
+          <Pressable accessibilityRole="button" onPress={() => setStage("email")} hitSlop={8} disabled={busy}>
             <Text style={styles.link}>Use a different email</Text>
           </Pressable>
         </>
       )}
+
+      {installedVariant === "staging" && <StagingPasswordSignIn onDone={finish} />}
 
       {busy && <ActivityIndicator style={styles.spinner} />}
       {error !== null && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
@@ -196,7 +204,43 @@ export default function SignIn() {
   );
 }
 
+/**
+ * CourtBook Staging only: sign in to a test account with a password. Staging cannot send email to
+ * arbitrary addresses, and automated tests need to sign in without one. The live app never shows
+ * this — the check is on the installed bundle ID, which no over-the-air update can change — and
+ * live accounts have no passwords.
+ */
+function StagingPasswordSignIn({ onDone }: { onDone: () => void }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function go() {
+    setBusy(true);
+    setError(null);
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    setBusy(false);
+    if (error) setError("Test sign-in failed: " + error.message);
+    else onDone();
+  }
+  return (
+    <View style={styles.staging}>
+      <Text style={styles.stagingTitle}>Staging test account</Text>
+      <TextInput testID="staging-email" accessibilityLabel="Test account email" style={styles.input} value={email} onChangeText={setEmail}
+        autoCapitalize="none" autoCorrect={false} keyboardType="email-address" placeholder="test email" placeholderTextColor="#9a9a9a" />
+      <TextInput testID="staging-password" accessibilityLabel="Test account password" style={styles.input} value={password} onChangeText={setPassword}
+        secureTextEntry placeholder="password" placeholderTextColor="#9a9a9a" />
+      <Pressable testID="staging-sign-in" accessibilityRole="button" style={[styles.secondary, busy && styles.disabled]} onPress={go} disabled={busy}>
+        <Text style={styles.secondaryText}>Sign in to the test account</Text>
+      </Pressable>
+      {error !== null && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  staging: { marginTop: 12, padding: 14, gap: 10, borderRadius: radius.md, borderWidth: 1, borderColor: color.warnInk, backgroundColor: color.warnSoft },
+  stagingTitle: { fontSize: 14, fontWeight: "700", color: color.warnInk },
   scroll: { flex: 1, backgroundColor: color.ground },
   page: { flexGrow: 1, padding: 20, gap: 14, justifyContent: "center" },
   heading: { fontSize: 28, fontWeight: "700", color: color.ink, marginBottom: 4 },

@@ -33,3 +33,30 @@ jobs:
       # would have caught the 0.2.0 iOS build failure before a build was spent on it.
       - name: Release bundling, as EAS runs it (iOS and Android, mobile/ only)
         run: npm run check:bundle
+
+  # Phone-size layout checks in a browser build with faked data (scripts/layout): times never under
+  # the booking panel, ticket times clear of the court marking and above the perforation, Info tab
+  # without anything past the screen edge, the unresolved-booking banner and block. iPhone SE to
+  # Pro Max widths and larger text. The emulator workflow covers real Android rendering.
+  layout:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - name: Layout checks
+        run: SHOTS=/tmp/layout-shots bash scripts/layout/run.sh
+      - name: Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: layout-screenshots
+          path: /tmp/layout-shots/
+          if-no-files-found: ignore

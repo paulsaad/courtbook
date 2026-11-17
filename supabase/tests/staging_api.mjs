@@ -8,6 +8,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
 const { STAGING_SUPABASE_URL: RAW_URL, STAGING_ANON_KEY: ANON, STAGING_SERVICE_ROLE_KEY: SERVICE, DB, EXPECTED_REF, LIVE_REF, APP_URL } = process.env;
@@ -57,9 +58,11 @@ const day = new Date(Date.now() + 3 * 86400e3).toISOString().slice(0, 10);
 const at = (hhmm) => new Date(`${day}T${hhmm}:00+02:00`).toISOString(); // Beirut is UTC+2 in November
 
 function cleanup() {
+  const mine = "(select id from auth.users where email like 'api-%@courtbook.test')";
   sql(`drop function if exists public.hold_slot(uuid, uuid, timestamptz, timestamptz);
-       delete from payments where booking_id in (select b.id from bookings b join auth.users u on u.id = b.player_id where u.email like 'api-%@courtbook.test');
-       delete from bookings where player_id in (select id from auth.users where email like 'api-%@courtbook.test');
+       delete from payments where booking_id in (select id from bookings where player_id in ${mine} or created_by in ${mine});
+       delete from bookings where player_id in ${mine} or created_by in ${mine};
+       delete from club_staff where profile_id in ${mine};
        delete from auth.users where email like 'api-%@courtbook.test';
        update clubs set payment_mode='${MODE}' where id='${CLUB}';`);
 }
@@ -181,50 +184,81 @@ try {
   const p3 = await holder.client.rpc("confirm_payment", { p_payment: hold.payment_id, p_provider_ref: "x", p_total_usd: 21 });
   record("R14", "the owner cannot confirm their own payment directly (server only)", !!p3.error && sql(`select status from payments where id='${hold.payment_id}'`) === "pending", errOf(p3) ?? "confirmed!");
 
-  // ---------------------------------------------------------------- P. the web payment route
-  console.log(`--- P. /api/pay/simulate and /api/notify/email (this branch's web app at ${APP_URL}, pointed at staging)`);
-  const pay = (body, headers = {}) => fetch(`${APP_URL}/api/pay/simulate`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
-  const bearer = (t) => ({ authorization: `Bearer ${t}` });
-  const PAY = hold.payment_id;
-  const status = () => sql(`select p.status||'/'||b.status from payments p join bookings b on b.id=p.booking_id where p.id='${PAY}'`);
-  let r = await pay({ paymentId: PAY });
-  record("P1", "no sign-in at all: 401", r.status === 401, `HTTP ${r.status} ${await r.text()}`);
-  r = await pay({ paymentId: PAY }, { authorization: "Bearer not-a-token" });
-  record("P2", "malformed bearer token: 401", r.status === 401, `HTTP ${r.status}`);
-  r = await pay({ paymentId: PAY }, { authorization: `Basic ${Buffer.from("a:b").toString("base64")}` });
-  record("P3", "'Basic' credentials: 401", r.status === 401, `HTTP ${r.status}`);
-  const [h, , sig] = holder.token.split(".");
-  const forged = `${h}.${Buffer.from(JSON.stringify({ sub: holder.id, role: "authenticated", aud: "authenticated", exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url")}.${sig}`;
-  r = await pay({ paymentId: PAY }, bearer(forged));
-  record("P4", "a token that decodes but is not signed by staging (owner's id inside): 401", r.status === 401, `HTTP ${r.status}`);
-  r = await pay({ paymentId: PAY }, bearer(other.token));
-  record("P5", "another player's real token for this payment: 404, nothing changes", r.status === 404 && status() === "pending/pending", `HTTP ${r.status}, ${status()}`);
-  r = await pay({ paymentId: PAY, user_id: holder.id, profile_id: holder.id, userId: holder.id }, bearer(other.token));
-  record("P6", "...even with the owner's id in the body: 404 (identity is never read from the body)", r.status === 404 && status() === "pending/pending", `HTTP ${r.status}`);
-  const U3 = await player(3);
-  await admin.auth.admin.deleteUser(U3.id);
-  r = await pay({ paymentId: PAY }, bearer(U3.token));
-  record("P7", "the token of a deleted account: 401", r.status === 401, `HTTP ${r.status}`);
-  r = await pay({ paymentId: PAY }, bearer(holder.token));
-  const body7 = await r.text();
-  record("P8", "the owner's app token: paid, booking confirmed", r.status === 200 && status() === "paid/confirmed", `HTTP ${r.status} ${body7}, ${status()}`);
-  r = await pay({ paymentId: PAY }, bearer(holder.token));
-  record("P9", "paying again: 409 not_payable, still one payment", r.status === 409 && status() === "paid/confirmed", `HTTP ${r.status}`);
+  // P needs the app sign-in on the payment routes (G1), kept on branch payments-g1 until in-app
+  // payment is built; M2 leaves the website's routes as they are on main.
+  const G1 = existsSync(new URL("../../src/lib/supabase/request.ts", import.meta.url));
+  if (!G1) console.log("--- P. skipped: this branch's website has no app sign-in on the payment routes (G1 is on branch payments-g1)");
+  if (G1) {
+    // ---------------------------------------------------------------- P. the web payment route
+    console.log(`--- P. /api/pay/simulate and /api/notify/email (this branch's web app at ${APP_URL}, pointed at staging)`);
+    const pay = (body, headers = {}) => fetch(`${APP_URL}/api/pay/simulate`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+    const bearer = (t) => ({ authorization: `Bearer ${t}` });
+    const PAY = hold.payment_id;
+    const status = () => sql(`select p.status||'/'||b.status from payments p join bookings b on b.id=p.booking_id where p.id='${PAY}'`);
+    let r = await pay({ paymentId: PAY });
+    record("P1", "no sign-in at all: 401", r.status === 401, `HTTP ${r.status} ${await r.text()}`);
+    r = await pay({ paymentId: PAY }, { authorization: "Bearer not-a-token" });
+    record("P2", "malformed bearer token: 401", r.status === 401, `HTTP ${r.status}`);
+    r = await pay({ paymentId: PAY }, { authorization: `Basic ${Buffer.from("a:b").toString("base64")}` });
+    record("P3", "'Basic' credentials: 401", r.status === 401, `HTTP ${r.status}`);
+    const [h, , sig] = holder.token.split(".");
+    const forged = `${h}.${Buffer.from(JSON.stringify({ sub: holder.id, role: "authenticated", aud: "authenticated", exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url")}.${sig}`;
+    r = await pay({ paymentId: PAY }, bearer(forged));
+    record("P4", "a token that decodes but is not signed by staging (owner's id inside): 401", r.status === 401, `HTTP ${r.status}`);
+    r = await pay({ paymentId: PAY }, bearer(other.token));
+    record("P5", "another player's real token for this payment: 404, nothing changes", r.status === 404 && status() === "pending/pending", `HTTP ${r.status}, ${status()}`);
+    r = await pay({ paymentId: PAY, user_id: holder.id, profile_id: holder.id, userId: holder.id }, bearer(other.token));
+    record("P6", "...even with the owner's id in the body: 404 (identity is never read from the body)", r.status === 404 && status() === "pending/pending", `HTTP ${r.status}`);
+    const U3 = await player(3);
+    await admin.auth.admin.deleteUser(U3.id);
+    r = await pay({ paymentId: PAY }, bearer(U3.token));
+    record("P7", "the token of a deleted account: 401", r.status === 401, `HTTP ${r.status}`);
+    r = await pay({ paymentId: PAY }, bearer(holder.token));
+    const body7 = await r.text();
+    record("P8", "the owner's app token: paid, booking confirmed", r.status === 200 && status() === "paid/confirmed", `HTTP ${r.status} ${body7}, ${status()}`);
+    r = await pay({ paymentId: PAY }, bearer(holder.token));
+    record("P9", "paying again: 409 not_payable, still one payment", r.status === 409 && status() === "paid/confirmed", `HTTP ${r.status}`);
 
-  // the website: cookie session made by the same library the web app uses
-  const jar = new Map();
-  const ssr = createServerClient(URL_, ANON, { cookies: { getAll: () => [...jar].map(([name, value]) => ({ name, value })), setAll: (cs) => cs.forEach(({ name, value }) => jar.set(name, value)) } });
-  const s1 = await ssr.auth.signInWithPassword({ email: other.email, password: PW });
-  const cookie = [...jar].map(([n, v]) => `${n}=${v}`).join("; ");
-  const wh = await web(other, COURT3, "21:00", "22:00");
-  const WPAY = rowOf(wh)?.payment_id;
-  r = await pay({ paymentId: WPAY }, { cookie, authorization: "Bearer not-a-token" });
-  record("P10", "website cookie plus a bad Authorization header: 401 (never falls back to the cookie)", r.status === 401, `HTTP ${r.status}`);
-  r = await pay({ paymentId: WPAY }, { cookie });
-  record("P11", "the website's cookie sign-in, unchanged: paid", !s1.error && r.status === 200 && sql(`select status from payments where id='${WPAY}'`) === "paid", `HTTP ${r.status} ${await r.text()}`);
-  const n1 = await fetch(`${APP_URL}/api/notify/email`, { method: "POST", headers: bearer(holder.token) });
-  const n2 = await fetch(`${APP_URL}/api/notify/email`, { method: "POST", headers: { authorization: "Bearer x.y.z" } });
-  record("P12", "/api/notify/email: app token accepted, invalid token 401", n1.status === 200 && n2.status === 401, `${n1.status} / ${n2.status}`);
+    // the website: cookie session made by the same library the web app uses
+    const jar = new Map();
+    const ssr = createServerClient(URL_, ANON, { cookies: { getAll: () => [...jar].map(([name, value]) => ({ name, value })), setAll: (cs) => cs.forEach(({ name, value }) => jar.set(name, value)) } });
+    const s1 = await ssr.auth.signInWithPassword({ email: other.email, password: PW });
+    const cookie = [...jar].map(([n, v]) => `${n}=${v}`).join("; ");
+    const wh = await web(other, COURT3, "21:00", "22:00");
+    const WPAY = rowOf(wh)?.payment_id;
+    r = await pay({ paymentId: WPAY }, { cookie, authorization: "Bearer not-a-token" });
+    record("P10", "website cookie plus a bad Authorization header: 401 (never falls back to the cookie)", r.status === 401, `HTTP ${r.status}`);
+    r = await pay({ paymentId: WPAY }, { cookie });
+    record("P11", "the website's cookie sign-in, unchanged: paid", !s1.error && r.status === 200 && sql(`select status from payments where id='${WPAY}'`) === "paid", `HTTP ${r.status} ${await r.text()}`);
+    const n1 = await fetch(`${APP_URL}/api/notify/email`, { method: "POST", headers: bearer(holder.token) });
+    const n2 = await fetch(`${APP_URL}/api/notify/email`, { method: "POST", headers: { authorization: "Bearer x.y.z" } });
+    record("P12", "/api/notify/email: app token accepted, invalid token 401", n1.status === 200 && n2.status === 401, `${n1.status} / ${n2.status}`);
+  }
+  // ---------------------------------------------------------------- M. staff moves (0066)
+  console.log("--- M. move_booking through the API: staff moves keep the club's length limits (0066) and the slot rules");
+  // after P: switching the club to pay-at-the-club expires every open hold, by design
+  sql(`update clubs set payment_mode='at_desk' where id='${CLUB}'; insert into club_staff (club_id, profile_id) values ('${CLUB}', '${U1.id}') on conflict do nothing;`);
+  const limits = sql(`select slot_minutes||'/'||min_booking_minutes||'/'||max_booking_minutes from clubs where id='${CLUB}'`);
+  record("M0", "club limits for this test (grid / minimum / maximum, minutes)", limits === "30/60/180", limits);
+  const wk = await U1.client.rpc("staff_book", { p_club: CLUB, p_court: COURT3, p_start: at("09:00"), p_end: at("10:00"), p_name: "api-move", p_phone: null });
+  const MB = wk.data;
+  record("M1", "staff books a 1 h walk-in through the API", !wk.error && typeof MB === "string", errOf(wk) ?? "");
+  const move = (u, court, s0, e0) => u.client.rpc("move_booking", { p_booking: MB, p_court: court, p_start: at(s0), p_end: at(e0) });
+  const span = () => sql(`select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'-'||to_char(end_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='${MB}'`);
+  let m = await move(U1, COURT3, "09:00", "09:30");
+  record("M2", "move to 30 min (below the 1 h minimum): bad_duration", errOf(m)?.includes("bad_duration"), errOf(m) ?? "moved!");
+  m = await move(U1, COURT3, "09:00", "13:00");
+  record("M3", "move to 4 h (above the 3 h maximum): bad_duration", errOf(m)?.includes("bad_duration"), errOf(m) ?? "moved!");
+  record("M4", "...booking unchanged", span() === "09:00-10:00", span());
+  // 14:00 onwards is free on Padel 3 whether or not section P ran (P replaces a player's 12:00 hold).
+  m = await move(U1, COURT3, "14:00", "15:30");
+  record("M5", "move to 1 h 30 at another time: accepted", !m.error && span() === "14:00-15:30", errOf(m) ?? span());
+  m = await move(U1, COURT3, "14:10", "15:40");
+  record("M6", "off the grid: not_on_grid (slot trigger)", errOf(m)?.includes("not_on_grid"), errOf(m) ?? "moved!");
+  m = await move(U2, COURT3, "16:00", "17:00");
+  record("M7", "a player who is not staff: forbidden", errOf(m)?.includes("forbidden"), errOf(m) ?? "moved!");
+  sql(`delete from club_staff where profile_id='${U1.id}'`);
+
 } catch (e) {
   record("X", "test run stopped", false, e.message);
 } finally {

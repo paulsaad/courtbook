@@ -8,7 +8,9 @@ import { haptic } from "../lib/haptics";
 /**
  * One start time on the availability grid. Four states, each told apart by words and shape as
  * well as colour (approved design): free (outline, "3 courts"), limited (amber, "1 court free"),
- * selected (filled, tick, "selected"), booked (hatched, struck through, "Booked", not pressable).
+ * selected (filled, tick, "selected"), not free (hatched, struck through, "Not free", not pressable).
+ * "Not free" rather than "Booked": the availability data cannot tell a booking from the club being
+ * closed, and a screen must not assert what the system does not know.
  *
  * The counts describe what the last successful read returned. Nothing here promises the slot:
  * the server decides when the player reserves.
@@ -21,44 +23,49 @@ export function tileState(freeCourts: number, selected: boolean): TileState {
   return freeCourts === 1 ? "limited" : "free";
 }
 
-export function tileLabel(state: TileState, price: string, freeCourts: number): string {
+/** `price` is optional: the exact total comes from the server quote once a time is chosen. */
+export function tileLabel(state: TileState, price: string | null, freeCourts: number): string {
+  const p = price ? `${price} · ` : "";
   switch (state) {
-    case "booked": return "Booked";
-    case "selected": return `${price} · selected`;
-    case "limited": return `${price} · 1 court free`;
-    case "free": return `${price} · ${freeCourts} courts`;
+    case "booked": return "Not free";
+    case "selected": return `${p}selected`;
+    case "limited": return `${p}1 court free`;
+    case "free": return `${p}${freeCourts} courts`;
   }
 }
 
-export function tileAccessibilityLabel(time: string, state: TileState, price: string, freeCourts: number): string {
-  if (state === "booked") return `${time}, booked`;
+export function tileAccessibilityLabel(time: string, state: TileState, price: string | null, freeCourts: number): string {
+  if (state === "booked") return `${time}, not free`;
   const courts = freeCourts === 1 ? "1 court free" : `${freeCourts} courts free`;
-  return `${time}, ${price}, ${courts}${state === "selected" ? ", selected" : ""}`;
+  return `${time}, ${price ? `${price}, ` : ""}${courts}${state === "selected" ? ", selected" : ""}`;
 }
 
-type Props = { time: string; price: string; freeCourts: number; selected: boolean; onPress: () => void };
+type Props = { time: string; price?: string | null; freeCourts: number; selected: boolean; onPress: () => void; disabled?: boolean };
 
-export function TimeTile({ time, price, freeCourts, selected, onPress }: Props) {
+/** `disabled` locks the grid while a reservation is in flight; the selected time stays readable. */
+export function TimeTile({ time, price = null, freeCourts, selected, onPress, disabled = false }: Props) {
   const state = tileState(freeCourts, selected);
   const s = look[state];
   return (
     <Pressable
+      testID={state === "booked" ? `time-taken-${time}` : `time-${time}`}
       accessibilityRole="button"
       accessibilityLabel={tileAccessibilityLabel(time, state, price, freeCourts)}
-      accessibilityState={{ selected: state === "selected", disabled: state === "booked" }}
-      disabled={state === "booked"}
+      accessibilityState={{ selected: state === "selected", disabled: state === "booked" || disabled }}
+      disabled={state === "booked" || disabled}
       onPress={() => {
         haptic.select();
         onPress();
       }}
-      style={({ pressed }) => [styles.tile, s.tile, pressed && state !== "booked" && styles.pressed]}
+      style={({ pressed }) => [styles.tile, s.tile, pressed && state !== "booked" && styles.pressed, disabled && state !== "selected" && state !== "booked" && { opacity: 0.5 }]}
     >
       {state === "booked" && <Hatch />}
       <View style={styles.top}>
-        <Text style={[styles.time, s.time]}>{time}</Text>
+        {/* At the largest text sizes on a narrow phone, shrink rather than break "08:00" over two lines. */}
+        <Text style={[styles.time, s.time]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{time}</Text>
         {state === "selected" && <Icon name="check" size={18} color={color.onDark} strokeWidth={3} />}
       </View>
-      <Text style={[styles.label, s.label]}>{tileLabel(state, price, freeCourts)}</Text>
+      <Text style={[styles.label, s.label]} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{tileLabel(state, price, freeCourts)}</Text>
     </Pressable>
   );
 }
@@ -87,6 +94,6 @@ const styles = StyleSheet.create({
   tile: { minHeight: 72, borderRadius: radius.md, paddingHorizontal: 11, paddingVertical: 9, justifyContent: "space-between", overflow: "hidden", flex: 1 },
   pressed: { opacity: 0.85 },
   top: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  time: { fontFamily: font.score, fontSize: 26, lineHeight: 28 },
+  time: { fontFamily: font.score, fontSize: 26, lineHeight: 28, flexShrink: 1 },
   label: { fontFamily: font.semibold, fontSize: 13, lineHeight: 17 },
 });

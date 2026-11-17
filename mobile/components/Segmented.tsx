@@ -19,9 +19,12 @@ export function Segmented<T extends string>({ options, value, onChange }: { opti
 }
 
 const styles = StyleSheet.create({
-  track: { flexDirection: "row", padding: 4, gap: 4, borderRadius: 14, backgroundColor: "#E8E3D8" },
-  seg: { flex: 1, minHeight: 44, borderRadius: 11, alignItems: "center", justifyContent: "center" },
-  segOn: { backgroundColor: color.card },
-  text: { fontFamily: font.semibold, fontSize: 15, color: color.muted },
-  textOn: { fontFamily: font.bold, color: color.ink },
+  // Approved Club Info handoff §4A: 12 pt track, 10 pt white thumb with a hairline, SemiBold ink when
+  // selected, Regular muted otherwise. The track keeps its darker limestone so it stays visible on the
+  // limestone page.
+  track: { flexDirection: "row", padding: 4, gap: 4, borderRadius: 12, backgroundColor: "#E8E3D8" },
+  seg: { flex: 1, minHeight: 44, borderRadius: 10, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "transparent" },
+  segOn: { backgroundColor: color.card, borderColor: color.line },
+  text: { fontFamily: font.regular, fontSize: 15, color: color.muted },
+  textOn: { fontFamily: font.semibold, color: color.ink },
 });
