@@ -27,6 +27,9 @@ jobs:
         run: npm run typecheck
       - name: Unit tests
         run: npm test -- --ci
+      # The test-run clean-up restores the demo club's payment mode only from its own record (P1).
+      - name: Demo club payment-mode clean-up (throwaway PostgreSQL)
+        run: bash e2e/test-club-mode.sh
       - name: Shared copies match the web app's src/lib
         run: npm run check:shared
       # The exact release bundling step an EAS build runs, on mobile/ alone. This is the check that

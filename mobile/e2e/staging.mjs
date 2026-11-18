@@ -6,6 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
+import { recordAndSet, restore } from "./clubMode.mjs";
 
 const STAGING_REF = "pwznauyioqykdwodwpvx";
 const LIVE_REF = "lgujfbwunokobjxlvpuf";
@@ -18,17 +19,16 @@ const sql = (q) => execFileSync("psql", [DB, "-v", "ON_ERROR_STOP=1", "-At", "-c
 const admin = createClient(URL_, SERVICE, { auth: { persistSession: false, autoRefreshToken: false } });
 const email = `e2e-android-${GITHUB_RUN_ID}@courtbook.test`;
 const CLUB = sql("select id from clubs where slug='batroun'");
-const stateFile = "/tmp/e2e-state.json";
+const modeFile = "/tmp/e2e-club-mode.json"; // fresh on every CI runner
 
 async function prepare() {
-  const mode = sql(`select payment_mode from clubs where id='${CLUB}'`);
   const password = randomBytes(18).toString("base64url");
   const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
   if (error) throw new Error(`createUser: ${error.message}`);
   sql(`update profiles set name='Emma Tester' where id='${data.user.id}'`);
-  // The app reserves only at pay-at-the-club clubs (in-app payment is deferred).
-  sql(`update clubs set payment_mode='at_desk' where id='${CLUB}'`);
-  fs.writeFileSync(stateFile, JSON.stringify({ mode, userId: data.user.id }));
+  // The app reserves only at pay-at-the-club clubs (in-app payment is deferred). The original mode is
+  // recorded before it is changed, and only a recorded value is ever restored (clubMode.mjs).
+  const mode = recordAndSet({ sql, club: CLUB, stateFile: modeFile, runId: GITHUB_RUN_ID });
   const tomorrow = new Date(Date.now() + 26 * 3600e3).toISOString().slice(0, 10);
   const out = { E2E_EMAIL: email, E2E_PASSWORD: password, E2E_CLUB: CLUB, E2E_DATE: tomorrow };
   if (process.env.GITHUB_ENV) {
@@ -39,14 +39,13 @@ async function prepare() {
 }
 
 function cleanup() {
-  const st = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : { mode: "simulated" };
   const mine = `(select id from auth.users where email like 'e2e-android-%@courtbook.test')`;
   const left = sql(`select count(*) from bookings where player_id in ${mine}`);
   sql(`delete from payments where booking_id in (select id from bookings where player_id in ${mine});
        delete from bookings where player_id in ${mine};
-       delete from auth.users where email like 'e2e-android-%@courtbook.test';
-       update clubs set payment_mode='${st.mode}' where id='${CLUB}';`);
-  console.log(`cleaned up: ${left} test booking(s) removed, test accounts removed, club mode ${st.mode}`);
+       delete from auth.users where email like 'e2e-android-%@courtbook.test';`);
+  const r = restore({ sql, club: CLUB, stateFile: modeFile });
+  console.log(`cleaned up: ${left} test booking(s) removed, test accounts removed, club mode ${r.restored ? `restored to ${r.mode}` : `not changed — ${r.reason}`}`);
 }
 
 const cmd = process.argv[2];
