@@ -18,9 +18,25 @@ function expiry(seconds) {
   if (seconds % 60 === 0) return `It expires in ${seconds / 60} minute${seconds === 60 ? "" : "s"}. `;
   return `It expires in ${seconds} seconds. `;
 }
+// On failure, report only Supabase's own error message (never contains the token), the response type,
+// and whether this token can see the staging project at all — no other data.
+async function why(r) {
+  const type = r.headers?.get?.("content-type") || "?";
+  let msg = "";
+  try { const t = await r.text(); try { msg = JSON.parse(t).message || JSON.parse(t).error || ""; } catch { msg = type.includes("html") ? "(HTML page, not a Supabase API answer)" : t.slice(0, 160); } } catch {}
+  let seen = "?";
+  try {
+    const l = await fetch("https://api.supabase.com/v1/projects", { headers });
+    if (l.ok) { const ps = await l.json(); seen = `${ps.length} project(s) visible to this token; staging among them: ${ps.some((x) => x.id === REF || x.ref === REF) ? "yes" : "NO"}`; }
+    else seen = `listing projects also refused: HTTP ${l.status}`;
+    const one = await fetch(`https://api.supabase.com/v1/projects/${REF}`, { headers });
+    seen += `; staging project details: HTTP ${one.status}`;
+  } catch (e) { seen = "probe failed: " + e.message; }
+  return `HTTP ${r.status}; response type ${type}; Supabase says: ${msg || "(no message)"}; ${seen}`;
+}
 async function get() {
   const r = await fetch(api, { headers });
-  if (!r.ok) { console.error(`::error::reading staging auth settings failed: HTTP ${r.status}`); process.exit(1); }
+  if (!r.ok) { console.error(`::error::reading staging auth settings failed: ${await why(r)}`); process.exit(1); }
   return r.json();
 }
 console.log(`project: ${REF} (staging)`);
@@ -37,7 +53,7 @@ const want = {
 const describe = (c) => `OTP length ${c.mailer_otp_length}; Magic Link: code ${/\{\{\s*\.Token\s*\}\}/.test(c.mailer_templates_magic_link_content || "") ? "yes" : "NO"}, link ${/ConfirmationURL/.test(c.mailer_templates_magic_link_content || "") ? "yes" : "no"}; Confirm signup: code ${/\{\{\s*\.Token\s*\}\}/.test(c.mailer_templates_confirmation_content || "") ? "yes" : "NO"}, link ${/ConfirmationURL/.test(c.mailer_templates_confirmation_content || "") ? "yes" : "no"}`;
 console.log(`before: ${describe(before)}`);
 const p = await fetch(api, { method: "PATCH", headers, body: JSON.stringify(want) });
-if (!p.ok) { console.error(`::error::updating the staging templates failed: HTTP ${p.status}`); process.exit(1); }
+if (!p.ok) { console.error(`::error::updating the staging templates failed: ${await why(p)}`); process.exit(1); }
 const after = await get();
 console.log(`after:  ${describe(after)}`);
 const same = Object.entries(want).every(([k, v]) => after[k] === v);
