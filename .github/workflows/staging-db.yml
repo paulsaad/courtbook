@@ -14,9 +14,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk"
+        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else)"
         type: choice
-        options: [check, apply, smoke, api, reset_demo, tester]
+        options: [check, apply, smoke, api, reset_demo, tester, demo_at_desk]
         default: check
       up_to:
         description: "apply only: highest migration number to apply, e.g. 0064 (leave empty for all on this branch)"
@@ -27,7 +27,13 @@ on:
         type: string
         default: ""
 
-concurrency: staging-db
+# One staging-changing run at a time across BOTH workflows that change shared staging data (the demo
+# club's payment mode, test accounts): "Staging database" and "Mobile Android tests". A run waits
+# for the one in progress. GitHub keeps at most one waiting run per group: a newer one replaces it
+# (the replaced run never starts, so it changes nothing). Keep this group name identical in both files.
+concurrency:
+  group: staging-shared-data
+  cancel-in-progress: false
 
 jobs:
   staging:
@@ -167,6 +173,20 @@ jobs:
       - name: Put the demo club back to its seeded payment mode (reset_demo)
         if: inputs.action == 'reset_demo'
         run: psql "$DB" -v ON_ERROR_STOP=1 -c "update clubs set payment_mode = 'simulated' where slug = 'batroun' returning name || ' -> ' || payment_mode"
+
+      # One row, one column: the staging demo club's payment mode, back to "at the desk" for phone tests
+      # (finding P1, 18 Nov). Refuses unless this is the staging database (marker table) and the club is
+      # the demo club; changes no account, booking or setting.
+      - name: Demo club at the desk only (demo_at_desk)
+        if: inputs.action == 'demo_at_desk'
+        run: |
+          psql "$DB" -v ON_ERROR_STOP=1 -At <<'SQL'
+          do $$ begin
+            if to_regclass('staging_meta.applied') is null then raise exception 'not the staging database (no staging marker)'; end if;
+          end $$;
+          select 'before: ' || name || ' (' || payment_mode || ')' from public.clubs where slug = 'batroun' and is_demo;
+          update public.clubs set payment_mode = 'at_desk' where slug = 'batroun' and is_demo returning 'after: ' || name || ' (' || payment_mode || ')';
+          SQL
 
       - name: Booking-protection checks on staging
         if: inputs.action == 'smoke'

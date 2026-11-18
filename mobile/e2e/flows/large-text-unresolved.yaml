@@ -1,0 +1,22 @@
+# Run at 360 dp with text at 160 % and 200 %. The answer to a reservation is lost (Test tools): the
+# panel must show its message (brought into view inside the panel's own scroll) and a "Check now"
+# that is on screen and enabled. run-android.sh then checks it clears the navigation bar, and
+# large-text-unresolved-finish.yaml presses it, recovers the booking and cancels it (F6, 18 Nov).
+appId: app.courtbook.mobile.staging
+---
+- runFlow: _sign-in.yaml
+- tapOn: "Profile"
+- scrollUntilVisible: { element: "Answer lost" }
+- tapOn: "Answer lost"
+- extendedWaitUntil: { visible: ".*Test mode: answer lost.*", timeout: 10000 }
+- openLink: "courtbook-staging://club/${E2E_CLUB}?date=${E2E_DATE}"
+- extendedWaitUntil: { visible: { id: "time-.*" }, timeout: 30000, optional: true }
+- scrollUntilVisible: { element: { id: "time-1[0-9]:30" }, direction: DOWN, timeout: 30000, centerElement: true }
+- waitForAnimationToEnd: { timeout: 5000 }   # the list may still be moving after the scroll
+- tapOn: { id: "time-1[0-9]:30", index: 0 }
+- extendedWaitUntil: { visible: { id: "reserve-button", text: "Reserve court", enabled: true }, timeout: 30000 }
+- tapOn: { id: "reserve-button" }
+- extendedWaitUntil: { visible: { id: "reserve-button", text: "Check now", enabled: true }, timeout: 90000 }
+# The message about the unconfirmed booking is in view without scrolling by hand.
+- extendedWaitUntil: { visible: "(We couldn't confirm your booking yet|Checking whether your booking went through|No booking found yet|Your sign-in expired).*", timeout: 20000 }
+- takeScreenshot: shots/sizes/unresolved-${SUFFIX}

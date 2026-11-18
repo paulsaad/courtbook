@@ -1,14 +1,25 @@
-# Offline at the moment of reserving: nothing is sent, and the player is told so.
+# Offline at the moment of reserving: the times say they are from before, the Reserve button says
+# why and cannot be pressed, and nothing is sent. Back online, both return to normal by themselves.
+# (That the store itself sends nothing offline is proven by the unit tests over the real reserve().)
 appId: app.courtbook.mobile.staging
 ---
 - runFlow: _sign-in.yaml
 - openLink: "courtbook-staging://club/${E2E_CLUB}?date=${E2E_DATE}"
 - extendedWaitUntil: { visible: { id: "time-1[0-9]:00" }, timeout: 30000 }
 - tapOn: { id: "time-1[0-9]:00", index: 0 }
-- extendedWaitUntil: { visible: "Reserve court", timeout: 20000 }
+- extendedWaitUntil: { visible: { id: "reserve-button", text: "Reserve court", enabled: true }, timeout: 20000 }
 - setAirplaneMode: enabled
 - extendedWaitUntil: { visible: ".*You're offline.*", timeout: 20000 }
-- tapOn: "Reserve court"
-- extendedWaitUntil: { visible: ".*nothing was sent.*", timeout: 20000 }
+- extendedWaitUntil: { visible: { id: "reserve-button", text: "Connect to the internet to reserve", enabled: false }, timeout: 20000 }
+# The times line sits above the tiles; picking a time may have scrolled it away.
+- scrollUntilVisible: { element: { text: "Offline · times as of \\d\\d:\\d\\d" }, direction: UP, timeout: 15000 }
+- assertNotVisible: "Checked.*"
+# Pressing the disabled button does nothing: no request, and not even the store's offline message.
+- tapOn: { id: "reserve-button" }
+- assertNotVisible: ".*nothing was sent.*"
 - takeScreenshot: shots/10-offline
 - setAirplaneMode: disabled
+- extendedWaitUntil: { visible: { id: "reserve-button", text: "Reserve court", enabled: true }, timeout: 45000 }
+- extendedWaitUntil: { visible: "(Checked .*|Checking for changes…)", timeout: 30000 }
+- assertNotVisible: "Offline · times as of.*"
+- takeScreenshot: shots/11-back-online

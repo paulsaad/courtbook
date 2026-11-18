@@ -1,0 +1,32 @@
+# Run at 360 dp with text at 160 % and 200 % (run-android.sh). The booking panel at the largest text:
+# date and time, court, duration, price, payment and cancellation text all reachable and readable,
+# and Reserve on screen and enabled (F5/F6, 18 Nov). large-text-reserve.yaml then presses it.
+appId: app.courtbook.mobile.staging
+---
+- runFlow: _sign-in.yaml
+- openLink: "courtbook-staging://club/${E2E_CLUB}?date=${E2E_DATE}"
+- extendedWaitUntil: { visible: { id: "time-.*" }, timeout: 30000, optional: true }
+- scrollUntilVisible: { element: { id: "time-.*" }, direction: DOWN, timeout: 20000 }
+- waitForAnimationToEnd: { timeout: 5000 }   # the list may still be moving after the scroll
+- tapOn: { id: "time-.*", index: 0 }
+- extendedWaitUntil: { visible: { id: "reserve-button", text: "Reserve court", enabled: true }, timeout: 30000 }
+- assertVisible: { id: "booking-details" }
+# Each detail in panel order; at 200 % text the details are taller than the panel, so scroll the
+# panel's own list (not the page) until each one is in view.
+- assertVisible: ".*\\d\\d:\\d\\d\\D{1,3}\\d\\d:\\d\\d.*"
+- takeScreenshot: shots/sizes/panel-top-${SUFFIX}
+- repeat:
+    while: { notVisible: "pay at the club" }
+    times: 5
+    commands:
+      - swipe: { from: { id: "booking-details" }, direction: UP, duration: 600 }
+- assertVisible: "Total \\d+ dollars"
+- assertVisible: "pay at the club"
+- repeat:
+    while: { notVisible: "Nothing is charged in the app.*" }
+    times: 5
+    commands:
+      - swipe: { from: { id: "booking-details" }, direction: UP, duration: 600 }
+- assertVisible: "Nothing is charged in the app\\..*Free cancellation up to \\d+ h before\\."
+- assertVisible: { id: "reserve-button", text: "Reserve court", enabled: true }
+- takeScreenshot: shots/sizes/panel-end-${SUFFIX}

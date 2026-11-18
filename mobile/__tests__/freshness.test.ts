@@ -31,3 +31,27 @@ describe("describeFreshness", () => {
     expect(f({ lastSuccessAt: 0 }).tone).toBe("failed");
   });
 });
+
+describe("describeFreshness offline", () => {
+  it("never shows the green 'Checked …' while offline, however recent the read", () => {
+    for (const now of [T, T + 30_000, T + 3 * 60_000, T + 6 * 60_000]) {
+      const r = f({ now, offline: true });
+      expect(r.tone).toBe("stale");
+      expect(r.text).toMatch(/^Offline · times as of \d\d:\d\d$/);
+      expect(r.text).not.toMatch(/Checked|pull to refresh/);
+    }
+  });
+
+  it("says offline rather than 'checking' or 'couldn't refresh'", () => {
+    expect(f({ offline: true, fetching: true }).text).toMatch(/^Offline · /);
+    expect(f({ offline: true, failedSinceSuccess: true }).text).toMatch(/^Offline · /);
+  });
+
+  it("with nothing loaded, says so", () => {
+    expect(f({ lastSuccessAt: 0, offline: true })).toEqual({ text: "Offline · times not loaded", tone: "failed" });
+  });
+
+  it("online is unchanged when the flag is false", () => {
+    expect(f({ now: T + 3 * 60_000, offline: false })).toEqual(f({ now: T + 3 * 60_000 }));
+  });
+});

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RefreshControl, ScrollView, StyleSheet, View, type HostInstance, type ScrollViewInstance } from "react-native";
+import { RefreshControl, ScrollView, StyleSheet, View, useWindowDimensions, type HostInstance, type ScrollViewInstance } from "react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -10,6 +10,7 @@ import { DateStrip } from "../../components/DateStrip";
 import { TimeTile } from "../../components/TimeTile";
 import { Button } from "../../components/Button";
 import { Freshness } from "../../components/Freshness";
+import { wrappingTitle } from "../../components/HeaderTitle";
 import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { Segmented } from "../../components/Segmented";
 import { ClubInfoView } from "../../components/ClubInfoView";
@@ -20,6 +21,9 @@ import { clubsFromSlots, durationLabel, durationOptions, partOfDay, sameInstant,
 import { BEIRUT, money, tilePriceLabel, useClubMode, useDaySlots, useQuote, useTilePrices } from "../../lib/queries";
 import { useSession } from "../../lib/session";
 import { useReservation } from "../../lib/reservation";
+import { joinParts, timeRange, unit } from "../../lib/panelText";
+import { reserveButton } from "../../lib/reserveButton";
+import { useOnline } from "../../lib/online";
 import { haptic } from "../../lib/haptics";
 import { bookingDays, shortDate, sportName } from "../../lib/days";
 import { color, font, radius, space } from "../../lib/theme";
@@ -33,6 +37,9 @@ import { color, font, radius, space } from "../../lib/theme";
 export default function Club() {
   const p = useLocalSearchParams<{ id: string; name?: string; date?: string; sport?: string; at?: string; tab?: string }>();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight, fontScale } = useWindowDimensions();
+  // F5: above this text scale the price goes under the booking details instead of beside them.
+  const stackSummary = fontScale > SUMMARY_BESIDE_PRICE_MAX_SCALE;
   const days = useMemo(() => bookingDays(BEIRUT), []);
   const [date, setDate] = useState(p.date ?? days[0].key);
   const sport = p.sport ?? null;
@@ -57,6 +64,7 @@ export default function Club() {
   const court = freeCourts.find((c) => c.id === courtId) ?? freeCourts[0] ?? null;
 
   const session = useSession();
+  const online = useOnline();
   const queryClient = useQueryClient();
   const mode = useClubMode(club?.id ?? null);
   const res = useReservation({
@@ -95,6 +103,14 @@ export default function Club() {
       : null);
 
   const scroller = useRef<ScrollViewInstance | null>(null);
+  // F6: the panel's details scroll at the largest text. A message about the reservation (offline,
+  // not confirmed yet, refused…) is the last item; bring it into view whenever it appears or changes.
+  const details = useRef<ScrollViewInstance | null>(null);
+  useEffect(() => {
+    if (!res.problem) return;
+    const id = requestAnimationFrame(() => details.current?.scrollToEnd({ animated: animate() }));
+    return () => cancelAnimationFrame(id);
+  }, [res.problem]);
   const content = useRef<HostInstance | null>(null);
   const cells = useRef(new Map<string, HostInstance | null>());
   const groupY = useRef<Record<string, number>>({});
@@ -138,21 +154,16 @@ export default function Club() {
   }
 
   const atDesk = mode.data === "at_desk";
-  const reserveLabel =
-    res.phase === "sending" ? "Reserving…"
-    : res.phase === "checking" ? "Checking…"
-    : res.phase === "uncertain" ? "Check now"
-    : session.status !== "signed-in" ? "Sign in to reserve"
-    : res.blockedBy ? "Earlier booking not confirmed"
-    : mode.isPending ? "Checking the club…"
-    : !atDesk ? "Reserve on the website for now"
-    : "Reserve court";
+  const reserveBtn = reserveButton({
+    phase: res.phase, signedIn: session.status === "signed-in", online, blocked: !!res.blockedBy,
+    modePending: mode.isPending, atDesk, priceKnown: shown !== null && shown.price !== null, // the panel renders only when shown exists
+  });
   const groups = groupTiles(tiles, club?.timezone ?? BEIRUT);
   const tz = club?.timezone ?? res.pending?.timezone ?? BEIRUT;
 
   return (
     <View style={styles.page}>
-      <Stack.Screen options={{ title: name }} />
+      <Stack.Screen options={wrappingTitle(name)} />
       <View style={styles.tabs}>
         <Segmented
           options={[{ key: "book", label: "Book" }, { key: "info", label: "Info" }]}
@@ -244,47 +255,52 @@ export default function Club() {
       )}
 
       {tab === "book" && shown && (club || res.pending) && (
-        <View testID="booking-panel" style={[styles.panel, { paddingBottom: insets.bottom + 14 }]}>
-          <View style={styles.courtRow} accessibilityRole="radiogroup">
-            <Text variant="label" style={{ marginRight: 10, flexShrink: 0 }} numberOfLines={1}>Court</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-              {locked ? (
-                <Chip label={shown.courtName} selected disabled onPress={() => {}} />
-              ) : (
-                freeCourts.map((c) => (
-                  <Chip key={c.id} label={courtLabel(c, tile ? prices.data?.get(tile.start) : undefined)} selected={c.id === shown.courtId} onPress={() => setCourtId(c.id)} />
-                ))
-              )}
-            </ScrollView>
-          </View>
-          {!locked && freeCourts.length === 1 && <Text variant="caption">The only court free at this time.</Text>}
-          <View style={styles.summaryRow}>
-            <View style={{ flexShrink: 1 }}>
-              <Text variant="strong">{shortDate(shown.date)} · {hhmm(shown.start, tz)}–{hhmm(new Date(Date.parse(shown.start) + shown.minutes * 60_000), tz)}</Text>
-              <Text variant="secondary">{[sport ? sportName(sport) : null, shown.courtName, durationLabel(shown.minutes)].filter(Boolean).join(" · ")}</Text>
+        // F6: the panel never takes more than PANEL_MAX_SHARE of the screen. At the largest text the
+        // details scroll inside it, and Reserve stays pinned below them, above the safe area.
+        <View testID="booking-panel" style={[styles.panel, { paddingBottom: insets.bottom + 14, maxHeight: Math.round(windowHeight * PANEL_MAX_SHARE) }]}>
+          <ScrollView ref={details} testID="booking-details" style={styles.details} contentContainerStyle={styles.detailsContent} persistentScrollbar>
+            <View style={styles.courtRow} accessibilityRole="radiogroup">
+              <Text variant="label" style={{ marginRight: 10, flexShrink: 0 }} numberOfLines={1}>Court</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                {locked ? (
+                  <Chip label={shown.courtName} selected disabled onPress={() => {}} />
+                ) : (
+                  freeCourts.map((c) => (
+                    <Chip key={c.id} label={courtLabel(c, tile ? prices.data?.get(tile.start) : undefined)} selected={c.id === shown.courtId} onPress={() => setCourtId(c.id)} />
+                  ))
+                )}
+              </ScrollView>
             </View>
-            <View style={{ alignItems: "flex-end" }}>
-              {shown.price !== null ? (
-                <Text style={styles.total} accessibilityLabel={`Total ${shown.price} dollars`}>{money(shown.price)}</Text>
-              ) : quote.isError ? (
-                <Text variant="caption" style={{ color: color.danger }}>Price unavailable</Text>
-              ) : (
-                <Text variant="caption">Getting price…</Text>
-              )}
-              <Text variant="caption">{atDesk ? "pay at the club" : "court price"}</Text>
+            {!locked && freeCourts.length === 1 && <Text variant="caption">The only court free at this time.</Text>}
+            <View testID="booking-summary" style={stackSummary ? styles.summaryStacked : styles.summaryRow}>
+              <View style={{ flexShrink: 1 }}>
+                <Text variant="strong">{unit(shortDate(shown.date))}{"\u00A0· "}{timeRange(hhmm(shown.start, tz), hhmm(new Date(Date.parse(shown.start) + shown.minutes * 60_000), tz))}</Text>
+                <Text variant="secondary">{joinParts([sport ? sportName(sport) : null, shown.courtName, durationLabel(shown.minutes)].filter((x): x is string => !!x))}</Text>
+              </View>
+              <View style={{ alignItems: stackSummary ? "flex-start" : "flex-end" }}>
+                {shown.price !== null ? (
+                  <Text style={styles.total} accessibilityLabel={`Total ${shown.price} dollars`}>{money(shown.price)}</Text>
+                ) : quote.isError ? (
+                  <Text variant="caption" style={{ color: color.danger }}>Price unavailable</Text>
+                ) : (
+                  <Text variant="caption">Getting price…</Text>
+                )}
+                <Text variant="caption">{atDesk ? "pay at the club" : "court price"}</Text>
+              </View>
             </View>
-          </View>
-          {res.problem ? (
-            <Text style={res.phase === "idle" && !res.blockedBy ? styles.problem : styles.pending} accessibilityRole="alert" accessibilityLiveRegion="polite">{res.problem}</Text>
-          ) : atDesk ? (
-            <Text variant="caption">Nothing is charged in the app.{cutoff !== null ? ` Free cancellation up to ${cutoff} h before.` : ""}</Text>
-          ) : mode.isSuccess ? (
-            <Text variant="caption">This club takes payment in the app. That arrives in the next update — reserve it on the website for now.</Text>
-          ) : null}
+            {res.problem ? (
+              <Text style={res.phase === "idle" && !res.blockedBy ? styles.problem : styles.pending} accessibilityRole="alert" accessibilityLiveRegion="polite">{res.problem}</Text>
+            ) : atDesk ? (
+              <Text variant="caption">Nothing is charged in the app.{cutoff !== null ? ` Free cancellation up to ${cutoff} h before.` : ""}</Text>
+            ) : mode.isSuccess ? (
+              <Text variant="caption">This club takes payment in the app. That arrives in the next update — reserve it on the website for now.</Text>
+            ) : null}
+          </ScrollView>
           <Button
-            label={reserveLabel}
+            testID="reserve-button"
+            label={reserveBtn.label}
             busy={res.phase === "sending" || res.phase === "checking"}
-            disabled={res.phase === "idle" && session.status === "signed-in" && (!!res.blockedBy || !atDesk || shown.price === null)}
+            disabled={reserveBtn.disabled}
             onPress={res.phase === "uncertain" ? () => void res.check() : onReserve}
           />
         </View>
@@ -292,6 +308,11 @@ export default function Club() {
     </View>
   );
 }
+
+/** F6: the most of the screen the booking panel may take; beyond it its details scroll. */
+export const PANEL_MAX_SHARE = 0.55;
+/** F5: largest text scale at which the price still sits beside the booking details on a 360 dp phone. */
+export const SUMMARY_BESIDE_PRICE_MAX_SCALE = 1.3;
 
 function courtLabel(c: { id: string; name: string }, prices: Map<string, { price: number | null }> | undefined) {
   const known = prices ? [...prices.values()].map((p) => p.price).filter((p): p is number => p !== null) : [];
@@ -328,6 +349,9 @@ const styles = StyleSheet.create({
   panel: { backgroundColor: color.card, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, borderTopWidth: 1, borderColor: color.line, paddingHorizontal: 20, paddingTop: 14, gap: 10 },
   courtRow: { flexDirection: "row", alignItems: "center" },
   summaryRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", gap: 12 },
+  summaryStacked: { gap: 6 },
+  details: { flexGrow: 0, flexShrink: 1 },
+  detailsContent: { gap: 10 },
   total: { fontFamily: font.score, fontSize: 30, lineHeight: 32, color: color.ink },
   problem: { fontFamily: font.semibold, fontSize: 15, color: color.danger },
   pending: { fontFamily: font.semibold, fontSize: 15, color: color.warnInk },
