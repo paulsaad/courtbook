@@ -1,23 +1,24 @@
 // Prepares and cleans up the staging database for the Android emulator tests. Staging only:
 // refuses anything that is not the staging project. Run from mobile/ (uses its supabase-js).
 //   node e2e/staging.mjs prepare   → test account, demo club at the desk; writes E2E_* to $GITHUB_ENV
-//   node e2e/staging.mjs cleanup   → removes the run's account, bookings and payments; restores the club
+//   node e2e/staging.mjs cleanup   → removes this run's own account, bookings and payments; restores the club
 import { createClient } from "@supabase/supabase-js";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import { recordAndSet, restore } from "./clubMode.mjs";
+import { cleanupRunAccount, runEmail } from "./runAccount.mjs";
 
 const STAGING_REF = "pwznauyioqykdwodwpvx";
 const LIVE_REF = "lgujfbwunokobjxlvpuf";
-const { STAGING_SUPABASE_URL: URL_, STAGING_SERVICE_ROLE_KEY: SERVICE, STAGING_DB_URL: DB, GITHUB_RUN_ID = "local" } = process.env;
+const { STAGING_SUPABASE_URL: URL_, STAGING_SERVICE_ROLE_KEY: SERVICE, STAGING_DB_URL: DB, GITHUB_RUN_ID = "local", GITHUB_RUN_ATTEMPT = "1" } = process.env;
 for (const [k, v] of Object.entries({ URL_, SERVICE, DB })) if (!v) throw new Error(`${k} missing`);
 if (!URL_.includes(STAGING_REF) || URL_.includes(LIVE_REF) || !DB.includes(STAGING_REF) || DB.includes(LIVE_REF)) {
   throw new Error("Refusing: these settings are not the staging project.");
 }
 const sql = (q) => execFileSync("psql", [DB, "-v", "ON_ERROR_STOP=1", "-At", "-c", q], { encoding: "utf8" }).trim();
 const admin = createClient(URL_, SERVICE, { auth: { persistSession: false, autoRefreshToken: false } });
-const email = `e2e-android-${GITHUB_RUN_ID}@courtbook.test`;
+const email = runEmail(GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT); // this run and attempt only
 const CLUB = sql("select id from clubs where slug='batroun'");
 const modeFile = "/tmp/e2e-club-mode.json"; // fresh on every CI runner
 
@@ -39,13 +40,10 @@ async function prepare() {
 }
 
 function cleanup() {
-  const mine = `(select id from auth.users where email like 'e2e-android-%@courtbook.test')`;
-  const left = sql(`select count(*) from bookings where player_id in ${mine}`);
-  sql(`delete from payments where booking_id in (select id from bookings where player_id in ${mine});
-       delete from bookings where player_id in ${mine};
-       delete from auth.users where email like 'e2e-android-%@courtbook.test';`);
+  // Only this run's own account, bookings and payments; never another run's.
+  const left = cleanupRunAccount({ sql, email });
   const r = restore({ sql, club: CLUB, stateFile: modeFile });
-  console.log(`cleaned up: ${left} test booking(s) removed, test accounts removed, club mode ${r.restored ? `restored to ${r.mode}` : `not changed — ${r.reason}`}`);
+  console.log(`cleaned up: ${left} test booking(s) of this run removed, this run's account removed, club mode ${r.restored ? `restored to ${r.mode}` : `not changed — ${r.reason}`}`);
 }
 
 const cmd = process.argv[2];

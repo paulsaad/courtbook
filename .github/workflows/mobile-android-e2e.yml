@@ -16,8 +16,12 @@ on:
         options: [android, ios]
         default: android
 
+# One staging-changing run at a time across BOTH workflows that change shared staging data (the demo
+# club's payment mode, test accounts): "Staging database" and "Mobile Android tests". A run waits
+# for the one in progress. GitHub keeps at most one waiting run per group: a newer one replaces it
+# (the replaced run never starts, so it changes nothing). Keep this group name identical in both files.
 concurrency:
-  group: android-e2e-staging
+  group: staging-shared-data
   cancel-in-progress: false
 
 permissions:

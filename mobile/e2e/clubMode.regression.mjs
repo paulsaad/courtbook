@@ -1,5 +1,5 @@
 // Regression tests for clubMode.mjs (finding P1; named so that Jest does not collect it) against a real, throwaway PostgreSQL database whose
-// clubs table has the same payment_mode check as staging. Run with e2e/test-club-mode.sh.
+// clubs table has the same payment_mode check as staging. Run with e2e/test-staging-cleanup.sh.
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -9,7 +9,7 @@ import path from "node:path";
 import { recordAndSet, restore } from "./clubMode.mjs";
 
 const DB = process.env.CLUBMODE_TEST_DB;
-if (!DB) throw new Error("CLUBMODE_TEST_DB missing (use e2e/test-club-mode.sh)");
+if (!DB) throw new Error("CLUBMODE_TEST_DB missing (use e2e/test-staging-cleanup.sh)");
 const sql = (q) => execFileSync("psql", [DB, "-v", "ON_ERROR_STOP=1", "-At", "-c", q], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 const CLUB = "16020754-ccbe-4068-aa97-ca7f46ff9f99";
 const mode = () => sql(`select payment_mode from clubs where id='${CLUB}'`);
