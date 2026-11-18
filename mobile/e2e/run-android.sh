@@ -47,8 +47,20 @@ echo "::endgroup::"
 
 # What was on screen when a large-text step failed: visible words and ids only. Editable fields are
 # skipped entirely, so nothing typed (such as the test password) can be printed.
+# A fresh screen dump or nothing: `uiautomator dump` can fail while the screen animates yet exit 0,
+# leaving the previous file behind, so the old file is removed first and its absence is an error.
+dumpui() {
+  adb shell rm -f /sdcard/ui.xml
+  for _ in 1 2 3 4 5; do
+    adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+    if adb shell ls /sdcard/ui.xml >/dev/null 2>&1; then adb pull /sdcard/ui.xml "$1" >/dev/null && return 0; fi
+    sleep 2
+  done
+  echo "::error::no fresh screen dump for $1"; return 1
+}
 onscreen() {
-  adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/fail-$1.xml" >/dev/null
+  adb exec-out screencap -p > "$OUT/shots/sizes/fail-$1.png" || true   # works even while animating
+  dumpui "$OUT/fail-$1.xml" || return 0
   python3 - "$OUT/fail-$1.xml" <<'PY'
 import re, sys
 t = open(sys.argv[1], encoding="utf-8").read()
@@ -80,18 +92,16 @@ for cfg in "1080x2400 420 412dp" "1080x1920 480 360dp"; do
     if [ "$name" = 360dp ] && { [ "$fs" = 1.6 ] || [ "$fs" = 2.0 ]; }; then
       echo "::group::large text $name $fs"
       if (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/large-text-panel.yaml); then
-        adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/panel-$fs.xml" >/dev/null
         adb shell dumpsys window > "$OUT/window-$fs.txt"
-        python3 e2e/check_reachable.py "$OUT/panel-$fs.xml" "$OUT/window-$fs.txt" "$dpi" "reserve $name text $fs" || status=1
+        { dumpui "$OUT/panel-$fs.xml" && python3 e2e/check_reachable.py "$OUT/panel-$fs.xml" "$OUT/window-$fs.txt" "$dpi" "reserve $name text $fs" "Reserve court"; } || status=1
         if (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/large-text-reserve.yaml); then
           echo "large text $name $fs: PASS"
         else echo "::error::large-text reserve $name $fs failed"; onscreen "reserve-$fs"; status=1; fi
       else echo "::error::large-text panel $name $fs failed"; onscreen "panel-$fs"; status=1; fi
       # Unresolved booking at the same size: message in view, "Check now" reachable and pressable.
       if (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/large-text-unresolved.yaml); then
-        adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/unresolved-$fs.xml" >/dev/null
         adb shell dumpsys window > "$OUT/window-u-$fs.txt"
-        python3 e2e/check_reachable.py "$OUT/unresolved-$fs.xml" "$OUT/window-u-$fs.txt" "$dpi" "check-now $name text $fs" || status=1
+        { dumpui "$OUT/unresolved-$fs.xml" && python3 e2e/check_reachable.py "$OUT/unresolved-$fs.xml" "$OUT/window-u-$fs.txt" "$dpi" "check-now $name text $fs" "Check now"; } || status=1
         if (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/large-text-unresolved-finish.yaml); then
           echo "large text unresolved $name $fs: PASS"
         else echo "::error::large-text unresolved finish $name $fs failed"; onscreen "finish-$fs"; status=1; fi

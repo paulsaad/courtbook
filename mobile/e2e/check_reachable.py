@@ -1,14 +1,17 @@
 """Is the Reserve button fully on screen and clear of Android's navigation bar? (F6, 18 Nov)
 
-usage: check_reachable.py ui.xml dumpsys-window.txt dpi label
+usage: check_reachable.py ui.xml dumpsys-window.txt dpi label expected-button-label
 ui.xml: `uiautomator dump` of the club screen; dumpsys-window.txt: `dumpsys window` output, which
 gives the navigation bar's frame. Prints one line; exit 1 if the button is cut off, covered or small.
-Reads only bounds and ids, never text."""
+Reads bounds, ids and the button's own label (so a stale screen cannot pass), never any field."""
 import re, sys
-ui, win, dpi, label = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+ui, win, dpi, label, expected = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5]
 xml = open(ui, encoding="utf-8").read()
-m = re.search(r'<node[^>]*resource-id="reserve-button"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml) \
-    or re.search(r'<node[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"[^>]*resource-id="reserve-button"', xml)
+node = next((n for n in re.findall(r"<node [^>]*>", xml) if 'resource-id="reserve-button"' in n), None)
+m = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node) if node else None
+desc = re.search(r'content-desc="([^"]*)"', node).group(1) if node and 'content-desc="' in node else None
+if m and desc != expected:
+    print(f"{label}: FAIL the button on screen reads {desc!r}, expected {expected!r}"); sys.exit(1)
 root = re.search(r'<node[^>]*bounds="\[0,0\]\[(\d+),(\d+)\]"', xml)
 if not m or not root:
     print(f"{label}: FAIL reserve button not found on screen"); sys.exit(1)

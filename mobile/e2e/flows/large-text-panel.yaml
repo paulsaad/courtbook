@@ -7,6 +7,7 @@ appId: app.courtbook.mobile.staging
 - openLink: "courtbook-staging://club/${E2E_CLUB}?date=${E2E_DATE}"
 - extendedWaitUntil: { visible: { id: "time-.*" }, timeout: 30000, optional: true }
 - scrollUntilVisible: { element: { id: "time-.*" }, direction: DOWN, timeout: 20000 }
+- waitForAnimationToEnd: { timeout: 5000 }   # the list may still be moving after the scroll
 - tapOn: { id: "time-.*", index: 0 }
 - extendedWaitUntil: { visible: { id: "reserve-button", text: "Reserve court", enabled: true }, timeout: 30000 }
 - assertVisible: { id: "booking-details" }
