@@ -14,9 +14,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk"
+        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; auth_templates = TEMPORARY: staging sign-in email templates carry the 6-digit code (Management API, SUPABASE_ACCESS_TOKEN secret)"
         type: choice
-        options: [check, apply, smoke, api, reset_demo, tester]
+        options: [check, apply, smoke, api, reset_demo, tester, auth_templates]
         default: check
       up_to:
         description: "apply only: highest migration number to apply, e.g. 0064 (leave empty for all on this branch)"
@@ -161,6 +161,12 @@ jobs:
           STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
           STAGING_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SERVICE_ROLE_KEY }}
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+          STAGING_TESTER_PASSWORD: ${{ secrets.STAGING_TESTER_PASSWORD }}
+        run: node mobile/e2e/staging-tester.mjs
+
+      - name: Staging sign-in email templates carry the 6-digit code (auth_templates, temporary)
+        if: inputs.action == 'auth_templates'
+        env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: node mobile/e2e/staging-auth-templates.mjs
 
