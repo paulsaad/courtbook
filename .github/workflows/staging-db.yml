@@ -17,9 +17,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else)"
+        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else); fixes_preflight / fixes_postcheck = read-only checks before / after applying 0068–0071 (supabase/live/fixes_*.sql)"
         type: choice
-        options: [check, apply, smoke, api, reset_demo, tester, demo_at_desk]
+        options: [check, apply, smoke, api, reset_demo, tester, demo_at_desk, fixes_preflight, fixes_postcheck]
         default: check
       migrations:
         description: "apply only: the exact migration numbers to apply, e.g. '0068 0069 0070 0071' — nothing else is applied; 'check' lists what is pending"
@@ -198,6 +198,16 @@ jobs:
           select 'before: ' || name || ' (' || payment_mode || ')' from public.clubs where slug = 'batroun' and is_demo;
           update public.clubs set payment_mode = 'at_desk' where slug = 'batroun' and is_demo returning 'after: ' || name || ' (' || payment_mode || ')';
           SQL
+
+      # The same read-only scripts as on live, for the staging run of 0068–0071 (release-fixes §4 step 3):
+      # preflight once before 'apply', postcheck once after. Every row must be ok / true; they change nothing.
+      - name: Release fixes preflight, read only (fixes_preflight)
+        if: inputs.action == 'fixes_preflight'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/fixes_preflight.sql
+
+      - name: Release fixes postcheck, read only (fixes_postcheck)
+        if: inputs.action == 'fixes_postcheck'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/fixes_postcheck.sql
 
       - name: Booking-protection checks on staging
         if: inputs.action == 'smoke'
