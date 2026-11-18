@@ -12,6 +12,9 @@ appId: app.courtbook.mobile.staging
 - openLink: "courtbook-staging://club/${E2E_CLUB}?date=${E2E_DATE}"
 - extendedWaitUntil: { visible: { id: "time-.*" }, timeout: 30000, optional: true }
 - takeScreenshot: shots/sizes/club-book-${SUFFIX}
+# On a narrow phone with large text the times start below the fold; without this scroll the tap
+# was skipped and no size screenshot ever showed a selected time (missed finding F4, 18 Nov).
+- scrollUntilVisible: { element: { id: "time-.*" }, direction: DOWN, timeout: 20000, optional: true }
 - tapOn: { id: "time-.*", index: 0, optional: true }
 - takeScreenshot: shots/sizes/club-selected-${SUFFIX}
 - tapOn: { text: "Info", optional: true }

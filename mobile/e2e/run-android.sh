@@ -45,16 +45,69 @@ adb logcat -d -v raw ReactNativeJS:V '*:S' > "$OUT/logcat-js.txt"
 python3 e2e/check_report.py "$OUT/logcat-js.txt" || status=1
 echo "::endgroup::"
 
-# 2. Sizes: small phone (360 dp), large phone (412 dp); text at 100%, 130%, and the app's maximum.
+# What was on screen when a large-text step failed: visible words and ids only. Editable fields are
+# skipped entirely, so nothing typed (such as the test password) can be printed.
+# A fresh screen dump or nothing: `uiautomator dump` can fail while the screen animates yet exit 0,
+# leaving the previous file behind, so the old file is removed first and its absence is an error.
+dumpui() {
+  adb shell rm -f /sdcard/ui.xml
+  for _ in 1 2 3 4 5; do
+    adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+    if adb shell ls /sdcard/ui.xml >/dev/null 2>&1; then adb pull /sdcard/ui.xml "$1" >/dev/null && return 0; fi
+    sleep 2
+  done
+  echo "::error::no fresh screen dump for $1"; return 1
+}
+onscreen() {
+  adb exec-out screencap -p > "$OUT/shots/sizes/fail-$1.png" || true   # works even while animating
+  dumpui "$OUT/fail-$1.xml" || return 0
+  python3 - "$OUT/fail-$1.xml" <<'PY'
+import re, sys
+t = open(sys.argv[1], encoding="utf-8").read()
+nodes = re.findall(r"<node [^>]*>", t)
+out = []
+for n in nodes:
+    if 'class="android.widget.EditText"' in n: continue
+    for k in ("resource-id", "text", "content-desc"):
+        m = re.search(k + r'="([^"]+)"', n)
+        if m: out.append(m.group(1))
+print("on screen at failure:", out[:80])
+PY
+}
+
+# 2. Sizes: small phone (360 dp), large phone (412 dp); text at 100%, 130%, the app's maximum (160%)
+#    and Android's maximum (200%). The narrow phone gets every step: the Galaxy A17's largest-text
+#    findings (18 Nov, F1–F4) were cut-off names and a broken word that only show when narrow and large.
 density=$(adb shell wm density | tr -dc '0-9\n' | tail -1)
 for cfg in "1080x2400 420 412dp" "1080x1920 480 360dp"; do
   set -- $cfg; size=$1; dpi=$2; name=$3
   adb shell wm size "$size"; adb shell wm density "$dpi"
-  case "$name" in 412dp) scales="1.0 1.6" ;; *) scales="1.0 1.3" ;; esac
+  case "$name" in 412dp) scales="1.0 1.6" ;; *) scales="1.0 1.3 1.6 2.0" ;; esac
   for fs in $scales; do
     adb shell settings put system font_scale "$fs"
     adb shell am force-stop "$APP"
     (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/screens.yaml) || { echo "::warning::screens $name text $fs incomplete"; }
+    # Narrow phone, largest text: the booking panel must stay readable and Reserve reachable and
+    # pressable (F5/F6). Unlike the screenshots above, these fail the run.
+    if [ "$name" = 360dp ] && { [ "$fs" = 1.6 ] || [ "$fs" = 2.0 ]; }; then
+      echo "::group::large text $name $fs"
+      if (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/large-text-panel.yaml); then
+        adb shell dumpsys window > "$OUT/window-$fs.txt"
+        { dumpui "$OUT/panel-$fs.xml" && python3 e2e/check_reachable.py "$OUT/panel-$fs.xml" "$OUT/window-$fs.txt" "$dpi" "reserve $name text $fs" "Reserve court"; } || status=1
+        if (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/large-text-reserve.yaml); then
+          echo "large text $name $fs: PASS"
+        else echo "::error::large-text reserve $name $fs failed"; onscreen "reserve-$fs"; status=1; fi
+      else echo "::error::large-text panel $name $fs failed"; onscreen "panel-$fs"; status=1; fi
+      # Unresolved booking at the same size: message in view, "Check now" reachable and pressable.
+      if (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/large-text-unresolved.yaml); then
+        adb shell dumpsys window > "$OUT/window-u-$fs.txt"
+        { dumpui "$OUT/unresolved-$fs.xml" && python3 e2e/check_reachable.py "$OUT/unresolved-$fs.xml" "$OUT/window-u-$fs.txt" "$dpi" "check-now $name text $fs" "Check now"; } || status=1
+        if (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/large-text-unresolved-finish.yaml); then
+          echo "large text unresolved $name $fs: PASS"
+        else echo "::error::large-text unresolved finish $name $fs failed"; onscreen "finish-$fs"; status=1; fi
+      else echo "::error::large-text unresolved $name $fs failed"; onscreen "unresolved-$fs"; status=1; fi
+      echo "::endgroup::"
+    fi
   done
   adb shell settings put system font_scale 1.0
   # 3. TalkBack audit of each screen at this size, normal text.

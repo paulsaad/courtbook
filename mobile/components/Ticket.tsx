@@ -17,7 +17,12 @@ import { color, font, radius } from "../lib/theme";
  * was partly hidden on the iPhone although a browser build laid it out correctly — Paul's test,
  * 2026-11-14. Baseline alignment inside a wrapping row is where the phone's layout engine and the
  * browser's differ, so that combination is gone rather than tuned.)
+ *
+ * The start time is display-size (60 pt, 3–4× body text). It follows the phone's text size only up
+ * to TICKET_TIME_MAX_SCALE and stays on one line: at 1.6× on a 360 dp phone it was ~96 px and broke
+ * inside the number ("08:0 / 0", F7, 18 Nov). The sport pill grows with its text instead of clipping it.
  */
+export const TICKET_TIME_MAX_SCALE = 1.2;
 export function Ticket({ date, start, end, sport, children }: { date: string; start: string; end?: string; sport?: { key: string; label: string }; children: ReactNode }) {
   return (
     <View style={styles.card} accessibilityLabel={`${date}, ${start}${end ? ` to ${end}` : ""}`}>
@@ -26,7 +31,7 @@ export function Ticket({ date, start, end, sport, children }: { date: string; st
         <View style={styles.bandTop}>
           <Text style={styles.date}>{date.toUpperCase()}</Text>
           {sport ? (
-            <View style={styles.sport}>
+            <View style={styles.sport} testID="ticket-sport">
               <SportMark sport={sport.key} size={16} color={color.redOnDark} />
               <Text style={styles.sportText}>{sport.label}</Text>
             </View>
@@ -34,7 +39,7 @@ export function Ticket({ date, start, end, sport, children }: { date: string; st
         </View>
         <View style={styles.bottomRow}>
           <View style={styles.times} testID="ticket-times">
-            <Text style={styles.start} testID="ticket-start">{start}</Text>
+            <Text style={styles.start} testID="ticket-start" maxFontSizeMultiplier={TICKET_TIME_MAX_SCALE} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{start}</Text>
             {end ? <Text style={styles.end} testID="ticket-end">to {end}</Text> : null}
           </View>
           <View style={styles.mark} testID="ticket-mark" accessible={false} importantForAccessibility="no-hide-descendants">
@@ -72,7 +77,7 @@ const styles = StyleSheet.create({
   band: { backgroundColor: color.night, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 16 },
   bandTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   date: { flexShrink: 1, fontFamily: font.bold, fontSize: 14, letterSpacing: 0.8, color: color.redOnDark },
-  sport: { flexDirection: "row", alignItems: "center", gap: 5, height: 28, paddingHorizontal: 10, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.10)" },
+  sport: { flexDirection: "row", alignItems: "center", gap: 5, minHeight: 28, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.10)" },
   sportText: { fontFamily: font.bold, fontSize: 13, color: color.onDark },
   perforation: { height: 2, justifyContent: "center" },
   dashes: { marginHorizontal: 16, borderTopWidth: 2, borderStyle: "dashed", borderColor: color.red },

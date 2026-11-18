@@ -7,19 +7,22 @@
 #
 # Safety: the run refuses if the connection string names the live project, and it only ever applies
 # files from supabase/migrations of the branch it runs on. It records what it applied in
-# staging_meta.applied (staging only), so running it twice never re-applies a file.
+# staging_meta.applied (staging only), so running it twice never re-applies a file. It applies only the
+# migration numbers named in 'migrations' (.github/scripts/staging-plan.sh), so a reserved number such
+# as M3's 0067 can never be applied by accident; 'check' lists what is pending and flags any file
+# numbered below the highest already applied.
 name: Staging database
 
 on:
   workflow_dispatch:
     inputs:
       action:
-        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk"
+        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else)"
         type: choice
-        options: [check, apply, smoke, api, reset_demo, tester]
+        options: [check, apply, smoke, api, reset_demo, tester, demo_at_desk]
         default: check
-      up_to:
-        description: "apply only: highest migration number to apply, e.g. 0064 (leave empty for all on this branch)"
+      migrations:
+        description: "apply only: the exact migration numbers to apply, e.g. '0068 0069 0070 0071' — nothing else is applied; 'check' lists what is pending"
         type: string
         default: ""
       confirm_ref:
@@ -27,7 +30,13 @@ on:
         type: string
         default: ""
 
-concurrency: staging-db
+# One staging-changing run at a time across BOTH workflows that change shared staging data (the demo
+# club's payment mode, test accounts): "Staging database" and "Mobile Android tests". A run waits
+# for the one in progress. GitHub keeps at most one waiting run per group: a newer one replaces it
+# (the replaced run never starts, so it changes nothing). Keep this group name identical in both files.
+concurrency:
+  group: staging-shared-data
+  cancel-in-progress: false
 
 jobs:
   staging:
@@ -68,6 +77,14 @@ jobs:
           select 'role settings:', rolname, coalesce(array_to_string(rolconfig, ', '), '(none)') from pg_roles where rolname in ('authenticated', 'anon', 'authenticator') order by rolname;
           SQL
 
+      - name: Migrations on this branch not yet applied (read only)
+        run: |
+          if [ "$(psql "$DB" -At -c "select to_regclass('staging_meta.applied') is not null")" = t ]; then
+            psql "$DB" -At -c "select name from staging_meta.applied" > /tmp/applied.txt
+          else : > /tmp/applied.txt; fi
+          echo "Branch ${GITHUB_REF_NAME}: migrations not yet applied on staging:"
+          bash .github/scripts/staging-plan.sh pending supabase/migrations /tmp/applied.txt
+
       - name: Refuse a database that is not ours to initialise
         if: inputs.action == 'apply'
         env:
@@ -84,18 +101,18 @@ jobs:
           fi
           psql "$DB" -v ON_ERROR_STOP=1 -q -c "create schema if not exists staging_meta; create table if not exists staging_meta.applied (name text primary key, applied_at timestamptz not null default now(), sha text); revoke all on schema staging_meta from public, anon, authenticated;"
 
-      - name: Apply migrations not yet applied
+      - name: Apply exactly the migrations named
         if: inputs.action == 'apply'
         env:
-          UP_TO: ${{ inputs.up_to }}
+          MIGRATIONS: ${{ inputs.migrations }}
         run: |
-          applied=$(psql "$DB" -At -c "select name from staging_meta.applied")
+          psql "$DB" -At -c "select name from staging_meta.applied" > /tmp/applied.txt
+          plan=$(bash .github/scripts/staging-plan.sh apply supabase/migrations /tmp/applied.txt "$MIGRATIONS") \
+            || { echo "::error::$plan"; echo "$plan"; exit 1; }
+          echo "plan:"; echo "$plan" | sed 's/^/  /'
           n=0
-          for f in $(ls supabase/migrations/*.sql | sort); do
-            name=$(basename "$f")
-            num=${name%%_*}
-            if [ -n "$UP_TO" ] && [ "$num" \> "$UP_TO" ]; then continue; fi
-            if echo "$applied" | grep -qx "$name"; then continue; fi
+          for name in $plan; do
+            f=supabase/migrations/$name
             echo "applying $name"
             # each file in its own transaction, recorded in the same one (0040 must run alone: it does)
             { cat "$f"; echo; echo "insert into staging_meta.applied (name, sha) values ('$name', '${GITHUB_SHA::7}');"; } \
@@ -167,6 +184,20 @@ jobs:
       - name: Put the demo club back to its seeded payment mode (reset_demo)
         if: inputs.action == 'reset_demo'
         run: psql "$DB" -v ON_ERROR_STOP=1 -c "update clubs set payment_mode = 'simulated' where slug = 'batroun' returning name || ' -> ' || payment_mode"
+
+      # One row, one column: the staging demo club's payment mode, back to "at the desk" for phone tests
+      # (finding P1, 18 Nov). Refuses unless this is the staging database (marker table) and the club is
+      # the demo club; changes no account, booking or setting.
+      - name: Demo club at the desk only (demo_at_desk)
+        if: inputs.action == 'demo_at_desk'
+        run: |
+          psql "$DB" -v ON_ERROR_STOP=1 -At <<'SQL'
+          do $$ begin
+            if to_regclass('staging_meta.applied') is null then raise exception 'not the staging database (no staging marker)'; end if;
+          end $$;
+          select 'before: ' || name || ' (' || payment_mode || ')' from public.clubs where slug = 'batroun' and is_demo;
+          update public.clubs set payment_mode = 'at_desk' where slug = 'batroun' and is_demo returning 'after: ' || name || ' (' || payment_mode || ')';
+          SQL
 
       - name: Booking-protection checks on staging
         if: inputs.action == 'smoke'

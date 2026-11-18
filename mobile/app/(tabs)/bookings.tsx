@@ -60,7 +60,7 @@ export default function Bookings() {
   );
 }
 
-function Row({ r, past = false }: { r: AgendaRow; past?: boolean }) {
+export function Row({ r, past = false }: { r: AgendaRow; past?: boolean }) {
   const date = formatInTimeZone(new Date(r.start_at), r.timezone, "EEE d MMM");
   const time = `${hhmm(r.start_at, r.timezone)}${r.end_at ? `–${hhmm(r.end_at, r.timezone)}` : ""}`;
   const status = r.status === "cancelled" ? "Cancelled" : r.status === "no_show" ? "No-show" : null;
@@ -80,7 +80,8 @@ function Row({ r, past = false }: { r: AgendaRow; past?: boolean }) {
         <Text style={styles.time} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{time}</Text>
       </View>
       <View style={{ flex: 1, gap: 2 }}>
-        <Text variant="strong" numberOfLines={2}>{r.club_name}</Text>
+        {/* No line limit: the club name wraps in full at the largest text sizes (F2). */}
+        <Text variant="strong">{r.club_name}</Text>
         <Text variant="secondary" numberOfLines={1}>{r.title ?? "Court"}</Text>
         {status && <Text variant="caption" style={{ fontFamily: font.semibold }}>{status}</Text>}
       </View>
