@@ -21,7 +21,8 @@ local-replica scripts only.** Revision 2, 16 Nov 2026, after Paul's review with 
 | `07-roadmap.md` | Stages, Stitch timing, first slice with exact acceptance, implementation order |
 | `08-traceability.md` | Requirements and review points → rules → design → tests → stage |
 | `09-decisions.md` | Settled defaults; four product decisions for Paul (P1–P4) |
-| `sql/0067_match_detail.draft.sql` | Proposed first migration (draft, not applied anywhere) |
+| `10-status.md` | **Implementation status on `m3-dev`**: coverage, checks, next steps, risks, decisions |
+| `sql/0067_match_detail.draft.sql` | Validated draft, superseded by `supabase/migrations/0067_match_detail.sql` (body identical; not applied anywhere) |
 | `repro/m3_findings.sh` | Reproductions F1–F10, controls C1–C2 |
 | `repro/match_detail_matrix.sh` | Authorisation matrix for the draft, in a rolled-back transaction |
 | `repro/chat_cursor.sh` | Chat cursor hazards (delayed commit, deletion) |
