@@ -45,6 +45,24 @@ adb logcat -d -v raw ReactNativeJS:V '*:S' > "$OUT/logcat-js.txt"
 python3 e2e/check_report.py "$OUT/logcat-js.txt" || status=1
 echo "::endgroup::"
 
+# What was on screen when a large-text step failed: visible words and ids only. Editable fields are
+# skipped entirely, so nothing typed (such as the test password) can be printed.
+onscreen() {
+  adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/fail-$1.xml" >/dev/null
+  python3 - "$OUT/fail-$1.xml" <<'PY'
+import re, sys
+t = open(sys.argv[1], encoding="utf-8").read()
+nodes = re.findall(r"<node [^>]*>", t)
+out = []
+for n in nodes:
+    if 'class="android.widget.EditText"' in n: continue
+    for k in ("resource-id", "text", "content-desc"):
+        m = re.search(k + r'="([^"]+)"', n)
+        if m: out.append(m.group(1))
+print("on screen at failure:", out[:80])
+PY
+}
+
 # 2. Sizes: small phone (360 dp), large phone (412 dp); text at 100%, 130%, the app's maximum (160%)
 #    and Android's maximum (200%). The narrow phone gets every step: the Galaxy A17's largest-text
 #    findings (18 Nov, F1–F4) were cut-off names and a broken word that only show when narrow and large.
@@ -67,8 +85,8 @@ for cfg in "1080x2400 420 412dp" "1080x1920 480 360dp"; do
         python3 e2e/check_reachable.py "$OUT/panel-$fs.xml" "$OUT/window-$fs.txt" "$dpi" "reserve $name text $fs" || status=1
         if (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/large-text-reserve.yaml); then
           echo "large text $name $fs: PASS"
-        else echo "::error::large-text reserve $name $fs failed"; status=1; fi
-      else echo "::error::large-text panel $name $fs failed"; status=1; fi
+        else echo "::error::large-text reserve $name $fs failed"; onscreen "reserve-$fs"; status=1; fi
+      else echo "::error::large-text panel $name $fs failed"; onscreen "panel-$fs"; status=1; fi
       # Unresolved booking at the same size: message in view, "Check now" reachable and pressable.
       if (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/large-text-unresolved.yaml); then
         adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/unresolved-$fs.xml" >/dev/null
@@ -76,8 +94,8 @@ for cfg in "1080x2400 420 412dp" "1080x1920 480 360dp"; do
         python3 e2e/check_reachable.py "$OUT/unresolved-$fs.xml" "$OUT/window-u-$fs.txt" "$dpi" "check-now $name text $fs" || status=1
         if (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/large-text-unresolved-finish.yaml); then
           echo "large text unresolved $name $fs: PASS"
-        else echo "::error::large-text unresolved finish $name $fs failed"; status=1; fi
-      else echo "::error::large-text unresolved $name $fs failed"; status=1; fi
+        else echo "::error::large-text unresolved finish $name $fs failed"; onscreen "finish-$fs"; status=1; fi
+      else echo "::error::large-text unresolved $name $fs failed"; onscreen "unresolved-$fs"; status=1; fi
       echo "::endgroup::"
     fi
   done

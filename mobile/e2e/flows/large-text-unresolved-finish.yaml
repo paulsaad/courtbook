@@ -1,17 +1,17 @@
-# Continues from large-text-unresolved.yaml: test tool off, press "Check now" (it may already have
-# looked again on its own), recover the same booking, look at its ticket at this text size, cancel.
+# Continues from large-text-unresolved.yaml, the same way as flow 02: test tool off, go Home, press
+# "Check now" if the app has not already looked again on its own, recover the same booking, look at
+# its ticket at this text size, cancel it.
 appId: app.courtbook.mobile.staging
 ---
 - openLink: "courtbook-staging://profile"
 - scrollUntilVisible: { element: "Off" }
 - tapOn: "Off"
-- openLink: "courtbook-staging://club/${E2E_CLUB}?date=${E2E_DATE}"
+- openLink: "courtbook-staging://"
 - runFlow:
     when:
-      visible: { id: "reserve-button", text: "Check now" }
+      visible: "Check now"
     commands:
-      - tapOn: { id: "reserve-button" }
-- openLink: "courtbook-staging://"
+      - tapOn: "Check now"
 - extendedWaitUntil: { visible: "Your booking went through", timeout: 60000 }
 - tapOn: "View booking"
 - extendedWaitUntil: { visible: { id: "ticket-start" }, timeout: 30000 }
