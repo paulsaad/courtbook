@@ -1,0 +1,22 @@
+# Continues from large-text-unresolved.yaml: test tool off, press "Check now" (it may already have
+# looked again on its own), recover the same booking, look at its ticket at this text size, cancel.
+appId: app.courtbook.mobile.staging
+---
+- openLink: "courtbook-staging://profile"
+- scrollUntilVisible: { element: "Off" }
+- tapOn: "Off"
+- openLink: "courtbook-staging://club/${E2E_CLUB}?date=${E2E_DATE}"
+- runFlow:
+    when:
+      visible: { id: "reserve-button", text: "Check now" }
+    commands:
+      - tapOn: { id: "reserve-button" }
+- openLink: "courtbook-staging://"
+- extendedWaitUntil: { visible: "Your booking went through", timeout: 60000 }
+- tapOn: "View booking"
+- extendedWaitUntil: { visible: { id: "ticket-start" }, timeout: 30000 }
+- takeScreenshot: shots/sizes/ticket-recovered-${SUFFIX}
+- scrollUntilVisible: { element: "Cancel booking" }
+- tapOn: "Cancel booking"
+- tapOn: "Yes, cancel"
+- extendedWaitUntil: { visible: ".*[Cc]ancelled.*", timeout: 30000 }

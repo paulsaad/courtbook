@@ -128,3 +128,41 @@ describe("F5 booking panel wording never breaks inside a unit", () => {
     expect(s.replace(/ /g, " ")).toBe("Padel · Padel 1 · 1 h 30");
   });
 });
+
+describe("F7 booking confirmation ticket", () => {
+  const { Ticket, TicketRow, TICKET_TIME_MAX_SCALE } = jest.requireActual("../components/Ticket") as typeof import("../components/Ticket");
+  const { StyleSheet } = jest.requireActual("react-native");
+  const ticket = () => render(
+    <Ticket date="Thursday 19 November" start="08:00" end="09:30" sport={{ key: "padel", label: "Padel" }}>
+      <TicketRow label="Club" value="Sample Club" last />
+    </Ticket>
+  );
+
+  it("start time: one line, follows text size only up to 1.2x, shrinks rather than breaking", async () => {
+    await ticket();
+    const t = screen.getByTestId("ticket-start");
+    expect(t.props.children).toBe("08:00"); // the whole time, unchanged
+    expect(t.props.numberOfLines).toBe(1);
+    expect(t.props.adjustsFontSizeToFit).toBe(true);
+    expect(t.props.maxFontSizeMultiplier).toBe(TICKET_TIME_MAX_SCALE);
+    expect(TICKET_TIME_MAX_SCALE).toBeLessThanOrEqual(1.2);
+    // still the largest text on the ticket, so it stays prominent
+    const f = StyleSheet.flatten(t.props.style);
+    expect(f.fontSize).toBe(60);
+    expect(f.lineHeight).toBe(64);
+  });
+
+  it("screen readers get the full date and times", async () => {
+    await ticket();
+    expect(screen.getByLabelText("Thursday 19 November, 08:00 to 09:30")).toBeTruthy();
+    expect(screen.getByText("to 09:30")).toBeTruthy();
+  });
+
+  it("sport pill grows with its text instead of clipping it; 28 dp as before at normal size", async () => {
+    await ticket();
+    const pill = StyleSheet.flatten(screen.getByTestId("ticket-sport").props.style);
+    expect(pill.height).toBeUndefined();
+    expect(pill.minHeight).toBe(28);
+    expect(screen.getByText("Padel")).toBeTruthy();
+  });
+});

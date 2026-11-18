@@ -69,6 +69,15 @@ for cfg in "1080x2400 420 412dp" "1080x1920 480 360dp"; do
           echo "large text $name $fs: PASS"
         else echo "::error::large-text reserve $name $fs failed"; status=1; fi
       else echo "::error::large-text panel $name $fs failed"; status=1; fi
+      # Unresolved booking at the same size: message in view, "Check now" reachable and pressable.
+      if (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/large-text-unresolved.yaml); then
+        adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/unresolved-$fs.xml" >/dev/null
+        adb shell dumpsys window > "$OUT/window-u-$fs.txt"
+        python3 e2e/check_reachable.py "$OUT/unresolved-$fs.xml" "$OUT/window-u-$fs.txt" "$dpi" "check-now $name text $fs" || status=1
+        if (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/large-text-unresolved-finish.yaml); then
+          echo "large text unresolved $name $fs: PASS"
+        else echo "::error::large-text unresolved finish $name $fs failed"; status=1; fi
+      else echo "::error::large-text unresolved $name $fs failed"; status=1; fi
       echo "::endgroup::"
     fi
   done

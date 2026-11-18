@@ -103,6 +103,14 @@ export default function Club() {
       : null);
 
   const scroller = useRef<ScrollViewInstance | null>(null);
+  // F6: the panel's details scroll at the largest text. A message about the reservation (offline,
+  // not confirmed yet, refused…) is the last item; bring it into view whenever it appears or changes.
+  const details = useRef<ScrollViewInstance | null>(null);
+  useEffect(() => {
+    if (!res.problem) return;
+    const id = requestAnimationFrame(() => details.current?.scrollToEnd({ animated: animate() }));
+    return () => cancelAnimationFrame(id);
+  }, [res.problem]);
   const content = useRef<HostInstance | null>(null);
   const cells = useRef(new Map<string, HostInstance | null>());
   const groupY = useRef<Record<string, number>>({});
@@ -250,7 +258,7 @@ export default function Club() {
         // F6: the panel never takes more than PANEL_MAX_SHARE of the screen. At the largest text the
         // details scroll inside it, and Reserve stays pinned below them, above the safe area.
         <View testID="booking-panel" style={[styles.panel, { paddingBottom: insets.bottom + 14, maxHeight: Math.round(windowHeight * PANEL_MAX_SHARE) }]}>
-          <ScrollView testID="booking-details" style={styles.details} contentContainerStyle={styles.detailsContent} persistentScrollbar>
+          <ScrollView ref={details} testID="booking-details" style={styles.details} contentContainerStyle={styles.detailsContent} persistentScrollbar>
             <View style={styles.courtRow} accessibilityRole="radiogroup">
               <Text variant="label" style={{ marginRight: 10, flexShrink: 0 }} numberOfLines={1}>Court</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
