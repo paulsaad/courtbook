@@ -57,6 +57,20 @@ for cfg in "1080x2400 420 412dp" "1080x1920 480 360dp"; do
     adb shell settings put system font_scale "$fs"
     adb shell am force-stop "$APP"
     (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/screens.yaml) || { echo "::warning::screens $name text $fs incomplete"; }
+    # Narrow phone, largest text: the booking panel must stay readable and Reserve reachable and
+    # pressable (F5/F6). Unlike the screenshots above, these fail the run.
+    if [ "$name" = 360dp ] && { [ "$fs" = 1.6 ] || [ "$fs" = 2.0 ]; }; then
+      echo "::group::large text $name $fs"
+      if (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/large-text-panel.yaml); then
+        adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/panel-$fs.xml" >/dev/null
+        adb shell dumpsys window > "$OUT/window-$fs.txt"
+        python3 e2e/check_reachable.py "$OUT/panel-$fs.xml" "$OUT/window-$fs.txt" "$dpi" "reserve $name text $fs" || status=1
+        if (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=${name}-text${fs}" ../flows/large-text-reserve.yaml); then
+          echo "large text $name $fs: PASS"
+        else echo "::error::large-text reserve $name $fs failed"; status=1; fi
+      else echo "::error::large-text panel $name $fs failed"; status=1; fi
+      echo "::endgroup::"
+    fi
   done
   adb shell settings put system font_scale 1.0
   # 3. TalkBack audit of each screen at this size, normal text.

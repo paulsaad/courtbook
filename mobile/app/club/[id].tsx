@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RefreshControl, ScrollView, StyleSheet, View, type HostInstance, type ScrollViewInstance } from "react-native";
+import { RefreshControl, ScrollView, StyleSheet, View, useWindowDimensions, type HostInstance, type ScrollViewInstance } from "react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,6 +21,7 @@ import { clubsFromSlots, durationLabel, durationOptions, partOfDay, sameInstant,
 import { BEIRUT, money, tilePriceLabel, useClubMode, useDaySlots, useQuote, useTilePrices } from "../../lib/queries";
 import { useSession } from "../../lib/session";
 import { useReservation } from "../../lib/reservation";
+import { joinParts, timeRange, unit } from "../../lib/panelText";
 import { reserveButton } from "../../lib/reserveButton";
 import { useOnline } from "../../lib/online";
 import { haptic } from "../../lib/haptics";
@@ -36,6 +37,9 @@ import { color, font, radius, space } from "../../lib/theme";
 export default function Club() {
   const p = useLocalSearchParams<{ id: string; name?: string; date?: string; sport?: string; at?: string; tab?: string }>();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight, fontScale } = useWindowDimensions();
+  // F5: above this text scale the price goes under the booking details instead of beside them.
+  const stackSummary = fontScale > SUMMARY_BESIDE_PRICE_MAX_SCALE;
   const days = useMemo(() => bookingDays(BEIRUT), []);
   const [date, setDate] = useState(p.date ?? days[0].key);
   const sport = p.sport ?? null;
@@ -243,43 +247,47 @@ export default function Club() {
       )}
 
       {tab === "book" && shown && (club || res.pending) && (
-        <View testID="booking-panel" style={[styles.panel, { paddingBottom: insets.bottom + 14 }]}>
-          <View style={styles.courtRow} accessibilityRole="radiogroup">
-            <Text variant="label" style={{ marginRight: 10, flexShrink: 0 }} numberOfLines={1}>Court</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-              {locked ? (
-                <Chip label={shown.courtName} selected disabled onPress={() => {}} />
-              ) : (
-                freeCourts.map((c) => (
-                  <Chip key={c.id} label={courtLabel(c, tile ? prices.data?.get(tile.start) : undefined)} selected={c.id === shown.courtId} onPress={() => setCourtId(c.id)} />
-                ))
-              )}
-            </ScrollView>
-          </View>
-          {!locked && freeCourts.length === 1 && <Text variant="caption">The only court free at this time.</Text>}
-          <View style={styles.summaryRow}>
-            <View style={{ flexShrink: 1 }}>
-              <Text variant="strong">{shortDate(shown.date)} · {hhmm(shown.start, tz)}–{hhmm(new Date(Date.parse(shown.start) + shown.minutes * 60_000), tz)}</Text>
-              <Text variant="secondary">{[sport ? sportName(sport) : null, shown.courtName, durationLabel(shown.minutes)].filter(Boolean).join(" · ")}</Text>
+        // F6: the panel never takes more than PANEL_MAX_SHARE of the screen. At the largest text the
+        // details scroll inside it, and Reserve stays pinned below them, above the safe area.
+        <View testID="booking-panel" style={[styles.panel, { paddingBottom: insets.bottom + 14, maxHeight: Math.round(windowHeight * PANEL_MAX_SHARE) }]}>
+          <ScrollView testID="booking-details" style={styles.details} contentContainerStyle={styles.detailsContent} persistentScrollbar>
+            <View style={styles.courtRow} accessibilityRole="radiogroup">
+              <Text variant="label" style={{ marginRight: 10, flexShrink: 0 }} numberOfLines={1}>Court</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                {locked ? (
+                  <Chip label={shown.courtName} selected disabled onPress={() => {}} />
+                ) : (
+                  freeCourts.map((c) => (
+                    <Chip key={c.id} label={courtLabel(c, tile ? prices.data?.get(tile.start) : undefined)} selected={c.id === shown.courtId} onPress={() => setCourtId(c.id)} />
+                  ))
+                )}
+              </ScrollView>
             </View>
-            <View style={{ alignItems: "flex-end" }}>
-              {shown.price !== null ? (
-                <Text style={styles.total} accessibilityLabel={`Total ${shown.price} dollars`}>{money(shown.price)}</Text>
-              ) : quote.isError ? (
-                <Text variant="caption" style={{ color: color.danger }}>Price unavailable</Text>
-              ) : (
-                <Text variant="caption">Getting price…</Text>
-              )}
-              <Text variant="caption">{atDesk ? "pay at the club" : "court price"}</Text>
+            {!locked && freeCourts.length === 1 && <Text variant="caption">The only court free at this time.</Text>}
+            <View testID="booking-summary" style={stackSummary ? styles.summaryStacked : styles.summaryRow}>
+              <View style={{ flexShrink: 1 }}>
+                <Text variant="strong">{unit(shortDate(shown.date))}{"\u00A0· "}{timeRange(hhmm(shown.start, tz), hhmm(new Date(Date.parse(shown.start) + shown.minutes * 60_000), tz))}</Text>
+                <Text variant="secondary">{joinParts([sport ? sportName(sport) : null, shown.courtName, durationLabel(shown.minutes)].filter((x): x is string => !!x))}</Text>
+              </View>
+              <View style={{ alignItems: stackSummary ? "flex-start" : "flex-end" }}>
+                {shown.price !== null ? (
+                  <Text style={styles.total} accessibilityLabel={`Total ${shown.price} dollars`}>{money(shown.price)}</Text>
+                ) : quote.isError ? (
+                  <Text variant="caption" style={{ color: color.danger }}>Price unavailable</Text>
+                ) : (
+                  <Text variant="caption">Getting price…</Text>
+                )}
+                <Text variant="caption">{atDesk ? "pay at the club" : "court price"}</Text>
+              </View>
             </View>
-          </View>
-          {res.problem ? (
-            <Text style={res.phase === "idle" && !res.blockedBy ? styles.problem : styles.pending} accessibilityRole="alert" accessibilityLiveRegion="polite">{res.problem}</Text>
-          ) : atDesk ? (
-            <Text variant="caption">Nothing is charged in the app.{cutoff !== null ? ` Free cancellation up to ${cutoff} h before.` : ""}</Text>
-          ) : mode.isSuccess ? (
-            <Text variant="caption">This club takes payment in the app. That arrives in the next update — reserve it on the website for now.</Text>
-          ) : null}
+            {res.problem ? (
+              <Text style={res.phase === "idle" && !res.blockedBy ? styles.problem : styles.pending} accessibilityRole="alert" accessibilityLiveRegion="polite">{res.problem}</Text>
+            ) : atDesk ? (
+              <Text variant="caption">Nothing is charged in the app.{cutoff !== null ? ` Free cancellation up to ${cutoff} h before.` : ""}</Text>
+            ) : mode.isSuccess ? (
+              <Text variant="caption">This club takes payment in the app. That arrives in the next update — reserve it on the website for now.</Text>
+            ) : null}
+          </ScrollView>
           <Button
             testID="reserve-button"
             label={reserveBtn.label}
@@ -292,6 +300,11 @@ export default function Club() {
     </View>
   );
 }
+
+/** F6: the most of the screen the booking panel may take; beyond it its details scroll. */
+export const PANEL_MAX_SHARE = 0.55;
+/** F5: largest text scale at which the price still sits beside the booking details on a 360 dp phone. */
+export const SUMMARY_BESIDE_PRICE_MAX_SCALE = 1.3;
 
 function courtLabel(c: { id: string; name: string }, prices: Map<string, { price: number | null }> | undefined) {
   const known = prices ? [...prices.values()].map((p) => p.price).filter((p): p is number => p !== null) : [];
@@ -328,6 +341,9 @@ const styles = StyleSheet.create({
   panel: { backgroundColor: color.card, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, borderTopWidth: 1, borderColor: color.line, paddingHorizontal: 20, paddingTop: 14, gap: 10 },
   courtRow: { flexDirection: "row", alignItems: "center" },
   summaryRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", gap: 12 },
+  summaryStacked: { gap: 6 },
+  details: { flexGrow: 0, flexShrink: 1 },
+  detailsContent: { gap: 10 },
   total: { fontFamily: font.score, fontSize: 30, lineHeight: 32, color: color.ink },
   problem: { fontFamily: font.semibold, fontSize: 15, color: color.danger },
   pending: { fontFamily: font.semibold, fontSize: 15, color: color.warnInk },

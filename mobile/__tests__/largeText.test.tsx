@@ -104,3 +104,27 @@ describe("F1 Courts card at the largest text", () => {
     expect(screen.getByText(/from/)).toBeTruthy();
   });
 });
+
+describe("F5 booking panel wording never breaks inside a unit", () => {
+  // Imported here so the module list above stays as it was.
+  const { unit, timeRange, joinParts } = jest.requireActual("../lib/panelText") as typeof import("../lib/panelText");
+  const breakable = (s: string) => /[ \t\n]/.test(s) || /[–-](?!⁠)/.test(s.replace(/⁠[–-]⁠/g, ""));
+
+  it("time range: no break point inside, reads the same", () => {
+    const r = timeRange("08:00", "09:30");
+    expect(breakable(r)).toBe(false);
+    expect(r.replace(/⁠/g, "")).toBe("08:00–09:30");
+  });
+
+  it("date and duration are single units", () => {
+    expect(unit("Thu 19 Nov")).toBe("Thu 19 Nov");
+    expect(unit("1 h 30")).not.toMatch(/ /);
+  });
+
+  it("details: a line can break only after a dot", () => {
+    const s = joinParts(["Padel", "Padel 1", "1 h 30"]);
+    expect(s).toBe("Padel · Padel 1 · 1 h 30");
+    expect(s.split(" ").length - 1).toBe(2); // the only ordinary spaces follow a dot
+    expect(s.replace(/ /g, " ")).toBe("Padel · Padel 1 · 1 h 30");
+  });
+});

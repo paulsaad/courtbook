@@ -1,0 +1,11 @@
+# Continues from large-text-panel.yaml (same screen): press Reserve at the largest text, see the
+# booking made, then cancel it so the run leaves staging as it found it.
+appId: app.courtbook.mobile.staging
+---
+- tapOn: { id: "reserve-button" }
+- extendedWaitUntil: { visible: "Court booked", timeout: 60000 }
+- takeScreenshot: shots/sizes/booked-${SUFFIX}
+- scrollUntilVisible: { element: "Cancel booking" }
+- tapOn: "Cancel booking"
+- tapOn: "Yes, cancel"
+- extendedWaitUntil: { visible: ".*[Cc]ancelled.*", timeout: 30000 }
