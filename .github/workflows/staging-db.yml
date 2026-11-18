@@ -161,8 +161,8 @@ jobs:
           STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
           STAGING_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SERVICE_ROLE_KEY }}
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
-          STAGING_TESTER_PASSWORD: ${{ secrets.STAGING_TESTER_PASSWORD }}
-        run: node mobile/e2e/staging-tester.mjs
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: node mobile/e2e/staging-auth-templates.mjs
 
       - name: Put the demo club back to its seeded payment mode (reset_demo)
         if: inputs.action == 'reset_demo'
