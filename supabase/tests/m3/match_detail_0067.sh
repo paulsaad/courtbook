@@ -8,8 +8,10 @@
 #   PSQL="sudo -u postgres psql" bash supabase/tests/run.sh           # builds courtbook_test
 #   PSQL="sudo -u postgres psql" bash supabase/tests/m3/match_detail_0067.sh
 #
-# MIGRATION defaults to the approved draft. When 0067 becomes a real migration file, point it there:
-#   MIGRATION=supabase/migrations/0067_match_detail.sql bash supabase/tests/m3/match_detail_0067.sh
+# MIGRATION defaults to the migration file (promoted from docs/m3/sql/0067_match_detail.draft.sql).
+# run.sh builds the replica with every migration, 0067 included, so the replica normally starts with
+# match_detail present (1/1). A replica built before 0067 existed starts at 0/0. Either is accepted;
+# the run must leave the replica exactly as it found it.
 #
 # Then every mutant below — each one a plausible mistake — must make the suite FAIL. A mutant that
 # passes means the tests can't see that mistake, and the script exits non-zero.
@@ -17,14 +19,14 @@ set -u
 cd "$(dirname "$0")/../../.."
 PSQL=${PSQL:-psql}
 DB=courtbook_test
-MIGRATION=${MIGRATION:-docs/m3/sql/0067_match_detail.draft.sql}
+MIGRATION=${MIGRATION:-supabase/migrations/0067_match_detail.sql}
 
 where=$($PSQL -At -d $DB -c "select current_database()||'@'||coalesce(host(inet_server_addr()),'local-socket')" 2>/dev/null)
 case "$where" in courtbook_test@local-socket|courtbook_test@127.0.0.1|courtbook_test@::1) ;;
   *) echo "refusing: connected to '$where', expected the local courtbook_test replica"; exit 2;; esac
 [ -f "$MIGRATION" ] || { echo "missing $MIGRATION"; exit 2; }
 before=$($PSQL -At -d $DB -c "select (select count(*) from pg_proc where proname='match_detail')||'/'||(select count(*) from information_schema.columns where table_name='matches' and column_name='court_lost_at')")
-[ "$before" = "0/0" ] || { echo "refusing: match_detail or court_lost_at already exists on the replica ($before) — rebuild it with run.sh"; exit 2; }
+case "$before" in 0/0|1/1) ;; *) echo "refusing: replica in an unexpected state ($before) — rebuild it with run.sh"; exit 2;; esac
 
 id() { printf '%s-0000-4000-8000-%012d' "$1" "$2"; }
 O=$(id e0000000 1); A=$(id e0000000 2); P=$(id e0000000 3); D=$(id e0000000 4); R=$(id e0000000 5)
@@ -187,7 +189,7 @@ done
 rm -rf "$tmp"
 
 after=$($PSQL -At -d $DB -c "select (select count(*) from pg_proc where proname='match_detail')||'/'||(select count(*) from information_schema.columns where table_name='matches' and column_name='court_lost_at')")
-echo "== replica after the run: match_detail functions / court_lost_at columns = $after (expected 0/0: everything rolled back)"
-[ "$after" = "0/0" ] || status=1
+echo "== replica after the run: match_detail functions / court_lost_at columns = $after (expected $before: everything rolled back)"
+[ "$after" = "$before" ] || status=1
 [ $status = 0 ] && echo "RESULT: PASS" || echo "RESULT: FAIL"
 exit $status

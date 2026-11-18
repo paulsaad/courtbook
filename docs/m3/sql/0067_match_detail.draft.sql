@@ -1,3 +1,4 @@
+-- SUPERSEDED by supabase/migrations/0067_match_detail.sql (body identical; kept for docs/m3/repro/match_detail_matrix.sh).
 -- DRAFT (specification, not a migration). Proposed as the first M3 migration, before any native
 -- game-detail screen. Additive only: one nullable column and one check value that nothing writes
 -- yet, and one read-only function.

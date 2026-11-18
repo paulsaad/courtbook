@@ -328,6 +328,13 @@ Kept as is (web is production; not part of M3). Native marks only the opened gam
 
 ## 2.3 Migration plan — four migrations, each staging first
 
+> **Numbering (updated 18 Nov 2026, integration with `main` at `661acf2`).** Release fixes took
+> 0068–0071 (S1 and S5 are in release fix **0069**, already on staging; their tests stay as regression
+> checks). **0067** stays reserved for `match_detail` and is now `supabase/migrations/0067_match_detail.sql`
+> on `m3-dev`, applied out of order after 0071 (schema identical in either order). The other M3
+> migrations are labelled here **M3-H** (hardening), **M3-S** (safety) and **M3-D** (delivery); each
+> gets the next free number when Paul approves it (`docs/audit/fixes.md` §3).
+
 Numbers follow the last migration (0066). Each is shown to Paul with its web-facing effects, applied
 to staging, tested there (staging API + repro scripts), then applied to live only with Paul's
 explicit approval. Each is re-runnable (suite §AL rule).
@@ -335,9 +342,9 @@ explicit approval. Each is re-runnable (suite §AL rule).
 | # | Migration | Contents | Fixes | Needed before |
 | --- | --- | --- | --- | --- |
 | 0067 | `match_detail` | `matches.court_lost_at`; `closed_reason` may be `no_court`; `match_detail()` (draft in `docs/m3/sql/`) | S6, GR-2 | Stage 1 screens |
-| 0068 | Game hardening | Drop organiser DELETE policy + revoke DELETE (S1); chat insert trigger: server time, `deleted_at` null, not cancelled, rate (S2, S9, S12); `leave_match` keeps declined (S4); `notifications` UPDATE only `read_at` (S5); booking trigger GR-9 + pending recipients + ignore no-show (S8, S18, S19); `resolve_court`; `set_match_status` time limits and `court_lost` refusal (GR-8); `post_match` club + 60 days (S10); `match_full_waiting` (S11); counters (S12); hidden games not notified (S14); approval → open (S15); `remove_player` (GR-6) | S1–S2, S4–S5, S8–S12, S14–S15, S18–S19 | Stage 3 write screens |
-| 0069 | Safety | `reports`, `blocks`, `blocked_terms`, `profiles.rules_accepted_at`, `profiles.suspended_at`; RPCs; block effects in `open_matches`, `match_board`, `match_detail`, `join_match`, `match_messages_list`, `match_message_notify`; admin RPCs (§5.6) | S3, S13 | Stage 4 chat |
-| 0070 | Delivery | `push_tokens`, `notification_prefs`, push claim columns incl. claim id, `push_tickets`, claim RPCs (service role), attempt cap on the existing email claim, cron jobs (staging only until approved) | S7, S16 | Stage 6 push |
+| M3-H | Game hardening | Chat insert trigger: server time, `deleted_at` null, not cancelled, rate (S2, S9, S12); `leave_match` keeps declined (S4); booking trigger GR-9 + pending recipients + ignore no-show (S8, S18, S19); `resolve_court`; `set_match_status` time limits and `court_lost` refusal (GR-8); `post_match` club + 60 days (S10); `match_full_waiting` (S11); counters (S12); hidden games not notified (S14); approval → open (S15); `remove_player` (GR-6) | S2, S4, S8–S12, S14–S15, S18–S19 | Stage 3 write screens |
+| M3-S | Safety | `reports`, `blocks`, `blocked_terms`, `profiles.rules_accepted_at`, `profiles.suspended_at`; RPCs; block effects in `open_matches`, `match_board`, `match_detail`, `join_match`, `match_messages_list`, `match_message_notify`; admin RPCs (§5.6) | S3, S13 | Stage 4 chat |
+| M3-D | Delivery | `push_tokens`, `notification_prefs`, push claim columns incl. claim id, `push_tickets`, claim RPCs (service role), attempt cap on the existing email claim, cron jobs (staging only until approved) | S7, S16 | Stage 6 push |
 
 ## 2.5 Changes and checks before any migration
 
@@ -347,15 +354,15 @@ explicit approval. Each is re-runnable (suite §AL rule).
 | 0067 | Confirm `matches_closed_reason_check` has the same definition on staging and live as in the migrations (read-only) | check |
 | 0067 | Field review of every returned column against discovery permissions (Paul's safeguard 1) — done on the draft (`FIELDS PASS`); repeat on the final migration text | check |
 | 0067 | Paul approves applying 0067 to staging, then separately to live | approval |
-| 0068 | Web (P4 approved): two strings for `no_court` (board badge, organiser hint) and `/matches/[id]` reading `match_detail` (fixes the 404 after start). Before any live release: web tests, staging smoke and API scripts, and the changed pages checked against the staging database | web change, staging regression first |
-| 0068 | List every new refusal the web can meet (`court_lost`, `match_cancelled`, `too_far_ahead`, `slow_down`, `too_many_games`, time limits of GR-8) with its web copy | review |
-| 0068 | Existing suite sections that encode replaced behaviour updated in the same change: §V 68 (cancel → game now `closed`/`no_court`, not `open`) | test change |
-| 0068 | Repro script before / after on the replica and on staging | check |
-| 0069 | Check existing `profiles.name` values against the new length rule (S13) before adding it | check (read-only) |
-| 0069 | P2, P3 approved. Snapshot access and retention safeguards in place (`05-architecture.md` §5.6) | check |
+| M3-H | Web (P4 approved): two strings for `no_court` (board badge, organiser hint) and `/matches/[id]` reading `match_detail` (fixes the 404 after start). Before any live release: web tests, staging smoke and API scripts, and the changed pages checked against the staging database | web change, staging regression first |
+| M3-H | List every new refusal the web can meet (`court_lost`, `match_cancelled`, `too_far_ahead`, `slow_down`, `too_many_games`, time limits of GR-8) with its web copy | review |
+| M3-H | Existing suite sections that encode replaced behaviour updated in the same change: §V 68 (cancel → game now `closed`/`no_court`, not `open`) | test change |
+| M3-H | Repro script before / after on the replica and on staging | check |
+| M3-S | Check existing `profiles.name` values against the new length rule (S13) before adding it | check (read-only) |
+| M3-S | P2, P3 approved. Snapshot access and retention safeguards in place (`05-architecture.md` §5.6) | check |
 | store submission | Paul explicitly accepts the moderator role and a review frequency (or names someone else) — not assumed before then | approval |
-| 0070 | Lease-expiry and overlapping-worker tests T-DL10–DL15 written and passing on the replica **before** `deliver` is implemented (Paul's safeguard 2) | test-first |
-| 0070 | FCM v1 and APNs credentials in EAS (Paul, guided); Expo access token as a per-project secret; live delivery stays disabled until approved | setup, approval |
+| M3-D | Lease-expiry and overlapping-worker tests T-DL10–DL15 written and passing on the replica **before** `deliver` is implemented (Paul's safeguard 2) | test-first |
+| M3-D | FCM v1 and APNs credentials in EAS (Paul, guided); Expo access token as a per-project secret; live delivery stays disabled until approved | setup, approval |
 
 ## 2.6 Not changed by this review
 

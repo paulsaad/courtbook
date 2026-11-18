@@ -13,7 +13,7 @@ local-replica scripts only.** Revision 2, 16 Nov 2026, after Paul's review with 
 | File | Contents |
 | --- | --- |
 | `01-audit.md` | What exists (database, web, native), what is partial or missing, what is reusable |
-| `02-safety-review.md` | Findings S1–S19; controls; migration plan 0067–0070; checks and changes before any migration |
+| `02-safety-review.md` | Findings S1–S19; controls; migration plan 0067, M3-H, M3-S, M3-D; checks and changes before any migration |
 | `03-journeys.md` | **Game rules GR-1…GR-12** (single source) and ten native journeys with messages |
 | `04-ux-spec.md` | Screens in Court Lines, message for every server code, push copy, Stitch candidates |
 | `05-architecture.md` | Data layer, write safety, chat cursor (verified), delivery reliability, moderation |

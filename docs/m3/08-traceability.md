@@ -39,25 +39,25 @@ Rows: every M3 requirement (release plan scope and acceptance, store rules, Paul
 
 | Finding | Fix | Tests | Migration |
 | --- | --- | --- | --- |
-| S1 | drop DELETE policy, revoke DELETE | T-S1 | 0068 |
-| S2 | chat insert trigger (server time) | T-S2a–b, T-CH1 | 0068 |
-| S3 | reports, blocks, filter, rules, moderation RPCs | T-S3a–h, T-MOD1–MOD5 | 0069 |
-| S4 | `leave_match` keeps declined | T-S4 | 0068 |
-| S5 | UPDATE only on `read_at` | T-S5a–b | 0068 |
+| S1 | drop DELETE policy, revoke DELETE | T-S1 (fixes suite S1a–c) | release fix 0069 (staging 18 Nov) |
+| S2 | chat insert trigger (server time) | T-S2a–b, T-CH1 | M3-H |
+| S3 | reports, blocks, filter, rules, moderation RPCs | T-S3a–h, T-MOD1–MOD5 | M3-S |
+| S4 | `leave_match` keeps declined | T-S4 | M3-H |
+| S5 | UPDATE only on `read_at` | T-S5a–b (fixes suite S5a–f) | release fix 0069 (staging 18 Nov) |
 | S6 | `match_detail` | T-MD1–MD5 | 0067 |
-| S7 | push copy from kind | U5 | 0070 / `deliver` |
-| S8 | pending recipients | T-S8, T-CL1 | 0068 |
-| S9 | trigger: `deleted_at`, cancelled | T-S9a–b | 0068 |
-| S10 | club required, 60 days | T-S10a–b | 0068 |
-| S11 | waiting-list notice | T-S11 | 0068 |
-| S12 | counters | T-S12a–b | 0068 |
-| S13 | name rule | T-S13 | 0069 |
-| S14 | skip hidden | T-S14 | 0068 |
-| S15 | approval → open | T-S15 | 0068 |
-| S16 | queue + scheduled `deliver` | T-DL1–DL9 | 0070 |
+| S7 | push copy from kind | U5 | M3-D / `deliver` |
+| S8 | pending recipients | T-S8, T-CL1 | M3-H |
+| S9 | trigger: `deleted_at`, cancelled | T-S9a–b | M3-H |
+| S10 | club required, 60 days | T-S10a–b | M3-H |
+| S11 | waiting-list notice | T-S11 | M3-H |
+| S12 | counters | T-S12a–b | M3-H |
+| S13 | name rule | T-S13 | M3-S |
+| S14 | skip hidden | T-S14 | M3-H |
+| S15 | approval → open | T-S15 | M3-H |
+| S16 | queue + scheduled `deliver` | T-DL1–DL9 | M3-D |
 | S17 | native per-game mark read | U4 | — |
-| S18 | ignore no-show | T-CL10 | 0068 |
-| S19 | GR-9 + `resolve_court` | T-CL1–CL12 | 0067 (column, state) + 0068 |
+| S18 | ignore no-show | T-CL10 | M3-H |
+| S19 | GR-9 + `resolve_court` | T-CL1–CL12 | 0067 (column, state) + M3-H |
 
 ## 8.3 Paul's review (16 Nov) → where it is answered
 

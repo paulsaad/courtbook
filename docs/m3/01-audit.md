@@ -64,7 +64,7 @@ the iOS accessibility audit, the staging tester account.
 
 | Layer | Item |
 | --- | --- |
-| Database | Four migrations (`02-safety-review.md` §2.3): 0067 `match_detail`; 0068 hardening incl. court-lost handling and `remove_player`; 0069 report / block / moderation; 0070 push delivery |
+| Database | Four migrations (`02-safety-review.md` §2.3): 0067 `match_detail`; M3-H hardening incl. court-lost handling and `remove_player`; M3-S report / block / moderation; M3-D push delivery |
 | Server | One Edge Function `deliver` draining the `notifications` queue on a schedule, for push and email (`05-architecture.md` §5.5) |
 | Native | Find a Game board; match detail; join / request / withdraw / leave; organiser approve / decline / edit / private / reopen / cancel / remove; post from a booking and without one; chat; Activity with unread badge; push permission, registration, deep links; Club → Games section |
 | Design | Board, match detail and chat designs approved before code (Stitch workflow, step 3) |

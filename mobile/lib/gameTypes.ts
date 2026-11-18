@@ -29,7 +29,7 @@ export type ClubGameRow = {
 };
 
 /**
- * match_detail() — migration 0067 (docs/m3/sql/0067_match_detail.draft.sql). NOT AVAILABLE until 0067
+ * match_detail() — migration 0067 (supabase/migrations/0067_match_detail.sql). NOT AVAILABLE until 0067
  * is approved and applied; see `MATCH_DETAIL_AVAILABLE` in lib/games.ts.
  * `organizer_id` and `booking_id` are null for anyone who is not the organiser, an accepted player,
  * club staff or admin; `pending` is null for everyone but the organiser (field review, safeguard S-A).

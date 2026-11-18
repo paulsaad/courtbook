@@ -4,7 +4,7 @@
 
 | # | Decision | Status after review |
 | --- | --- | --- |
-| D1 | Fix the reproduced defects before native write screens | Kept. Now four migrations (0067–0070), each approved separately (`02-safety-review.md` §2.3) |
+| D1 | Fix the reproduced defects before native write screens | Kept. Now four migrations (0067, M3-H, M3-S, M3-D), each approved separately (`02-safety-review.md` §2.3) |
 | D2 | Delivery driven by the database | Kept, **one change I am making on my own judgement:** a scheduled job drains the `notifications` queue every 15 s instead of a webhook per row. Reason: webhooks run on `pg_net`, which does not retry failed calls; the scheduled job is one mechanism that also does retries and recovery (`05-architecture.md` §5.5). At-least-once, duplicates possible only in a narrow crash window — stated, not hidden |
 | D3 | Organiser can remove an accepted player before start; removal is final for that game | Kept (GR-6) |
 | D4 | Report, block, filter, community rules in M3 | Kept (review point 5) |
@@ -24,7 +24,7 @@
 | **P1** | A game may go ahead without a CourtBook court reservation (after a cancelled booking, or posted that way) | Players must clearly understand that no court is booked through CourtBook | GR-10; card, detail, join confirmation and push say "No court booked through CourtBook"; `court_resolved` copy (`04-ux-spec.md` §4.9) |
 | **P2** | Reports admin page on the web and the moderation workflow | **No commitment to a review frequency is assumed** until Paul explicitly accepts the moderator responsibility | `05-architecture.md` §5.6 ("Review frequency: not set"); acceptance required before store submission (`02-safety-review.md` §2.5) |
 | **P3** | Deleted messages stay deleted; report snapshots keep evidence of content reported before deletion | With access and retention safeguards | Admin-only access; snapshot cleared 180 days after closing unless on legal hold; tests T-MOD1, T-MOD6, T-MOD7 |
-| **P4** | Web adjustments with 0068 (court-cancelled wording; game page on `match_detail`) | Staging regression checks before any live release | `02-safety-review.md` §2.5; `07-roadmap.md` stage 2 |
+| **P4** | Web adjustments with M3-H (court-cancelled wording; game page on `match_detail`) | Staging regression checks before any live release | `02-safety-review.md` §2.5; `07-roadmap.md` stage 2 |
 
 ## 9.3 Engineering safeguards added by Paul (16 Nov)
 

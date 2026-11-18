@@ -13,7 +13,7 @@ one delivery function (§5.5). No new paid tool. Payment model and booking safet
 | Shared logic | `mobile/shared/levels.ts` (byte copy; `npm run check:shared` covers it) | `shared/types.ts`, `shared/time.ts` |
 | Errors | `lib/errors.ts` gains the game copy map (`04-ux-spec.md` §4.8) | `classify()` |
 | Components | `GameCard`, `RequestRow`, `ChatBubble`, `Composer`, `ActivityRow`, `Badge`, `Stepper`, `ReportSheet`, `CourtLostSheet` | `PlayerSlots`, `Chip`, `Segmented`, `DateStrip`, `SportMark`, `StateView`, `Freshness`, `OfflineBanner`, `SignInPrompt`, `Button`, `Text`, `Icon` |
-| Database | Existing RPCs + migrations 0067–0070 (`02-safety-review.md` §2.3) | — |
+| Database | Existing RPCs + migrations 0067, M3-H, M3-S, M3-D (`02-safety-review.md` §2.3) | — |
 | Delivery | Queue = `notifications` rows; Edge Function `deliver` drained on a schedule (§5.5) | `claim_notifications_to_email` |
 
 ## 5.2 Query keys and refresh
@@ -39,7 +39,7 @@ Chat sends are optimistic with a client id.
   `["game", id]` and show the real state.
 - Chat send: the client makes the message `id` (UUID) and inserts it; a retry of the same message
   hits the primary key (`23505`) and is treated as sent after a re-read. Server sets `created_at`
-  (0068 trigger).
+  (M3-H trigger).
 - Membership, capacity, level fit and court state are never decided on the phone; fit is display
   only.
 
@@ -55,7 +55,7 @@ Polling every 4 s (accepted). `match_messages_list(p_match, p_after)` returns ro
 | Equal timestamps | Lost if only one was seen | Same overlap + de-duplication | By construction (`>` with a 10 s overlap includes all equal stamps) |
 | Reconnect / app back to foreground / screen reopened | Gap since last poll | Full reload (`p_after = null`) on focus, reconnect and open | — |
 | Soft delete of an older message | Never returned (its `created_at` does not change) | Full reload every 60 s and on focus; own deletions applied locally at once | Same script: incremental 0, full reload 1 — CONFIRMED |
-| Sender-chosen timestamps | Cursor poisoned (F2) | Server-side `created_at` (0068 trigger) — required | `m3_findings.sh` F2 |
+| Sender-chosen timestamps | Cursor poisoned (F2) | Server-side `created_at` (M3-H trigger) — required | `m3_findings.sh` F2 |
 
 **Why 10 s is enough:** in Supabase, API calls by signed-in users run with an 8-second statement
 timeout by default, so a message insert cannot keep its stamp uncommitted for longer than that;
@@ -63,7 +63,7 @@ timeout by default, so a message insert cannot keep its stamp uncommitted for lo
 the 60-second full reload catches anything slower, so the worst case is a message appearing 60 s
 late, never missing. Ordering in the app is `(created_at, id)`.
 
-**Correction needed:** none beyond the 0068 trigger. No Realtime: nothing above needs it.
+**Correction needed:** none beyond the M3-H trigger. No Realtime: nothing above needs it.
 
 Cost at pilot scale: one small RPC per open chat every 4 s plus one full list per minute.
 
@@ -88,7 +88,7 @@ in a response table to be retried by the caller. A scheduled job that only looks
 gives the same latency class (≤ 15 s plus sending time) with one mechanism, and recovers from every
 failure below without extra code. Supabase Cron supports intervals down to one second.
 
-**Columns (0070):** `notifications.push_claim_id, push_claimed_at, push_attempts, pushed_at, push_failed_at`
+**Columns (M3-D):** `notifications.push_claim_id, push_claimed_at, push_attempts, pushed_at, push_failed_at`
 (email keeps its existing `email_claimed_at, emailed_at`). `push_tokens (token unique, profile_id,
 platform, app_variant, created_at, last_seen_at)`. `push_tickets (ticket_id, token, notification_id,
 created_at)`.
@@ -103,7 +103,7 @@ created_at)`.
 | Concurrent workers | `skip locked` + lease; function processes only what it claimed | No ordering promise across notices; each notice is independent |
 | Expired tokens | Ticket error `DeviceNotRegistered` → delete token at once; receipts job deletes tokens whose receipt says `DeviceNotRegistered`; tickets older than 24 h are discarded (Expo clears receipts after 24 h); tokens not refreshed for 60 days are pruned | Dead tokens stop costing calls within ~15 min |
 | Staging / live separation | Separate Supabase projects, each with its own cron job, function deployment and secrets (`EXPO_ACCESS_TOKEN`, SMTP, `DELIVERY_ENABLED`, `EXPECTED_APP_VARIANT`). Tokens reach a project only from the app variant bound to it (bundle id → project, as today). The function skips any token whose `app_variant` differs from `EXPECTED_APP_VARIANT`. **Live: cron job not created and `DELIVERY_ENABLED=false` until Paul approves** | A staging push can't reach a live user without two independent mistakes |
-| Email | Same function calls `claim_notifications_to_email`. Today that claim has a 5-min lease but **no attempt limit**: if sending succeeds and the stamp keeps failing, the same email would go out every 5 minutes. 0070 keeps its signature (the web route `/api/notify/email` keeps working) and adds `email_attempts`, incremented at claim, with a cap of 3. Both callers use the same claim, so they never hold the same row at once | Bounded like push: at most 3 sends per notice (T-DL16) |
+| Email | Same function calls `claim_notifications_to_email`. Today that claim has a 5-min lease but **no attempt limit**: if sending succeeds and the stamp keeps failing, the same email would go out every 5 minutes. M3-D keeps its signature (the web route `/api/notify/email` keeps working) and adds `email_attempts`, incremented at claim, with a cap of 3. Both callers use the same claim, so they never hold the same row at once | Bounded like push: at most 3 sends per notice (T-DL16) |
 | Content | Copy built from `kind` + game context; never `notifications.body` (S7) | — |
 
 **Demonstrating it (staging, before live):** T-DL1–DL8 in `06-test-plan.md` — kill the function
@@ -114,7 +114,7 @@ well inside the Supabase Free allowance of 500K Edge Function invocations a mont
 
 ## 5.6 Report, block, filter and moderation (S3)
 
-**Data (0069):**
+**Data (M3-S):**
 - `reports (id, reporter_id, target_kind 'message'|'player'|'game', message_id, profile_id, match_id,
   reason, note ≤ 500, snapshot text, created_at, status 'open'|'actioned'|'dismissed', handled_by,
   handled_at, action, emailed_at, legal_hold, closed_at)`. `snapshot` = the message text or display name at report time, so a later

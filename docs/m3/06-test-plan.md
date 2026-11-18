@@ -19,7 +19,7 @@ output recorded. Rule IDs (GR-n) are in `03-journeys.md` §3.0.
 
 | Script | Result | Becomes |
 | --- | --- | --- |
-| `repro/m3_findings.sh` | F1–F10 reproduced (F5 behaviour, F8 two parts); C1, C2 control OK | 0068 acceptance: run before (all reproduced) and after (none) on replica and staging |
+| `repro/m3_findings.sh` | F1–F10 reproduced (F5 behaviour, F8 two parts); C1, C2 control OK | M3-H acceptance: run before (all reproduced) and after (none) on replica and staging |
 | `repro/match_detail_matrix.sh` | `MATRIX PASS` (8 roles × 7 states), `FIELDS PASS`; mutations "no start-time limit" → `MATRIX FAIL`, "booking id to everyone" → `FIELDS FAIL`; anon → permission denied | T-MD1–MD6 in suite §AO |
 | `repro/chat_cursor.sh` | strict cursor loses a delayed commit, overlap recovers it; deletion seen only by full reload — both CONFIRMED | U3 cases and T-CH1–CH2 |
 
@@ -36,15 +36,15 @@ output recorded. Rule IDs (GR-n) are in `03-journeys.md` §3.0.
 | T-MD5 | Migration applied twice | no error, one function | — |
 | T-MD6 | Field review: every column for each role (`02-safety-review.md` S6 table) — `organizer_id`, `booking_id` only for organiser, accepted, staff, admin; `has_court` and court name for all who see the game; `note` only where the game is visible | as the table | return identifiers to all |
 
-### AP — 0068 hardening (stage 2)
+### AP — M3-H hardening (stage 2)
 
 | ID | Test | Expected | Mutation |
 | --- | --- | --- | --- |
-| T-S1 | Organiser `delete from matches` on a game with a player | 0 rows; game, players, chat intact | restore the policy |
+| T-S1 | Organiser `delete from matches` on a game with a player | 0 rows; game, players, chat intact | restore the policy — **already satisfied by release fix 0069** (fixes suite S1a–c); kept as regression |
 | T-S2a | Member inserts `created_at = 2030-01-01` | stored within 5 s of now | drop trigger |
 | T-S2b | Member inserts `deleted_at = now()` | stored null | trigger without that line |
 | T-S4 | Declined player leaves, asks again | `join_declined`; organiser has 1 request notice | old `leave_match` |
-| T-S5a | User updates own notice `body` / `emailed_at` | permission denied | re-grant UPDATE |
+| T-S5a | User updates own notice `body` / `emailed_at` | permission denied | re-grant UPDATE — **satisfied by release fix 0069** (fixes S5a–f); regression |
 | T-S5b | `mark_notifications_read` and `update … set read_at` | both work | revoke `read_at` |
 | T-S8 | Booking moved; pending requester | gets `booking_moved` | old recipient set |
 | T-S9a | Member inserts 2000-character body (any `deleted_at`) | check violation | — |
@@ -79,7 +79,7 @@ output recorded. Rule IDs (GR-n) are in `03-journeys.md` §3.0.
 | T-CL12 | Cancel a `no_court` game | `cancelled`, notices to A and P | — |
 | T-SUITE | Existing §V 68 updated: cancel → `no_court` (was: stays open) | — | — |
 
-### AQ — 0069 safety (stage 4)
+### AQ — M3-S safety (stage 4)
 
 | ID | Test | Expected |
 | --- | --- | --- |
@@ -109,7 +109,7 @@ output recorded. Rule IDs (GR-n) are in `03-journeys.md` §3.0.
 | T-R3 | Pending requester: chat | 0 rows |
 | T-R4 | Left / removed player: chat, participants | 0 rows |
 
-### AS — 0070 delivery tables
+### AS — M3-D delivery tables
 
 | ID | Test | Expected |
 | --- | --- | --- |
@@ -135,7 +135,7 @@ sessions, so the race is reproduced exactly rather than hoped for.
 | T-DL15 | `deliver` started with lease < 2 × its deadline | refuses to start | remove the guard |
 | T-DL16 | Email claim: stamp fails 3 times after sending | ≤ 3 claims of the row, then not claimable; web route still works with the same claim | remove `email_attempts` |
 
-### AT — chat cursor (with 0068 trigger)
+### AT — chat cursor (with M3-H trigger)
 
 | ID | Test | Expected |
 | --- | --- | --- |
@@ -151,7 +151,7 @@ sessions, so the race is reproduced exactly rather than hoped for.
 | G3 | B asks; A accepts; B's `my_agenda` has it | each step visible to the other |
 | G4 | B writes; A reads; stranger C reads nothing | RLS on staging |
 | G5 | B leaves; A notified; game reopens | — |
-| G6 | All F-items via REST with real JWTs (after 0068) | none reproduced |
+| G6 | All F-items via REST with real JWTs (after M3-H) | none reproduced |
 | G7 | A cancels the linked booking → GR-9 end to end, then `resolve_court` | T-CL1, T-CL5 on staging |
 
 ## 6.4 Delivery on staging (`deliver`, before live approval)
