@@ -204,6 +204,8 @@ jobs:
           select 'booking exclusion constraint present:', count(*) > 0 from pg_constraint where conrelid = to_regclass('public.bookings') and contype = 'x';
           select 'demo clubs:', string_agg(name || ' (' || payment_mode || ')', ', ') from public.clubs where is_demo;
           SQL
+          # read-only data snapshot (counts and hashes only), to compare before and after a test run
+          psql "$DB" -v ON_ERROR_STOP=1 -f .github/scripts/staging-snapshot.sql
           # the live preflight, run read-only here too (staging has 0065: only the hold_slot rows may differ)
           psql "$DB" -f supabase/live/0065_preflight_v2.sql || true
           # the 0066 post-check, read only (staging has 0066: every row should be true)
