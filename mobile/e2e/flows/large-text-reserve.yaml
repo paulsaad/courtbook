@@ -5,7 +5,10 @@ appId: app.courtbook.mobile.staging
 - tapOn: { id: "reserve-button" }
 - extendedWaitUntil: { visible: "Court booked", timeout: 60000 }
 - takeScreenshot: shots/sizes/booked-${SUFFIX}
+# "Visible" can mean behind Android's navigation bar (the app draws under it); the page keeps room
+# at the bottom, so one more scroll brings the last button fully above the bar before tapping it.
 - scrollUntilVisible: { element: "Cancel booking" }
+- scroll
 - tapOn: "Cancel booking"
 - tapOn: "Yes, cancel"
 - extendedWaitUntil: { visible: ".*[Cc]ancelled.*", timeout: 30000 }
