@@ -13,6 +13,9 @@ type Props = Omit<PressableProps, "children" | "style"> & {
  */
 export function Button({ label, variant = "primary", busy = false, disabled, onPress, ...rest }: Props) {
   const inactive = busy || !!disabled;
+  // Disabled (not busy): a solid neutral button with muted text, 5.75:1 — never a faded colour.
+  // The 50 % fade made white text on pale green 2.15:1, too faint to read (O3, Galaxy, 18 Nov).
+  const off = !!disabled && !busy;
   return (
     <Pressable
       accessibilityRole="button"
@@ -20,13 +23,13 @@ export function Button({ label, variant = "primary", busy = false, disabled, onP
       accessibilityState={{ disabled: inactive, busy }}
       disabled={inactive}
       onPress={inactive ? undefined : onPress}
-      style={({ pressed }) => [styles.base, styles[variant], inactive && styles.inactive, pressed && !inactive && styles.pressed]}
+      style={({ pressed }) => [styles.base, off ? styles.disabled : styles[variant], busy && styles.inactive, pressed && !inactive && styles.pressed]}
       {...rest}
     >
       {busy ? (
         <ActivityIndicator color={variant === "primary" || variant === "dark" ? color.onDark : color.ink} />
       ) : (
-        <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.text, variant === "primary" || variant === "dark" ? styles.textOnPrimary : styles.textPlain]}>
+        <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.text, off ? styles.textDisabled : variant === "primary" || variant === "dark" ? styles.textOnPrimary : styles.textPlain]}>
           {label}
         </Text>
       )}
@@ -41,8 +44,10 @@ const styles = StyleSheet.create({
   quiet: { backgroundColor: "transparent" },
   dark: { backgroundColor: color.night },
   inactive: { opacity: 0.5 },
+  disabled: { backgroundColor: color.line },
   pressed: { opacity: 0.85 },
   text: { fontFamily: font.bold, fontSize: 17 },
   textOnPrimary: { color: color.onDark },
   textPlain: { color: color.ink },
+  textDisabled: { color: color.muted },
 });

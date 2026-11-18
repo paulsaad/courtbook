@@ -4,6 +4,9 @@
  * `lastSuccessAt` must be the time of the last SUCCESSFUL fetch (React Query's dataUpdatedAt,
  * which a failed refetch does not move). The words never claim more than that: a time shown as
  * free was free when it was read, and only the server decides at the moment of reserving.
+ *
+ * Offline nothing can be refreshed, so it never shows the green "Checked …": it says the phone is
+ * offline and when the times were read, in the neutral tone.
  */
 export type Freshness = { text: string; tone: "ok" | "stale" | "checking" | "failed" };
 
@@ -12,7 +15,13 @@ export function describeFreshness(o: {
   now: number;
   fetching: boolean;
   failedSinceSuccess: boolean;
+  offline?: boolean;
 }): Freshness {
+  if (o.offline) {
+    return o.lastSuccessAt === 0
+      ? { text: "Offline · times not loaded", tone: "failed" }
+      : { text: `Offline · times as of ${clock(o.lastSuccessAt)}`, tone: "stale" };
+  }
   if (o.lastSuccessAt === 0) return { text: o.fetching ? "Checking times…" : "Times not loaded", tone: o.fetching ? "checking" : "failed" };
   const age = Math.max(0, o.now - o.lastSuccessAt);
   const when = clock(o.lastSuccessAt);

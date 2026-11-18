@@ -27,6 +27,10 @@ jobs:
         run: npm run typecheck
       - name: Unit tests
         run: npm test -- --ci
+      # Test-run clean-up (throwaway PostgreSQL): the demo club's payment mode is restored only from the
+      # run's own record (P1); only the run's own account is deleted; one shared concurrency group.
+      - name: Staging clean-up regression tests
+        run: bash e2e/test-staging-cleanup.sh
       - name: Shared copies match the web app's src/lib
         run: npm run check:shared
       # The exact release bundling step an EAS build runs, on mobile/ alone. This is the check that
