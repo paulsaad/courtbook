@@ -11,7 +11,7 @@ import type { ClubGameRow, GameDetail, MyLevelRow, OpenGameRow, ParticipantRow }
 /**
  * Find a Game data layer (docs/m3/05-architecture.md §5.1–5.2). Reads only: every call is one of the
  * existing database functions, under the caller's own session and RLS. No write is made here; game
- * actions arrive in stage 3, after migration 0068.
+ * actions are in lib/gameActions.ts, switched off until M3-H (hardening).
  */
 
 /**

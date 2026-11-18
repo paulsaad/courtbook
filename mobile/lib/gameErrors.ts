@@ -8,7 +8,7 @@ import { classify, type Failure } from "./errors";
  * comes from classify() — network / auth / refused / unknown — so retry and sign-in behaviour is
  * exactly the M2 behaviour.
  *
- * Reasons marked (0068) / (0069) are raised only once those migrations exist; listing them now
+ * Reasons marked (M3-H) / (M3-S) are raised only once those migrations exist; listing them now
  * keeps the copy in one place and is harmless before then.
  */
 export const GAME_ERRORS: Record<string, string> = {
@@ -33,7 +33,7 @@ export const GAME_ERRORS: Record<string, string> = {
   booking_not_found: "Pick one of your own upcoming bookings.",
   booking_already_posted: "You already posted a game for this booking.",
   sport_mismatch: "That booking is for a different sport.",
-  // (0068)
+  // (M3-H, hardening)
   club_required: "Choose a club for this game.",
   too_far_ahead: "Games can be posted up to 60 days ahead.",
   match_cancelled: "This game was cancelled.",
@@ -43,7 +43,7 @@ export const GAME_ERRORS: Record<string, string> = {
   too_many_games: "You already have 10 open games. Close one to post another.",
   too_many_requests: "You have many requests waiting. Withdraw one to ask for another.",
   slow_down: "You're sending messages quickly. Wait a moment.",
-  // (0069)
+  // (M3-S, safety)
   blocked: "You can't join this game.",
   message_not_allowed: "This message can't be sent. Check our community rules.",
   rules_not_accepted: "Please accept the community rules first.",

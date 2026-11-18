@@ -117,7 +117,7 @@ export type OrganiserAction = { kind: "edit" | "make_private" | "reopen" | "remo
 /**
  * The organiser's "Manage game" sheet (GR-8): items not allowed now stay visible but disabled, with
  * the reason. Display only — set_match_status, update_match, remove_player and resolve_court decide.
- * `remove_player` and `resolve_court` need migration 0068.
+ * `remove_player` and `resolve_court` need migration M3-H (hardening).
  */
 export function organiserActions(d: GameDetail): OrganiserAction[] {
   const phase = phaseOf(d);

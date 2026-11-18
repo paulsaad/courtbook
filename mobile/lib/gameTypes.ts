@@ -4,7 +4,7 @@
  */
 
 export type MatchStatus = "open" | "closed" | "cancelled";
-/** `no_court` is written only once migration 0068 is in place (game rule GR-9). */
+/** `no_court` is written only once migration M3-H (hardening) is in place (game rule GR-9). */
 export type ClosedReason = "full" | "organizer" | "no_court" | null;
 export type JoinMode = "open" | "approval";
 export type MyStatus = "accepted" | "pending" | "declined" | null;
