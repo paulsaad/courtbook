@@ -26,28 +26,27 @@ check control "$E2E_EMAIL" "$E2E_PASSWORD"
 check paul-tester "paul.tester@courtbook.test" "$E2E_TESTER_PASSWORD"
 paste() { # label first_wrong
   echo "::group::paste: $1"
+  adb logcat -c
   if (cd "$OUT" && maestro test -e "E2E_EMAIL=paul.tester@courtbook.test" -e "E2E_PASSWORD=$E2E_TESTER_PASSWORD" -e "FIRST_WRONG=$2" ../flows/_diag-paste.yaml --format junit --output "paste-$1.xml" > "paste-$1.log" 2>&1); then
     echo "RESULT $1: signed in (Home shows 'Ready to play')"
+    adb logcat -d -v raw ReactNativeJS:V '*:S' | grep -c "\[diag\]" | sed 's/^/DIAG attempts logged: /'
   else
     adb shell input swipe 540 900 540 1700 300; sleep 1   # scroll up a little, towards the top of the form
     adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/ui-$1.xml" >/dev/null
     msg=$(python3 -c "import re; t=open('$OUT/ui-$1.xml').read(); print(' | '.join(x for x in re.findall(r'text=\"([^\"]+)\"', t) if re.search(r'sign-in failed|Invalid|error|Ready to play', x, re.I) and '[diag]' not in x))")
-    diag=$(python3 - "$OUT/ui-$1.xml" <<'PY'
+    adb logcat -d -v raw ReactNativeJS:V '*:S' > "$OUT/logcat-$1.txt"
+    python3 - "$OUT/logcat-$1.txt" <<'PY'
 import os, re, sys
-t = open(sys.argv[1]).read()
-m = re.search(r'\[diag\] email sent: &quot;(.*?)&quot; \((\d+)\); password sent: (\d+) chars; fp ([0-9a-f]{8})', t)
-if not m:
-    raw = [x for x in re.findall(r'text="([^"]*)"', t) if 'diag' in x]
-    print("(no diagnostic line parsed; raw: %r)" % raw[:3]); sys.exit()
 secret = os.environ["E2E_TESTER_PASSWORD"]
 h = 0x811c9dc5
-for ch in secret.encode("utf-16-le").decode("utf-16-le"):
-    for unit in ([ord(ch)] if ord(ch) < 0x10000 else []):
-        h ^= unit; h = (h * 0x01000193) & 0xffffffff
-print(f"email sent: {m.group(1)!r}; password sent: {m.group(3)} chars (secret: {len(secret)}); equals the secret: {'YES' if m.group(4) == format(h, '08x') else 'NO'}")
+for ch in secret:
+    h ^= ord(ch); h = (h * 0x01000193) & 0xffffffff
+want = format(h, "08x")
+lines = [m for m in re.finditer(r'\[diag\] email sent: "(.*?)" \((\d+)\); password sent: (\d+) chars; fp ([0-9a-f]{8})', open(sys.argv[1]).read())]
+if not lines: print("DIAG: no attempt logged")
+for n, m in enumerate(lines, 1):
+    print(f"DIAG attempt {n}: email sent {m.group(1)!r}; password sent {m.group(3)} chars (secret {len(secret)}); equals the secret: {'YES' if m.group(4) == want else 'NO'}")
 PY
-)
-    echo "DIAG $1: $diag"
     step=$(sed 's/\x1b\[[0-9;]*m//g' "$OUT/paste-$1.log" | grep -v -i "input text" | grep -E "FAILED|❌|Element not found|Assertion|not found" | head -3 | tr '\n' ' ')
     echo "RESULT $1: NOT signed in; on screen: ${msg:-(no error text)}; maestro: ${step:-?}"
   fi

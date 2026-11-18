@@ -35,7 +35,9 @@ export function StagingPasswordSignIn({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError(null);
     const sent = { email: email.trim(), password };
-    setDiag(`[diag] email sent: "${sent.email}" (${sent.email.length}); password sent: ${sent.password.length} chars; fp ${fnv(sent.password)}`);
+    const line = `[diag] email sent: "${sent.email}" (${sent.email.length}); password sent: ${sent.password.length} chars; fp ${fnv(sent.password)}`;
+    setDiag(line);
+    console.log(line);
     const { error } = await supabase.auth.signInWithPassword(sent);
     setBusy(false);
     if (error) {
