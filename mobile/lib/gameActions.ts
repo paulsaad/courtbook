@@ -17,8 +17,8 @@ import type { JoinMode, MatchStatus } from "./gameTypes";
  *
  * Each call is one existing database function under the caller's own session. The phone decides
  * nothing: membership, capacity, level fit and court state are the server's (§5.3).
- * Not here yet, because their functions arrive with M3-H: remove a player (`remove_player`) and
- * sort out a cancelled court (`resolve_court`).
+ * `remove` and `resolveCourt` call functions that exist only once M3-H is applied
+ * (docs/m3/sql/m3h_game_hardening.draft.sql).
  */
 export const GAME_WRITES_AVAILABLE = false;
 
@@ -36,7 +36,9 @@ export type GameAction =
   | { kind: "decide"; profileId: string; accept: boolean }
   | { kind: "status"; status: MatchStatus } // private (closed), open again, cancel
   | { kind: "edit"; edit: GameEdit }
-  | { kind: "hide"; hidden: boolean };
+  | { kind: "hide"; hidden: boolean }
+  | { kind: "remove"; profileId: string } // organiser removes an accepted player (GR-6)
+  | { kind: "resolveCourt"; bookingId: string | null }; // court booking cancelled: link another, or go ahead without (GR-9)
 
 /**
  * The argument names of each function, as on the database (checked against the replica by
@@ -50,6 +52,8 @@ export const GAME_RPC_ARGS = {
   set_match_status: ["p_match", "p_status"],
   update_match: ["p_match", "p_players_needed", "p_level_min", "p_level_max", "p_note", "p_join_mode"],
   hide_match: ["p_match", "p_hidden"],
+  remove_player: ["p_match", "p_profile"], // M3-H
+  resolve_court: ["p_match", "p_booking"], // M3-H
 } as const;
 
 /** Shown if an action is called before writes are switched on (no screen offers one before then). */
@@ -60,6 +64,7 @@ export const MANAGE_LATER_TEXT = "Managing games from the app arrives in the nex
 export function actionKey(gameId: string, a: GameAction): string {
   switch (a.kind) {
     case "decide": return `${gameId}:decide:${a.profileId}`;
+    case "remove": return `${gameId}:remove:${a.profileId}`;
     default: return `${gameId}:${a.kind}`;
   }
 }
@@ -79,6 +84,8 @@ export function rpcFor(gameId: string, a: GameAction): { fn: string; args: Recor
       },
     };
     case "hide": return { fn: "hide_match", args: { p_match: gameId, p_hidden: a.hidden } };
+    case "remove": return { fn: "remove_player", args: { p_match: gameId, p_profile: a.profileId } };
+    case "resolveCourt": return { fn: "resolve_court", args: { p_match: gameId, p_booking: a.bookingId } };
   }
 }
 
@@ -122,7 +129,7 @@ export async function runGameAction(
 ): Promise<ActionOutcome> {
   const { available = GAME_WRITES_AVAILABLE, rpc = defaultRpc, courtLost } = opts;
   if (!available) {
-    const organiser = a.kind === "decide" || a.kind === "status" || a.kind === "edit";
+    const organiser = a.kind === "decide" || a.kind === "status" || a.kind === "edit" || a.kind === "remove" || a.kind === "resolveCourt";
     return { kind: "refused", failure: { kind: "refused", message: organiser ? MANAGE_LATER_TEXT : JOIN_LATER_TEXT, reason: "writes_unavailable" } };
   }
   return flight.run(actionKey(gameId, a), async () => {

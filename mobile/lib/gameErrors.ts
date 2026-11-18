@@ -41,7 +41,8 @@ export const GAME_ERRORS: Record<string, string> = {
   court_lost: "Sort out the court first: use another booking, go ahead without one, or cancel.",
   court_not_lost: "Something went wrong. Try again.",
   too_many_games: "You already have 10 open games. Close one to post another.",
-  too_many_requests: "You have many requests waiting. Withdraw one to ask for another.",
+  too_many_requests: "You have 20 requests waiting. Withdraw one to ask for another.",
+  not_accepted: "That player is no longer in this game.",
   slow_down: "You're sending messages quickly. Wait a moment.",
   // (M3-S, safety)
   blocked: "You can't join this game.",

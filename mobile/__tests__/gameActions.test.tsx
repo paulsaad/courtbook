@@ -19,7 +19,9 @@ const ALL: GameAction[] = [
   { kind: "join" }, { kind: "leave" }, { kind: "decide", profileId: P, accept: true },
   { kind: "status", status: "closed" }, { kind: "hide", hidden: true },
   { kind: "edit", edit: { playersNeeded: 4, levelMin: 3, levelMax: 6, note: "Friendly", joinMode: "approval" } },
+  { kind: "remove", profileId: P }, { kind: "resolveCourt", bookingId: null },
 ];
+const ORGANISER = new Set(["decide", "status", "edit", "remove", "resolveCourt"]);
 
 function client() {
   return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
@@ -39,8 +41,7 @@ describe("writes stay off until M3-H is approved (D1)", () => {
     for (const a of ALL) {
       const out = await runGameAction(qc, G, a);
       expect(out.kind).toBe("refused");
-      const organiser = a.kind === "decide" || a.kind === "status" || a.kind === "edit";
-      if (out.kind === "refused") expect(out.failure.message).toBe(organiser ? MANAGE_LATER_TEXT : JOIN_LATER_TEXT);
+      if (out.kind === "refused") expect(out.failure.message).toBe(ORGANISER.has(a.kind) ? MANAGE_LATER_TEXT : JOIN_LATER_TEXT);
     }
     expect(rpc).not.toHaveBeenCalled();
   });
@@ -55,6 +56,12 @@ describe("each action calls its function with the database's argument names", ()
   it("every listed function is used by some action", () => {
     const used = new Set(ALL.map((a) => rpcFor(G, a).fn));
     expect([...used].sort()).toEqual(Object.keys(GAME_RPC_ARGS).sort());
+  });
+  it("going ahead without a court sends an explicit null booking", () => {
+    expect(rpcFor(G, { kind: "resolveCourt", bookingId: null }).args).toEqual({ p_match: G, p_booking: null });
+  });
+  it("removing two different players is not blocked by each other", () => {
+    expect(actionKey(G, { kind: "remove", profileId: "a" })).not.toBe(actionKey(G, { kind: "remove", profileId: "b" }));
   });
   it("edit sends every field, nulls included", () => {
     const { args } = rpcFor(G, { kind: "edit", edit: { playersNeeded: 2, levelMin: null, levelMax: null, note: null, joinMode: "open" } });

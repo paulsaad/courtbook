@@ -46,7 +46,8 @@ while IFS= read -r line; do
   fn=$(echo "$line" | sed -E 's/^ *([a-z_]+):.*/\1/'); have=$(echo "$line" | grep -oE '"p_[a-z_]+"' | tr -d '"' | tr '\n' ' ' | sed 's/ $//')
   want=$($PSQL -At -d $DB -c "select string_agg(n, ' ' order by i) from pg_proc p, unnest(p.proargnames) with ordinality as a(n, i)
     where p.proname = '$fn' and p.pronamespace = 'public'::regnamespace and has_function_privilege('authenticated', p.oid, 'EXECUTE')")
-  if [ "$want" = "$have" ]; then echo "ok    $fn($have)"
+  if [ -z "$want" ] && echo "$line" | grep -q "// M3-H"; then echo "skip  $fn (M3-H draft; not on this replica)"
+  elif [ "$want" = "$have" ]; then echo "ok    $fn($have)"
   else echo "FAIL  $fn"; echo "      db:  $want"; echo "      app: $have"; fails=$((fails+1)); fi
 done < <(awk '/^export const GAME_RPC_ARGS = \{/ {on=1; next} on && /^\}/ {exit} on {print}' "$ACT")
 
