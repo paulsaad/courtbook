@@ -10,6 +10,7 @@ import { DateStrip } from "../../components/DateStrip";
 import { TimeTile } from "../../components/TimeTile";
 import { Button } from "../../components/Button";
 import { Freshness } from "../../components/Freshness";
+import { wrappingTitle } from "../../components/HeaderTitle";
 import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { Segmented } from "../../components/Segmented";
 import { ClubInfoView } from "../../components/ClubInfoView";
@@ -150,7 +151,7 @@ export default function Club() {
 
   return (
     <View style={styles.page}>
-      <Stack.Screen options={{ title: name }} />
+      <Stack.Screen options={wrappingTitle(name)} />
       <View style={styles.tabs}>
         <Segmented
           options={[{ key: "book", label: "Book" }, { key: "info", label: "Info" }]}

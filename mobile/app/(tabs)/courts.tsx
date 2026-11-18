@@ -77,7 +77,7 @@ export default function Courts() {
   );
 }
 
-function ClubCard({ club, date, sport, cover }: { club: ClubDay; date: string; sport: string | null; cover: string | null }) {
+export function ClubCard({ club, date, sport, cover }: { club: ClubDay; date: string; sport: string | null; cover: string | null }) {
   const go = (at?: string) =>
     router.push({ pathname: "/club/[id]", params: { id: club.id, name: club.name, date, ...(sport ? { sport } : {}), ...(at ? { at } : {}) } });
   const shown = club.starts.slice(0, 3);
@@ -99,7 +99,8 @@ function ClubCard({ club, date, sport, cover }: { club: ClubDay; date: string; s
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <View style={styles.nameRow}>
-            <Text style={styles.name} numberOfLines={2}>{club.name}</Text>
+            {/* No line limit: at the largest text sizes the full name wraps rather than being cut (F1). */}
+            <Text style={styles.name}>{club.name}</Text>
             {from !== null && (
               <Text style={styles.from}>from <Text style={styles.price}>${from}</Text>/h</Text>
             )}

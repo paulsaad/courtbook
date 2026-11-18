@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import Svg, { Defs, Line, Pattern, Rect } from "react-native-svg";
 import { Text } from "./Text";
 import { Icon } from "./Icon";
@@ -12,6 +12,10 @@ import { haptic } from "../lib/haptics";
  * "Not free" rather than "Booked": the availability data cannot tell a booking from the club being
  * closed, and a screen must not assert what the system does not know.
  *
+ * Above SELECTED_WORD_MAX_SCALE the word "selected" no longer fits a tile line on a 360 dp phone and
+ * Android breaks it mid-word ("se/lected", F4). There the tile drops the word: the fill and the tick
+ * still show it, screen readers still hear "selected", and the panel below names the chosen time.
+ *
  * The counts describe what the last successful read returned. Nothing here promises the slot:
  * the server decides when the player reserves.
  */
@@ -23,12 +27,15 @@ export function tileState(freeCourts: number, selected: boolean): TileState {
   return freeCourts === 1 ? "limited" : "free";
 }
 
+/** Largest text scale at which "selected" still fits a tile line on a 360 dp phone (checked on the emulator). */
+export const SELECTED_WORD_MAX_SCALE = 1.3;
+
 /** `price` is optional: the exact total comes from the server quote once a time is chosen. */
-export function tileLabel(state: TileState, price: string | null, freeCourts: number): string {
+export function tileLabel(state: TileState, price: string | null, freeCourts: number, fontScale = 1): string {
   const p = price ? `${price} · ` : "";
   switch (state) {
     case "booked": return "Not free";
-    case "selected": return `${p}selected`;
+    case "selected": return fontScale > SELECTED_WORD_MAX_SCALE ? (price ?? "") : `${p}selected`;
     case "limited": return `${p}1 court free`;
     case "free": return `${p}${freeCourts} courts`;
   }
@@ -46,6 +53,7 @@ type Props = { time: string; price?: string | null; freeCourts: number; selected
 export function TimeTile({ time, price = null, freeCourts, selected, onPress, disabled = false }: Props) {
   const state = tileState(freeCourts, selected);
   const s = look[state];
+  const { fontScale } = useWindowDimensions();
   return (
     <Pressable
       testID={state === "booked" ? `time-taken-${time}` : `time-${time}`}
@@ -65,7 +73,7 @@ export function TimeTile({ time, price = null, freeCourts, selected, onPress, di
         <Text style={[styles.time, s.time]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{time}</Text>
         {state === "selected" && <Icon name="check" size={18} color={color.onDark} strokeWidth={3} />}
       </View>
-      <Text style={[styles.label, s.label]} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{tileLabel(state, price, freeCourts)}</Text>
+      <Text style={[styles.label, s.label]} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{tileLabel(state, price, freeCourts, fontScale)}</Text>
     </Pressable>
   );
 }

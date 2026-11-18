@@ -45,12 +45,14 @@ adb logcat -d -v raw ReactNativeJS:V '*:S' > "$OUT/logcat-js.txt"
 python3 e2e/check_report.py "$OUT/logcat-js.txt" || status=1
 echo "::endgroup::"
 
-# 2. Sizes: small phone (360 dp), large phone (412 dp); text at 100%, 130%, and the app's maximum.
+# 2. Sizes: small phone (360 dp), large phone (412 dp); text at 100%, 130%, the app's maximum (160%)
+#    and Android's maximum (200%). The narrow phone gets every step: the Galaxy A17's largest-text
+#    findings (18 Nov, F1–F4) were cut-off names and a broken word that only show when narrow and large.
 density=$(adb shell wm density | tr -dc '0-9\n' | tail -1)
 for cfg in "1080x2400 420 412dp" "1080x1920 480 360dp"; do
   set -- $cfg; size=$1; dpi=$2; name=$3
   adb shell wm size "$size"; adb shell wm density "$dpi"
-  case "$name" in 412dp) scales="1.0 1.6" ;; *) scales="1.0 1.3" ;; esac
+  case "$name" in 412dp) scales="1.0 1.6" ;; *) scales="1.0 1.3 1.6 2.0" ;; esac
   for fs in $scales; do
     adb shell settings put system font_scale "$fs"
     adb shell am force-stop "$APP"
