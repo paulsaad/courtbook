@@ -78,7 +78,9 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
           </>
         ) : m.status === "closed" ? (
           <>
-            {m.closed_reason === "full" ? (
+            {m.closed_reason === "no_court" ? (
+              <p className="text-sm text-muted">The court booking for this match was cancelled, so joining is paused. Your players stay in the match.</p>
+            ) : m.closed_reason === "full" ? (
               <>
                 <p className="text-sm text-muted">Full, so it is off the match board. Want one more player? Edit it above and add a spot.</p>
                 <button disabled={busy} onClick={() => run("set_match_status", { p_match: m.match_id, p_status: "closed" })} className={secondary}>Make it private — keep it off the board</button>
@@ -102,7 +104,7 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
         <p className="text-sm text-muted">The organizer could not take you this time.</p>
       ) : m.status === "open" ? (
         <button disabled={busy} onClick={() => run("join_match", { p_match: m.match_id })} className={primary}>{m.join_mode === "approval" ? "Ask to join" : "Join"}</button>
-      ) : <p className="text-sm text-muted">{m.joined >= m.players_needed ? "This match is full." : "The organizer is not taking more players."}</p>}
+      ) : <p className="text-sm text-muted">{m.closed_reason === "no_court" ? "The court booking for this match was cancelled. Joining is paused until the organizer decides." : m.joined >= m.players_needed ? "This match is full." : "The organizer is not taking more players."}</p>}
     </div>
   );
 }
