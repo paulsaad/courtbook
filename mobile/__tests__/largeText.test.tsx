@@ -11,7 +11,7 @@ jest.mock("react-native/Libraries/Utilities/useWindowDimensions", () => ({ __esM
 
 import { Platform } from "react-native";
 import { render, screen } from "@testing-library/react-native";
-import { ClubCard } from "../app/(tabs)/courts";
+import { ClubCard, PRICE_BESIDE_NAME_MAX_SCALE } from "../app/(tabs)/courts";
 import { Row } from "../app/(tabs)/bookings";
 import { TimeTile, tileLabel, SELECTED_WORD_MAX_SCALE } from "../components/TimeTile";
 import { HEADER_MAX_FONT_SCALE, WrappingHeaderTitle, wrappingTitle } from "../components/HeaderTitle";
@@ -82,5 +82,25 @@ describe("F4 selected time tile", () => {
   it("at normal text: unchanged", async () => {
     await render(<TimeTile time="08:00" price="$30" freeCourts={5} selected onPress={() => {}} />);
     expect(screen.getByText("$30 · selected")).toBeTruthy();
+  });
+});
+
+describe("F1 Courts card at the largest text", () => {
+  const club = { id: "c1", name: LONG, slug: "b", town: "Batroun", priceFrom: 20, timezone: "Asia/Beirut", slotMinutes: 30, minMinutes: 60, maxMinutes: 120, cancelCutoffHours: 6, isDemo: false, courtCount: 5, sports: ["padel"], starts: [] };
+  const direction = async () => {
+    const { StyleSheet } = jest.requireActual("react-native");
+    return StyleSheet.flatten(screen.getByTestId("club-name-row").props.style).flexDirection;
+  };
+  it("price beside the name up to 1.3x", async () => {
+    dims.fontScale = PRICE_BESIDE_NAME_MAX_SCALE;
+    await render(<ClubCard club={club} date="2026-11-19" sport={null} cover={null} />);
+    expect(await direction()).toBe("row");
+  });
+  it("price under the name above it, so the name gets the full width", async () => {
+    dims.fontScale = 1.6;
+    await render(<ClubCard club={club} date="2026-11-19" sport={null} cover={null} />);
+    expect(await direction()).toBeUndefined(); // column
+    expect(screen.getByText(LONG)).toBeTruthy();
+    expect(screen.getByText(/from/)).toBeTruthy();
   });
 });

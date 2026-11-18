@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
 import { PendingReservationBanner } from "../../components/PendingReservation";
 import { router, useLocalSearchParams } from "expo-router";
 import { hhmm } from "@shared/time";
@@ -77,7 +77,15 @@ export default function Courts() {
   );
 }
 
+/**
+ * Above this text scale the price moves under the club name instead of beside it: on a 360 dp phone
+ * the column beside the price is too narrow and words break mid-word ("Batr/oun", F1, 18 Nov).
+ */
+export const PRICE_BESIDE_NAME_MAX_SCALE = 1.3;
+
 export function ClubCard({ club, date, sport, cover }: { club: ClubDay; date: string; sport: string | null; cover: string | null }) {
+  const { fontScale } = useWindowDimensions();
+  const stacked = fontScale > PRICE_BESIDE_NAME_MAX_SCALE;
   const go = (at?: string) =>
     router.push({ pathname: "/club/[id]", params: { id: club.id, name: club.name, date, ...(sport ? { sport } : {}), ...(at ? { at } : {}) } });
   const shown = club.starts.slice(0, 3);
@@ -98,7 +106,7 @@ export function ClubCard({ club, date, sport, cover }: { club: ClubDay; date: st
           )}
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <View style={styles.nameRow}>
+          <View testID="club-name-row" style={stacked ? styles.nameStacked : styles.nameRow}>
             {/* No line limit: at the largest text sizes the full name wraps rather than being cut (F1). */}
             <Text style={styles.name}>{club.name}</Text>
             {from !== null && (
@@ -138,6 +146,7 @@ const styles = StyleSheet.create({
   thumb: { width: 64, height: 64, borderRadius: 12, backgroundColor: color.cedarDeep, overflow: "hidden" },
   thumbImg: { width: 64, height: 64 },
   nameRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: 8 },
+  nameStacked: { gap: 2 },
   name: { fontFamily: font.bold, fontSize: 17, lineHeight: 22, color: color.ink, flexShrink: 1 },
   from: { fontFamily: font.regular, fontSize: 13, color: color.muted },
   price: { fontFamily: font.score, fontSize: 20, color: color.ink },
