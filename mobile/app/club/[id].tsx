@@ -20,6 +20,8 @@ import { clubsFromSlots, durationLabel, durationOptions, partOfDay, sameInstant,
 import { BEIRUT, money, tilePriceLabel, useClubMode, useDaySlots, useQuote, useTilePrices } from "../../lib/queries";
 import { useSession } from "../../lib/session";
 import { useReservation } from "../../lib/reservation";
+import { reserveButton } from "../../lib/reserveButton";
+import { useOnline } from "../../lib/online";
 import { haptic } from "../../lib/haptics";
 import { bookingDays, shortDate, sportName } from "../../lib/days";
 import { color, font, radius, space } from "../../lib/theme";
@@ -57,6 +59,7 @@ export default function Club() {
   const court = freeCourts.find((c) => c.id === courtId) ?? freeCourts[0] ?? null;
 
   const session = useSession();
+  const online = useOnline();
   const queryClient = useQueryClient();
   const mode = useClubMode(club?.id ?? null);
   const res = useReservation({
@@ -138,15 +141,10 @@ export default function Club() {
   }
 
   const atDesk = mode.data === "at_desk";
-  const reserveLabel =
-    res.phase === "sending" ? "Reserving…"
-    : res.phase === "checking" ? "Checking…"
-    : res.phase === "uncertain" ? "Check now"
-    : session.status !== "signed-in" ? "Sign in to reserve"
-    : res.blockedBy ? "Earlier booking not confirmed"
-    : mode.isPending ? "Checking the club…"
-    : !atDesk ? "Reserve on the website for now"
-    : "Reserve court";
+  const reserveBtn = reserveButton({
+    phase: res.phase, signedIn: session.status === "signed-in", online, blocked: !!res.blockedBy,
+    modePending: mode.isPending, atDesk, priceKnown: shown !== null && shown.price !== null, // the panel renders only when shown exists
+  });
   const groups = groupTiles(tiles, club?.timezone ?? BEIRUT);
   const tz = club?.timezone ?? res.pending?.timezone ?? BEIRUT;
 
@@ -282,9 +280,10 @@ export default function Club() {
             <Text variant="caption">This club takes payment in the app. That arrives in the next update — reserve it on the website for now.</Text>
           ) : null}
           <Button
-            label={reserveLabel}
+            testID="reserve-button"
+            label={reserveBtn.label}
             busy={res.phase === "sending" || res.phase === "checking"}
-            disabled={res.phase === "idle" && session.status === "signed-in" && (!!res.blockedBy || !atDesk || shown.price === null)}
+            disabled={reserveBtn.disabled}
             onPress={res.phase === "uncertain" ? () => void res.check() : onReserve}
           />
         </View>
