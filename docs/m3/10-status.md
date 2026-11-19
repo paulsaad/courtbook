@@ -102,4 +102,4 @@ Choices made where the spec left a detail open (all reversible, listed for revie
   `player_removed`, `court_resolved`, new `booking_unlinked` texts.
 
 Pre-existing, not caused by M3: SQL suite check 95a fails when run shortly after midnight UTC
-(reproduced on `main` at 00:14 UTC, 19 Nov; passes at other hours).
+(reproduced on `main` at 00:14 UTC, 19 Nov; passed at 23:00 UTC the evening before).
