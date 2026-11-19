@@ -6,10 +6,11 @@ import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { SignInPrompt } from "../../components/SignInPrompt";
 import { GameDetailView, type DetailHandlers } from "../../components/game/GameDetailView";
 import { BookingPicker } from "../../components/game/BookingPicker";
+import { ManageSheet } from "../../components/game/ManageSheet";
 import { useSession } from "../../lib/session";
 import { SCREEN_FEATURES, useGameScreen } from "../../lib/gameScreens";
 import type { ActionOutcome, GameAction } from "../../lib/gameActions";
-import { NOT_AVAILABLE } from "../../lib/gameState";
+import { NOT_AVAILABLE, organiserActions } from "../../lib/gameState";
 import { color, space } from "../../lib/theme";
 
 /** Asks each sentence in turn (GR-10: no court, level outside the range); resolves true only if all are accepted. */
@@ -41,6 +42,7 @@ export default function GameScreen() {
   const me = signedIn ? session.session.user.id : null;
   const screen = useGameScreen(id, { signedIn });
   const [picking, setPicking] = useState(false);
+  const [managing, setManaging] = useState(false);
   const d = screen.detail;
 
   if (session.status === "signed-out") {
@@ -83,6 +85,7 @@ export default function GameScreen() {
     handlers.onSecondary = async (s) => {
       if (s === "withdraw" && await confirm("Withdraw your request?", "The organiser will no longer see it.", "Withdraw")) await run({ kind: "leave" });
       if (s === "leave" && await confirm("Leave this game?", "Your place opens for someone else.", "Leave", true)) await run({ kind: "leave" });
+      if (s === "manage") setManaging(true);
     };
     if (d.i_organize) {
       handlers.onDecide = (profileId, accept) => void run({ kind: "decide", profileId, accept });
@@ -101,6 +104,15 @@ export default function GameScreen() {
     <>
       <GameDetailView sections={screen.sections} me={me} pendingCount={d.i_organize ? d.pending ?? 0 : null} handlers={handlers}
                       refreshing={screen.refreshing} onRefresh={screen.refetch} />
+      {SCREEN_FEATURES.writes && d.i_organize ? (
+        <ManageSheet visible={managing} actions={organiserActions(d)} onClose={() => setManaging(false)}
+                     onPick={async (k) => {
+                       setManaging(false);
+                       if (k === "make_private" && await confirm("Make this game private?", "It leaves Find a game, and waiting requests are declined.", "Make private")) await run({ kind: "status", status: "closed" });
+                       if (k === "reopen") await run({ kind: "status", status: "open" });
+                       if (k === "cancel" && await confirm("Cancel this game?", "Everyone in the game and everyone waiting is told.", "Cancel game", true)) await run({ kind: "status", status: "cancelled" });
+                     }} />
+      ) : null}
       {SCREEN_FEATURES.writes && d.i_organize ? (
         <BookingPicker visible={picking} sport={d.sport} onClose={() => setPicking(false)}
                        onPick={async (bookingId) => { setPicking(false); await run({ kind: "resolveCourt", bookingId }); }} />

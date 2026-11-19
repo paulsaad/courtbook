@@ -35,7 +35,9 @@ rep "L5 0067_apply.sql applies on 0001–0071" "$([ "$r" = "0067 applied" ] && e
 p=$(post $AP); rep "L6 postcheck all ok after it" "$([ -z "$p" ] && echo true)" "$p"
 r=$($PSQL -X -At -d $AP -f supabase/live/0067_apply.sql 2>&1 | grep -o "STOPPED, nothing changed" | head -1)
 rep "L7 a second run stops and changes nothing" "$([ -n "$r" ] && echo true)" "$r"
-rep "L8 result identical to a build of the migrations folder (schema fingerprint)" "$(cmp -s <(fp $AP) <(fp $NEW) && echo true)" "$(diff <(fp $NEW) <(fp $AP) | head -2 | tr '\n' ' ')"
+# reference: 0001–0071 plus the migration file itself (the folder may hold later candidates, e.g. 0072)
+copy $OLD $X; $PSQL -X -q -d $X -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0067_match_detail.sql >/dev/null 2>&1
+rep "L8 result identical to applying the migration file (schema fingerprint)" "$(cmp -s <(fp $AP) <(fp $X) && echo true)" "$(diff <(fp $X) <(fp $AP) | head -2 | tr '\n' ' ')"
 
 # staging path: the workflow applies the migration file itself
 copy $OLD $X
@@ -52,7 +54,7 @@ SQL
 r=$($PSQL -X -At -d $X -f supabase/live/0067_rollback.sql 2>&1 | grep -o "STOPPED, nothing changed: some games" | head -1)
 rep "L10 rollback refuses while a game uses the court-lost state" "$([ -n "$r" ] && echo true)" "$r"
 copy $AP $X
-$PSQL -X -q -d $X -v ON_ERROR_STOP=1 -1 -f docs/m3/sql/m3h_game_hardening.draft.sql >/dev/null 2>&1
+$PSQL -X -q -d $X -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0072_game_hardening.sql >/dev/null 2>&1
 r=$($PSQL -X -At -d $X -f supabase/live/0067_rollback.sql 2>&1 | grep -o "STOPPED, nothing changed: M3-H" | head -1)
 rep "L11 rollback refuses once M3-H is applied" "$([ -n "$r" ] && echo true)" "$r"
 r=$($PSQL -X -At -d $AP -f supabase/live/0067_rollback.sql 2>&1 | tail -1)

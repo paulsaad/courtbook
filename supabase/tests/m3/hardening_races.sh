@@ -7,7 +7,7 @@
 set -u
 PSQL=${PSQL:-psql}
 SRC=courtbook_test; DB=courtbook_m3h_race
-MIGRATION=${MIGRATION:-docs/m3/sql/m3h_game_hardening.draft.sql}
+MIGRATION=${MIGRATION:-supabase/migrations/0072_game_hardening.sql}
 oks=0; fails=0
 W=$(mktemp -d); chmod 755 "$W"; trap 'rm -rf "$W"' EXIT
 rep() { if [ "$2" = true ]; then echo "ok    $1"; oks=$((oks+1)); else echo "FAIL  $1  [$3]"; fails=$((fails+1)); fi; }

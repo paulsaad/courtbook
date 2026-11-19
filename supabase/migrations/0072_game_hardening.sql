@@ -1,5 +1,6 @@
--- M3-H — game hardening (DRAFT: not a migration yet; its number is assigned when Paul approves it,
--- as the next free number after 0071, docs/audit/fixes.md §3). Applied nowhere.
+-- 0072 — M3-H game hardening. CANDIDATE: numbered for review on m3-dev (Paul, 20 Nov 2026); NOT applied
+-- to staging or live, and nothing applies it until Paul approves it (staging `apply` runs only the
+-- numbers it is given). If another migration is approved first, this one takes the next free number.
 --
 -- Fixes the reproduced defects before the app can write to games (decision D1). Rules: game rules
 -- GR-4 … GR-12 in docs/m3/03-journeys.md; findings in docs/m3/02-safety-review.md; tests §AP in

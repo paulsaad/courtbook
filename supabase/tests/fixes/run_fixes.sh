@@ -98,9 +98,13 @@ stops=0; for n in 0068 0069 0070 0071; do $PSQL -X -q -At -d $APDB -f supabase/l
 rep "F5 running any of them a second time stops and changes nothing" "$([ $stops = 4 ] && echo true)" "$stops of 4 stopped"
 # On the M3 branch the migrations folder also holds 0067 (match_detail), reserved and applied out of
 # order after 0071. F6 applies it the same way, on a copy, so F7's rollback still starts from 0068–0071.
-f6db=$APDB; f6_extra=""; if [ -f supabase/migrations/0067_match_detail.sql ]; then
+# Later M3 candidates (0072 …) are applied after it in number order, the same way.
+f6db=$APDB; f6_extra=""
+extra=$(ls supabase/migrations/*.sql | sort | grep -vE '/00(0[0-9]|[1-5][0-9]|6[0-6]|6[89]|7[01])_' || true)
+if [ -n "$extra" ]; then
   f6db=${APDB}_67; $PSQL -q -d postgres -c "drop database if exists $f6db" -c "create database $f6db template $APDB" >/dev/null
-  $PSQL -X -q -d $f6db -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0067_match_detail.sql >/dev/null && f6_extra=" + 0067 after them"; fi
+  for f in $extra; do $PSQL -X -q -d $f6db -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null && f6_extra="$f6_extra + $(basename "$f" | cut -c1-4)"; done
+  f6_extra="$f6_extra after them"; fi
 $PSQL -At -d $f6db -f supabase/tests/schema_fingerprint.sql | grep -v d1_fixture > /tmp/cb_fp_ap; $PSQL -At -d $NEW -f supabase/tests/schema_fingerprint.sql > /tmp/cb_fp_new
 rep "F6 result$f6_extra identical to a build of the migrations folder (schema fingerprint)" "$(cmp -s /tmp/cb_fp_ap /tmp/cb_fp_new && echo true)" "$(diff /tmp/cb_fp_new /tmp/cb_fp_ap | head -2 | tr '\n' ' ')"
 [ "$f6db" != "$APDB" ] && $PSQL -q -d postgres -c "drop database if exists $f6db" >/dev/null

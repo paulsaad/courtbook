@@ -17,7 +17,7 @@ $PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql || exit 1
 for f in $(ls supabase/migrations/*.sql | sort) ${EXTRA_MIGRATIONS:-}; do
   $PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f "$f" || { echo "MIGRATION FAILED: $f"; exit 1; }
 done
-# EXTRA_MIGRATIONS: drafts not yet numbered (e.g. docs/m3/sql/m3h_game_hardening.draft.sql), applied after
+# EXTRA_MIGRATIONS: drafts not yet numbered (e.g. docs/favourites/sql/club_favourites.draft.sql), applied after
 # the folder so the whole suite can run against them. Empty by default.
 [ -n "${EXTRA_MIGRATIONS:-}" ] && echo "extra migrations: $EXTRA_MIGRATIONS"
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/seed.sql || exit 1

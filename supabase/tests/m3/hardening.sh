@@ -8,10 +8,11 @@
 #   PSQL="sudo -u postgres psql" bash supabase/tests/run.sh
 #   PSQL="sudo -u postgres psql" bash supabase/tests/m3/hardening.sh
 #
-# MIGRATION defaults to the draft; point it at the numbered file once Paul approves one.
+# MIGRATION defaults to the candidate 0072 (also applied by run.sh when it builds the replica, so the
+# replica usually has it already; the run is rolled back either way and must leave the replica unchanged).
 PSQL=${PSQL:-psql}
 DB=courtbook_test
-MIGRATION=${MIGRATION:-docs/m3/sql/m3h_game_hardening.draft.sql}
+MIGRATION=${MIGRATION:-supabase/migrations/0072_game_hardening.sql}
 TESTS=supabase/tests/m3/hardening_tests.sql
 where=$($PSQL -At -d $DB -c "select current_database()||'@'||coalesce(host(inet_server_addr()),'local-socket')" 2>/dev/null)
 case "$where" in courtbook_test@local-socket|courtbook_test@127.0.0.1|courtbook_test@::1) ;;

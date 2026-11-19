@@ -18,7 +18,7 @@ import type { JoinMode, MatchStatus } from "./gameTypes";
  * Each call is one existing database function under the caller's own session. The phone decides
  * nothing: membership, capacity, level fit and court state are the server's (§5.3).
  * `remove` and `resolveCourt` call functions that exist only once M3-H is applied
- * (docs/m3/sql/m3h_game_hardening.draft.sql).
+ * (supabase/migrations/0072_game_hardening.sql).
  */
 export const GAME_WRITES_AVAILABLE = false;
 
