@@ -266,3 +266,32 @@ describe("Club → Games and Bookings → Games open the game", () => {
     expect(mockPush.mock.calls).toEqual([[{ pathname: "/game/[id]", params: { id: "g9" } }], [{ pathname: "/booking/[id]", params: { id: "b9" } }]]);
   });
 });
+
+import { ActivityRow } from "../app/activity";
+import { badgeText, kindIcon, relativeTime, unreadCount } from "../lib/activity";
+
+describe("Activity (read-only)", () => {
+  const n = { id: "n1", kind: "join_request", match_id: "g1", body: "Adam wants to join your match", created_at: "2026-11-19T09:55:00Z", read_at: null };
+  it("an unread row says so, shows its time, and opens the game", async () => {
+    mockPush.mockReset();
+    await render(<ActivityRow n={n} now={NOW} />);
+    const row = screen.getByTestId("notice-n1");
+    expect(row.props.accessibilityLabel).toBe("Unread. Adam wants to join your match, 5 min ago");
+    await fireEvent.press(row);
+    expect(mockPush).toHaveBeenCalledWith({ pathname: "/game/[id]", params: { id: "g1" } });
+  });
+  it("a notice without a game is not a button", async () => {
+    await render(<ActivityRow n={{ ...n, match_id: null, read_at: "2026-11-19T09:56:00Z" }} now={NOW} />);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByTestId("notice-n1").props.accessibilityLabel).toBe("Adam wants to join your match, 5 min ago");
+  });
+  it("badge, unread count, icons and times", () => {
+    expect([badgeText(0), badgeText(7), badgeText(120)]).toEqual([null, "7", "99+"]);
+    expect(unreadCount([n, { ...n, id: "n2", read_at: "x" }])).toBe(1);
+    expect([kindIcon("match_message"), kindIcon("booking_unlinked"), kindIcon("something_new")]).toEqual(["chat", "court", "bell"]);
+    expect(relativeTime("2026-11-19T09:59:40Z", NOW)).toBe("Just now");
+    expect(relativeTime("2026-11-19T07:00:00Z", NOW)).toBe("3 h ago");
+    expect(relativeTime("2026-11-18T12:00:00Z", NOW)).toBe("Yesterday");
+    expect(relativeTime("2026-11-14T12:00:00Z", NOW)).toBe("Sat 14 Nov");
+  });
+});
