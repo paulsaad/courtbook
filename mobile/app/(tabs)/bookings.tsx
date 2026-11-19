@@ -42,7 +42,7 @@ export default function Bookings() {
         view === "booking" ? (
           <Empty title="No bookings yet" body="Courts you reserve show up here." action="Find a court" onAction={() => router.navigate("/courts")} />
         ) : (
-          <Empty title="No games yet" body="Games you organise or join show up here. Finding games in the app arrives in the next milestone." />
+          <Empty title="No games yet" body="Games you organise or join show up here." action="Find a game" onAction={() => router.push("/games")} />
         )
       ) : (
         <>
@@ -64,14 +64,15 @@ export function Row({ r, past = false }: { r: AgendaRow; past?: boolean }) {
   const date = formatInTimeZone(new Date(r.start_at), r.timezone, "EEE d MMM");
   const time = `${hhmm(r.start_at, r.timezone)}${r.end_at ? `–${hhmm(r.end_at, r.timezone)}` : ""}`;
   const status = r.status === "cancelled" ? "Cancelled" : r.status === "no_show" ? "No-show" : null;
-  const tappable = r.kind === "booking";
   const label = [date, time, r.club_name, r.title, status].filter(Boolean).join(", ");
   return (
     <Pressable
-      accessibilityRole={tappable ? "button" : undefined}
+      accessibilityRole="button"
       accessibilityLabel={label}
-      disabled={!tappable}
-      onPress={() => router.push({ pathname: "/booking/[id]", params: { id: r.id } })}
+      accessibilityHint={r.kind === "match" ? "Opens the game" : "Opens the booking"}
+      onPress={() => r.kind === "match"
+        ? router.push({ pathname: "/game/[id]", params: { id: r.id } })
+        : router.push({ pathname: "/booking/[id]", params: { id: r.id } })}
       style={({ pressed }) => [styles.row, past && styles.rowPast, pressed && { opacity: 0.85 }]}
     >
       <View style={[styles.edge, past && { backgroundColor: color.line }]} />
@@ -85,7 +86,7 @@ export function Row({ r, past = false }: { r: AgendaRow; past?: boolean }) {
         <Text variant="secondary" numberOfLines={1}>{r.title ?? "Court"}</Text>
         {status && <Text variant="caption" style={{ fontFamily: font.semibold }}>{status}</Text>}
       </View>
-      {tappable && <Icon name="chevronRight" size={20} color={color.muted} />}
+      <Icon name="chevronRight" size={20} color={color.muted} />
     </Pressable>
   );
 }

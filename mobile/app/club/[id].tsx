@@ -11,6 +11,7 @@ import { TimeTile } from "../../components/TimeTile";
 import { Button } from "../../components/Button";
 import { Freshness } from "../../components/Freshness";
 import { wrappingTitle } from "../../components/HeaderTitle";
+import { ClubGames } from "../../components/game/ClubGames";
 import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { Segmented } from "../../components/Segmented";
 import { ClubInfoView } from "../../components/ClubInfoView";
@@ -45,8 +46,8 @@ export default function Club() {
   const sport = p.sport ?? null;
   const q = useDaySlots(date, sport);
   const club = useMemo(() => clubsFromSlots(q.data ?? []).find((c) => c.id === p.id), [q.data, p.id]);
-  // Book | Info. The club's details are read on their own, so they show even on a day with nothing free.
-  const [tab, setTab] = useState<"book" | "info">(p.tab === "info" ? "info" : "book");
+  // Book | Info | Games. The club's details are read on their own, so they show even on a day with nothing free.
+  const [tab, setTab] = useState<"book" | "info" | "games">(p.tab === "info" ? "info" : p.tab === "games" ? "games" : "book");
   const info = useClubInfo(p.id ?? null);
   const infoClub = info.data?.club;
   const durations = club ? durationOptions(club) : [];
@@ -166,12 +167,14 @@ export default function Club() {
       <Stack.Screen options={wrappingTitle(name)} />
       <View style={styles.tabs}>
         <Segmented
-          options={[{ key: "book", label: "Book" }, { key: "info", label: "Info" }]}
+          options={[{ key: "book", label: "Book" }, { key: "info", label: "Info" }, { key: "games", label: "Games" }]}
           value={tab}
           onChange={(k) => { if (!locked) setTab(k); }}
         />
       </View>
-      {tab === "info" ? (
+      {tab === "games" ? (
+        <ClubGames clubId={p.id} signedIn={session.status === "signed-in"} bottom={insets.bottom} />
+      ) : tab === "info" ? (
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingBottom: insets.bottom + space.xxxl }}

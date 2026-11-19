@@ -14,14 +14,15 @@ import type { OpenGameRow } from "../../lib/gameTypes";
  * action. Screen readers hear one sentence (boardCard's a11y). Everything shown comes from the row
  * open_matches returned — nothing is computed about permissions here.
  */
-export function GameCard({ row, onPress, now }: { row: OpenGameRow; onPress: () => void; now?: Date }) {
+export function GameCard({ row, onPress, now, label: forced }: { row: OpenGameRow; onPress: () => void; now?: Date; label?: string }) {
   const c = boardCard(row, now);
   const noCourt = c.court === NO_COURT;
-  const label = c.joined ? "Joined" : c.join;
+  const label = forced ?? (c.joined ? "Joined" : c.join);
+  const green = !forced && row.join_mode === "open" && !c.joined;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={c.a11y}
+      accessibilityLabel={forced ? `${c.a11y}, ${forced}` : c.a11y}
       accessibilityHint="Opens the game"
       onPress={onPress}
       testID={`game-card-${row.match_id}`}
@@ -35,8 +36,8 @@ export function GameCard({ row, onPress, now }: { row: OpenGameRow; onPress: () 
           </View>
           <Text style={styles.time}>{c.when.time}</Text>
         </View>
-        <View style={[styles.mode, row.join_mode === "open" && !c.joined ? styles.modeOpen : null]}>
-          <Text style={[styles.modeText, row.join_mode === "open" && !c.joined ? styles.modeTextOpen : null]}>{label}</Text>
+        <View style={[styles.mode, green ? styles.modeOpen : null]}>
+          <Text style={[styles.modeText, green ? styles.modeTextOpen : null]}>{label}</Text>
         </View>
       </View>
 

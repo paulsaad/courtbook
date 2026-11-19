@@ -234,3 +234,35 @@ describe("Find a game board: filters ask the database, cards navigate", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 });
+
+import { asCardRow, clubGameLabel } from "../components/game/ClubGames";
+import { Row } from "../app/(tabs)/bookings";
+import type { ClubGameRow } from "../lib/gameTypes";
+
+describe("Club → Games and Bookings → Games open the game", () => {
+  const club: ClubGameRow = {
+    match_id: "g2", club_id: "c1", club_name: "Batroun Padel & Tennis Club", club_slug: "batroun", sport: "padel",
+    start_at: "2026-11-21T16:00:00Z", end_at: null, level_min: null, level_max: null, level_legacy: false, my_level: null,
+    players_needed: 3, joined: 3, pending: 0, status: "closed", closed_reason: "full", note: null, join_mode: "open",
+    organizer_id: "o", organizer_name: "Rami", my_status: null, i_organize: false, booking_id: null, court_name: null,
+  };
+  it("a club game card says the player's part or the game's state, in words", () => {
+    expect(clubGameLabel({ ...club, i_organize: true })).toBe("Organiser");
+    expect(clubGameLabel({ ...club, my_status: "accepted" })).toBe("Joined");
+    expect(clubGameLabel({ ...club, my_status: "pending" })).toBe("Requested");
+    expect(clubGameLabel(club)).toBe("Full");
+    expect(clubGameLabel({ ...club, closed_reason: "no_court" })).toBe("Court cancelled");
+    expect(clubGameLabel({ ...club, closed_reason: "organizer" })).toBe("Private");
+    expect(clubGameLabel({ ...club, status: "open" })).toBeUndefined();
+    expect(asCardRow({ ...club, my_status: "pending" }).i_joined).toBe(true);
+  });
+  it("a game in Bookings → Games opens the Game screen; a booking still opens the booking", async () => {
+    mockPush.mockReset();
+    const base = { start_at: "2026-11-21T16:00:00Z", end_at: null, club_name: "Batroun", club_slug: "b", timezone: "Asia/Beirut", title: "Padel", status: "confirmed", role: null };
+    await render(<><Row r={{ ...base, kind: "match", id: "g9" }} /><Row r={{ ...base, kind: "booking", id: "b9" }} /></>);
+    const [game, booking] = screen.getAllByRole("button");
+    await fireEvent.press(game);
+    await fireEvent.press(booking);
+    expect(mockPush.mock.calls).toEqual([[{ pathname: "/game/[id]", params: { id: "g9" } }], [{ pathname: "/booking/[id]", params: { id: "b9" } }]]);
+  });
+});
