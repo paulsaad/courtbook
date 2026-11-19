@@ -1,4 +1,4 @@
-# M3 — 10. Implementation status (18 Nov 2026)
+# M3 — 10. Implementation status (updated 19 Nov 2026)
 
 Branch **`m3-dev`** = `m3-foundation` (`bb811bd`) + `main` (`661acf2`: M2, accessibility, release
 fixes 0068–0071) + the work below. Not merged into `main`. Nothing applied to staging or live; no
@@ -80,3 +80,26 @@ build, update or deployment.
 4. Email for actions made in the app before M3-D: (a) accept in-app notices only for stage 3, or
    (b) bring forward request authentication on the email route (G1, parked on `payments-g1`).
    The plan recommends the database-driven dispatcher (M3-D) and does not settle the interim.
+
+## 10.7 Round 2 (19 Nov) — hardening, game functions, 0067 pack, screen structure
+
+| Item | Where | State |
+| --- | --- | --- |
+| M3-H hardening (S2, S4, S8–S12, S14–S15, S18–S19; GR-6, GR-8, GR-9) incl. `remove_player`, `resolve_court` | `docs/m3/sql/m3h_game_hardening.draft.sql` | draft, number assigned at approval; applied nowhere |
+| §AP tests | `supabase/tests/m3/hardening.sh` | 60/60, 15/15 mutants detected; whole SQL suite 381/381 with the draft (`EXTRA_MIGRATIONS`) |
+| Web adjustments (P4) | board badge, game-page hints, refusal copy; `/matches/[id]` on `match_detail` with fallback | on `m3-dev` only |
+| App actions incl. remove / resolve court | `mobile/lib/gameActions.ts` | switched off (`GAME_WRITES_AVAILABLE = false`) |
+| 0067 staging/live pack | `supabase/live/0067_{preflight,apply,postcheck,rollback}.sql`; workflow actions `m3_0067_preflight` / `m3_0067_postcheck` | tested locally 15/15; not run on staging |
+| Screen structure | `mobile/lib/gameScreens.ts` | section order and content from §4.3–4.4; no routes or layout until Stitch approval |
+
+Choices made where the spec left a detail open (all reversible, listed for review):
+- S12 "open games" counts every game not cancelled and not started (private and full included).
+- GR-8 time limits apply to admins too (status changes after start refused for everyone).
+- A booking cancelled after its game was played only removes the link (no state change, no notices).
+- `remove_player` on a pending request answers `not_accepted` (requests are declined, not removed).
+- Cancelling an already-cancelled game is a no-op (no repeat notices).
+- New notice texts (stored bodies, web wording "match"/"organizer"): `match_full_waiting`,
+  `player_removed`, `court_resolved`, new `booking_unlinked` texts.
+
+Pre-existing, not caused by M3: SQL suite check 95a fails when run shortly after midnight UTC
+(reproduced on `main` at 00:14 UTC, 19 Nov; passes at other hours).
