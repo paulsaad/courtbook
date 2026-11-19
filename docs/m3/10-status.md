@@ -1,4 +1,4 @@
-# M3 — 10. Implementation status (updated 19 Nov 2026, round 3)
+# M3 — 10. Implementation status (updated 20 Nov 2026, round 4)
 
 Branch **`m3-dev`** = `m3-foundation` (`bb811bd`) + `main` (`661acf2`: M2, accessibility, release
 fixes 0068–0071) + the work below. Not merged into `main`. Nothing applied to staging or live; no
@@ -119,3 +119,25 @@ Pre-existing, not caused by M3: SQL suite check 95a fails when run shortly after
   without the draft.
 - **Decision recorded (Paul, 19 Nov):** the first game functionality uses in-app notices only; push
   and email remain separate delivery milestones (M3-D).
+
+## 10.9 Round 4 (20 Nov) — the game screens
+
+Built from the approved Stitch exports (14 board; 26–30 detail states A–E), on `m3-dev`:
+
+| Screen / flow | Data (all under the player's own session) | State |
+| --- | --- | --- |
+| Find a game (`app/games`) — sport, Today / This week / Any time, area sheet, My level, cards, all load states | `open_matches`, `my_levels`, `areas` | done |
+| Game (`app/game/[id]`) — one screen for A–E and playing / played / private / full / cancelled | `match_detail` (0067), `match_participants` (organiser and accepted players only) | done, read-only |
+| Club → Games tab; Bookings → Games rows open the game; Home entry; `courtbook://match/<id>` | `match_board`, `my_agenda` | done |
+| Activity (Home bell, Profile row, `courtbook://activity`) | own `notifications`, newest 50 | done, read-only (nothing marked read) |
+| Join / ask, withdraw, leave, accept / decline, remove, manage (private / reopen / cancel), court choices (link booking / go ahead / cancel) | 0072 functions | wired, **off** (`GAME_WRITES_AVAILABLE`, `SCREEN_FEATURES.writes`); no control drawn while off |
+| M3-H | `supabase/migrations/0072_game_hardening.sql` | numbered candidate, applied nowhere |
+
+Where the exports were not followed (they show things the spec or the data do not have): no Share
+or Post button, no avatars or initials, no "Format: Doubles", no decimal levels ("5.0"), no "asked
+2 h ago" (participants carry no request time), no "cancelled by venue" (who cancelled is not
+known), no Chat button (chat is stage 4). A cancelled booking shows "No court booked through
+CourtBook", not a struck-out court.
+
+Not verified on a device: layouts are built to wrap (Dynamic Type up to 1.6×, time capped at 1.2×
+like the ticket) and pass the unit tests, but have not been seen on a phone or emulator.
