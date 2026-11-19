@@ -333,6 +333,7 @@ insert into t values
      and not has_function_privilege('anon', 'notify_waiting(uuid)', 'execute'), ''),
   ('T-H1 push_text is not callable through the API', not has_function_privilege('authenticated', 'push_text(uuid)', 'execute')
      and not has_function_privilege('anon', 'push_text(uuid)', 'execute'), ''),
+  ('T-H1 the delivery role (service_role) may call push_text', has_function_privilege('service_role', 'push_text(uuid)', 'execute'), ''),
   ('T-H1 remove_player and resolve_court: signed-in only', has_function_privilege('authenticated', 'remove_player(uuid,uuid)', 'execute')
      and not has_function_privilege('anon', 'remove_player(uuid,uuid)', 'execute')
      and has_function_privilege('authenticated', 'resolve_court(uuid,uuid)', 'execute')

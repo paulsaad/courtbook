@@ -461,3 +461,4 @@ begin
   end case;
 end $$;
 revoke all on function push_text(uuid) from public, anon, authenticated;
+grant execute on function push_text(uuid) to service_role;   -- the delivery function (M3-D) runs as service_role
