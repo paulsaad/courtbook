@@ -70,6 +70,9 @@ function RootLayout() {
               <Stack.Screen name="booking/[id]" options={{ title: "Booking" }} />
               <Stack.Screen name="design-preview" options={{ title: "Component preview" }} />
               <Stack.Screen name="club/[id]" options={{ title: "" }} />
+              <Stack.Screen name="games/index" options={{ title: "" }} />
+              <Stack.Screen name="game/[id]" options={{ title: "Game" }} />
+              <Stack.Screen name="match/[id]" options={{ title: "Game" }} />
             </Stack>
             <OfflineBanner />
             <TestFaultBanner />

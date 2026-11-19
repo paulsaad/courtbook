@@ -21,8 +21,8 @@ import { color, font, radius, space } from "../../lib/theme";
 /**
  * Home (approved design 1R): book a court first, then the player's next booking. Everything shown is
  * read from the database — the sports offered are the ones with free courts today, the next booking
- * comes from my_agenda. Find a game and coaches join Home when those screens exist in the app (M3/M4);
- * until then nothing here points at a screen that is not built.
+ * comes from my_agenda. Find a game (M3) opens the games board; coaches join Home when that screen
+ * exists (M4) — nothing here points at a screen that is not built.
  */
 export default function Home() {
   const session = useSession();
@@ -76,6 +76,16 @@ export default function Home() {
         )}
       </View>
 
+      <Pressable accessibilityRole="button" accessibilityLabel="Find a game" accessibilityHint="Games that need players"
+                 onPress={() => router.push("/games")} style={({ pressed }) => [styles.gameCard, pressed && { opacity: 0.9 }]} testID="home-find-a-game">
+        <View style={styles.gameIcon}><Icon name="players" size={24} color={color.cedar} /></View>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={styles.gameTitle}>Find a game</Text>
+          <Text variant="secondary">Games that need players</Text>
+        </View>
+        <Icon name="chevronRight" size={22} color={color.muted} />
+      </Pressable>
+
       {userId ? (
         <View style={styles.section}>
           <View style={styles.sectionHead}>
@@ -120,6 +130,9 @@ const styles = StyleSheet.create({
   bookTitle: { fontFamily: font.score, fontSize: 26, lineHeight: 30, color: color.onDark },
   bookSub: { fontFamily: font.regular, fontSize: 15, color: color.onDarkMuted },
   sportRow: { gap: 8, paddingHorizontal: space.lg, paddingBottom: space.lg },
+  gameCard: { flexDirection: "row", alignItems: "center", gap: space.md, padding: space.lg, minHeight: 72, backgroundColor: color.card, borderRadius: radius.lg, borderWidth: 1, borderColor: color.line },
+  gameIcon: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: color.cedarSoft },
+  gameTitle: { fontFamily: font.score, fontSize: 24, lineHeight: 28, color: color.ink },
   section: { gap: space.md },
   // Wraps at large text sizes so "All bookings" drops below the heading instead of off the screen.
   sectionHead: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", columnGap: 12 },

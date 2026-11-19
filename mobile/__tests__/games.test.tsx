@@ -96,16 +96,22 @@ describe("existing read functions", () => {
   });
 });
 
-describe("match_detail is unavailable until migration 0067 is approved and applied", () => {
-  it("is switched off in this build", () => {
-    expect(MATCH_DETAIL_AVAILABLE).toBe(false);
+describe("match_detail (0067: on staging, not on live)", () => {
+  it("is switched on: a database without 0067 is handled as unavailable", () => {
+    expect(MATCH_DETAIL_AVAILABLE).toBe(true);
   });
 
-  it("the hook does not call the server and reports 'unavailable' without retrying", async () => {
+  it("switched off, the fetch does not call the server and reports 'unavailable'", async () => {
+    await expect(fetchGameDetail("m1", false)).rejects.toBeInstanceOf(GameDetailUnavailable);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("the hook asks once and, on a database without 0067, reports 'unavailable' without retrying", async () => {
+    rpc.mockResolvedValue({ data: null, error: { code: "PGRST202", message: "Could not find the function public.match_detail(p_match) in the schema cache" } });
     const { wrapper } = setup();
     const { result } = await renderHook(() => useGame("m1", { signedIn: true }), { wrapper });
     await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(rpc).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledTimes(1);
     expect(result.current.error).toBeInstanceOf(GameDetailUnavailable);
     expect(loadView({ signedIn: true, online: true, hasData: false, isPending: true, fetchStatus: "idle", error: result.current.error }))
       .toEqual({ kind: "unavailable", message: DETAIL_UNAVAILABLE_TEXT });

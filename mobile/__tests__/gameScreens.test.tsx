@@ -33,7 +33,7 @@ const pick = <K extends DetailSection["kind"]>(s: DetailSection[], k: K) => s.fi
 describe("section order follows §4.4", () => {
   it("organiser, everything shipped: hero, banners, actions, players, requests, details, manage", () => {
     const s = detailSections(g({ i_organize: true, organizer_id: "o", pending: 1, court_lost: true, status: "closed", closed_reason: "no_court" }), PEOPLE, LATER);
-    expect(kinds(s)).toEqual(["hero", "banners", "actions", "players", "requests", "details", "manage"]);
+    expect(kinds(s)).toEqual(["hero", "banners", "actions", "players", "requests", "details", "resolve", "manage"]);
   });
   it("a player, everything shipped: report last, no requests, no manage", () => {
     expect(kinds(detailSections(g({ my_status: "accepted" }), PEOPLE, LATER))).toEqual(["hero", "banners", "actions", "players", "details", "report"]);
@@ -99,7 +99,7 @@ describe("content", () => {
   });
   it("details: level range, join mode, note, organiser", () => {
     expect(pick(detailSections(g({}), [], STAGE1), "details")).toEqual(
-      { kind: "details", level: expect.any(String), joinMode: "Ask to join", note: "Friendly doubles", organiser: "Rami" });
+      { kind: "details", level: "Levels 4–6", joinMode: "Ask to join", note: "Friendly doubles", organiser: "Rami", fit: { text: "You're Level 5 · fits", tone: "ok" } });
   });
 });
 
@@ -107,7 +107,7 @@ describe("screen hooks make no game call when signed out (U9)", () => {
   const rpc = supabase.rpc as jest.Mock;
   beforeEach(() => rpc.mockReset());
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{children}</QueryClientProvider>
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })}>{children}</QueryClientProvider>
   );
   it("game and board", async () => {
     const a = await renderHook(() => useGameScreen("m1", { signedIn: false }), { wrapper });

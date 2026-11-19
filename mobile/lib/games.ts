@@ -15,12 +15,12 @@ import type { ClubGameRow, GameDetail, MyLevelRow, OpenGameRow, ParticipantRow }
  */
 
 /**
- * match_detail() exists only after migration 0067, which needs Paul's separate approval for staging
- * and for live. Until this is switched on (in the same change that ships 0067), the detail hook does
- * not call the server and reports `detail_unavailable`. A server without the function is reported
- * the same way (PostgREST PGRST202), never as a generic error.
+ * match_detail() is migration 0067: on staging since 19 Nov 2026 (Paul's approval), not on live yet.
+ * A server without the function answers PostgREST PGRST202, which the detail hook reports as
+ * `detail_unavailable` ("Game details arrive in the next update."), never as a generic error — so the
+ * app stays correct against a database with or without 0067.
  */
-export const MATCH_DETAIL_AVAILABLE = false;
+export const MATCH_DETAIL_AVAILABLE = true;
 
 export class GameDetailUnavailable extends Error {
   constructor() {
