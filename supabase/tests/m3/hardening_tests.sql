@@ -82,6 +82,9 @@ insert into t select 'T-S12b the 31st is refused: slow_down', x = 'ERR slow_down
   from (select pg_temp.r(:A, format($q$insert into match_messages (match_id, profile_id, body) values (%L, %L, 'one more')$q$, pg_temp.g(1), :A)) x) s;
 insert into t select 'T-S12b the limit is per sender', x = 'ok', x
   from (select pg_temp.r(:B, format($q$insert into match_messages (match_id, profile_id, body) values (%L, %L, 'me too')$q$, pg_temp.g(1), :B)) x) s;
+insert into t select 'T-S12c 30 rows in one statement: refused as a whole (rows of the same statement count)', x = 'ERR slow_down'
+  and (select count(*) from match_messages where match_id = pg_temp.g(1) and profile_id = :B) = 1, x
+  from (select pg_temp.r(:B, format($q$insert into match_messages (match_id, profile_id, body) select %L, %L, 'bulk ' || i from generate_series(1, 30) i$q$, pg_temp.g(1), :B)) x) s;
 select null from pg_temp.keep('s9b', pg_temp.r(:O, format('select set_match_status(%L, ''cancelled'')', pg_temp.g(1))));
 insert into t select 'T-S9b a cancelled game takes no messages: match_cancelled', pg_temp.got('s9b') = 'ok' and x = 'ERR match_cancelled', x
   from (select pg_temp.r(:B, format($q$insert into match_messages (match_id, profile_id, body) values (%L, %L, 'late')$q$, pg_temp.g(1), :B)) x) s;
@@ -311,10 +314,25 @@ select null from pg_temp.keep('gr8e', pg_temp.r(:O, format('select leave_match(%
 insert into t select 'T-GR8e the organiser leaving their own game changes nothing',
   pg_temp.got('gr8e') = 'ok' and pg_temp.st(2) = 'open/-/court', pg_temp.st(2);
 
+-- ================= push text (S7): never the stored body =================
+insert into notifications (profile_id, kind, match_id, actor_id, body)
+values (pg_temp.u(1), 'match_message', pg_temp.g(2), pg_temp.u(3), 'B: SECRET-CHAT-TEXT meet at gate 4');
+insert into t select 'T-S7 chat notice: the push text names the game, not the message', title = 'New message'
+  and body like 'In your padel game, %' and body not like '%SECRET%', title || ' / ' || body
+  from push_text((select id from notifications where body like '%SECRET-CHAT-TEXT%'));
+insert into t select 'T-S7 every notice made in this run: push text set, never containing the stored body',
+  count(*) filter (where p.title is null or p.body is null or position(n.body in p.body) > 0) = 0 and count(*) > 20,
+  count(*) || ' notices; bad: ' || count(*) filter (where p.title is null or p.body is null or position(n.body in p.body) > 0)
+  from notifications n, lateral push_text(n.id) p where n.match_id::text like 'f1000000-%';
+insert into t select 'T-S7 kinds of notices covered: ' || string_agg(distinct kind, ' '), count(distinct kind) >= 10, ''
+  from notifications where match_id::text like 'f1000000-%';
+
 -- ================= who may call what =================
 insert into t values
   ('T-H1 notify_waiting is not callable through the API', not has_function_privilege('authenticated', 'notify_waiting(uuid)', 'execute')
      and not has_function_privilege('anon', 'notify_waiting(uuid)', 'execute'), ''),
+  ('T-H1 push_text is not callable through the API', not has_function_privilege('authenticated', 'push_text(uuid)', 'execute')
+     and not has_function_privilege('anon', 'push_text(uuid)', 'execute'), ''),
   ('T-H1 remove_player and resolve_court: signed-in only', has_function_privilege('authenticated', 'remove_player(uuid,uuid)', 'execute')
      and not has_function_privilege('anon', 'remove_player(uuid,uuid)', 'execute')
      and has_function_privilege('authenticated', 'resolve_court(uuid,uuid)', 'execute')

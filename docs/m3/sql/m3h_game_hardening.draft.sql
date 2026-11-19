@@ -20,6 +20,8 @@
 --   S12          at most 10 live games per organiser; at most 20 waiting requests per player
 --   S14          a member who hid the game gets no chat notices for it
 --   S15          switching approval → open accepts waiting requests in request order up to capacity
+--   S7           push_text(notification): the only text a push may carry — built from the kind and the
+--                game, never from the stored body (chat text stays off lock screens)
 --   GR-6         remove_player(game, player): organiser or admin, accepted players, before start;
 --                stored as declined (final); a game closed as full reopens
 --
@@ -66,6 +68,8 @@ begin
   select coalesce(name, 'A player') into me from profiles where id = auth.uid();
 
   if m.join_mode = 'approval' then
+    -- one count at a time per player: two requests to two different games cannot both see 19 (S12)
+    perform pg_advisory_xact_lock(hashtextextended('courtbook:requests:' || auth.uid()::text, 0));
     if (select count(*) from match_players mp join matches x on x.id = mp.match_id
         where mp.profile_id = auth.uid() and mp.status = 'pending'
           and x.status <> 'cancelled' and x.start_at > now()) >= 20 then
@@ -254,7 +258,9 @@ begin
   if p_join_mode not in ('open', 'approval') then raise exception 'bad_join_mode'; end if;
   if length(coalesce(p_note, '')) > 300 then raise exception 'note_too_long'; end if;
   if (p_level_min is null) <> (p_level_max is null) or (p_level_min is not null and (p_level_min < 1 or p_level_max > 10 or p_level_min > p_level_max)) then raise exception 'bad_level_range'; end if;
-  -- S12: live games = not cancelled and not started
+  -- S12: live games = not cancelled and not started; one count at a time per organiser, so two
+  -- simultaneous posts cannot both see 9
+  perform pg_advisory_xact_lock(hashtextextended('courtbook:post_match:' || auth.uid()::text, 0));
   if (select count(*) from matches where organizer_id = auth.uid() and status <> 'cancelled' and start_at > now()) >= 10 then
     raise exception 'too_many_games';
   end if;
@@ -381,6 +387,8 @@ begin
   new.created_at := now();        -- S2: the server's clock, never the sender's
   new.deleted_at := null;         -- S9: a message cannot arrive deleted (and so skip the length check)
   if (select status from matches where id = new.match_id) = 'cancelled' then raise exception 'match_cancelled'; end if;
+  -- one count at a time per sender and game: parallel inserts cannot all see 29 (S12)
+  perform pg_advisory_xact_lock(hashtextextended('courtbook:chat:' || new.match_id::text || ':' || new.profile_id::text, 0));
   if (select count(*) from match_messages where match_id = new.match_id and profile_id = new.profile_id
       and created_at > now() - interval '10 minutes') >= 30 then
     raise exception 'slow_down';
@@ -412,3 +420,44 @@ begin
   end loop;
   return new;
 end $$;
+
+-- ---------------------------------------------------------------------------------------------
+-- Push text (S7; docs/m3/04-ux-spec.md §4.9). The lock-screen title and body for one notice, built
+-- from its kind, the game and (for the organiser's request notices) the actor's name — NEVER from
+-- notifications.body, which holds chat text for match_message. The delivery function (M3-D) sends
+-- this and nothing else. Service role only: not callable through the API.
+create or replace function push_text(p_notification uuid, out title text, out body text)
+language plpgsql stable security definer set search_path = public as $$
+declare n notifications%rowtype; m record; g text; who text; ct text;
+begin
+  select * into n from notifications where id = p_notification;
+  if not found then return; end if;
+  select x.sport::text as sport, x.start_at, x.organizer_id, x.booking_id, k.timezone, coalesce(t.name_en, k.name) as place
+    into m from matches x join clubs k on k.id = x.club_id left join towns t on t.id = k.town_id where x.id = n.match_id;
+  if m is null then title := 'CourtBook'; body := 'Open CourtBook for details.'; return; end if;
+  g := m.sport || ', ' || to_char(m.start_at at time zone coalesce(m.timezone, 'Asia/Beirut'), 'Dy HH24:MI');
+  who := coalesce((select name from profiles where id = n.actor_id), 'A player');
+  case n.kind
+    when 'join_request' then title := 'New request'; body := who || ' asked to join your ' || replace(g, ', ', ' game, ') || '.';
+    when 'player_joined' then title := 'Player joined'; body := who || ' joined your ' || replace(g, ', ', ' game, ') || '.';
+    when 'join_accepted' then title := 'You''re in'; body := 'Your ' || replace(g, ', ', ' game, ') || ' at ' || m.place || '.';
+    when 'join_declined' then title := 'Request not accepted'; body := 'Your request for ' || g || '.';
+    when 'player_left' then title := 'Player left'; body := 'A player left your ' || replace(g, ', ', ' game, ') || '.';
+    when 'match_cancelled' then title := 'Game cancelled'; body := initcap(g) || ' at ' || m.place || ' was cancelled.';
+    when 'match_message' then title := 'New message'; body := 'In your ' || replace(g, ', ', ' game, ') || '.';
+    when 'booking_moved' then title := 'Court time changed';
+      body := 'Your ' || m.sport || ' game now starts at ' || to_char(m.start_at at time zone coalesce(m.timezone, 'Asia/Beirut'), 'HH24:MI') || '.';
+    when 'booking_unlinked' then title := 'Court booking cancelled';
+      body := case when n.profile_id = m.organizer_id then 'Choose what to do with your ' || replace(g, ', ', ' game, ') || '.'
+                   else initcap(g) || ': joining is paused until the organiser decides.' end;
+    when 'court_resolved' then title := 'Game update';
+      select c.name into ct from bookings b join courts c on c.id = b.court_id where b.id = m.booking_id;
+      body := case when ct is not null then 'Your ' || m.sport || ' game is now at ' || m.place || ', ' || ct || ', '
+                     || to_char(m.start_at at time zone coalesce(m.timezone, 'Asia/Beirut'), 'Dy HH24:MI') || '.'
+                   else initcap(g) || ' goes ahead. No court is booked through CourtBook — the organiser is arranging it.' end;
+    when 'player_removed' then title := 'Removed from a game'; body := 'The organiser removed you from ' || g || '.';
+    when 'match_full_waiting' then title := 'Game full'; body := 'You''re on the waiting list for ' || g || '.';
+    else title := 'CourtBook'; body := 'Open CourtBook for details.';
+  end case;
+end $$;
+revoke all on function push_text(uuid) from public, anon, authenticated;

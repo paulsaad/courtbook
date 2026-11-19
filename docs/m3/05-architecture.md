@@ -88,6 +88,8 @@ in a response table to be retried by the caller. A scheduled job that only looks
 gives the same latency class (≤ 15 s plus sending time) with one mechanism, and recovers from every
 failure below without extra code. Supabase Cron supports intervals down to one second.
 
+**Push text (S7):** `deliver` sends only `push_text(notification)` (M3-H draft; service role only): title and body built from the kind and the game, never from `notifications.body`, so chat text never reaches a lock screen.
+
 **Columns (M3-D):** `notifications.push_claim_id, push_claimed_at, push_attempts, pushed_at, push_failed_at`
 (email keeps its existing `email_claimed_at, emailed_at`). `push_tokens (token unique, profile_id,
 platform, app_variant, created_at, last_seen_at)`. `push_tickets (ticket_id, token, notification_id,

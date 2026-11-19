@@ -1,4 +1,4 @@
-# M3 — 10. Implementation status (updated 19 Nov 2026)
+# M3 — 10. Implementation status (updated 19 Nov 2026, round 3)
 
 Branch **`m3-dev`** = `m3-foundation` (`bb811bd`) + `main` (`661acf2`: M2, accessibility, release
 fixes 0068–0071) + the work below. Not merged into `main`. Nothing applied to staging or live; no
@@ -103,3 +103,19 @@ Choices made where the spec left a detail open (all reversible, listed for revie
 
 Pre-existing, not caused by M3: SQL suite check 95a fails when run shortly after midnight UTC
 (reproduced on `main` at 00:14 UTC, 19 Nov; passed at 23:00 UTC the evening before).
+
+## 10.8 Round 3 (19 Nov) — review corrections, 0067 on staging
+
+- **0067 on staging (Paul's approval, staging only):** preflight run 44485229713 part 1 9/9 true
+  (statement timeout for signed-in users: 8s); apply run 44485327343 "applied 1 migration(s)", RLS
+  policies 49, demo club at the desk; postcheck run 44485458241 8/8 true. Not on live.
+- **M3-H draft corrections (still a draft, applied nowhere):** per-user transaction locks make the
+  three limits hold under simultaneous requests — 10 live games per organiser (`post_match`), 20
+  waiting requests per player across games (`join_match`), 30 messages per sender per game per
+  10 minutes (chat insert guard; rows of one multi-row insert count too). `push_text(notification)`
+  gives the only text a push may carry, built from the kind and the game (S7).
+- **Tests:** `hardening.sh` 65/65, 17/17 mutants; `hardening_races.sh` 3 two-session races hold the
+  limit, and the same races exceed it with the locks removed (control); SQL suite 381/381 with and
+  without the draft.
+- **Decision recorded (Paul, 19 Nov):** the first game functionality uses in-app notices only; push
+  and email remain separate delivery milestones (M3-D).

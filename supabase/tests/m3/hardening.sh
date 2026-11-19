@@ -48,6 +48,8 @@ mutants=(
   "M12 waiting notice callable by players|s/revoke all on function notify_waiting(uuid) from public, anon, authenticated;/grant execute on function notify_waiting(uuid) to authenticated;/"
   "M13 cancel after the game was played (GR-8)|s/if coalesce(m.end_at, m.start_at + interval '3 hours') <= now() then raise exception 'match_over'; end if;\$//"
   "M14 no waiting-list notice (S11)|s/perform notify_waiting(p_match);//g"
+  "M16 push carries the stored chat text (S7)|s/when 'match_message' then title := 'New message'; body := 'In your ' || replace(g, ', ', ' game, ') || '.';/when 'match_message' then title := 'New message'; body := n.body;/"
+  "M17 push_text callable by players|s/revoke all on function push_text(uuid) from public, anon, authenticated;/grant execute on function push_text(uuid) to authenticated;/"
   "M15 approval to open accepts nobody (S15)|s/if m.join_mode = 'approval' and p_join_mode = 'open' and st = 'open' then/if false then/"
 )
 tmp=$(mktemp -d); chmod 755 "$tmp"
