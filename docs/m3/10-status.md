@@ -164,3 +164,16 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
 - Open, not fixed: at ×2.0 on Android, line spacing grows more than the letters (fixed `lineHeight`
   values seem to ignore the size cap). Affects every screen; one change in the shared `Text`, to be
   proposed separately.
+
+## 10.11 Round 6 (20 Nov) — 0072 on staging, game actions on for staging
+
+- 0072 on staging (Paul's approval, staging only): preflight 44710561598 (12/12 required, 3/3
+  information), apply 44710678965 ("applied 1 migration(s)", 72 on staging), postcheck 44710824703
+  18/18. Not on live.
+- Game actions are on when the bundle's database is staging (`gameWritesFor`), off for live and
+  anything else.
+- End to end on staging, `suite=m3-actions`, run 44716190004 on `bcca8e9`: ask → declined, join →
+  leave, organiser decline + accept, court booking cancelled → go ahead without one. Every app step
+  and all 13 database checks passed; the run's games and accounts were removed.
+- Large text: Android `lineHeight` now follows the size cap (shared `Text`); checked at ×2.0.
+- `m3-dev` website preview → staging: not yet verified (preview is behind Vercel sign-in).
