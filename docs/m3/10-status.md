@@ -184,3 +184,15 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
   build). Update `01a1f89e-f412-753b-beb5-ff8c29dc07b2`, group `15f59966-05e1-4644-a18c-3e2bcef2634a`,
   runtime 0.3.0. Rollback: group `c6033820-eecb-46b3-be18-24bb3bf4a2a7` (18 Nov, `8885859`). iOS staging
   and live untouched.
+
+- **Temporary test games on staging (20 Nov, for Paul's Samsung).** Run 44725264338, script
+  `supabase/staging/m3_test_games.sh` (made through `post_match` / `join_match` acting as each account).
+  Demo club, padel, no court booked, note starts "[M3 TEST]". No account, booking or club setting created
+  or changed.
+  - G1 open game `3f9e51d5-1fb0-4086-90eb-db5d36d9fa8c`, Sun 22 Nov 18:00–19:30 Beirut, organiser
+    account `6138b979` (Paul Tester).
+  - G2 approval game `bda1de19-8e4d-4186-bb1e-6036613430ee`, Mon 23 Nov 19:00–20:30 Beirut, organiser
+    `02111629` (Paul's code sign-in); requests waiting from `6138b979` and `966f79cf`; two
+    `join_request` notices to Paul.
+  - Cleanup: Staging database → action `m3_test_games_cleanup` (removes only "[M3 TEST]" games with
+    their players, messages and notices).
