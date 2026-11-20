@@ -123,11 +123,12 @@ export function friendlyError(message: string | undefined): string {
   return message;
 }
 
-/** Community rules, accepted once before a player's first chat message. Wording approved by Paul (20 Nov). */
+/** Community rules, accepted once before a player's first chat message. Wording approved by Paul (20 Nov, revised). */
+export const COMMUNITY_RULES_TITLE = "Community rules";
 export const COMMUNITY_RULES = [
-  "CourtBook is for organising sports: finding players, booking courts and arranging games.",
-  "Be respectful. No harassment, threats, insults or hate.",
-  "No unwanted romantic or sexual advances.",
-  "No solicitation: no selling, advertising, recruiting or asking for money.",
-  "Use someone's contact details only to arrange the game. Report anything that breaks these rules — we can remove messages and suspend accounts.",
+  "Keep it about sports. CourtBook is for finding players, booking courts and organising games.",
+  "Respect others. Harassment, threats, insults and hate speech are not allowed.",
+  "Respect personal boundaries. Don't make unwanted romantic or sexual advances toward other players.",
+  "No advertising or solicitation. Do not use CourtBook to sell products, promote services, recruit people or ask for money.",
+  "Respect privacy. Only use another player's contact information to arrange a game. If someone breaks these rules, report it. CourtBook may remove messages or suspend accounts.",
 ];

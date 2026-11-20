@@ -61,10 +61,10 @@ export const REPORT_BLOCK_OFFER = "You can also block this player now.";
 export const REPORT_DANGER = "If anyone is in danger, contact the police or emergency services now.";
 
 /**
- * Community rules shown once before the first message. Wording approved by Paul on 20 Nov (sports only;
- * no harassment, unwanted romantic advances or solicitation); one copy for the website and the app.
+ * Community rules shown once before the first message. Wording approved by Paul on 20 Nov (revised);
+ * one copy for the website and the app (shared/types).
  */
-export { COMMUNITY_RULES } from "@shared/types";
+export { COMMUNITY_RULES, COMMUNITY_RULES_TITLE } from "@shared/types";
 
 type Rpc = (fn: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: unknown }>;
 const defaultRpc: Rpc = (fn, args) => supabase.rpc(fn, args);

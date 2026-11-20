@@ -6,7 +6,7 @@ import { Icon } from "../Icon";
 import { Button } from "../Button";
 import { ChoiceRow } from "./GameFields";
 import {
-  COMMUNITY_RULES, FEEDBACK_MAX, FEEDBACK_TEXT, FEEDBACK_THANKS, type FeedbackKind, REPORT_BLOCK_OFFER, REPORT_DANGER, REPORT_NOTE_MAX, REPORT_REASONS, REPORT_THANKS, type ReportReason,
+  COMMUNITY_RULES, COMMUNITY_RULES_TITLE, FEEDBACK_MAX, FEEDBACK_TEXT, FEEDBACK_THANKS, type FeedbackKind, REPORT_BLOCK_OFFER, REPORT_DANGER, REPORT_NOTE_MAX, REPORT_REASONS, REPORT_THANKS, type ReportReason,
 } from "../../lib/safety";
 import { color, font, MAX_FONT_SCALE, radius, space, TOUCH } from "../../lib/theme";
 
@@ -88,14 +88,13 @@ export function RulesSheet({ visible, onAgree, onClose }: { visible: boolean; on
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   return (
-    <Sheet visible={visible} title="Community rules" onClose={onClose}>
+    <Sheet visible={visible} title={COMMUNITY_RULES_TITLE} onClose={onClose}>
       {COMMUNITY_RULES.map((r, i) => (
         <View key={i} style={styles.rule}>
           <Text style={styles.ruleNumber}>{i + 1}</Text>
           <Text variant="body" style={{ flex: 1 }}>{r}</Text>
         </View>
       ))}
-      <Text variant="secondary">These rules are part of the CourtBook terms of use.</Text>
       {problem ? <Text style={{ color: color.danger }} accessibilityRole="alert">{problem}</Text> : null}
       <Button label="I agree" busy={busy} onPress={async () => { setBusy(true); const p = await onAgree(); setBusy(false); if (p) setProblem(p); }} testID="rules-agree" />
     </Sheet>

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
-import { COMMUNITY_RULES, friendlyError } from "@/lib/types";
+import { COMMUNITY_RULES, COMMUNITY_RULES_TITLE, friendlyError } from "@/lib/types";
 
 type Msg = { id: string; profile_id: string; name: string | null; body: string; created_at: string; deleted?: boolean; /** M3-S: the reader blocked the sender (text withheld) */ blocked?: boolean };
 
@@ -93,8 +93,8 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
         <div ref={bottom} />
       </div>
       {rules && (
-        <div className="mt-3 rounded-xl border border-grid bg-paper p-3 text-sm" role="dialog" aria-label="Community rules">
-          <p className="mb-2 font-medium">Before your first message</p>
+        <div className="mt-3 rounded-xl border border-grid bg-paper p-3 text-sm" role="dialog" aria-label={COMMUNITY_RULES_TITLE}>
+          <p className="mb-2 font-medium">{COMMUNITY_RULES_TITLE}</p>
           <ol className="mb-3 list-decimal space-y-1 pl-5">{COMMUNITY_RULES.map((r) => <li key={r}>{r}</li>)}</ol>
           <div className="flex gap-2">
             <button disabled={busy} onClick={acceptRules} className="rounded-xl bg-action px-4 py-2 font-medium text-white disabled:opacity-50">I agree</button>

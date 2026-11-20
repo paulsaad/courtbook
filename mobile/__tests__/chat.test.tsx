@@ -201,7 +201,7 @@ describe("chat screen", () => {
     await show(game, []);
     await fireEvent.changeText(await screen.findByLabelText("Message the group"), "Hello");
     await fireEvent.press(screen.getByTestId("chat-send"));
-    expect(await screen.findByText(/for organising sports/)).toBeTruthy();
+    expect(await screen.findByText(/Keep it about sports/)).toBeTruthy();
     expect(screen.getByLabelText("Message the group").props.value).toBe("Hello");
   });
 

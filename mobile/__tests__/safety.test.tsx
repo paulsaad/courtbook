@@ -65,14 +65,17 @@ describe("on only where the database has 0074 (decided at run time)", () => {
   });
 });
 
-describe("community rules (approved wording)", () => {
-  it("five rules: sports only, no harassment, no unwanted advances, no solicitation", () => {
-    expect(COMMUNITY_RULES).toHaveLength(5);
-    const all = COMMUNITY_RULES.join(" ");
-    expect(all).toMatch(/for organising sports/);
-    expect(all).toMatch(/No harassment/);
-    expect(all).toMatch(/No unwanted romantic or sexual advances/);
-    expect(all).toMatch(/No solicitation/);
+describe("community rules (approved wording, revised 20 Nov)", () => {
+  it("exactly the five approved rules, and no terms-of-use sentence on the sheet", async () => {
+    expect(COMMUNITY_RULES).toEqual([
+      "Keep it about sports. CourtBook is for finding players, booking courts and organising games.",
+      "Respect others. Harassment, threats, insults and hate speech are not allowed.",
+      "Respect personal boundaries. Don't make unwanted romantic or sexual advances toward other players.",
+      "No advertising or solicitation. Do not use CourtBook to sell products, promote services, recruit people or ask for money.",
+      "Respect privacy. Only use another player's contact information to arrange a game. If someone breaks these rules, report it. CourtBook may remove messages or suspend accounts.",
+    ]);
+    const sheets = fs.readFileSync(path.join(__dirname, "../components/game/SafetySheets.tsx"), "utf8");
+    expect(sheets).not.toMatch(/terms of use/i);
   });
 });
 
