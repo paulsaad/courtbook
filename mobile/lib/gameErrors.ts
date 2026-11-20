@@ -51,6 +51,7 @@ export const GAME_ERRORS: Record<string, string> = {
   bad_target: "You can't report or block yourself.",
   bad_reason: "Choose a reason for the report.",
   account_suspended: "Your account is suspended. Contact courtbook.contact@gmail.com.",
+  text_required: "Write a few words first.",
 };
 
 export const COURT_PAUSED = "Joining is paused: the court booking was cancelled.";

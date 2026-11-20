@@ -84,6 +84,7 @@ export const ERRORS: Record<string, string> = {
   bad_reason: "Choose a reason for the report.",
   bad_status: "Choose handled or dismissed.",
   reason_required: "Enter a reason.",
+  text_required: "Write a few words first.",
   // M3-H (game hardening) refusals
   court_not_lost: "Something went wrong. Refresh and try again.",
   court_lost: "The court booking for this match was cancelled. Joining is paused until the organizer decides.",
@@ -122,11 +123,11 @@ export function friendlyError(message: string | undefined): string {
   return message;
 }
 
-/** M3-S community rules, accepted once before a player's first chat message. DRAFT for Paul's review. */
+/** Community rules, accepted once before a player's first chat message. Wording approved by Paul (20 Nov). */
 export const COMMUNITY_RULES = [
-  "Be civil. Treat other players as you would on court.",
-  "No harassment, threats or abuse.",
-  "Use the chat for the game you're playing.",
-  "Use someone's contact details only for the game you're playing.",
-  "Report anything that breaks these rules. We can remove messages and suspend accounts.",
+  "CourtBook is for organising sports: finding players, booking courts and arranging games.",
+  "Be respectful. No harassment, threats, insults or hate.",
+  "No unwanted romantic or sexual advances.",
+  "No solicitation: no selling, advertising, recruiting or asking for money.",
+  "Use someone's contact details only to arrange the game. Report anything that breaks these rules — we can remove messages and suspend accounts.",
 ];

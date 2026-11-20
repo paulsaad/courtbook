@@ -43,6 +43,9 @@ mutants=(
   "N16 organiser accepts a blocked request|s/    if players_blocked(p_profile, m.organizer_id) then raise exception 'blocked'; end if;//"
   "N17 S15 accepts a blocked request|s/             and not players_blocked(profile_id, m.organizer_id)   -- M3-S: blocked requests keep waiting//"
   "N18 blocked messages readable from the table|s/  and not exists (select 1 from player_blocks b where b.blocker_id = auth.uid() and b.blocked_id = match_messages.profile_id));/  );/"
+  "N20 no daily feedback limit|/function send_feedback/,/end \$\$;/ s/    raise exception 'slow_down';/    null;/"
+  "N21 waiting players see everyone|s/       or (mine.my_status = 'accepted' and p.status::text = 'accepted')/       or true/"
+  "N22 feedback not refused when empty|s/  if body = '' then raise exception 'text_required'; end if;//"
   "N19 suspensions readable|s/revoke all on table reports, blocked_terms, account_suspensions from anon, authenticated;/revoke all on table reports, blocked_terms from anon, authenticated; grant select on account_suspensions to authenticated; drop policy if exists s on account_suspensions; create policy s on account_suspensions for select using (true);/"
 )
 tmp=$(mktemp -d); chmod 755 "$tmp"

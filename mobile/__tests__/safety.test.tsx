@@ -13,7 +13,7 @@ const path = require("path") as { join: (...p: string[]) => string };
 import { fireEvent, render, screen } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import {
-  blockPlayer, COMMUNITY_RULES, REPORT_DANGER, REPORT_REASONS, REPORT_THANKS, reportContent, SAFETY_AVAILABLE, SAFETY_RPC_ARGS,
+  blockPlayer, COMMUNITY_RULES, REPORT_DANGER, REPORT_REASONS, REPORT_THANKS, reportContent, SAFETY_RPC_ARGS, fetchSafety, feedbackContext, sendFeedback, isMissingFunction,
 } from "../lib/safety";
 import { ReportSheet } from "../components/game/SafetySheets";
 import { detailSections, SCREEN_FEATURES } from "../lib/gameScreens";
@@ -30,7 +30,7 @@ describe("contract with the M3-S draft", () => {
   });
   it("the reasons are the ones the draft accepts, in the spec's order", () => {
     expect(REPORT_REASONS.map((r) => r.key)).toEqual(["spam", "abuse", "inappropriate", "danger", "other"]);
-    expect(DRAFT).toContain("reason in ('spam', 'abuse', 'inappropriate', 'danger', 'other')");
+    expect(DRAFT).toContain("p_reason not in ('spam', 'abuse', 'inappropriate', 'danger', 'other')");
   });
   it("calls send the draft's argument names; an empty note is sent as null", async () => {
     const rpc = jest.fn(async () => ({ data: null, error: null }));
@@ -45,14 +45,53 @@ describe("contract with the M3-S draft", () => {
   });
 });
 
-describe("switched off until M3-S is applied", () => {
-  it("no report control on the game screen", () => {
-    expect(SAFETY_AVAILABLE).toBe(false);
+describe("on only where the database has 0074 (decided at run time)", () => {
+  it("the base switch is off; the game screen adds report from useSafety", () => {
     expect(SCREEN_FEATURES.report).toBe(false);
-  });
-  it("five rules, worded from the terms draft", () => {
-    expect(COMMUNITY_RULES).toHaveLength(5);
     expect(detailSections).toBeDefined();
+  });
+  it("before 0074 (function missing): off, and nothing thrown", async () => {
+    const rpc = jest.fn(async () => ({ data: null, error: { code: "PGRST202", message: "Could not find the function public.my_account_status without parameters in the schema cache" } }));
+    await expect(fetchSafety(rpc)).resolves.toEqual({ available: false, suspended: false });
+    expect(rpc).toHaveBeenCalledWith("my_account_status", {});
+  });
+  it("with 0074: on; a suspended account is known", async () => {
+    await expect(fetchSafety(async () => ({ data: "active", error: null }))).resolves.toEqual({ available: true, suspended: false });
+    await expect(fetchSafety(async () => ({ data: "suspended", error: null }))).resolves.toEqual({ available: true, suspended: true });
+  });
+  it("offline or a server error: asked again later (thrown), never read as 'missing'", async () => {
+    await expect(fetchSafety(async () => ({ data: null, error: { message: "Network request failed" } }))).rejects.toBeTruthy();
+    expect(isMissingFunction({ message: "Network request failed" })).toBe(false);
+  });
+});
+
+describe("community rules (approved wording)", () => {
+  it("five rules: sports only, no harassment, no unwanted advances, no solicitation", () => {
+    expect(COMMUNITY_RULES).toHaveLength(5);
+    const all = COMMUNITY_RULES.join(" ");
+    expect(all).toMatch(/for organising sports/);
+    expect(all).toMatch(/No harassment/);
+    expect(all).toMatch(/No unwanted romantic or sexual advances/);
+    expect(all).toMatch(/No solicitation/);
+  });
+});
+
+describe("Help & Feedback", () => {
+  it("sends kind, trimmed text and the app context; empty text is not sent", async () => {
+    const rpc = jest.fn(async () => ({ data: null, error: null }));
+    expect(await sendFeedback("app_problem", "  map is blank  ", "android · 0.3.0", rpc)).toBeNull();
+    expect(rpc).toHaveBeenCalledWith("send_feedback", { p_kind: "app_problem", p_text: "map is blank", p_context: "android · 0.3.0" });
+    expect((await sendFeedback("suggestion", "   ", "x", rpc))?.reason).toBe("text_required");
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+  it("a refusal reads as a sentence", async () => {
+    const f = await sendFeedback("suggestion", "x", "c", async () => ({ data: null, error: { message: "slow_down", code: "P0001" } }));
+    expect(f?.message).toMatch(/Wait a moment/);
+  });
+  it("context: platform, version and update, nothing personal", () => {
+    expect(feedbackContext("android", [{ label: "Version", value: "0.3.0 (build 12)" }, { label: "Update", value: "01a1f89e-f412-753b" }]))
+      .toBe("android · 0.3.0 (build 12) · update 01a1f89e");
+    expect(feedbackContext("ios", [{ label: "Version", value: "0.3.0 (build 3)" }, { label: "Code", value: "Built-in" }])).toBe("ios · 0.3.0 (build 3) · built-in code");
   });
 });
 

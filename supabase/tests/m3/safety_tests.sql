@@ -251,6 +251,56 @@ insert into t values
   ('T-S55 unsuspending restores the account', pg_temp.got('s15') = 'ok' and pg_temp.got('s16') in ('accepted', 'pending'), pg_temp.got('s16')),
   ('T-S56 booking functions are untouched by suspension (M2)', not exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname in ('hold_slot', 'book_at_desk', 'cancel_booking', 'confirm_payment') and prosrc like '%assert_active%'), '');
 
+-- ===== Help & Feedback =====
+-- fresh people 12–15 in one game only: F organises, G and H accepted, J waiting
+insert into auth.users (id, email) select pg_temp.u(i), 's' || i || '@m3s.test' from generate_series(12, 15) i;
+update profiles set name = 'Player ' || right(id::text, 2), rules_accepted_at = now() where id in (select pg_temp.u(i) from generate_series(12, 15) i);
+\set F 'pg_temp.u(12)'
+\set G 'pg_temp.u(13)'
+\set H 'pg_temp.u(14)'
+\set J 'pg_temp.u(15)'
+select pg_temp.game(30, :F, 'open', null, pg_temp.day(20), pg_temp.day(20) + interval '90 min', 6, 'approval');
+select pg_temp.player(30, :G, 'accepted'); select pg_temp.player(30, :H, 'accepted'); select pg_temp.player(30, :J, 'pending');
+create function pg_temp.recent(who uuid) returns text language sql as $$
+  select coalesce(string_agg(right(x, 2), ',' order by x), '') from regexp_split_to_table(pg_temp.r(who, 'select string_agg(profile_id::text, '','') from my_recent_players()'), ',') x where x <> 'ok' $$;
+select null from pg_temp.keep('rp1', pg_temp.recent(:F));
+select null from pg_temp.keep('rp2', pg_temp.recent(:G));
+select null from pg_temp.keep('rp3', pg_temp.recent(:J));
+select null from pg_temp.keep('rp4', pg_temp.recent(:X));
+select null from pg_temp.keep('rp5', pg_temp.r(null, 'select count(*)::text from my_recent_players()'));
+select null from pg_temp.keep('rp6', pg_temp.r(:G, format($q$select report_content('player', %L, 'abuse')$q$, :H)));
+insert into t values
+  ('T-S57 recent players, organiser: everyone in or asking', pg_temp.got('rp1') = '13,14,15', pg_temp.got('rp1')),
+  ('T-S58 recent players, accepted: organiser and the other accepted, not the waiting one', pg_temp.got('rp2') = '12,14', pg_temp.got('rp2')),
+  ('T-S59 recent players, waiting: the organiser only', pg_temp.got('rp3') = '12', pg_temp.got('rp3')),
+  ('T-S60 recent players: nobody for a stranger or when signed out', pg_temp.got('rp4') = '' and pg_temp.got('rp5') = '0', pg_temp.got('rp4') || '/' || pg_temp.got('rp5')),
+  ('T-S61 a player picked there is reported through report_content', pg_temp.got('rp6') = 'ok', pg_temp.got('rp6'));
+
+select null from pg_temp.keep('fb1', pg_temp.r(:G, $q$select send_feedback('app_problem', '  The map does not open  ', 'android 0.3.0')$q$));
+select null from pg_temp.keep('fb2', pg_temp.r(:G, $q$select send_feedback('app_problem', '   ')$q$));
+select null from pg_temp.keep('fb3', pg_temp.r(:G, $q$select send_feedback('praise', 'nice')$q$));
+select null from pg_temp.keep('fb4', pg_temp.r(:G, format($q$select send_feedback('suggestion', %L)$q$, repeat('x', 1001))));
+select null from pg_temp.keep('fb5', pg_temp.r(null, $q$select send_feedback('suggestion', 'x')$q$));
+select null from pg_temp.keep('fb6', pg_temp.r(:G, 'select count(*)::text from reports'));
+select null from pg_temp.keep('fb7', pg_temp.r(:G, $q$select count(*)::text from admin_reports('open')$q$));
+select null from pg_temp.keep('fb8', pg_temp.r(:ADM, format($q$select reason || '|' || note || '|' || snapshot || '|' || (profile_id is null)::text || '|' || reporter_name from admin_reports('open') where target_kind = 'feedback' and reporter_id = %L$q$, :G)));
+select null from pg_temp.keep('fb9', pg_temp.r(:G, $q$select count(*)::text from (select send_feedback('suggestion', 'idea ' || i) from generate_series(1, 9) i) x$q$));
+select null from pg_temp.keep('fb10', pg_temp.r(:G, $q$select send_feedback('suggestion', 'one too many')$q$));
+select null from pg_temp.keep('fb11', pg_temp.r(:ADM, format($q$select admin_suspend(%L, 'test')$q$, :H)));
+select null from pg_temp.keep('fb12', pg_temp.r(:H, $q$select send_feedback('suggestion', 'please review my suspension')$q$));
+select null from pg_temp.keep('fb13', pg_temp.r(:ADM, format($q$select admin_resolve_report(id, 'dismissed', 'noted') from admin_reports('open') where target_kind = 'feedback' and reporter_id = %L$q$, :H)));
+select null from pg_temp.keep('fb14', pg_temp.r(:ADM, format($q$select count(*)::text from admin_reports('dismissed') where target_kind = 'feedback' and reporter_id = %L$q$, :H)));
+insert into t values
+  ('T-S62 feedback is saved, trimmed, with its app version', pg_temp.got('fb1') = 'ok', pg_temp.got('fb1')),
+  ('T-S63 feedback: empty, unknown kind, too long, signed out are refused',
+     pg_temp.got('fb2') like 'ERR text_required%' and pg_temp.got('fb3') like 'ERR bad_reason%' and pg_temp.got('fb4') like 'ERR note_too_long%' and pg_temp.got('fb5') like 'ERR not_authenticated%',
+     concat_ws(' / ', pg_temp.got('fb2'), pg_temp.got('fb3'), pg_temp.got('fb4'), pg_temp.got('fb5'))),
+  ('T-S64 feedback is private: the sender cannot read it back, a player cannot list it', pg_temp.got('fb6') like 'ERR permission denied%' and pg_temp.got('fb7') like 'ERR forbidden%', pg_temp.got('fb6') || '/' || pg_temp.got('fb7')),
+  ('T-S65 the admin sees it in the one report list', pg_temp.got('fb8') = 'app_problem|The map does not open|android 0.3.0|true|Player 13', pg_temp.got('fb8')),
+  ('T-S66 ten a day, then slow_down', pg_temp.got('fb9') = '9' and pg_temp.got('fb10') like 'ERR slow_down%', pg_temp.got('fb9') || '/' || pg_temp.got('fb10')),
+  ('T-S67 a suspended player can still write to us', pg_temp.got('fb11') = 'ok' and pg_temp.got('fb12') = 'ok', pg_temp.got('fb12')),
+  ('T-S68 feedback is closed like a report', pg_temp.got('fb13') = 'ok' and pg_temp.got('fb14') = '1', pg_temp.got('fb13') || '/' || pg_temp.got('fb14'));
+
 -- ===== grants =====
 insert into t values
   ('T-S31 safety functions: signed-in only; internals not callable',
@@ -260,7 +310,9 @@ insert into t values
      and not has_function_privilege('authenticated', 'message_has_blocked_term(text)', 'execute')
      and not has_function_privilege('authenticated', 'assert_active()', 'execute')
      and has_function_privilege('authenticated', 'admin_reports(text)', 'execute') and not has_function_privilege('anon', 'admin_reports(text)', 'execute')
-     and not has_function_privilege('anon', 'admin_suspend(uuid,text)', 'execute'), '');
+     and not has_function_privilege('anon', 'admin_suspend(uuid,text)', 'execute')
+     and has_function_privilege('authenticated', 'send_feedback(text,text,text)', 'execute') and not has_function_privilege('anon', 'send_feedback(text,text,text)', 'execute')
+     and has_function_privilege('authenticated', 'my_recent_players()', 'execute') and not has_function_privilege('anon', 'my_recent_players()', 'execute'), '');
 
 select case when pass then 'ok   ' else 'FAIL ' end || id || case when pass then '' else '  [' || coalesce(detail, '') || ']' end from t order by pass, id;
 select 'FAILED ' || count(*) filter (where not pass or pass is null) || ' of ' || count(*) from t;

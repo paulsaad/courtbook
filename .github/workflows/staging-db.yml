@@ -19,14 +19,14 @@ on:
       action:
         description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else); m3_0067_preflight / m3_0067_postcheck and m3_0072_preflight / m3_0072_postcheck, m3_0073_* and m3_0074_* = read-only checks before / after applying 0067 0072, 0073 or 0074 (supabase/live/00xx_*.sql)"
         type: choice
-        options: [check, apply, smoke, api, reset_demo, tester, demo_at_desk, m3_0067_preflight, m3_0067_postcheck, m3_0072_preflight, m3_0072_postcheck, m3_0073_preflight, m3_0073_postcheck, m3_0074_preflight, m3_0074_postcheck, m3_accounts, m3_test_games, m3_test_games_cleanup]
+        options: [check, apply, smoke, api, reset_demo, tester, demo_at_desk, m3_0067_preflight, m3_0067_postcheck, m3_0072_preflight, m3_0072_postcheck, m3_0073_preflight, m3_0073_postcheck, m3_0074_preflight, m3_0074_postcheck, m3_accounts, m3_test_games, m3_test_games_cleanup, m3_moderator_check, m3_moderator_grant]
         default: check
       migrations:
         description: "apply only: the exact migration numbers to apply, e.g. '0068 0069 0070 0071' — nothing else is applied; 'check' lists what is pending"
         type: string
         default: ""
       accounts:
-        description: "m3_test_games: three account ids (first 8 characters, from m3_accounts): your player, then two other accounts. m3_test_games_cleanup: the recorded game ids (full), so nothing else can be removed"
+        description: "m3_moderator_grant: one account id (first 8 characters, from m3_accounts). m3_test_games: three account ids (first 8 characters, from m3_accounts): your player, then two other accounts. m3_test_games_cleanup: the recorded game ids (full), so nothing else can be removed"
         type: string
         default: ""
       confirm_ref:
@@ -254,6 +254,17 @@ jobs:
       - name: 0074 postcheck, read only (m3_0074_postcheck)
         if: inputs.action == 'm3_0074_postcheck'
         run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0074_postcheck.sql
+
+      # The staging moderator (supabase/staging/m3_moderator.sh): read-only check that the admin accounts can
+      # use Admin → Reports and a player cannot; grant = the admin role for ONE named account (approval).
+      - name: Staging moderator, read only (m3_moderator_check)
+        if: inputs.action == 'm3_moderator_check'
+        run: PGOPTIONS="-c default_transaction_read_only=on" bash supabase/staging/m3_moderator.sh check
+      - name: Make one account the staging moderator (m3_moderator_grant)
+        if: inputs.action == 'm3_moderator_grant'
+        env:
+          ACCOUNTS: ${{ inputs.accounts }}
+        run: bash supabase/staging/m3_moderator.sh grant $ACCOUNTS
 
       - name: Booking-protection checks on staging
         if: inputs.action == 'smoke'

@@ -19,7 +19,7 @@ import { useGameActions } from "../../lib/gameActions";
 import {
   CHAT_AVAILABLE, chatKey, chatRows, COUNTER_FROM, composerState, MESSAGE_MAX, useChat, useChatActions, type ChatData, type ChatMessage, type ChatRow,
 } from "../../lib/chat";
-import { afterBlockChange, blockPlayer, reportContent, SAFETY_AVAILABLE, useAcceptRules, useRulesAccepted } from "../../lib/safety";
+import { afterBlockChange, blockPlayer, reportContent, useAcceptRules, useRulesAccepted, useSafety } from "../../lib/safety";
 import { ReportSheet, RulesSheet } from "../../components/game/SafetySheets";
 import { useQueryClient } from "@tanstack/react-query";
 import { color, font, MAX_FONT_SCALE, radius, space, TOUCH } from "../../lib/theme";
@@ -50,7 +50,8 @@ export default function Chat() {
   const [unseen, setUnseen] = useState(0);
   const [reporting, setReporting] = useState<ChatMessage | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
-  const rules = useRulesAccepted(signedIn && member);
+  const safety = useSafety(signedIn);
+  const rules = useRulesAccepted(safety.available && member);
   const acceptRules = useAcceptRules();
   const qc = useQueryClient();
   const reloadChat = () => { qc.setQueryData<ChatData>(chatKey(id ?? ""), (x) => (x ? { ...x, fullAt: 0 } : x)); void chat.refetch(); };
@@ -100,7 +101,7 @@ export default function Chat() {
     const body = text.trim();
     if (!body || body.length > MESSAGE_MAX || !state.canSend) return;
     // M3-S: the community rules, once, before the first message
-    if (SAFETY_AVAILABLE && !rulesJustAccepted && rules.data === false) { setRulesOpen(true); return; }
+    if (safety.available && !rulesJustAccepted && rules.data === false) { setRulesOpen(true); return; }
     setText(""); setProblem(null);
     const { id: mid, out } = await actions.send(body);
     if (out.kind === "failed" && !out.retry) {
@@ -121,7 +122,7 @@ export default function Chat() {
     if (m.local) return;
     if (m.profile_id !== me) {
       // report and block: migration M3-S (off until it is applied)
-      if (!SAFETY_AVAILABLE || m.blocked) return;
+      if (!safety.available || m.blocked) return;
       Alert.alert(m.name ?? "Player", undefined, [
         { text: "Report message", onPress: () => setReporting(m) },
         { text: `Block ${m.name ?? "player"}`, style: "destructive", onPress: () => block(m) },
@@ -218,15 +219,14 @@ export default function Chat() {
           <Text variant="caption" style={[styles.counter, text.length > MESSAGE_MAX && { color: color.danger }]} accessibilityLiveRegion="polite">{text.length}/{MESSAGE_MAX}</Text>
         ) : null}
       </View>
-      {SAFETY_AVAILABLE ? (
-        <>
-          <ReportSheet visible={!!reporting} what="message" onClose={() => setReporting(null)}
-                       onSend={async (reason, note) => (await reportContent("message", reporting!.id, reason, note))?.message ?? null}
-                       onBlock={reporting ? () => block(reporting) : undefined} />
-          <RulesSheet visible={rulesOpen} onClose={() => setRulesOpen(false)}
-                      onAgree={async () => { const f = await acceptRules(); if (!f) { setRulesOpen(false); void send(true); } return f?.message ?? null; }} />
-        </>
+      {safety.available ? (
+        <ReportSheet visible={!!reporting} what="message" onClose={() => setReporting(null)}
+                     onSend={async (reason, note) => (await reportContent("message", reporting!.id, reason, note))?.message ?? null}
+                     onBlock={reporting ? () => block(reporting) : undefined} />
       ) : null}
+      {/* always there: the server may ask for the rules (0074) before this app knows it has them */}
+      <RulesSheet visible={rulesOpen} onClose={() => setRulesOpen(false)}
+                  onAgree={async () => { const f = await acceptRules(); if (!f) { setRulesOpen(false); void send(true); } return f?.message ?? null; }} />
     </KeyboardAware>,
   );
 }

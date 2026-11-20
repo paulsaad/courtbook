@@ -6,7 +6,7 @@ import { Icon } from "../Icon";
 import { Button } from "../Button";
 import { ChoiceRow } from "./GameFields";
 import {
-  COMMUNITY_RULES, REPORT_BLOCK_OFFER, REPORT_DANGER, REPORT_NOTE_MAX, REPORT_REASONS, REPORT_THANKS, type ReportReason,
+  COMMUNITY_RULES, FEEDBACK_MAX, FEEDBACK_TEXT, FEEDBACK_THANKS, type FeedbackKind, REPORT_BLOCK_OFFER, REPORT_DANGER, REPORT_NOTE_MAX, REPORT_REASONS, REPORT_THANKS, type ReportReason,
 } from "../../lib/safety";
 import { color, font, MAX_FONT_SCALE, radius, space, TOUCH } from "../../lib/theme";
 
@@ -105,3 +105,41 @@ const styles = StyleSheet.create({
   rule: { flexDirection: "row", gap: space.md, alignItems: "flex-start" },
   ruleNumber: { fontFamily: font.score, fontSize: 22, lineHeight: 24, color: color.red, minWidth: 18 },
 });
+
+/** Help & Feedback: an app problem or a suggestion, one text box, private to the CourtBook team. */
+export function FeedbackSheet({ kind, onSend, onClose }: { kind: FeedbackKind | null; onSend: (kind: FeedbackKind, text: string) => Promise<string | null>; onClose: () => void }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const close = () => { setText(""); setSent(false); setProblem(null); onClose(); };
+  const t = FEEDBACK_TEXT[kind ?? "app_problem"];
+  const send = async () => {
+    if (!kind || busy || !text.trim()) return;
+    setBusy(true); setProblem(null);
+    const p = await onSend(kind, text);
+    setBusy(false);
+    if (p) setProblem(p); else setSent(true);
+  };
+  return (
+    <Sheet visible={!!kind} title={sent ? "Sent" : t.title} onClose={close}>
+      {sent ? (
+        <>
+          <Text variant="body" accessibilityLiveRegion="polite">{FEEDBACK_THANKS}</Text>
+          <Button label="Done" variant="quiet" onPress={close} />
+        </>
+      ) : (
+        <>
+          <Text variant="secondary">{t.prompt}</Text>
+          <TextInput
+            value={text} onChangeText={(v) => setText(v.slice(0, FEEDBACK_MAX))} multiline maxLength={FEEDBACK_MAX}
+            maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.note, { minHeight: 120 }]} accessibilityLabel={t.title} testID="feedback-text"
+          />
+          {text.length >= FEEDBACK_MAX - 100 ? <Text variant="caption" accessibilityLiveRegion="polite">{text.length}/{FEEDBACK_MAX}</Text> : null}
+          {problem ? <Text style={{ color: color.danger }} accessibilityRole="alert">{problem}</Text> : null}
+          <Button label="Send" busy={busy} disabled={!text.trim()} onPress={() => void send()} testID="feedback-send" />
+        </>
+      )}
+    </Sheet>
+  );
+}

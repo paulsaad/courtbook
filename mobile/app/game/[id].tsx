@@ -11,7 +11,7 @@ import { ReportSheet } from "../../components/game/SafetySheets";
 import { blockedNotice, reportContent, useBlockedPlayers } from "../../lib/safety";
 import { useGamePeople } from "../../lib/games";
 import { useSession } from "../../lib/session";
-import { SCREEN_FEATURES, useGameScreen } from "../../lib/gameScreens";
+import { useGameScreen } from "../../lib/gameScreens";
 import { useActivity, useMarkRead } from "../../lib/activity";
 import type { ActionOutcome, GameAction } from "../../lib/gameActions";
 import { NOT_AVAILABLE, organiserActions } from "../../lib/gameState";
@@ -53,7 +53,7 @@ export default function GameScreen() {
   const [reporting, setReporting] = useState(false);
   const d = screen.detail;
   // M3-S: tell the blocker when someone they blocked is in this game (names are visible to members only)
-  const blocked = useBlockedPlayers(signedIn);
+  const blocked = useBlockedPlayers(screen.safety.available);
   const people = useGamePeople(id, { signedIn, visible: !!d && (d.i_organize || d.my_status === "accepted") });
   const notice = d ? blockedNotice(people.data, blocked.data, me, d.i_organize) : null;
 
@@ -84,6 +84,7 @@ export default function GameScreen() {
   const handlers: DetailHandlers = {
     onOpenClub: d.club_id && d.status !== "cancelled" ? () => router.push({ pathname: "/club/[id]", params: { id: d.club_id!, name: d.club_name ?? "", tab: "info" } }) : undefined,
   };
+  const SCREEN_FEATURES = screen.features;
   if (SCREEN_FEATURES.report) handlers.onReport = () => setReporting(true);
   if (SCREEN_FEATURES.writes) {
     const v = screen.sections.find((s) => s.kind === "actions");

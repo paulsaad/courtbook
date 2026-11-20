@@ -10,6 +10,9 @@ export default async function AdminHome() {
   const { data: me } = await supabase.from("profiles").select("roles").eq("id", user.id).single();
   if (!me?.roles?.includes("admin")) return <main className="p-6">Admins only.</main>;
 
+  // open reports and feedback (0074); before 0074 the function is missing and no count is shown
+  const { data: open } = await supabase.rpc("admin_reports", { p_status: "open" });
+  const openCount = Array.isArray(open) ? open.length : null;
   const { data: clubs } = await supabase.from("clubs").select("id, name, slug, active, service_fee_usd, courts(count)").order("name");
 
   return (
@@ -32,7 +35,7 @@ export default async function AdminHome() {
       <NewClubForm />
       <div className="flex gap-4">
         <Link href="/admin/payments" className="text-sm text-action underline">Payments</Link>
-        <Link href="/admin/reports" className="text-sm text-action underline">Reports</Link>
+        <Link href="/admin/reports" className="text-sm text-action underline">Reports{openCount ? ` (${openCount} open)` : ""}</Link>
       </div>
     </main>
   );

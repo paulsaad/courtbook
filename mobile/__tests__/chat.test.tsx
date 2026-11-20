@@ -109,13 +109,16 @@ const game: GameDetail = {
   started: false, finished: false, hidden: false,
 };
 const metrics = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 0, left: 0, right: 0, bottom: 0 } };
-async function show(d: GameDetail, messages: ServerMessage[]) {
+/** `has0074`: the database has the safety functions (my_account_status answers); otherwise PostgREST's "not found". */
+async function show(d: GameDetail, messages: ServerMessage[], has0074 = false) {
   const q = qc();
   q.setQueryData(gameKeys.detail("m1"), d, { updatedAt: Date.now() + 864e5 });
   q.setQueryData(["activity"], [], { updatedAt: Date.now() + 864e5 });
   (supabase.rpc as jest.Mock).mockImplementation(async (fn: string) => {
     if (fn === "match_messages_list") return { data: messages, error: null };
     if (fn === "match_detail") return { data: [d], error: null };
+    if (fn === "my_account_status") return has0074 ? { data: "active", error: null } : { data: null, error: { code: "PGRST202", message: "Could not find the function" } };
+    if (fn === "my_rules_accepted") return { data: true, error: null };
     return { data: null, error: null };
   });
   await render(<SafeAreaProvider initialMetrics={metrics}><QueryClientProvider client={q}><Chat /></QueryClientProvider></SafeAreaProvider>);
@@ -179,6 +182,25 @@ describe("chat screen", () => {
     await fireEvent(screen.getByTestId("msg-b"), "longPress");
     expect(alert).toHaveBeenCalledWith("Delete this message?", expect.any(String), expect.any(Array));
     alert.mockRestore();
+  });
+
+  it("with 0074: long press on another player's message offers Report and Block", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+    await show(game, [msg("a", "2026-11-20T10:00:00Z")], true);
+    await waitFor(async () => {
+      await fireEvent(screen.getByTestId("msg-a"), "longPress");
+      expect(alert).toHaveBeenCalledWith("Nour", undefined, expect.arrayContaining([expect.objectContaining({ text: "Report message" }), expect.objectContaining({ text: "Block Nour" })]));
+    });
+    alert.mockRestore();
+  });
+
+  it("before the app knows 0074 is there, a rules refusal still shows the rules (chat never sticks)", async () => {
+    (supabase.from as jest.Mock).mockReturnValue({ insert: jest.fn(async () => ({ error: { code: "P0001", message: "rules_not_accepted" } })) });
+    await show(game, []);
+    await fireEvent.changeText(await screen.findByLabelText("Message the group"), "Hello");
+    await fireEvent.press(screen.getByTestId("chat-send"));
+    expect(await screen.findByText(/for organising sports/)).toBeTruthy();
+    expect(screen.getByLabelText("Message the group").props.value).toBe("Hello");
   });
 
   it("a deleted message reads “Message deleted”", async () => {

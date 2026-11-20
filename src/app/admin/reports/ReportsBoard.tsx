@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/types";
 
 export type Report = {
-  id: string; created_at: string; target_kind: "message" | "player" | "game"; reason: string; note: string | null; snapshot: string | null;
+  id: string; created_at: string; target_kind: "message" | "player" | "game" | "feedback"; reason: string; note: string | null; snapshot: string | null;
   status: "open" | "actioned" | "dismissed"; reporter_id: string; reporter_name: string | null; profile_id: string | null; reported_name: string | null;
   reported_suspended: boolean; reports_against: number; match_id: string | null; message_id: string | null; message_deleted: boolean;
   handled_at: string | null; action: string | null;
@@ -17,8 +17,8 @@ type Line = { id: string; created_at: string; sender: string | null; body: strin
 
 const tz = "Asia/Beirut";
 const when = (t: string) => formatInTimeZone(new Date(t), tz, "d MMM HH:mm");
-const REASONS: Record<string, string> = { spam: "Spam", abuse: "Abuse or harassment", inappropriate: "Inappropriate", danger: "Threat or danger", other: "Something else" };
-const KINDS: Record<string, string> = { message: "Message", player: "Player", game: "Game" };
+const REASONS: Record<string, string> = { spam: "Spam", abuse: "Abuse or harassment", inappropriate: "Inappropriate", danger: "Threat or danger", other: "Something else", app_problem: "App problem", suggestion: "Suggestion" };
+const KINDS: Record<string, string> = { message: "Message", player: "Player", game: "Game", feedback: "Help & Feedback" };
 const TABS = [["open", "Open"], ["actioned", "Handled"], ["dismissed", "Dismissed"]] as const;
 
 export default function ReportsBoard({ status, reports, unavailable, failed }: { status: string; reports: Report[]; unavailable: boolean; failed: boolean }) {
@@ -35,7 +35,14 @@ export default function ReportsBoard({ status, reports, unavailable, failed }: {
       {unavailable && <p className="rounded-lg bg-slate-soft px-3 py-2 text-sm text-muted">Reports are not available on this database yet (migration 0074).</p>}
       {failed && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">Could not load reports. Refresh to try again.</p>}
       {!unavailable && !failed && reports.length === 0 && <p className="text-sm text-muted">{status === "open" ? "No open reports." : "None."}</p>}
-      {reports.map((r) => <ReportCard key={r.id} r={r} />)}
+      {/* player reports first (they can need action), then app problems and suggestions (private feedback) */}
+      {[["Player reports", reports.filter((r) => r.target_kind !== "feedback")], ["App problems and suggestions", reports.filter((r) => r.target_kind === "feedback")]].map(([title, list]) =>
+        (list as Report[]).length > 0 && (
+          <section key={title as string} className="flex flex-col gap-3" aria-label={title as string}>
+            <h2 className="text-sm font-medium text-muted">{title as string} · {(list as Report[]).length}</h2>
+            {(list as Report[]).map((r) => <ReportCard key={r.id} r={r} />)}
+          </section>
+        ))}
     </main>
   );
 }
@@ -74,8 +81,13 @@ function ReportCard({ r }: { r: Report }) {
         Reported by {r.reporter_name ?? "a player"}
         {r.profile_id && <> · about <span className="text-ink">{r.reported_name ?? "a player"}</span>{r.reported_suspended && <span className="ml-1 rounded bg-red-50 px-1.5 py-0.5 text-xs text-danger">suspended</span>}{r.reports_against > 1 && <> · {r.reports_against} reports in total</>}</>}
       </p>
-      {r.note && <p className="mt-2"><span className="text-muted">Their note: </span>{r.note}</p>}
-      {r.snapshot != null && (
+      {r.target_kind === "feedback" ? (
+        <>
+          <p className="mt-2 whitespace-pre-wrap break-words">{r.note}</p>
+          {r.snapshot && <p className="mt-1 text-xs text-muted">Sent from {r.snapshot}</p>}
+        </>
+      ) : r.note && <p className="mt-2"><span className="text-muted">Their note: </span>{r.note}</p>}
+      {r.snapshot != null && r.target_kind !== "feedback" && (
         <blockquote className="mt-2 rounded-lg border-l-4 border-grid bg-paper px-3 py-2">
           <div className="text-xs text-muted">{r.target_kind === "message" ? "The message, as reported" : "As reported"}{r.message_deleted && " · since deleted"}</div>
           <div className="whitespace-pre-wrap break-words">{r.snapshot}</div>

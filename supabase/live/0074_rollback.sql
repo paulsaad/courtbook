@@ -425,6 +425,8 @@ drop function if exists admin_hide_message(uuid);
 drop function if exists admin_suspend(uuid, text);
 drop function if exists admin_unsuspend(uuid);
 drop function if exists my_account_status();
+drop function if exists send_feedback(text, text, text);
+drop function if exists my_recent_players();
 drop function if exists message_has_blocked_term(text);
 drop function if exists players_blocked(uuid, uuid);
 drop function if exists assert_active();

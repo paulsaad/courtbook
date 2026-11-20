@@ -99,6 +99,20 @@ describe("Reports (admin)", () => {
     expect(screen.getByText(/Handled .* · warned/)).toBeTruthy();
   });
 
+  it("app problems and suggestions are listed apart, with their text and app version, and can be closed", async () => {
+    render(<ReportsBoard status="open" unavailable={false} failed={false} reports={[
+      report(),
+      report({ id: "f1", target_kind: "feedback", reason: "app_problem", note: "Map stays blank", snapshot: "android · 0.3.0", profile_id: null, reported_name: null, match_id: null, message_id: null, reports_against: 0 }),
+    ]} />);
+    const feedback = screen.getByRole("region", { name: "App problems and suggestions" });
+    expect(feedback.textContent).toContain("Help & Feedback · App problem");
+    expect(feedback.textContent).toContain("Map stays blank");
+    expect(feedback.textContent).toContain("Sent from android · 0.3.0");
+    expect(feedback.textContent).not.toContain("Suspend account");
+    expect(feedback.textContent).not.toContain("Show conversation");
+    expect(screen.getByRole("region", { name: "Player reports" }).textContent).toContain("the reported text");
+  });
+
   it("says so before migration 0074", () => {
     render(<ReportsBoard status="open" reports={[]} unavailable failed={false} />);
     expect(screen.getByText(/not available on this database yet/)).toBeTruthy();

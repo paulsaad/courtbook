@@ -17,6 +17,8 @@
 --                       (M2) unaffected
 --   rules_accepted_at  community rules accepted once before the first message ('rules_not_accepted')
 --   blocked_terms      word list, EMPTY here (filled only with approval) → 'message_not_allowed'
+--   help & feedback    send_feedback (app problem / suggestion, kept in reports, admins only, 10 a day);
+--                       my_recent_players (whom I can report from Profile, never more than games show me)
 --
 -- Not here: report email to the moderator (M3-D `deliver`), snapshot retention job (P3).
 -- Replaces: 0073 post_match; 0072 join_match, decide_join, update_match, set_match_status, remove_player,
@@ -194,14 +196,14 @@ create policy "match_messages: members read" on match_messages for select using 
 create table if not exists reports (
   id          uuid primary key default gen_random_uuid(),
   reporter_id uuid not null references profiles(id) on delete cascade,
-  target_kind text not null check (target_kind in ('message', 'player', 'game')),
+  target_kind text not null check (target_kind in ('message', 'player', 'game', 'feedback')),  -- feedback: Help & Feedback
   message_id  uuid references match_messages(id) on delete set null,
   profile_id  uuid references profiles(id) on delete set null,
   match_id    uuid references matches(id) on delete set null,
-  target_key  uuid not null,                         -- the reported thing's id, kept if it is deleted
-  reason      text not null check (reason in ('spam', 'abuse', 'inappropriate', 'danger', 'other')),
-  note        text check (char_length(note) <= 500),
-  snapshot    text,                                  -- the message text or name at report time (evidence)
+  target_key  uuid not null,                         -- the reported thing's id, kept if it is deleted (feedback: its own)
+  reason      text not null check (reason in ('spam', 'abuse', 'inappropriate', 'danger', 'other', 'app_problem', 'suggestion')),
+  note        text check (char_length(note) <= 1000),  -- reports 500 (report_content), feedback 1000
+  snapshot    text,                                  -- the message text or name at report time (evidence); feedback: app version
   created_at  timestamptz not null default now(),
   status      text not null default 'open' check (status in ('open', 'actioned', 'dismissed')),
   handled_by  uuid references profiles(id),
@@ -254,6 +256,56 @@ begin
 end $$;
 revoke all on function report_content(text, uuid, text, text) from public, anon;
 grant execute on function report_content(text, uuid, text, text) to authenticated;
+
+-- Help & Feedback (Profile): an app problem or a suggestion, private to CourtBook's admins. Kept in
+-- reports so the moderator has one list (admin_reports) and one way to close it (admin_resolve_report).
+-- A suspended player can still write (it is how they reach us). At most 10 a day per player.
+create or replace function send_feedback(p_kind text, p_text text, p_context text default null) returns void
+language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid(); body text := trim(coalesce(p_text, ''));
+begin
+  if me is null then raise exception 'not_authenticated'; end if;
+  if p_kind is null or p_kind not in ('app_problem', 'suggestion') then raise exception 'bad_reason'; end if;
+  if body = '' then raise exception 'text_required'; end if;
+  if char_length(body) > 1000 then raise exception 'note_too_long'; end if;
+  perform pg_advisory_xact_lock(hashtext('send_feedback'), hashtext(me::text));
+  if (select count(*) from reports where reporter_id = me and target_kind = 'feedback'
+        and created_at > now() - interval '1 day') >= 10 then
+    raise exception 'slow_down';
+  end if;
+  insert into reports (reporter_id, target_kind, target_key, reason, note, snapshot)
+  values (me, 'feedback', gen_random_uuid(), p_kind, body, left(nullif(trim(coalesce(p_context, '')), ''), 200));
+end $$;
+revoke all on function send_feedback(text, text, text) from public, anon;
+grant execute on function send_feedback(text, text, text) to authenticated;
+
+-- Help & Feedback → "Report player behaviour": the players I can pick, from games in the last 60 days
+-- and upcoming ones, never more than the game screens already show me (organiser: everyone in or
+-- asking; accepted player: the organiser and the other accepted players; waiting: the organiser).
+-- The report itself is report_content('player', …), unchanged.
+create or replace function my_recent_players()
+returns table (profile_id uuid, name text, last_game timestamptz)
+language sql stable security definer set search_path = public as $$
+  with mine as (
+    select m.id, m.start_at, m.organizer_id, (m.organizer_id = auth.uid()) as organiser, mp.status::text as my_status
+    from matches m left join match_players mp on mp.match_id = m.id and mp.profile_id = auth.uid()
+    where auth.uid() is not null and m.start_at > now() - interval '60 days'
+      and (m.organizer_id = auth.uid() or mp.status::text in ('accepted', 'pending'))
+  ), seen as (
+    select organizer_id as pid, start_at from mine
+    union all
+    select p.profile_id, mine.start_at from mine join match_players p on p.match_id = mine.id
+    where (mine.organiser and p.status::text in ('accepted', 'pending'))
+       or (mine.my_status = 'accepted' and p.status::text = 'accepted')
+  )
+  select s.pid, pr.name, max(s.start_at) from seen s join profiles pr on pr.id = s.pid
+  where s.pid <> auth.uid()
+  group by s.pid, pr.name
+  order by max(s.start_at) desc
+  limit 50;
+$$;
+revoke all on function my_recent_players() from public, anon;
+grant execute on function my_recent_players() to authenticated;
 
 -- ---------------------------------------------------------------------------------------------
 -- Board: games of a blocked player (either way) leave the board. Exact current definitions (0041

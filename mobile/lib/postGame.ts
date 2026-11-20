@@ -24,11 +24,11 @@ import type { JoinMode } from "./gameTypes";
  */
 
 /**
- * 0073 (post_match idempotency key) applied: the app sends one key per post (p_token) and a retry with
- * the same key returns the same game. OFF until 0073 is approved and applied (the server would not
- * know the argument); until then a lost answer is resolved by the lookup below.
+ * 0073 (post_match idempotency key): the app sends one key per post (p_token) and a retry with the same
+ * key returns the same game. On wherever game writes are on — staging, where 0073 was applied on
+ * 20 Nov (runs 44754235645 / 44754364260 / 44754489437). Live has neither, so both stay off there.
  */
-export const POST_TOKEN_AVAILABLE = false;
+export const POST_TOKEN_AVAILABLE = GAME_WRITES_AVAILABLE;
 
 export const DURATIONS = [60, 90, 120] as const;
 export const MAX_PLAYERS = 30;

@@ -18,7 +18,7 @@ import { sportName } from "../../lib/days";
 import { useOnline } from "../../lib/online";
 import { GAME_WRITES_AVAILABLE } from "../../lib/gameActions";
 import { GameBanner } from "../../components/game/GameBanner";
-import { SUSPENDED_TEXT, SUSPENDED_TITLE, useAccountStatus } from "../../lib/safety";
+import { SUSPENDED_TEXT, SUSPENDED_TITLE, useSafety } from "../../lib/safety";
 import { color, font, space, TOUCH } from "../../lib/theme";
 
 const WHEN: { key: When; label: string }[] = [
@@ -48,8 +48,7 @@ export default function FindAGame() {
   const board = useFindGames(filters, { signedIn });
   const levels = useMyLevels({ signedIn });
   const areas = useAreas({ signedIn });
-  const account = useAccountStatus(signedIn);
-  const suspended = account.data === "suspended";
+  const suspended = useSafety(signedIn).suspended;
   const set = (patch: Partial<GameFilters>) => setFilters((f) => ({ ...f, ...patch }));
 
   const active = activeFilterCount(filters);

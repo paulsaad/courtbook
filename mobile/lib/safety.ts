@@ -2,15 +2,47 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "./supabase";
 import type { Failure } from "./errors";
 import { gameFailure } from "./gameErrors";
+import { GAME_WRITES_AVAILABLE } from "./gameActions";
 
 /**
- * Report, block and community rules (docs/m3/05-architecture.md §5.6; UX §4.6 "Report", "Community
- * rules"). Every call is one function of migration M3-S (supabase/migrations/0074_safety.sql).
+ * Report, block, community rules and Help & Feedback (docs/m3/05-architecture.md §5.6; UX §4.6).
+ * Every call is one function of migration 0074 (supabase/migrations/0074_safety.sql).
  *
- * OFF until M3-S is approved and applied: no control is drawn while this is false, and the chat does
- * not ask for the rules (the database does not require them yet).
+ * ON WHEN THE DATABASE HAS 0074, decided at run time (useSafety): the app asks my_account_status once
+ * per session; if the function does not exist yet, no safety control is drawn. So one app update works
+ * before and after 0074 is applied (and after a rollback), and only where game writes are on (staging).
+ * The community rules are shown whenever the server asks for them (`rules_not_accepted`), whatever
+ * this says, so chat can never get stuck on that refusal.
  */
-export const SAFETY_AVAILABLE = false;
+export const safetyKey = ["safety"] as const;
+export type SafetyState = { available: boolean; suspended: boolean };
+export const SAFETY_OFF: SafetyState = { available: false, suspended: false };
+
+/** PostgREST's answer for a function that is not in the database (before 0074, or after a rollback). */
+export function isMissingFunction(error: unknown): boolean {
+  const e = (error ?? {}) as { code?: unknown; message?: unknown; status?: unknown };
+  return e.code === "PGRST202" || e.code === "42883" || (typeof e.message === "string" && /could not find the function/i.test(e.message));
+}
+
+export async function fetchSafety(rpc: Rpc = defaultRpc): Promise<SafetyState> {
+  const { data, error } = await rpc("my_account_status", {});
+  if (error) {
+    if (isMissingFunction(error)) return SAFETY_OFF;
+    throw error;                       // offline or a server problem: asked again later, controls stay off
+  }
+  return { available: true, suspended: data === "suspended" };
+}
+
+/** Safety controls and my suspension, for this session. Off until known, and off wherever game writes are. */
+export function useSafety(signedIn: boolean): SafetyState {
+  const q = useQuery({
+    queryKey: safetyKey,
+    enabled: signedIn && GAME_WRITES_AVAILABLE,
+    staleTime: 5 * 60_000,
+    queryFn: () => fetchSafety(),
+  });
+  return q.data ?? SAFETY_OFF;
+}
 
 export type ReportKind = "message" | "player" | "game";
 export type ReportReason = "spam" | "abuse" | "inappropriate" | "danger" | "other";
@@ -29,8 +61,8 @@ export const REPORT_BLOCK_OFFER = "You can also block this player now.";
 export const REPORT_DANGER = "If anyone is in danger, contact the police or emergency services now.";
 
 /**
- * Community rules shown once before the first message. The wording follows the draft terms of use
- * ("Matches and chat") — FOR PAUL'S REVIEW with the terms (release plan D6) before M3-S goes live.
+ * Community rules shown once before the first message. Wording approved by Paul on 20 Nov (sports only;
+ * no harassment, unwanted romantic advances or solicitation); one copy for the website and the app.
  */
 export { COMMUNITY_RULES } from "@shared/types";
 
@@ -59,7 +91,7 @@ export const rulesKey = ["rules-accepted"] as const;
 export function useRulesAccepted(enabled: boolean) {
   return useQuery({
     queryKey: rulesKey,
-    enabled: enabled && SAFETY_AVAILABLE,
+    enabled,
     staleTime: Infinity,
     queryFn: async () => {
       const { data, error } = await supabase.rpc("my_rules_accepted");
@@ -86,7 +118,7 @@ export type BlockedPlayer = { profile_id: string; name: string | null; created_a
 export function useBlockedPlayers(enabled: boolean) {
   return useQuery({
     queryKey: blockedKey,
-    enabled: enabled && SAFETY_AVAILABLE,
+    enabled,
     staleTime: 60_000,
     queryFn: async () => {
       const { data, error } = await supabase.rpc("my_blocked_players");
@@ -121,19 +153,45 @@ export function blockedNotice(
   return `You blocked ${who}. You won't see their messages. ${next}`;
 }
 
-/** Whether my account is suspended (my_account_status), so the app explains it up front. */
-export function useAccountStatus(enabled: boolean) {
+// ---- Help & Feedback (Profile) -----------------------------------------------------------------
+export type FeedbackKind = "app_problem" | "suggestion";
+export const FEEDBACK_MAX = 1000;
+export const FEEDBACK_TEXT: Record<FeedbackKind, { title: string; prompt: string }> = {
+  app_problem: { title: "Report an app problem", prompt: "What happened? What did you tap, and what did you expect?" },
+  suggestion: { title: "Suggest an improvement", prompt: "What would make CourtBook better for you?" },
+};
+export const FEEDBACK_THANKS = "Thanks. Only the CourtBook team sees this.";
+export const CONTACT_EMAIL = "courtbook.contact@gmail.com";
+
+/** What the team needs to look into a problem: platform, version and update. Nothing about the person. */
+export function feedbackContext(os: string, build: { label: string; value: string }[]): string {
+  const v = build.find((r) => r.label === "Version")?.value;
+  const u = build.find((r) => r.label === "Update")?.value;
+  return [os, v, u ? `update ${u.slice(0, 8)}` : "built-in code"].filter(Boolean).join(" · ").slice(0, 200);
+}
+
+export async function sendFeedback(kind: FeedbackKind, text: string, context: string, rpc: Rpc = defaultRpc): Promise<Failure | null> {
+  const body = text.trim();
+  if (!body) return { kind: "refused", message: "Write a few words first.", reason: "text_required" };
+  const { error } = await rpc("send_feedback", { p_kind: kind, p_text: body.slice(0, FEEDBACK_MAX), p_context: context });
+  return error ? gameFailure(error) : null;
+}
+
+export type RecentPlayer = { profile_id: string; name: string | null; last_game: string };
+/** Players I can report from Profile: from my games (last 60 days and upcoming), as the game screens show them. */
+export function useRecentPlayers(enabled: boolean) {
   return useQuery({
-    queryKey: ["account-status"],
-    enabled: enabled && SAFETY_AVAILABLE,
-    staleTime: 5 * 60_000,
+    queryKey: ["recent-players"],
+    enabled,
+    staleTime: 60_000,
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("my_account_status");
+      const { data, error } = await supabase.rpc("my_recent_players");
       if (error) throw error;
-      return data === "suspended" ? "suspended" as const : "active" as const;
+      return (data ?? []) as RecentPlayer[];
     },
   });
 }
+
 export const SUSPENDED_TITLE = "Account suspended";
 export const SUSPENDED_TEXT = "You can't post, join or message for now. Contact courtbook.contact@gmail.com.";
 
@@ -144,4 +202,6 @@ export const SAFETY_RPC_ARGS = {
   unblock_player: ["p_profile"],
   my_blocked_players: [],
   my_account_status: [],
+  send_feedback: ["p_kind", "p_text", "p_context"],
+  my_recent_players: [],
 } as const;

@@ -7,7 +7,7 @@ import { shiftDate } from "@shared/time";
 import type { GameFilters } from "./gameFilters";
 import { gameView, organiserActions, type Banner, type GameView, type OrganiserAction, type Primary, type Secondary } from "./gameState";
 import { loadView, splitPeople, useGame, useGamePeople, useOpenGames, type LoadView } from "./games";
-import { SAFETY_AVAILABLE } from "./safety";
+import { useSafety } from "./safety";
 import { GAME_WRITES_AVAILABLE, JOIN_LATER_TEXT, MANAGE_LATER_TEXT, useGameActions } from "./gameActions";
 import type { GameDetail, ParticipantRow } from "./gameTypes";
 
@@ -119,8 +119,9 @@ export function detailSections(d: GameDetail, people: ParticipantRow[] | undefin
 }
 
 /** What the switches are today. Each turns on in the change that ships its stage. */
-/** Writes and chat: on where 0072 is applied (staging). Report: migration M3-S (off until applied). */
-export const SCREEN_FEATURES: Omit<DetailOptions, "now"> = { writes: GAME_WRITES_AVAILABLE, chat: GAME_WRITES_AVAILABLE, report: SAFETY_AVAILABLE };
+/** Writes and chat: on where 0072 is applied (staging). Report: off here; useGameScreen turns it on
+ *  when the database has 0074 (useSafety). */
+export const SCREEN_FEATURES: Omit<DetailOptions, "now"> = { writes: GAME_WRITES_AVAILABLE, chat: GAME_WRITES_AVAILABLE, report: false };
 
 /** Game screen: load state, sections and actions for one game id. */
 export function useGameScreen(id: string | undefined, { signedIn }: { signedIn: boolean }) {
@@ -130,13 +131,15 @@ export function useGameScreen(id: string | undefined, { signedIn }: { signedIn: 
   const namesVisible = !!detail && (detail.i_organize || detail.my_status === "accepted");
   const people = useGamePeople(id, { signedIn, visible: namesVisible });
   const actions = useGameActions(id ?? "", { available: SCREEN_FEATURES.writes });
+  const safety = useSafety(signedIn);
+  const features = { ...SCREEN_FEATURES, report: safety.available };
   const load: LoadView = loadView({
     signedIn, online, hasData: q.data !== undefined, dataIsNull: q.data === null,
     isPending: q.isPending, fetchStatus: q.fetchStatus, error: q.error,
   });
-  const sections = load.kind === "ready" && detail ? detailSections(detail, people.data, SCREEN_FEATURES) : null;
+  const sections = load.kind === "ready" && detail ? detailSections(detail, people.data, features) : null;
   const refetch = () => { void q.refetch(); if (namesVisible) void people.refetch(); };
-  return { load, detail, sections, actions, refetch, refreshing: q.isRefetching || people.isRefetching };
+  return { load, detail, sections, actions, features, safety, refetch, refreshing: q.isRefetching || people.isRefetching };
 }
 
 /** Find a game: load state and one card model per game (§4.3), in the server's order. */
