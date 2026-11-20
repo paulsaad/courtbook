@@ -4,7 +4,8 @@
 #
 # Two throwaway players are created, everything they make is deleted at the end (and at the start,
 # in case an earlier run stopped half-way), and the demo club's payment mode is put back. It refuses
-# the live project. Section S2 runs only if hold_slot takes a retry token (migration 0065).
+# the live project. Section S2 runs only if hold_slot takes a retry token (migration 0065). Section S4
+# (release fix 0071) uses today's clock, so it runs only between 11:00 and 22:00 Beirut.
 set -u
 : "${DB:?set DB}"
 case "$DB" in *lgujfbwunokobjxlvpuf*) echo "refusing: this is the LIVE project"; exit 1;; esac
@@ -124,6 +125,29 @@ fails_with $U1 "S3n not whole slots (1 h 15): refused" "select move_booking('$MB
 OB=$(q $U1 "select staff_book('$CLUB','$COURT2', $(at 19:00), $(at 20:00), 'smoke-move', null);")
 fails_with $U1 "S3o onto another booking: refused" "select move_booking('$MB','$COURT2', $(at 19:30), $(at 20:30));" slot_taken
 fails_with $U2 "S3p a player who is not staff cannot move it" "select move_booking('$MB','$COURT2', $(at 21:00), $(at 22:00));" forbidden
+
+echo "--- S4. staff and past times on today's real clock (release fix 0071): walk-in cutoff, extend, past, ended"
+# Times are on the club's 30-minute grid relative to now (F = now rounded down to 30 min), on three courts.
+HAS_0071=$(q admin "select (prosrc like '%walk_in_too_old%')::text from pg_proc where proname='staff_book' and pronamespace='public'::regnamespace")
+FOK=$(q admin "select (to_char(date_bin('30 minutes', now(), '2000-01-01') at time zone 'Asia/Beirut', 'HH24:MI') between '11:00' and '21:30')::text")
+t() { echo "(date_bin('30 minutes', now(), '2000-01-01') + interval '$1 minutes')"; }
+BUSY=$(q admin "select count(*) from bookings where court_id in ('$COURT','$COURT2','$COURT3') and status in ('confirmed','pending') and tstzrange(start_at, end_at) && tstzrange($(t -180), $(t 90)) and coalesce(created_by::text,'') not in ('$U1','$U2')")
+if [ "$HAS_0071" != "true" ]; then echo "  (0071 not applied: S4 skipped)"
+elif [ "$FOK" != "true" ]; then echo "  (S4 needs the club's hours around now — run between 11:00 and 22:00 Beirut; skipped)"
+elif [ "$BUSY" != "0" ]; then echo "  (S4 skipped: Padel 1–3 have other bookings between 3 h ago and 1 h 30 ahead)"
+else
+  W1=$(q $U1 "select staff_book('$CLUB','$COURT', $(t -60), $(t 30), 'smoke-walkin', null);")
+  check admin "S4a walk-in that started 60–89 min ago: accepted" "select status from bookings where id='$W1';" confirmed
+  fails_with $U1 "S4b walk-in that started 3 h ago: refused" "select staff_book('$CLUB','$COURT2', $(t -180), $(t -120), 'smoke-walkin', null);" walk_in_too_old
+  check $U1 "S4c extend the walk-in in progress by 30 min: accepted" "select move_booking('$W1','$COURT', $(t -60), $(t 60))::text || 'moved';" moved
+  fails_with $U1 "S4d move the walk-in in progress to start earlier: refused" "select move_booking('$W1','$COURT', $(t -90), $(t 60));" move_into_past
+  N=$(q $U1 "select staff_book('$CLUB','$COURT3', $(t 30), $(t 90), 'smoke-future', null);")
+  fails_with $U1 "S4e move a booking that has not started into the past: refused" "select move_booking('$N','$COURT3', $(t -120), $(t -60));" move_into_past
+  E=$(q $U1 "select staff_book('$CLUB','$COURT2', $(t -90), $(t -30), 'smoke-ended', null);")
+  check admin "S4f walk-in from 90–119 min ago lasting 1 h (already ended): accepted" "select (status = 'confirmed' and end_at < now())::text from bookings where id='$E';" true
+  fails_with $U1 "S4g move the ended booking: refused" "select move_booking('$E','$COURT2', $(t 60), $(t 120));" booking_ended
+  check admin "S4h the refused moves changed nothing" "select (select to_char(start_at,'HH24:MI')||'-'||to_char(end_at,'HH24:MI') from bookings where id='$W1') = to_char($(t -60),'HH24:MI')||'-'||to_char($(t 60),'HH24:MI');" t
+fi
 
 echo
 echo "checks: $CHECKS, failures: $FAILS"
