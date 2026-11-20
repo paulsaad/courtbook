@@ -245,3 +245,16 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
 - **App:** safety detected at run time; Profile → Help & Feedback; rules sheet on demand.
 - **Staging moderator:** none yet (0 admin accounts, run 44758049339). `m3_moderator_grant` prepared.
 - Rollout and monitoring: `11-0074-rollout.md`.
+
+## Round 10 (20 Nov) — staging moderator, Android staging update, 0074 on staging
+
+- Moderator: `02111629` (Paul confirmed in the Supabase dashboard) granted admin (run 44769046561); check
+  run 44769171584: the only admin, `is_admin()` true.
+- Android staging update (Paul's approval): run 44773199747 from `m3-dev` @ `c1d3e37`, channel staging,
+  staging database confirmed, 537/537 tests, native fingerprint `4e91cfa…` matches 1 staging build.
+  Update `01a1f9c8-911f-7d4a-a706-42419e47d887`, group `8384db5f-06c8-4b49-ae6b-9601530882e1`. Rollback:
+  group `15f59966-05e1-4644-a18c-3e2bcef2634a`.
+- 0074 on staging (Paul's approval): preflight run 44773643818 16/16 required true (1 admin, 0 message
+  senders); apply run 44773756013 "applied 1 migration(s)" (74 on staging); postcheck run 44773905030
+  40/40 true; moderator check run 44773997558: admin_reports answers for `02111629`, a player is refused.
+- Open question recorded: `12-staging-duplicate-account.md`.
