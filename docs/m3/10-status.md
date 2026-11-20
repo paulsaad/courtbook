@@ -286,3 +286,8 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
   Rollback: group `ebae6e05-8cd1-4cf7-97b4-962dc933b265` (16 Nov iOS staging update).
 - Shared temporary test game prepared (`m3_test_games_shared`), not run; short iPhone check:
   `14-iphone-checklist.md`.
+- **Shared temporary test game on staging** (Paul's approval; accounts confirmed by run 44795045732):
+  run 44795161612 — "[M3 TEST] Shared game: chat, report and block", id
+  `1cfe3bf2-8db0-44d7-ab1f-0257c6ad1f5d`, Sun 22 Nov 18:00 Beirut, organiser `6138b979` (Paul Tester),
+  `02111629` accepted, one message from Paul Tester. Keep until Paul confirms both device checks; then
+  `m3_test_games_cleanup` with that id.
