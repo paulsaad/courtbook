@@ -18,7 +18,7 @@ import {
 import { ReportSheet } from "../components/game/SafetySheets";
 import { detailSections, SCREEN_FEATURES } from "../lib/gameScreens";
 
-const DRAFT = fs.readFileSync(path.join(__dirname, "../../docs/m3/sql/m3s_safety.draft.sql"), "utf8");
+const DRAFT = fs.readFileSync(path.join(__dirname, "../../supabase/migrations/0074_safety.sql"), "utf8");
 const metrics = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 0, left: 0, right: 0, bottom: 0 } };
 
 describe("contract with the M3-S draft", () => {

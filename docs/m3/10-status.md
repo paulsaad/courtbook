@@ -212,9 +212,20 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
 - **Chat** (`app/chat/[id].tsx`, `lib/chat.ts`), staging bundle only: 4 s polling with 10 s overlap,
   full reload on open / every 60 s / on return; phone-made message ids (a retry cannot duplicate);
   delete own; delete a finished or cancelled conversation for oneself; read-only and offline states.
-- **M3-S draft** `docs/m3/sql/m3s_safety.draft.sql` (for review, applied nowhere): blocks (join refused,
-  board hidden, text withheld, no notices), reports with snapshot, community rules once, word filter.
-  `supabase/tests/m3/safety.sh` 32/32, 11/11 mutants. App side wired, `SAFETY_AVAILABLE = false`.
+- **0073 candidate** `supabase/migrations/0073_post_match_token.sql` (applied nowhere): `post_match` gains
+  `p_token uuid default null`; one game per (organiser, key), so a retry after a lost answer returns the
+  same game. Website unchanged (no key = as before). Pack: `supabase/live/0073_{preflight,postcheck,rollback}.sql`.
+  Tests: `post_token.sh` 12/12 + race, 5/5 mutants; `live_0073.sh` 8/8. App: `POST_TOKEN_AVAILABLE = false`.
+- **0074 candidate** `supabase/migrations/0074_safety.sql` (applied nowhere; replaces the M3-S draft):
+  blocks, reports, community rules once (draft text, 5 rules, for Paul), empty word list (needs approval),
+  account suspension, and admin moderation functions (`admin_reports`, `admin_report_messages`,
+  `admin_resolve_report`, `admin_hide_message`, `admin_suspend`, `admin_unsuspend`; admins only).
+  Blocking model: either way, join and accept refused and the game hidden on the board; an existing
+  shared game stays (organiser can remove, player can leave); for the blocker only, the blocked
+  player's messages are withheld (list and table) and no chat notices. A suspended account cannot post,
+  join, decide, edit, cancel, remove or chat. Pack: `supabase/live/0074_{preflight,postcheck,rollback}.sql`
+  (rollback keeps the data, removes the behaviour). Tests: `safety.sh` 49/49, 19/19 mutants;
+  `live_0074.sh` 12/12. App: `SAFETY_AVAILABLE = false`.
 
 - **Emulator on staging** (`suite=m3-post-chat`, run 44739579776): Post a game from Find a game (Ask to join,
   3 players, note) → exactly one game, as chosen; a helper asks; Edit → Join straight away → the request

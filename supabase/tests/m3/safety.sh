@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# M3-S safety tests (docs/m3/sql/m3s_safety.draft.sql) and mutation checks.
+# M3-S safety tests (supabase/migrations/0074_safety.sql) and mutation checks.
 # LOCAL DISPOSABLE REPLICA ONLY; each run is one transaction that is rolled back. Needs 0072 on the replica.
 #   PSQL="sudo -u postgres psql" bash supabase/tests/run.sh
 #   PSQL="sudo -u postgres psql" bash supabase/tests/m3/safety.sh
 PSQL=${PSQL:-psql}
 DB=courtbook_test
-MIGRATION=${MIGRATION:-docs/m3/sql/m3s_safety.draft.sql}
+MIGRATION=${MIGRATION:-supabase/migrations/0074_safety.sql}
 TESTS=supabase/tests/m3/safety_tests.sql
 where=$($PSQL -At -d $DB -c "select current_database()||'@'||coalesce(host(inet_server_addr()),'local-socket')" 2>/dev/null)
 case "$where" in courtbook_test@local-socket|courtbook_test@127.0.0.1|courtbook_test@::1) ;;
@@ -32,10 +32,18 @@ mutants=(
   "N5 blocked text not withheld|s/when x.deleted_at is not null or bl.blocked_id is not null then '' else x.body end/when x.deleted_at is not null then '' else x.body end/"
   "N6 notices despite a block|s/and not exists (select 1 from player_blocks pb where pb.blocker_id = r.pid and pb.blocked_id = new.profile_id)//"
   "N7 board shows blocked games|s/    and not players_blocked(auth.uid(), m.organizer_id)//"
-  "N8 any member can read reports|s/alter table reports enable row level security;/alter table reports enable row level security; drop policy if exists \"r\" on reports; create policy \"r\" on reports for select using (true); grant select on reports to authenticated;/"
+  "N8 any member can read reports|s/revoke all on table reports, blocked_terms, account_suspensions from anon, authenticated;/revoke all on table blocked_terms, account_suspensions from anon, authenticated; grant select on reports to authenticated; drop policy if exists r on reports; create policy r on reports for select using (true);/"
   "N9 non-members can report messages|s/       and not exists (select 1 from match_players mp where mp.match_id = msg.match_id and mp.profile_id = me and mp.status = 'accepted') then/       and false then/"
   "N10 repeat reports pile up|s/  on conflict (reporter_id, target_kind, target_key) where status = 'open' do nothing;/  ;/"
   "N11 self-block allowed|s/if p_profile is null or p_profile = auth.uid() then raise exception 'bad_target'; end if;//"
+  "N12 suspension not enforced on game writes|s/  if exists (select 1 from account_suspensions where profile_id = auth.uid()) then raise exception 'account_suspended'; end if;/  null;/"
+  "N13 suspension not enforced in chat|s/  if exists (select 1 from account_suspensions where profile_id = new.profile_id) then raise exception 'account_suspended'; end if;//"
+  "N14 any player lists reports|0,/  if not is_admin() then raise exception 'forbidden'; end if;/s//  null;/"
+  "N15 any player suspends|/function admin_suspend/,/end \$\$;/ s/  if not is_admin() then raise exception 'forbidden'; end if;//"
+  "N16 organiser accepts a blocked request|s/    if players_blocked(p_profile, m.organizer_id) then raise exception 'blocked'; end if;//"
+  "N17 S15 accepts a blocked request|s/             and not players_blocked(profile_id, m.organizer_id)   -- M3-S: blocked requests keep waiting//"
+  "N18 blocked messages readable from the table|s/  and not exists (select 1 from player_blocks b where b.blocker_id = auth.uid() and b.blocked_id = match_messages.profile_id));/  );/"
+  "N19 suspensions readable|s/revoke all on table reports, blocked_terms, account_suspensions from anon, authenticated;/revoke all on table reports, blocked_terms from anon, authenticated; grant select on account_suspensions to authenticated; drop policy if exists s on account_suspensions; create policy s on account_suspensions for select using (true);/"
 )
 tmp=$(mktemp -d); chmod 755 "$tmp"
 for m in "${mutants[@]}"; do

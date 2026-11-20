@@ -175,13 +175,92 @@ insert into t values
   ('T-S29 reports are not readable through the API', pg_temp.got('p12') like 'ERR permission denied%' or pg_temp.got('p12') = '0', pg_temp.got('p12')),
   ('T-S30 the snapshot survives the message being deleted', pg_temp.got('p13') = 'from B', pg_temp.got('p13'));
 
+
+-- ===== blocked messages are not readable directly either =====
+-- (game 5, used below: A organises with approval; B and C asked before A blocks B again)
+select pg_temp.game(5, :A, 'open', null, pg_temp.day(7), pg_temp.day(7) + interval '90 min', 4, 'approval');
+select pg_temp.player(5, :B, 'pending', now() - interval '2 hours'); select pg_temp.player(5, :C, 'pending', now() - interval '1 hour');
+select null from pg_temp.keep('v0', pg_temp.r(:A, format('select block_player(%L)', :B)));
+select null from pg_temp.keep('v1', pg_temp.r(:A, $q$select count(*)::text from match_messages where profile_id = 'e1000000-0000-4000-8000-000000000003'$q$));
+select null from pg_temp.keep('v2', pg_temp.r(:O, $q$select count(*)::text from match_messages where profile_id = 'e1000000-0000-4000-8000-000000000003'$q$));
+insert into t values ('T-S40 a direct table read hides the blocked player''s messages from the blocker only', pg_temp.got('v1') = '0' and pg_temp.got('v2')::int >= 1, pg_temp.got('v1') || '/' || pg_temp.got('v2'));
+
+-- ===== a request between blocked players: never accepted, still declinable; S15 leaves it waiting =====
+-- game 5: A organises (approval); B asked before the block; C (u9) asked too
+select null from pg_temp.keep('x1', pg_temp.r(:A, format('select decide_join(%L, %L, true)', pg_temp.g(5), :B)));
+select null from pg_temp.keep('x2', pg_temp.r(:A, format('select update_match(%L, 4, null, null, null, ''open'')', pg_temp.g(5))));
+select null from pg_temp.keep('x3', (select string_agg(status, ',' order by profile_id) from match_players where match_id = pg_temp.g(5)));
+select null from pg_temp.keep('x4', pg_temp.r(:A, format('select decide_join(%L, %L, false)', pg_temp.g(5), :B)));
+insert into t values
+  ('T-S41 the organiser cannot accept a blocked player''s request', pg_temp.got('x1') like 'ERR blocked%', pg_temp.got('x1')),
+  ('T-S42 switching to Join straight away accepts the others, leaves the blocked request waiting', pg_temp.got('x2') = 'ok' and pg_temp.got('x3') = 'pending,accepted', pg_temp.got('x2') || ' ' || pg_temp.got('x3')),
+  ('T-S43 the blocked request can still be declined', pg_temp.got('x4') = 'ok', pg_temp.got('x4'));
+
+-- ===== moderation: admins only =====
+select null from pg_temp.keep('rid_msg', (select id::text from reports where target_kind = 'message' limit 1));
+select null from pg_temp.keep('rid_game', (select id::text from reports where target_kind = 'game' limit 1));
+select null from pg_temp.keep('rid_player', (select id::text from reports where target_kind = 'player' limit 1));
+select null from pg_temp.keep('m1', pg_temp.r(:O, 'select count(*)::text from admin_reports()'));
+select null from pg_temp.keep('m2', pg_temp.r(null, 'select count(*)::text from admin_reports()'));
+select null from pg_temp.keep('m3', pg_temp.r(:ADM, $q$select snapshot || '|' || target_kind || '|' || reporter_name || '|' || reported_name || '|' || reports_against from admin_reports() where target_kind = 'message'$q$));
+select null from pg_temp.keep('m4', pg_temp.r(:ADM, format('select count(*)::text from admin_report_messages(%L) where reported', pg_temp.got('rid_msg'))));
+select null from pg_temp.keep('m5', pg_temp.r(:O, format('select admin_resolve_report(%L, ''dismissed'')', pg_temp.got('rid_msg'))));
+select null from pg_temp.keep('m6', pg_temp.r(:ADM, format('select admin_resolve_report(%L, ''dismissed'', ''not against the rules'')', pg_temp.got('rid_game'))));
+select null from pg_temp.keep('m7', pg_temp.r(:ADM, format('select admin_resolve_report(%L, ''actioned'', ''warned and suspended'')', pg_temp.got('rid_player'))));
+select null from pg_temp.keep('m8', (select string_agg(target_kind || ':' || status || ':' || (handled_by = pg_temp.u(8))::text, ',' order by target_kind) from reports where target_kind in ('game', 'player')));
+select null from pg_temp.keep('m9', pg_temp.r(:ADM, $q$select count(*)::text from admin_reports('open')$q$));
+select null from pg_temp.keep('m10', pg_temp.r(:ADM, format('select admin_resolve_report(%L, ''deleted'')', pg_temp.got('rid_msg'))));
+insert into t values
+  ('T-S44 non-admins and signed-out callers cannot list reports', pg_temp.got('m1') like 'ERR forbidden%' and pg_temp.got('m2') like 'ERR%', pg_temp.got('m1') || '/' || pg_temp.got('m2')),
+  ('T-S45 the admin sees the report with its evidence (snapshot, who, how often reported)', pg_temp.got('m3') like 'from B|message|Player %|Player %|%', pg_temp.got('m3')),
+  ('T-S46 the admin sees the conversation around the reported message', pg_temp.got('m4') = '1', pg_temp.got('m4')),
+  ('T-S47 only an admin closes a report; dismissed or actioned, with who and when', pg_temp.got('m5') like 'ERR forbidden%' and pg_temp.got('m6') = 'ok' and pg_temp.got('m7') = 'ok' and pg_temp.got('m8') = 'game:dismissed:true,player:actioned:true', pg_temp.got('m8')),
+  ('T-S48 closed reports leave the open list; a made-up status is refused', pg_temp.got('m9') = '1' and pg_temp.got('m10') like 'ERR bad_status%', pg_temp.got('m9') || '/' || pg_temp.got('m10'));
+
+-- hiding a message for everyone (admin)
+insert into match_messages (id, match_id, profile_id, body) values ('c5000000-0000-4000-8000-000000000009', pg_temp.g(1), :O, 'rude words');
+select null from pg_temp.keep('h1', pg_temp.r(:A, $q$select admin_hide_message('c5000000-0000-4000-8000-000000000009')$q$));
+select null from pg_temp.keep('h2', pg_temp.r(:ADM, $q$select admin_hide_message('c5000000-0000-4000-8000-000000000009')$q$));
+select null from pg_temp.keep('h3', pg_temp.r(:A, format($q$select deleted || '/' || body from match_messages_list(%L, null) where id = 'c5000000-0000-4000-8000-000000000009'$q$, pg_temp.g(1))));
+insert into t values ('T-S49 only an admin hides a message; players then see it as deleted', pg_temp.got('h1') like 'ERR forbidden%' and pg_temp.got('h2') = 'ok' and pg_temp.got('h3') = 'true/', pg_temp.got('h1') || ' ' || pg_temp.got('h3'));
+
+-- ===== suspension =====
+select null from pg_temp.keep('s1', pg_temp.r(:O, format($q$select admin_suspend(%L, 'threats')$q$, :X)));
+select null from pg_temp.keep('s2', pg_temp.r(:ADM, format($q$select admin_suspend(%L, '')$q$, :X)));
+select null from pg_temp.keep('s3', pg_temp.r(:ADM, format($q$select admin_suspend(%L, 'threats in chat')$q$, :B)));
+select null from pg_temp.keep('s4', pg_temp.r(:B, 'select my_account_status()'));
+select null from pg_temp.keep('s5', pg_temp.r(:B, format($q$select post_match(%L, 'padel', now() + interval '50 days', null, null, null, 3, null, null)::text$q$, pg_temp.club())));
+select null from pg_temp.keep('s6', pg_temp.r(:B, format('select join_match(%L)::text', pg_temp.g(4))));
+select null from pg_temp.keep('s7', pg_temp.r(:B, format($q$insert into match_messages (match_id, profile_id, body) values (%L, %L, 'still here')$q$, pg_temp.g(1), :B)));
+select null from pg_temp.keep('s8', pg_temp.r(:B, format('select update_match(%L, 3, null, null, null, ''open'')', pg_temp.g(2))));
+select null from pg_temp.keep('s9', pg_temp.r(:B, format('select set_match_status(%L, ''cancelled'')', pg_temp.g(2))));
+select null from pg_temp.keep('s10', pg_temp.r(:B, format('select count(*)::text from match_messages_list(%L, null)', pg_temp.g(1))));
+select null from pg_temp.keep('s11', pg_temp.r(:B, format('select leave_match(%L)', pg_temp.g(1))));
+select null from pg_temp.keep('s12', pg_temp.r(:B, format($q$select report_content('game', %L, 'other')$q$, pg_temp.g(4))));
+select null from pg_temp.keep('s13', pg_temp.r(:B, 'select count(*)::text from account_suspensions'));
+select null from pg_temp.keep('s14', pg_temp.r(:ADM, format('select reported_suspended::text from admin_reports(null) where profile_id = %L limit 1', :B)));
+select null from pg_temp.keep('s15', pg_temp.r(:ADM, format('select admin_unsuspend(%L)', :B)));
+select null from pg_temp.keep('s16', pg_temp.r(:B, format('select join_match(%L)::text', pg_temp.g(4))));
+insert into t values
+  ('T-S50 only an admin suspends, and only with a reason', pg_temp.got('s1') like 'ERR forbidden%' and pg_temp.got('s2') like 'ERR reason_required%' and pg_temp.got('s3') = 'ok', pg_temp.got('s1') || '/' || pg_temp.got('s2') || '/' || pg_temp.got('s3')),
+  ('T-S51 the suspended player can see their status', pg_temp.got('s4') = 'suspended', pg_temp.got('s4')),
+  ('T-S52 suspended: no post, join, message, edit or status change', pg_temp.got('s5') like 'ERR account_suspended%' and pg_temp.got('s6') like 'ERR account_suspended%' and pg_temp.got('s7') like 'ERR account_suspended%' and pg_temp.got('s8') like 'ERR account_suspended%' and pg_temp.got('s9') like 'ERR account_suspended%',
+     concat_ws(' / ', pg_temp.got('s5'), pg_temp.got('s6'), pg_temp.got('s7'), pg_temp.got('s8'), pg_temp.got('s9'))),
+  ('T-S53 suspended: can still read, leave and report', pg_temp.got('s10') ~ '^[0-9]+$' and pg_temp.got('s11') = 'ok' and pg_temp.got('s12') = 'ok', concat_ws(' / ', pg_temp.got('s10'), pg_temp.got('s11'), pg_temp.got('s12'))),
+  ('T-S54 suspensions are not readable through the API; the admin list shows them', pg_temp.got('s13') like 'ERR permission denied%' and pg_temp.got('s14') = 'true', pg_temp.got('s13') || '/' || pg_temp.got('s14')),
+  ('T-S55 unsuspending restores the account', pg_temp.got('s15') = 'ok' and pg_temp.got('s16') in ('accepted', 'pending'), pg_temp.got('s16')),
+  ('T-S56 booking functions are untouched by suspension (M2)', not exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname in ('hold_slot', 'book_at_desk', 'cancel_booking', 'confirm_payment') and prosrc like '%assert_active%'), '');
+
 -- ===== grants =====
 insert into t values
   ('T-S31 safety functions: signed-in only; internals not callable',
      has_function_privilege('authenticated', 'block_player(uuid)', 'execute') and not has_function_privilege('anon', 'block_player(uuid)', 'execute')
      and has_function_privilege('authenticated', 'report_content(text,uuid,text,text)', 'execute') and not has_function_privilege('anon', 'report_content(text,uuid,text,text)', 'execute')
      and not has_function_privilege('authenticated', 'players_blocked(uuid,uuid)', 'execute')
-     and not has_function_privilege('authenticated', 'message_has_blocked_term(text)', 'execute'), '');
+     and not has_function_privilege('authenticated', 'message_has_blocked_term(text)', 'execute')
+     and not has_function_privilege('authenticated', 'assert_active()', 'execute')
+     and has_function_privilege('authenticated', 'admin_reports(text)', 'execute') and not has_function_privilege('anon', 'admin_reports(text)', 'execute')
+     and not has_function_privilege('anon', 'admin_suspend(uuid,text)', 'execute'), '');
 
 select case when pass then 'ok   ' else 'FAIL ' end || id || case when pass then '' else '  [' || coalesce(detail, '') || ']' end from t order by pass, id;
 select 'FAILED ' || count(*) filter (where not pass or pass is null) || ' of ' || count(*) from t;

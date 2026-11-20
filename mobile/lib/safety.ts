@@ -5,7 +5,7 @@ import { gameFailure } from "./gameErrors";
 
 /**
  * Report, block and community rules (docs/m3/05-architecture.md §5.6; UX §4.6 "Report", "Community
- * rules"). Every call is one function of migration M3-S (docs/m3/sql/m3s_safety.draft.sql).
+ * rules"). Every call is one function of migration M3-S (supabase/migrations/0074_safety.sql).
  *
  * OFF until M3-S is approved and applied: no control is drawn while this is false, and the chat does
  * not ask for the rules (the database does not require them yet).
