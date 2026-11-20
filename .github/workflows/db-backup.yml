@@ -9,8 +9,12 @@ name: Database backup (verified)
 #      as a run artifact. Nothing unencrypted leaves the runner; logs show table names and numbers only.
 # Nothing is ever written to the source database. `staging` is the rehearsal; `live` needs the
 # LIVE_DB_URL secret (Session pooler string of project lgujfbwunokobjxlvpuf).
+# Until this file is on `main` (where GitHub allows starting it by hand), it starts by pushing the
+# current commit to branch `db-backup-staging` (rehearsal) or `db-backup-live` (only with approval).
 
 on:
+  push:
+    branches: [db-backup-staging, db-backup-live]
   workflow_dispatch:
     inputs:
       source:
@@ -24,7 +28,7 @@ on:
         default: 30
 
 concurrency:
-  group: db-backup-${{ inputs.source }}
+  group: db-backup-${{ inputs.source || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -32,6 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
+      SOURCE: ${{ inputs.source || (github.ref_name == 'db-backup-live' && 'live') || 'staging' }}
       LIVE_REF: lgujfbwunokobjxlvpuf
       STAGING_REF: pwznauyioqykdwodwpvx
     steps:
@@ -39,7 +44,6 @@ jobs:
 
       - name: Which database (refuses a mismatch)
         env:
-          SOURCE: ${{ inputs.source }}
           LIVE_DB_URL: ${{ secrets.LIVE_DB_URL }}
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
           PASS: ${{ secrets.BACKUP_PASSPHRASE }}
@@ -110,7 +114,6 @@ jobs:
       - name: Encrypt and keep (only after a verified restore)
         env:
           PASS: ${{ secrets.BACKUP_PASSPHRASE }}
-          SOURCE: ${{ inputs.source }}
         run: |
           if [ -z "$PASS" ]; then echo "No BACKUP_PASSPHRASE: rehearsal only, nothing kept."; echo "KEEP=no" >> "$GITHUB_ENV"; exit 0; fi
           name="courtbook-$SOURCE-$(date -u +%Y%m%d-%H%M)"
@@ -130,7 +133,7 @@ jobs:
         with:
           name: ${{ env.NAME }}
           path: /tmp/${{ env.NAME }}.tar.gpg
-          retention-days: ${{ inputs.keep_days }}
+          retention-days: ${{ inputs.keep_days || 30 }}
           if-no-files-found: error
 
       - name: Remove everything unencrypted from the runner
