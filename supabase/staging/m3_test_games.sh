@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Temporary M3 test games on STAGING for Paul's phone tests (20 Nov 2026). Staging only.
+#
+#   accounts            read only: the staging accounts, personal addresses hidden (logs are public)
+#   create <player> <a> <b>   two games at the demo club, no court booked, tagged "[M3 TEST]":
+#                         G1 open game organised by account <a> — <player> can join it
+#                         G2 approval game organised by <player>, with <a> and <b> waiting
+#   cleanup             removes every "[M3 TEST]" game (its players, messages and notices go with it)
+#
+# Acting as an account sets both settings auth.uid() reads (request.jwt.claim.sub and request.jwt.claims).
+# Each account is given as the first 8 characters of an account id, as `accounts` prints them. Games are made through
+# the real functions (post_match, join_match) acting as each account, so every rule and notice applies.
+# No court booking, no club setting, no account is created or changed.
+set -euo pipefail
+: "${DB:?DB missing}"
+TAG="[M3 TEST]"
+q() { psql "$DB" -v ON_ERROR_STOP=1 -At "$@"; }
+
+q -c "do \$\$ begin if to_regclass('staging_meta.applied') is null then raise exception 'not the staging database (no staging marker)'; end if; end \$\$;"
+
+case "${1:-}" in
+accounts)
+  q -F ' | ' <<'SQL'
+select left(u.id::text, 8),
+       case when u.email like '%@courtbook.test' then u.email else '(personal address hidden)' end,
+       coalesce(p.name, '-'), array_to_string(p.roles, ','),
+       coalesce(to_char(u.last_sign_in_at, 'YYYY-MM-DD'), 'never'),
+       (select count(*) from bookings b where b.player_id = u.id and b.status = 'confirmed' and b.start_at > now()) || ' upcoming booking(s)'
+from auth.users u left join profiles p on p.id = u.id
+order by u.last_sign_in_at desc nulls last;
+SQL
+  ;;
+create)
+  player="${2:-}"; ra="${3:-}"; rb="${4:-}"
+  for v in "$player" "$ra" "$rb"; do [[ "$v" =~ ^[0-9a-f]{8}$ ]] || { echo "give three account ids (8 hex characters each)"; exit 1; }; done
+  [ "$player" != "$ra" ] && [ "$player" != "$rb" ] && [ "$ra" != "$rb" ] || { echo "three different accounts needed"; exit 1; }
+  q <<SQL
+begin;
+do \$\$
+declare
+  me uuid; others uuid[]; club uuid; g1 uuid; g2 uuid;
+  d1 timestamptz := (date_trunc('day', now() at time zone 'Asia/Beirut') + interval '2 days 18 hours') at time zone 'Asia/Beirut';
+  d2 timestamptz := (date_trunc('day', now() at time zone 'Asia/Beirut') + interval '3 days 19 hours') at time zone 'Asia/Beirut';
+begin
+  if exists (select 1 from matches where note like '$TAG%' and status <> 'cancelled') then
+    raise exception 'test games already exist: run cleanup first';
+  end if;
+  select id into strict me from auth.users where left(id::text, 8) = '$player';
+  others := array[(select id from auth.users where left(id::text, 8) = '$ra'), (select id from auth.users where left(id::text, 8) = '$rb')];
+  if others[1] is null or others[2] is null then raise exception 'account not found'; end if;
+  select id into strict club from clubs where slug = 'batroun' and is_demo;
+
+  -- G1: open game by another account (acting as that account)
+  perform set_config('request.jwt.claim.sub', others[1]::text, true), set_config('request.jwt.claims', json_build_object('sub', others[1], 'role', 'authenticated')::text, true);
+  g1 := post_match(club, 'padel', d1, d1 + interval '90 minutes', null, null, 3, '$TAG Open game: join it from your phone', null, 'open');
+
+  -- G2: approval game organised by Paul's player
+  perform set_config('request.jwt.claim.sub', me::text, true), set_config('request.jwt.claims', json_build_object('sub', me, 'role', 'authenticated')::text, true);
+  g2 := post_match(club, 'padel', d2, d2 + interval '90 minutes', null, null, 3, '$TAG Your game: accept or decline the requests', null, 'approval');
+
+  -- two requests waiting on G2
+  perform set_config('request.jwt.claim.sub', others[1]::text, true), set_config('request.jwt.claims', json_build_object('sub', others[1], 'role', 'authenticated')::text, true);
+  perform join_match(g2);
+  perform set_config('request.jwt.claim.sub', others[2]::text, true), set_config('request.jwt.claims', json_build_object('sub', others[2], 'role', 'authenticated')::text, true);
+  perform join_match(g2);
+  perform set_config('request.jwt.claim.sub', '', true), set_config('request.jwt.claims', '', true);
+
+  raise notice 'G1 open game        %  % (Beirut)  organiser %', g1, to_char(d1 at time zone 'Asia/Beirut', 'Dy DD Mon HH24:MI'), left(others[1]::text, 8);
+  raise notice 'G2 your game        %  % (Beirut)  organiser %', g2, to_char(d2 at time zone 'Asia/Beirut', 'Dy DD Mon HH24:MI'), left(me::text, 8);
+  raise notice 'G2 waiting requests %, %', left(others[1]::text, 8), left(others[2]::text, 8);
+end \$\$;
+commit;
+SQL
+  q -F ' | ' -c "select left(m.id::text, 8), m.id, m.join_mode, m.status, to_char(m.start_at at time zone 'Asia/Beirut', 'Dy DD Mon HH24:MI'),
+                       (select count(*) from match_players mp where mp.match_id = m.id and mp.status = 'pending') || ' waiting',
+                       (select count(*) from notifications n where n.match_id = m.id) || ' notice(s)'
+                 from matches m where m.note like '$TAG%' order by m.start_at"
+  ;;
+cleanup)
+  q <<SQL
+begin;
+select count(*) || ' test game(s) to remove' from matches where note like '$TAG%';
+delete from notifications where match_id in (select id from matches where note like '$TAG%');
+delete from matches where note like '$TAG%';   -- players and messages cascade
+commit;
+SQL
+  ;;
+*) echo "accounts | create <player> | cleanup"; exit 1 ;;
+esac
