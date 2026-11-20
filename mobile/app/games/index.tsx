@@ -17,6 +17,8 @@ import { activeFilterCount, capNote, DEFAULT_FILTERS, myLevelNote, type GameFilt
 import { sportName } from "../../lib/days";
 import { useOnline } from "../../lib/online";
 import { GAME_WRITES_AVAILABLE } from "../../lib/gameActions";
+import { GameBanner } from "../../components/game/GameBanner";
+import { SUSPENDED_TEXT, SUSPENDED_TITLE, useAccountStatus } from "../../lib/safety";
 import { color, font, space, TOUCH } from "../../lib/theme";
 
 const WHEN: { key: When; label: string }[] = [
@@ -46,6 +48,8 @@ export default function FindAGame() {
   const board = useFindGames(filters, { signedIn });
   const levels = useMyLevels({ signedIn });
   const areas = useAreas({ signedIn });
+  const account = useAccountStatus(signedIn);
+  const suspended = account.data === "suspended";
   const set = (patch: Partial<GameFilters>) => setFilters((f) => ({ ...f, ...patch }));
 
   const active = activeFilterCount(filters);
@@ -56,6 +60,7 @@ export default function FindAGame() {
   const header = useMemo(() => (
     <View style={styles.header}>
       <Text variant="title" accessibilityRole="header" style={styles.title}>Find a game</Text>
+      {suspended ? <View style={styles.pad}><GameBanner tone="warn" title={SUSPENDED_TITLE} text={SUSPENDED_TEXT} testID="account-suspended" /></View> : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sports} accessibilityLabel="Sport">
         <Chip label="All sports" tone="sport" selected={!filters.sport} onPress={() => set({ sport: null })} />
         {BOARD_SPORTS.map((s) => (
@@ -95,7 +100,7 @@ export default function FindAGame() {
       ) : null}
     </View>
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [filters, areas.data, levels.data, board.load, board.rows.length, board.updatedAt, online, active, myLevel, levelNote]);
+  ), [filters, areas.data, levels.data, board.load, board.rows.length, board.updatedAt, online, active, myLevel, levelNote, suspended]);
 
   if (session.status === "signed-out") {
     return (

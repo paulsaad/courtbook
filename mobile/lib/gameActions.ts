@@ -106,6 +106,15 @@ export type ActionOutcome =
   | { kind: "uncertain"; failure: Failure }
   | { kind: "signed-out"; failure: Failure };
 
+/** M3-S: the shared `blocked` sentence is for the joiner; an organiser accepting reads this one. */
+export const BLOCKED_ACCEPT = "You can't accept this player.";
+function withActionCopy(a: GameAction, o: ActionOutcome): ActionOutcome {
+  if (o.kind === "refused" && o.failure.reason === "blocked" && a.kind === "decide" && a.accept) {
+    return { kind: "refused", failure: { ...o.failure, message: BLOCKED_ACCEPT } };
+  }
+  return o;
+}
+
 export function outcomeOf(error: unknown, ctx: { courtLost?: boolean } = {}): ActionOutcome {
   const failure = gameFailure(error, ctx);
   if (failure.kind === "auth") return { kind: "signed-out", failure };
@@ -139,7 +148,7 @@ export async function runGameAction(
     let outcome: ActionOutcome;
     try {
       const { data, error } = await rpc(fn, args);
-      if (error) outcome = outcomeOf(error, { courtLost });
+      if (error) outcome = withActionCopy(a, outcomeOf(error, { courtLost }));
       else if (a.kind === "join") outcome = { kind: "done", joined: data === "pending" ? "pending" : "accepted" };
       else outcome = { kind: "done" };
     } catch (e) {

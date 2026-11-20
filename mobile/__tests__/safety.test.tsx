@@ -86,3 +86,38 @@ describe("report sheet", () => {
     expect(screen.queryByText("Report sent")).toBeNull();
   });
 });
+
+describe("blocked player in a shared game (approved model: the game stays; the blocker is told)", () => {
+  const { blockedNotice } = jest.requireActual("../lib/safety") as typeof import("../lib/safety");
+  const people = [
+    { profile_id: "org", name: "Omar", is_organizer: true },
+    { profile_id: "me", name: "Me", is_organizer: false },
+    { profile_id: "sami", name: "Sami", is_organizer: false },
+  ];
+  const b = (id: string) => ({ profile_id: id, name: null, created_at: "2026-11-20T10:00:00Z" });
+  it("nothing when no one I blocked is here", () => {
+    expect(blockedNotice(people, [b("zzz")], "me", false)).toBeNull();
+    expect(blockedNotice(people, [], "me", false)).toBeNull();
+    expect(blockedNotice(null, [b("sami")], "me", false)).toBeNull();
+  });
+  it("a player: named, messages hidden, I can leave", () => {
+    expect(blockedNotice(people, [b("sami")], "me", false)).toBe("You blocked Sami, who is in this game. You won't see their messages. You can leave the game if you'd rather not play.");
+  });
+  it("the organiser: I can leave", () => {
+    expect(blockedNotice(people, [b("org")], "me", false)).toMatch(/^You blocked the organiser of this game\..*leave the game/);
+  });
+  it("as organiser: I can remove them", () => {
+    expect(blockedNotice(people, [b("sami")], "org", true)).toMatch(/You can remove them\.$/);
+  });
+  it("never about myself", () => {
+    expect(blockedNotice(people, [b("me")], "me", false)).toBeNull();
+  });
+});
+
+describe("contract: new safety reads", () => {
+  it("my_blocked_players and my_account_status take no arguments", () => {
+    expect(DRAFT).toMatch(/create or replace function my_blocked_players\(\)/);
+    expect(DRAFT).toMatch(/create or replace function my_account_status\(\) returns text/);
+    expect(DRAFT).toContain("then 'suspended' else 'active' end");
+  });
+});

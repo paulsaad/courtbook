@@ -30,7 +30,10 @@ export default async function AdminHome() {
         ))}
       </ul>
       <NewClubForm />
-      <Link href="/admin/payments" className="text-sm text-action underline">Payments</Link>
+      <div className="flex gap-4">
+        <Link href="/admin/payments" className="text-sm text-action underline">Payments</Link>
+        <Link href="/admin/reports" className="text-sm text-action underline">Reports</Link>
+      </div>
     </main>
   );
 }

@@ -18,7 +18,12 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
     setBusy(true); setError(null);
     const { error } = await createClient().rpc(fn, args);
     setBusy(false);
-    if (error) { setError(friendlyError(error.message)); return false; }
+    if (error) {
+      // M3-S: an organiser accepting a player one of them blocked (the shared copy is for the joiner)
+      const acceptBlocked = fn === "decide_join" && args.p_accept === true && error.message?.includes("blocked");
+      setError(acceptBlocked ? "You can't accept this player." : friendlyError(error.message));
+      return false;
+    }
     fetch("/api/notify/email", { method: "POST" }).catch(() => {});   // best-effort email fan-out
     router.refresh();
     return true;

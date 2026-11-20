@@ -8,7 +8,8 @@ import { GameDetailView, type DetailHandlers } from "../../components/game/GameD
 import { BookingPicker } from "../../components/game/BookingPicker";
 import { ManageSheet } from "../../components/game/ManageSheet";
 import { ReportSheet } from "../../components/game/SafetySheets";
-import { reportContent } from "../../lib/safety";
+import { blockedNotice, reportContent, useBlockedPlayers } from "../../lib/safety";
+import { useGamePeople } from "../../lib/games";
 import { useSession } from "../../lib/session";
 import { SCREEN_FEATURES, useGameScreen } from "../../lib/gameScreens";
 import { useActivity, useMarkRead } from "../../lib/activity";
@@ -51,6 +52,10 @@ export default function GameScreen() {
   const [managing, setManaging] = useState(false);
   const [reporting, setReporting] = useState(false);
   const d = screen.detail;
+  // M3-S: tell the blocker when someone they blocked is in this game (names are visible to members only)
+  const blocked = useBlockedPlayers(signedIn);
+  const people = useGamePeople(id, { signedIn, visible: !!d && (d.i_organize || d.my_status === "accepted") });
+  const notice = d ? blockedNotice(people.data, blocked.data, me, d.i_organize) : null;
 
   if (session.status === "signed-out") {
     return <View style={{ flex: 1 }}><Stack.Screen options={{ title: "Game" }} /><SignInPrompt title="Sign in to see this game" body="Games are shown to signed-in players." /></View>;
@@ -111,7 +116,7 @@ export default function GameScreen() {
 
   return page(
     <>
-      <GameDetailView key={id} sections={screen.sections} me={me} pendingCount={d.i_organize ? d.pending ?? 0 : null} handlers={handlers}
+      <GameDetailView key={id} sections={screen.sections} me={me} pendingCount={d.i_organize ? d.pending ?? 0 : null} handlers={handlers} notice={notice}
                       refreshing={screen.refreshing} onRefresh={screen.refetch} />
       {SCREEN_FEATURES.writes && d.i_organize ? (
         <ManageSheet visible={managing} actions={organiserActions(d)} onClose={() => setManaging(false)}

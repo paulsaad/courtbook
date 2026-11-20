@@ -32,13 +32,7 @@ export const REPORT_DANGER = "If anyone is in danger, contact the police or emer
  * Community rules shown once before the first message. The wording follows the draft terms of use
  * ("Matches and chat") — FOR PAUL'S REVIEW with the terms (release plan D6) before M3-S goes live.
  */
-export const COMMUNITY_RULES = [
-  "Be civil. Treat other players as you would on court.",
-  "No harassment, threats or abuse.",
-  "Use the chat for the game you're playing.",
-  "Use someone's contact details only for the game you're playing.",
-  "Report anything that breaks these rules. We can remove messages and suspend accounts.",
-];
+export { COMMUNITY_RULES } from "@shared/types";
 
 type Rpc = (fn: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: unknown }>;
 const defaultRpc: Rpc = (fn, args) => supabase.rpc(fn, args);
@@ -85,9 +79,69 @@ export function useAcceptRules() {
   };
 }
 
+export const blockedKey = ["blocked-players"] as const;
+export type BlockedPlayer = { profile_id: string; name: string | null; created_at: string };
+
+/** The players I blocked (my_blocked_players). Only ever the blocker's own list. */
+export function useBlockedPlayers(enabled: boolean) {
+  return useQuery({
+    queryKey: blockedKey,
+    enabled: enabled && SAFETY_AVAILABLE,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("my_blocked_players");
+      if (error) throw error;
+      return (data ?? []) as BlockedPlayer[];
+    },
+  });
+}
+
+/** After a block or unblock: my list, and every board and game (blocked organisers' games are hidden). */
+export function afterBlockChange(qc: ReturnType<typeof useQueryClient>) {
+  for (const k of [blockedKey, ["games"], ["club-games"], ["game"]]) void qc.invalidateQueries({ queryKey: k });
+}
+
+/**
+ * The approved safety model when a block meets a game both players are already in: the game stays as
+ * it is (nobody is moved or told); the blocker does not see the other player's messages and gets no
+ * chat notices from them; the organiser can remove them, a player can leave. Shown to the blocker only.
+ */
+export function blockedNotice(
+  people: { profile_id: string; name: string | null; is_organizer: boolean }[] | null | undefined,
+  blocked: BlockedPlayer[] | undefined, me: string | null, iOrganise: boolean,
+): string | null {
+  if (!people || !blocked?.length || !me) return null;
+  const ids = new Set(blocked.map((b) => b.profile_id));
+  const here = people.filter((p) => p.profile_id !== me && ids.has(p.profile_id));
+  if (here.length === 0) return null;
+  const host = here.find((p) => p.is_organizer);
+  const names = here.map((p) => p.name ?? "a player");
+  const who = host ? "the organiser of this game" : names.length === 1 ? `${names[0]}, who is in this game` : `${names.length} players in this game`;
+  const next = iOrganise ? "You can remove them." : "You can leave the game if you'd rather not play.";
+  return `You blocked ${who}. You won't see their messages. ${next}`;
+}
+
+/** Whether my account is suspended (my_account_status), so the app explains it up front. */
+export function useAccountStatus(enabled: boolean) {
+  return useQuery({
+    queryKey: ["account-status"],
+    enabled: enabled && SAFETY_AVAILABLE,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("my_account_status");
+      if (error) throw error;
+      return data === "suspended" ? "suspended" as const : "active" as const;
+    },
+  });
+}
+export const SUSPENDED_TITLE = "Account suspended";
+export const SUSPENDED_TEXT = "You can't post, join or message for now. Contact courtbook.contact@gmail.com.";
+
 /** Argument names as on the draft (checked by the unit tests against the SQL file). */
 export const SAFETY_RPC_ARGS = {
   report_content: ["p_kind", "p_target", "p_reason", "p_note"],
   block_player: ["p_profile"],
   unblock_player: ["p_profile"],
+  my_blocked_players: [],
+  my_account_status: [],
 } as const;

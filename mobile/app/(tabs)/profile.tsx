@@ -15,6 +15,8 @@ import { Icon } from "../../components/Icon";
 import { badgeText, unreadCount, useActivity } from "../../lib/activity";
 import { FAULT_LABEL, currentFault, faultsAvailable, setFault, subscribeFault, type Fault } from "../../lib/testFaults";
 import { sendTestReport } from "../../lib/crash";
+import { SAFETY_AVAILABLE } from "../../lib/safety";
+import { BlockedPlayers } from "../../components/BlockedPlayers";
 import { color, font, radius, space, text, MAX_FONT_SCALE, TOUCH } from "../../lib/theme";
 
 /**
@@ -78,6 +80,12 @@ export default function Profile() {
         </View>
       )}
       {session.status === "signed-in" ? <ActivityLink /> : null}
+      {session.status === "signed-in" && SAFETY_AVAILABLE ? (
+        <>
+          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.section}>Blocked players</Text>
+          <BlockedPlayers />
+        </>
+      ) : null}
 
       <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.section}>About this app</Text>
       <View style={styles.card}>

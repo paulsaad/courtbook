@@ -47,9 +47,11 @@ const SECONDARY_LABEL: Record<Secondary, string> = { withdraw: "Withdraw request
  * database returned — so the same components serve states A–E and playing, played, private, full and
  * cancelled. Names appear only when the database returned them (organiser and accepted players).
  */
-export function GameDetailView({ sections, me, pendingCount, handlers = {}, refreshing = false, onRefresh }: {
+export function GameDetailView({ sections, me, pendingCount, handlers = {}, refreshing = false, onRefresh, notice }: {
   sections: DetailSection[]; me: string | null; pendingCount: number | null; handlers?: DetailHandlers;
   refreshing?: boolean; onRefresh?: () => void;
+  /** M3-S: a player the viewer blocked is in this game (blockedNotice); shown to the viewer only */
+  notice?: string | null;
 }) {
   const insets = useSafeAreaInsets();
   const scroll = useRef<ScrollViewInstance | null>(null);
@@ -102,6 +104,7 @@ export function GameDetailView({ sections, me, pendingCount, handlers = {}, refr
           </GameSection>
         ) : null}
 
+        {notice ? <GameBanner tone="plain" title="Blocked player" text={notice} testID="blocked-notice" /> : null}
         <GameSection title="Players" note={`${players.spots.filled} of ${players.spots.capacity} places filled`} testID="players">
           <SlotDots filled={players.spots.filled} capacity={players.spots.capacity} size={22} paused={players.paused}
                     text={players.paused ? "Joining paused" : players.spots.text} />

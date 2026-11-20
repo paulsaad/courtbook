@@ -75,6 +75,15 @@ export const ERRORS: Record<string, string> = {
   join_declined: "The organizer declined your request for this match.",
   sport_mismatch: "That booking is for a different sport.",
   booking_already_posted: "A match is already posted for that booking.",
+  // M3-S (chat and player safety) refusals
+  blocked: "You can't join this match.",
+  account_suspended: "Your account is suspended. Contact courtbook.contact@gmail.com.",
+  rules_not_accepted: "Please accept the community rules first.",
+  message_not_allowed: "This message can't be sent. Check the community rules.",
+  bad_target: "You can't do that to your own account.",
+  bad_reason: "Choose a reason for the report.",
+  bad_status: "Choose handled or dismissed.",
+  reason_required: "Enter a reason.",
   // M3-H (game hardening) refusals
   court_not_lost: "Something went wrong. Refresh and try again.",
   court_lost: "The court booking for this match was cancelled. Joining is paused until the organizer decides.",
@@ -103,8 +112,21 @@ export const ERRORS: Record<string, string> = {
   clubs_hold_minutes_check: "Hold must be 2–30 minutes.",
 };
 
+// Longest first, so a code that contains another wins (`rules_not_accepted` over `not_accepted`,
+// `user_not_found` over `not_found`), as the app's classify() already does.
+const ERROR_KEYS = Object.keys(ERRORS).sort((a, b) => b.length - a.length);
+
 export function friendlyError(message: string | undefined): string {
   if (!message) return "Something went wrong.";
-  for (const key of Object.keys(ERRORS)) if (message.includes(key)) return ERRORS[key];
+  for (const key of ERROR_KEYS) if (message.includes(key)) return ERRORS[key];
   return message;
 }
+
+/** M3-S community rules, accepted once before a player's first chat message. DRAFT for Paul's review. */
+export const COMMUNITY_RULES = [
+  "Be civil. Treat other players as you would on court.",
+  "No harassment, threats or abuse.",
+  "Use the chat for the game you're playing.",
+  "Use someone's contact details only for the game you're playing.",
+  "Report anything that breaks these rules. We can remove messages and suspend accounts.",
+];
