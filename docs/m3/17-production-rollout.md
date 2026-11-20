@@ -79,12 +79,12 @@ Undo: each step has its rollback script; roll back newest first. The backup is t
 
 ## 5. Progress and packages (20 Nov 2026)
 
-Done on live: A1 preflight (15/15), 0068, 0069, 0070 club review (demo only, nothing switched), 0070, 0071,
+Live is now 0001–0073 (0074, 0075 pending). Done on live: A1 preflight (15/15), 0068, 0069, 0070 club review (demo only, nothing switched), 0070, 0071,
 release-fixes postcheck (11/11). The rest goes in three packages, each one review, one approval, one run:
 
 | Package | Scripts | Expect |
 | --- | --- | --- |
-| 1. Database: 0067 + 0072 + 0073 | `pkg1_preflight.sql` → `pkg1_apply.sql` (one transaction: all three or none) → `pkg1_postcheck.sql` | part 1 all true → `package 1 applied: 0067, 0072, 0073` → 29/29 true |
+| 1. Database: 0067 + 0072 + 0073 — **COMPLETE on live, 20 Nov 2026** | `pkg1_preflight.sql` → `pkg1_apply.sql` (one transaction: all three or none) → `pkg1_postcheck.sql` | done: preflight 18/18 true, `package 1 applied: 0067, 0072, 0073`, postcheck 29/29 true |
 | 2. Website | merge `m3-dev` → `main`, same session as package 1 | Play loads; a game opens; Admin → Reports "not available yet" |
 | 3. Database: 0074 + 0075 | prepared after package 2 | |
 
