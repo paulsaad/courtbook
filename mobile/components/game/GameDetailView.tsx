@@ -67,7 +67,7 @@ export function GameDetailView({ sections, me, pendingCount, handlers = {}, refr
     : handlers.onPrimary;
 
   return (
-    <View style={styles.page}>
+    <View style={styles.page} testID="game-detail">
       <ScrollView ref={scroll} contentContainerStyle={styles.content}
                   refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={color.cedar} /> : undefined}>
         {organiserView ? (
