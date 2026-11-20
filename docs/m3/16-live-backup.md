@@ -55,8 +55,9 @@ restore guide describes. Club photo files are not in the database backup (their 
    `live-backup` → Configure:
    - **Required reviewers:** tick it, add yourself (`paulsaad`). Leave "Prevent self-review" off.
    - **Deployment branches and tags:** Selected branches and tags → add `main` only.
-   - **Environment secrets:** add `LIVE_DB_URL` (step 2) and `BACKUP_PASSPHRASE` (step 1).
-   Do **not** add them under Secrets and variables → Actions (repository secrets).
+   - **Environment secrets:** only **after** the gate proof below — add `LIVE_DB_URL` (step 2) and
+     `BACKUP_PASSPHRASE` (step 1). Do **not** add them under Secrets and variables → Actions
+     (repository secrets).
 4. Tell me it's done. I never see either value.
 
 **Prerequisite — the workflow on `main`.** GitHub shows "Run workflow" only for a workflow that exists on
