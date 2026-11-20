@@ -6,13 +6,13 @@ import { color, font, radius, space, TOUCH } from "../../lib/theme";
 import type { OrganiserAction } from "../../lib/gameState";
 
 const LABEL: Partial<Record<OrganiserAction["kind"], string>> = {
-  make_private: "Make private", reopen: "Open to players again", cancel: "Cancel this game",
+  edit: "Edit details", make_private: "Make private", reopen: "Open to players again", cancel: "Cancel this game",
 };
 
 /**
  * The organiser's game-wide actions (organiserActions: what the game's state allows; the database
  * decides again). An action the state does not allow is listed with the reason, not as a button.
- * Removing a player is done from the Players list; editing details is not in the app yet.
+ * Removing a player is done from the Players list. Spec order (§4.6): Edit details first, Cancel last.
  * Shown only when game writes are switched on.
  */
 export function ManageSheet({ visible, actions, onPick, onClose }: { visible: boolean; actions: OrganiserAction[]; onPick: (k: OrganiserAction["kind"]) => void; onClose: () => void }) {

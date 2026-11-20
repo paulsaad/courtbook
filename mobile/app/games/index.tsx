@@ -16,6 +16,7 @@ import { useFindGames } from "../../lib/gameScreens";
 import { activeFilterCount, capNote, DEFAULT_FILTERS, myLevelNote, type GameFilters, type When } from "../../lib/gameFilters";
 import { sportName } from "../../lib/days";
 import { useOnline } from "../../lib/online";
+import { GAME_WRITES_AVAILABLE } from "../../lib/gameActions";
 import { color, font, space, TOUCH } from "../../lib/theme";
 
 const WHEN: { key: When; label: string }[] = [
@@ -99,7 +100,7 @@ export default function FindAGame() {
   if (session.status === "signed-out") {
     return (
       <View style={styles.page}>
-        <Stack.Screen options={{ title: "" }} />
+        <Stack.Screen options={{ title: "", headerRight: undefined }} />
         <View style={styles.header}><Text variant="title" accessibilityRole="header" style={styles.title}>Find a game</Text></View>
         <SignInPrompt title="Sign in to find a game" body="Games that need players are shown to signed-in players, with your level next to each one." />
       </View>
@@ -114,14 +115,14 @@ export default function FindAGame() {
       case "ready":
         return active > 0
           ? <Empty title="No games match these filters" body="Try another day, area or sport." action="Clear filters" onAction={() => setFilters(DEFAULT_FILTERS)} />
-          : <Empty title="No open games right now" body="New games appear here as players post them." />;
+          : <Empty title="No open games right now" body="New games appear here as players post them." {...(GAME_WRITES_AVAILABLE ? { action: "Post a game", onAction: openPost } : {})} />;
       default: return null;
     }
   })();
 
   return (
     <View style={styles.page}>
-      <Stack.Screen options={{ title: "" }} />
+      <Stack.Screen options={{ title: "", headerRight: GAME_WRITES_AVAILABLE ? () => <PostAction onPress={openPost} /> : undefined }} />
       <FlatList
         data={board.rows}
         keyExtractor={(r) => r.match_id}
@@ -146,7 +147,22 @@ export default function FindAGame() {
   );
 }
 
+const openPost = () => router.push("/games/post");
+
+/** "Post a game" in the header (04-ux-spec.md §4.3 header: green text action). */
+function PostAction({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel="Post a game" onPress={onPress} hitSlop={8}
+               style={({ pressed }) => [styles.postAction, pressed && { opacity: 0.6 }]} testID="post-a-game">
+      <Icon name="plus" size={18} color={color.cedarDeep} strokeWidth={2.4} />
+      <Text style={styles.postActionText} maxFontSizeMultiplier={1.3}>Post a game</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  postAction: { flexDirection: "row", alignItems: "center", gap: 4, minHeight: TOUCH, paddingHorizontal: space.xs },
+  postActionText: { fontFamily: font.semibold, fontSize: 16, color: color.cedarDeep },
   page: { flex: 1, backgroundColor: color.ground },
   list: { paddingBottom: 48 },
   header: { gap: space.md, paddingTop: space.sm, paddingBottom: space.md },

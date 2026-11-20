@@ -112,6 +112,7 @@ export default function GameScreen() {
         <ManageSheet visible={managing} actions={organiserActions(d)} onClose={() => setManaging(false)}
                      onPick={async (k) => {
                        setManaging(false);
+                       if (k === "edit") { router.push({ pathname: "/games/edit", params: { id: d.match_id } }); return; }
                        if (k === "make_private" && await confirm("Make this game private?", "It leaves Find a game, and waiting requests are declined.", "Make private")) await run({ kind: "status", status: "closed" });
                        if (k === "reopen") await run({ kind: "status", status: "open" });
                        if (k === "cancel" && await confirm("Cancel this game?", "Everyone in the game and everyone waiting is told.", "Cancel game", true)) await run({ kind: "status", status: "cancelled" });

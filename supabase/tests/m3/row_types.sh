@@ -51,4 +51,10 @@ while IFS= read -r line; do
   else echo "FAIL  $fn"; echo "      db:  $want"; echo "      app: $have"; fails=$((fails+1)); fi
 done < <(awk '/^export const GAME_RPC_ARGS = \{/ {on=1; next} on && /^\}/ {exit} on {print}' "$ACT")
 
+# post_match (mobile/lib/postGame.ts POST_ARG_NAMES)
+have=$(grep -E '^export const POST_ARG_NAMES' mobile/lib/postGame.ts | grep -oE '"p_[a-z_]+"' | tr -d '"' | tr '\n' ' ' | sed 's/ $//')
+want=$($PSQL -At -d $DB -c "select string_agg(n, ' ' order by i) from pg_proc p, unnest(p.proargnames) with ordinality as a(n, i)
+  where p.proname = 'post_match' and p.pronamespace = 'public'::regnamespace and has_function_privilege('authenticated', p.oid, 'EXECUTE')")
+if [ "$want" = "$have" ]; then echo "ok    post_match($have)"; else echo "FAIL  post_match"; echo "      db:  $want"; echo "      app: $have"; fails=$((fails+1)); fi
+
 [ $fails = 0 ] && echo "RESULT: PASS" || { echo "RESULT: FAIL ($fails)"; exit 1; }
