@@ -1,7 +1,9 @@
 name: Database backup (verified)
 
 # A manual backup of one Supabase database, proved restorable before it is kept:
-#   1. dump roles, schema and data with the Supabase CLI (Supabase's documented backup method);
+#   1. dump roles, schema and data with the Supabase CLI (Supabase's documented backup method), plus
+#      the source's exact permissions as SQL (a new database grants anon / authenticated by default;
+#      the dump alone would not take those grants away again);
 #   2. count every table (public, auth, storage) and fingerprint the schema on the source, read-only;
 #   3. restore the dump into a throwaway local Supabase started on this runner, as Supabase's restore
 #      guide does, and take the same counts there — every count and fingerprint must match;
@@ -100,6 +102,9 @@ jobs:
           sudo apt-get -qq install -y postgresql-client >/dev/null
           PGOPTIONS="-c default_transaction_read_only=on" psql "$DB_URL" -X -v ON_ERROR_STOP=1 -f .github/scripts/db-snapshot.sql > /tmp/source.txt
           PGOPTIONS="-c default_transaction_read_only=on" psql "$DB_URL" -X -v ON_ERROR_STOP=1 -f .github/scripts/db-security-detail.sql > /tmp/source-security.txt
+          # the source's exact permissions as SQL, kept in the backup and run last in every restore
+          PGOPTIONS="-c default_transaction_read_only=on" psql "$DB_URL" -X -v ON_ERROR_STOP=1 -f .github/scripts/db-security-restore.sql > /tmp/backup/security.sql
+          echo "permissions script: $(grep -c '' /tmp/backup/security.sql) statements"
           echo "$(grep -c '^rows ' /tmp/source.txt) tables counted; source Postgres $(grep '^other server major' /tmp/source.txt | cut -d'|' -f2)"
 
       - name: Start a throwaway local Supabase (Postgres 17)
@@ -114,9 +119,10 @@ jobs:
         run: |
           cd /tmp/backup
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -X --single-transaction -v ON_ERROR_STOP=1 \
-            -f roles.sql -f schema.sql -c 'SET session_replication_role = replica' -f data.sql > /tmp/restore.log 2>&1 \
+            -f roles.sql -f schema.sql -c 'SET session_replication_role = replica' -f data.sql \
+            -c 'SET session_replication_role = origin' -f security.sql > /tmp/restore.log 2>&1 \
             || { echo "::error::The restore failed (quoted values hidden):"; grep -m5 -E "ERROR|FATAL" /tmp/restore.log | sed -E "s/\"[^\"]*\"/\"…\"/g; s/'[^']*'/'…'/g; s/=\([^)]*\)/=(…)/g" | cut -c1-160; exit 1; }
-          echo "restored in one transaction"
+          echo "restored in one transaction (roles, schema, data, then the source's exact permissions)"
 
       - name: Compare the restored copy with the source
         run: |
