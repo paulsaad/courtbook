@@ -295,3 +295,5 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
   report, block, unblock). Shared test game removed (run 44799369520: 1 game, 3 notices, 1 player row,
   3 messages; nothing else).
 - **Community rules:** Paul's revised wording in the shared copy (`c8fdd1e`); terms-of-use sentence removed.
+- **Staging website verification:** `smoke` 43/43 (run 44799779447) and `api` 46/46 (run 44799807745,
+  section P skipped as before: G1 is on `payments-g1`). Browser checklist: `15-staging-website-check.md`.
