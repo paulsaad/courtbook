@@ -11,6 +11,15 @@ name: Database backup (verified)
 # LIVE_DB_URL secret (Session pooler string of project lgujfbwunokobjxlvpuf).
 # Until this file is on `main` (where GitHub allows starting it by hand), it starts by pushing the
 # current commit to branch `db-backup-staging` (rehearsal) or `db-backup-live` (only with approval).
+#
+# Security:
+# - LIVE_DB_URL and BACKUP_PASSPHRASE are secrets of the GitHub environment `live-backup` (not repository
+#   secrets): only a job of this workflow that names that environment can read them, only from the
+#   branches the environment allows (db-backup-live), and only after Paul approves the run on GitHub.
+# - A live backup starts only from branch db-backup-live (or a hand-started run on main); any other
+#   branch backs up staging and never names the live environment.
+# - The connection string and its password are masked in logs; secrets are given only to the steps that
+#   use them; the passphrase goes to gpg on standard input; nothing unencrypted is uploaded.
 
 on:
   push:
@@ -35,6 +44,8 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # live only: secrets live in this environment, which requires Paul's approval for every run
+    environment: ${{ (inputs.source || (github.ref_name == 'db-backup-live' && 'live') || 'staging') == 'live' && 'live-backup' || 'staging-backup' }}
     env:
       SOURCE: ${{ inputs.source || (github.ref_name == 'db-backup-live' && 'live') || 'staging' }}
       LIVE_REF: lgujfbwunokobjxlvpuf
@@ -48,21 +59,32 @@ jobs:
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
           PASS: ${{ secrets.BACKUP_PASSPHRASE }}
         run: |
-          if [ "$SOURCE" = live ]; then url="$LIVE_DB_URL"; want="$LIVE_REF"; else url="$STAGING_DB_URL"; want="$STAGING_REF"; fi
+          if [ "$SOURCE" = live ]; then
+            case "$GITHUB_REF_NAME" in db-backup-live|main) ;; *) echo "::error::A live backup runs only from db-backup-live or main."; exit 1;; esac
+            url="$LIVE_DB_URL"; want="$LIVE_REF"
+          else
+            # a live secret must exist only in the live-backup environment, never as a repository secret
+            [ -z "$LIVE_DB_URL" ] || { echo "::error::LIVE_DB_URL is readable outside the live-backup environment (repository secret?). Move it into the environment. Nothing done."; exit 1; }
+            url="$STAGING_DB_URL"; want="$STAGING_REF"
+          fi
           [ -n "$url" ] || { echo "::error::The ${SOURCE^^}_DB_URL secret is not set."; exit 1; }
+          pw=$(echo "$url" | sed -nE 's#^[a-z]+://[^:]+:([^@]+)@.*#\1#p'); [ -n "$pw" ] && echo "::add-mask::$pw"
+          echo "::add-mask::$url"
           ref=$(echo "$url" | sed -nE 's#^postgres(ql)?://postgres\.([a-z0-9]+):.*#\2#p')
           [ "$ref" = "$want" ] || { echo "::error::The $SOURCE connection string is for project '$ref', expected '$want'. Nothing done."; exit 1; }
           if [ "$SOURCE" = live ] && [ -z "$PASS" ]; then echo "::error::BACKUP_PASSPHRASE is not set: a live backup is never kept unencrypted."; exit 1; fi
-          echo "::add-mask::$url"
-          echo "DB_URL=$url" >> "$GITHUB_ENV"
           echo "Backing up: $SOURCE (project $ref)"
 
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1.7.3
         with:
           version: latest
 
       - name: Dump roles, schema and data (Supabase CLI)
+        env:
+          LIVE_DB_URL: ${{ secrets.LIVE_DB_URL }}
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
         run: |
+          DB_URL=$([ "$SOURCE" = live ] && echo "$LIVE_DB_URL" || echo "$STAGING_DB_URL")
           mkdir -p /tmp/backup && cd /tmp/backup
           supabase db dump --db-url "$DB_URL" -f roles.sql --role-only
           supabase db dump --db-url "$DB_URL" -f schema.sql
@@ -70,10 +92,14 @@ jobs:
           ls -l /tmp/backup | awk 'NR>1 {print $5, $9}'
 
       - name: Counts and fingerprints on the source (read only)
+        env:
+          LIVE_DB_URL: ${{ secrets.LIVE_DB_URL }}
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
         run: |
+          DB_URL=$([ "$SOURCE" = live ] && echo "$LIVE_DB_URL" || echo "$STAGING_DB_URL")
           sudo apt-get -qq install -y postgresql-client >/dev/null
           PGOPTIONS="-c default_transaction_read_only=on" psql "$DB_URL" -X -v ON_ERROR_STOP=1 -f .github/scripts/db-snapshot.sql > /tmp/source.txt
-          echo "$(grep -c '^rows ' /tmp/source.txt) tables counted"
+          echo "$(grep -c '^rows ' /tmp/source.txt) tables counted; source Postgres $(grep '^other server major' /tmp/source.txt | cut -d'|' -f2)"
 
       - name: Start a throwaway local Supabase (Postgres 17)
         run: |
@@ -88,7 +114,7 @@ jobs:
           cd /tmp/backup
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -X --single-transaction -v ON_ERROR_STOP=1 \
             -f roles.sql -f schema.sql -c 'SET session_replication_role = replica' -f data.sql > /tmp/restore.log 2>&1 \
-            || { echo "::error::The restore failed:"; grep -m5 -E "ERROR|FATAL" /tmp/restore.log | cut -c1-200; exit 1; }
+            || { echo "::error::The restore failed (quoted values hidden):"; grep -m5 -E "ERROR|FATAL" /tmp/restore.log | sed -E "s/\"[^\"]*\"/\"…\"/g; s/'[^']*'/'…'/g; s/=\([^)]*\)/=(…)/g" | cut -c1-160; exit 1; }
           echo "restored in one transaction"
 
       - name: Compare the restored copy with the source
@@ -103,7 +129,8 @@ jobs:
           while IFS='|' read -r k a b; do
             mark=ok
             if [ "$a" != "$b" ]; then
-              if echo "$k|" | grep -qE "$volatile"; then mark="changed during the dump (sign-in data)"
+              if [ "$k" = "other server major version" ] && [ "$b" -ge "$a" ] 2>/dev/null; then mark="newer Postgres on the restore side ($b ≥ $a)"
+              elif echo "$k|" | grep -qE "$volatile"; then mark="changed during the dump (sign-in data)"
               elif [ "$a" = MISSING ] && [ "$b" = 0 ] && [ "${k#rows }" != "$k" ]; then mark="empty table that only the newer local platform has"
               else mark=DIFFERENT; fails=$((fails+1)); fi
             fi
@@ -112,7 +139,7 @@ jobs:
           done < /tmp/compare.txt
           echo "$(wc -l < /tmp/compare.txt) checks compared, $fails different"
           [ "$fails" = 0 ] || { echo "::error::The restored copy differs from the source. The backup is NOT kept."; exit 1; }
-          echo "RESTORE VERIFIED: every table count and schema fingerprint matches"
+          echo "RESTORE VERIFIED: every row count, data hash (public tables, accounts, storage records), security setting and schema fingerprint matches"
 
       - name: Encrypt and keep (only after a verified restore)
         env:
