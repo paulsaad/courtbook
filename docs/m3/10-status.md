@@ -300,3 +300,7 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
 - **Staging website check done:** A1–A5, B1–B2 PASS (Paul); B3–B5 by `smoke` S4 on the real clock
   (run 44805295948: 8/8, 51/51). Live readiness query prepared: `supabase/live/live_state.sql`
   (read only; tested on 0001–0066, 0001–0073 and 0001–0074 replicas).
+- **Live backup done (closed):** run #12 (44820813184) — 65 tables, 113 checks, 0 different, kept
+  encrypted, two copies saved by Paul. Live mobile fingerprint check (no publish): iOS live build 0.2.0 does
+  not match, no Android live build exists → native builds needed for the mobile release.
+  Rollout plan: `17-production-rollout.md`.
