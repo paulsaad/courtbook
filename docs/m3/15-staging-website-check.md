@@ -1,4 +1,7 @@
-# M3 — staging website check (browser)
+# M3 — staging website check (browser) — DONE 20 Nov
+
+**Result:** A1–A5 PASS and B1–B2 PASS (Paul, browser). B3–B5 verified by the automated staging check
+instead (`smoke` section S4 on the real clock, run 44805295948: 8/8, 51/51 overall) — see below.
 
 Website: https://courtbook-git-m3-dev-paul-bc50.vercel.app — sign in with your email code (your account
 is admin on staging, so it also opens the staff calendar). Demo club Batroun. Report failures only, with
@@ -14,7 +17,7 @@ the step number. About 15 minutes.
 | A4 | Chat on it → send a first message | "Community rules" with the new wording appears once → I agree → the message is sent |
 | A5 | Manage → Cancel match | Cancelled; the chat becomes read-only (this also tidies up) |
 
-## B. Release-fix checks (Staff → Batroun calendar)
+## B. Release-fix checks (Staff → Batroun calendar) — B3–B5 automated, see the end
 
 | # | Step | Expected |
 | --- | --- | --- |
@@ -33,3 +36,19 @@ the step number. About 15 minutes.
 - Reporting, blocking, moderation, Help & Feedback: phone checks (PASS) and the moderator check.
 - Simulated payment refused for a real club: fixes suite (staging has no real club to try it on).
 - Website sentences for every new refusal: website tests (all M3 codes).
+
+## B3–B5 automated on staging (`smoke` S4, today's clock, three courts, cleaned up)
+
+| Check | Result |
+| --- | --- |
+| Walk-in started 60–89 min ago | accepted |
+| Walk-in started 3 h ago | refused `walk_in_too_old` |
+| Extend the walk-in in progress by 30 min | accepted |
+| Move the walk-in in progress to start earlier | refused `move_into_past` |
+| Move a not-started booking into the past | refused `move_into_past` |
+| Walk-in that already ended (started < 2 h ago) | accepted |
+| Move the ended booking | refused `booking_ended` |
+| The refused moves changed nothing | yes |
+
+Gap (small): these refusals were checked in the database and their website sentences by the website
+tests, not by clicking through the staff calendar's dialogs. S4 runs only between 11:00 and 22:00 Beirut.

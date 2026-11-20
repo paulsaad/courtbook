@@ -297,3 +297,6 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
 - **Community rules:** Paul's revised wording in the shared copy (`c8fdd1e`); terms-of-use sentence removed.
 - **Staging website verification:** `smoke` 43/43 (run 44799779447) and `api` 46/46 (run 44799807745,
   section P skipped as before: G1 is on `payments-g1`). Browser checklist: `15-staging-website-check.md`.
+- **Staging website check done:** A1–A5, B1–B2 PASS (Paul); B3–B5 by `smoke` S4 on the real clock
+  (run 44805295948: 8/8, 51/51). Live readiness query prepared: `supabase/live/live_state.sql`
+  (read only; tested on 0001–0066, 0001–0073 and 0001–0074 replicas).
