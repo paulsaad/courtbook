@@ -7,6 +7,8 @@ import { SignInPrompt } from "../../components/SignInPrompt";
 import { GameDetailView, type DetailHandlers } from "../../components/game/GameDetailView";
 import { BookingPicker } from "../../components/game/BookingPicker";
 import { ManageSheet } from "../../components/game/ManageSheet";
+import { ReportSheet } from "../../components/game/SafetySheets";
+import { reportContent } from "../../lib/safety";
 import { useSession } from "../../lib/session";
 import { SCREEN_FEATURES, useGameScreen } from "../../lib/gameScreens";
 import { useActivity, useMarkRead } from "../../lib/activity";
@@ -47,6 +49,7 @@ export default function GameScreen() {
   useMarkRead(screen.load.kind === "ready" ? activity.data : undefined, id);
   const [picking, setPicking] = useState(false);
   const [managing, setManaging] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const d = screen.detail;
 
   if (session.status === "signed-out") {
@@ -76,6 +79,7 @@ export default function GameScreen() {
   const handlers: DetailHandlers = {
     onOpenClub: d.club_id && d.status !== "cancelled" ? () => router.push({ pathname: "/club/[id]", params: { id: d.club_id!, name: d.club_name ?? "", tab: "info" } }) : undefined,
   };
+  if (SCREEN_FEATURES.report) handlers.onReport = () => setReporting(true);
   if (SCREEN_FEATURES.writes) {
     const v = screen.sections.find((s) => s.kind === "actions");
     handlers.busy = (key) => key.startsWith("decide:") ? screen.actions.busy({ kind: "decide", profileId: key.slice(7), accept: true })
@@ -118,6 +122,10 @@ export default function GameScreen() {
                        if (k === "reopen") await run({ kind: "status", status: "open" });
                        if (k === "cancel" && await confirm("Cancel this game?", "Everyone in the game and everyone waiting is told.", "Cancel game", true)) await run({ kind: "status", status: "cancelled" });
                      }} />
+      ) : null}
+      {SCREEN_FEATURES.report && !d.i_organize ? (
+        <ReportSheet visible={reporting} what="game" onClose={() => setReporting(false)}
+                     onSend={async (reason, note) => (await reportContent("game", d.match_id, reason, note))?.message ?? null} />
       ) : null}
       {SCREEN_FEATURES.writes && d.i_organize ? (
         <BookingPicker visible={picking} sport={d.sport} onClose={() => setPicking(false)}

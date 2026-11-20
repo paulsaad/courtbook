@@ -31,7 +31,7 @@ export const FULL_RELOAD_MS = 60_000;
 export const MESSAGE_MAX = 1000;
 export const COUNTER_FROM = 900;
 
-export type ServerMessage = { id: string; profile_id: string; name: string | null; body: string; created_at: string; deleted: boolean };
+export type ServerMessage = { id: string; profile_id: string; name: string | null; body: string; created_at: string; deleted: boolean; /** M3-S: the reader blocked the sender (text withheld) */ blocked?: boolean };
 export type ChatMessage = ServerMessage & { local?: "sending" | "failed" };
 export type ChatData = { messages: ChatMessage[]; fullAt: number };
 

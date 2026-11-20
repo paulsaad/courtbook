@@ -28,6 +28,8 @@ export type DetailHandlers = {
   onRemove?: (profileId: string) => void;
   onChoose?: (c: ResolveChoice["kind"]) => void;
   onOpenClub?: () => void;
+  /** M3-S: "Report this game" (not the organiser); drawn only when given */
+  onReport?: () => void;
   busy?: (key: string) => boolean;
 };
 
@@ -150,6 +152,12 @@ export function GameDetailView({ sections, me, pendingCount, handlers = {}, refr
             </GameSection>
           </View>
         ) : null}
+
+        {sections.some((x) => x.kind === "report") && handlers.onReport ? (
+          <Pressable accessibilityRole="button" onPress={handlers.onReport} style={styles.reportLink} hitSlop={6} testID="report-game">
+            <Text variant="secondary">Report this game</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
 
       <ActionBar actions={actions} spots={hero.phase === "open" && !organiserView && !players.names ? players.spots.text : null}
@@ -256,6 +264,7 @@ function ActionBar({ actions, spots, onPrimary, onSecondary, busy, bottom }: {
 }
 
 const styles = StyleSheet.create({
+  reportLink: { alignSelf: "center", minHeight: TOUCH, justifyContent: "center", paddingHorizontal: space.md },
   page: { flex: 1, backgroundColor: color.ground },
   content: { padding: space.lg, gap: space.md, paddingBottom: space.xxxl },
   organiserStrip: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.sm, padding: space.md, borderRadius: radius.md, backgroundColor: color.cedarSoft, borderWidth: 1, borderColor: "#BFDFCB" },

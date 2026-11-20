@@ -16,8 +16,11 @@ import { sportName } from "../../lib/days";
 import { useActivity, useMarkRead } from "../../lib/activity";
 import { useGameActions } from "../../lib/gameActions";
 import {
-  CHAT_AVAILABLE, chatRows, COUNTER_FROM, composerState, MESSAGE_MAX, useChat, useChatActions, type ChatMessage, type ChatRow,
+  CHAT_AVAILABLE, chatKey, chatRows, COUNTER_FROM, composerState, MESSAGE_MAX, useChat, useChatActions, type ChatData, type ChatMessage, type ChatRow,
 } from "../../lib/chat";
+import { blockPlayer, reportContent, SAFETY_AVAILABLE, useAcceptRules, useRulesAccepted } from "../../lib/safety";
+import { ReportSheet, RulesSheet } from "../../components/game/SafetySheets";
+import { useQueryClient } from "@tanstack/react-query";
 import { color, font, MAX_FONT_SCALE, radius, space, TOUCH } from "../../lib/theme";
 
 /**
@@ -44,6 +47,12 @@ export default function Chat() {
   const [problem, setProblem] = useState<string | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [unseen, setUnseen] = useState(0);
+  const [reporting, setReporting] = useState<ChatMessage | null>(null);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const rules = useRulesAccepted(signedIn && member);
+  const acceptRules = useAcceptRules();
+  const qc = useQueryClient();
+  const reloadChat = () => { qc.setQueryData<ChatData>(chatKey(id ?? ""), (x) => (x ? { ...x, fullAt: 0 } : x)); void chat.refetch(); };
   const list = useRef<FlatList<ChatRow>>(null);
   const lastCount = useRef(0);
   const tz = d?.club_timezone ?? "Asia/Beirut";
@@ -86,21 +95,40 @@ export default function Chat() {
   if (!d || !member) return page(<Empty title="Chat is for the players in this game" body="You're no longer in this game." />);
 
   const state = composerState({ member, cancelled: d.status === "cancelled", finished: d.finished }, online);
-  const send = async () => {
+  const send = async (rulesJustAccepted = false) => {
     const body = text.trim();
     if (!body || body.length > MESSAGE_MAX || !state.canSend) return;
+    // M3-S: the community rules, once, before the first message
+    if (SAFETY_AVAILABLE && !rulesJustAccepted && rules.data === false) { setRulesOpen(true); return; }
     setText(""); setProblem(null);
     const { id: mid, out } = await actions.send(body);
     if (out.kind === "failed" && !out.retry) {
       // refused (too fast, game cancelled, no longer in it): the message was not saved
       actions.discard(mid);
+      if (out.failure.reason === "rules_not_accepted") { setText(body); setRulesOpen(true); return; }
       setText(body);
       setProblem(out.failure.message);
     }
     if (out.kind === "signed-out") router.push("/sign-in");
   };
+  const block = (m: ChatMessage) => Alert.alert(`Block ${m.name ?? "this player"}?`,
+    "You won't see their messages or games, and they can't join yours. They aren't told. You can unblock them in Profile.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Block", style: "destructive", onPress: async () => { const f = await blockPlayer(m.profile_id); if (f) setProblem(f.message); else reloadChat(); } },
+    ]);
   const onLong = (m: ChatMessage) => {
-    if (m.profile_id !== me || m.deleted || m.local) return; // report and block need M3-S (not applied)
+    if (m.local) return;
+    if (m.profile_id !== me) {
+      // report and block: migration M3-S (off until it is applied)
+      if (!SAFETY_AVAILABLE || m.blocked) return;
+      Alert.alert(m.name ?? "Player", undefined, [
+        { text: "Report message", onPress: () => setReporting(m) },
+        { text: `Block ${m.name ?? "player"}`, style: "destructive", onPress: () => block(m) },
+        { text: "Cancel", style: "cancel" },
+      ]);
+      return;
+    }
+    if (m.deleted) return;
     Alert.alert("Delete this message?", "Players will see “Message deleted”.", [
       { text: "Keep", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: async () => { const f = await actions.remove(m.id); if (f) setProblem(f.message); } },
@@ -189,6 +217,15 @@ export default function Chat() {
           <Text variant="caption" style={[styles.counter, text.length > MESSAGE_MAX && { color: color.danger }]} accessibilityLiveRegion="polite">{text.length}/{MESSAGE_MAX}</Text>
         ) : null}
       </View>
+      {SAFETY_AVAILABLE ? (
+        <>
+          <ReportSheet visible={!!reporting} what="message" onClose={() => setReporting(null)}
+                       onSend={async (reason, note) => (await reportContent("message", reporting!.id, reason, note))?.message ?? null}
+                       onBlock={reporting ? () => block(reporting) : undefined} />
+          <RulesSheet visible={rulesOpen} onClose={() => setRulesOpen(false)}
+                      onAgree={async () => { const f = await acceptRules(); if (!f) { setRulesOpen(false); void send(true); } return f?.message ?? null; }} />
+        </>
+      ) : null}
     </KeyboardAvoidingView>,
   );
 }
@@ -198,7 +235,8 @@ function Bubble({ r, mine, tz, onLong, onRetry }: { r: Extract<ChatRow, { kind: 
   const who = mine ? "You" : m.name ?? "Player";
   const time = hhmm(m.created_at, tz);
   const status = m.local === "sending" ? "Sending…" : m.local === "failed" ? "Not sent — tap to retry" : null;
-  const spoken = `${who}, ${time}: ${m.deleted ? "Message deleted" : m.body}${status ? `. ${status}` : ""}`;
+  const shown = m.deleted ? "Message deleted" : m.blocked ? "Message from a player you blocked" : m.body;
+  const spoken = `${who}, ${time}: ${shown}${status ? `. ${status}` : ""}`;
   return (
     <View style={[styles.msgWrap, mine ? styles.right : styles.left, r.first && { marginTop: space.sm }]}>
       {!mine && r.first ? <Text variant="caption" style={styles.name}>{who}</Text> : null}
@@ -211,7 +249,7 @@ function Bubble({ r, mine, tz, onLong, onRetry }: { r: Extract<ChatRow, { kind: 
         style={[styles.bubble, mine ? styles.mine : styles.theirs, m.local === "failed" && styles.failed]}
         testID={`msg-${m.id}`}
       >
-        <Text style={m.deleted ? styles.deleted : styles.body}>{m.deleted ? "Message deleted" : m.body}</Text>
+        <Text style={m.deleted || m.blocked ? styles.deleted : styles.body}>{shown}</Text>
       </Pressable>
       {status ? <Text variant="caption" style={m.local === "failed" ? { color: color.danger } : undefined}>{status}</Text>
         : r.last ? <Text variant="caption">{time}</Text> : null}

@@ -803,6 +803,9 @@ check service "90p badminton is a sport"                           "select count
 
 
 echo "--- AF. delete activity / chat, open a booking"
+# With M3-S (community rules before the first message) the chat checks' players have accepted the
+# rules; without M3-S the column does not exist and nothing changes.
+$PSQL -q -d $DB -c "do \$\$ begin if exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'rules_accepted_at') then execute 'update profiles set rules_accepted_at = now()'; end if; end \$\$;"
 $PSQL -q -d $DB -c "insert into notifications (profile_id, kind, body) values ('$P1','test','a'),('$P1','test','b'),('$P2','test','c');"
 NID=$($PSQL -At -d $DB -c "select id from notifications where profile_id='$P1' and kind='test' limit 1")
 { as_user $P2; echo "select delete_notification('$NID');"; } | $PSQL -q -d $DB >/dev/null

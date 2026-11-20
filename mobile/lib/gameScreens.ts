@@ -7,6 +7,7 @@ import { shiftDate } from "@shared/time";
 import type { GameFilters } from "./gameFilters";
 import { gameView, organiserActions, type Banner, type GameView, type OrganiserAction, type Primary, type Secondary } from "./gameState";
 import { loadView, splitPeople, useGame, useGamePeople, useOpenGames, type LoadView } from "./games";
+import { SAFETY_AVAILABLE } from "./safety";
 import { GAME_WRITES_AVAILABLE, JOIN_LATER_TEXT, MANAGE_LATER_TEXT, useGameActions } from "./gameActions";
 import type { GameDetail, ParticipantRow } from "./gameTypes";
 
@@ -118,8 +119,8 @@ export function detailSections(d: GameDetail, people: ParticipantRow[] | undefin
 }
 
 /** What the switches are today. Each turns on in the change that ships its stage. */
-/** Writes and chat: on where 0072 is applied (staging). Report needs M3-S (not applied). */
-export const SCREEN_FEATURES: Omit<DetailOptions, "now"> = { writes: GAME_WRITES_AVAILABLE, chat: GAME_WRITES_AVAILABLE, report: false };
+/** Writes and chat: on where 0072 is applied (staging). Report: migration M3-S (off until applied). */
+export const SCREEN_FEATURES: Omit<DetailOptions, "now"> = { writes: GAME_WRITES_AVAILABLE, chat: GAME_WRITES_AVAILABLE, report: SAFETY_AVAILABLE };
 
 /** Game screen: load state, sections and actions for one game id. */
 export function useGameScreen(id: string | undefined, { signedIn }: { signedIn: boolean }) {

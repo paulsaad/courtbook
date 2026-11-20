@@ -48,6 +48,8 @@ export const GAME_ERRORS: Record<string, string> = {
   blocked: "You can't join this game.",
   message_not_allowed: "This message can't be sent. Check our community rules.",
   rules_not_accepted: "Please accept the community rules first.",
+  bad_target: "You can't report or block yourself.",
+  bad_reason: "Choose a reason for the report.",
   account_suspended: "Your account is suspended. Contact courtbook.contact@gmail.com.",
 };
 
