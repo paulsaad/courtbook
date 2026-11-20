@@ -103,7 +103,9 @@ jobs:
           while IFS='|' read -r k a b; do
             mark=ok
             if [ "$a" != "$b" ]; then
-              if echo "$k|" | grep -qE "$volatile"; then mark="changed during the dump (sign-in data)"; else mark=DIFFERENT; fails=$((fails+1)); fi
+              if echo "$k|" | grep -qE "$volatile"; then mark="changed during the dump (sign-in data)"
+              elif [ "$a" = MISSING ] && [ "$b" = 0 ] && [ "${k#rows }" != "$k" ]; then mark="empty table that only the newer local platform has"
+              else mark=DIFFERENT; fails=$((fails+1)); fi
             fi
             echo "| $k | $a | $b |" >> "$GITHUB_STEP_SUMMARY"
             [ "$mark" = ok ] || echo "$mark: $k source=$a restored=$b"
