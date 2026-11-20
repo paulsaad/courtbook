@@ -196,3 +196,22 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
     `join_request` notices to Paul.
   - Cleanup: Staging database → action `m3_test_games_cleanup` (removes only "[M3 TEST]" games with
     their players, messages and notices).
+
+## 10.12 Round 7 (20 Nov) — Post a game, Edit game, chat; M3-S draft
+
+- Temporary staging test games removed (run 44728104189): exactly the two recorded "[M3 TEST]" games,
+  their 8 notices and 2 player rows; no booking linked; nothing else touched.
+- **Post a game** (`app/games/post.tsx`, `lib/postGame.ts`): Find a game → "Post a game", and a booking
+  → "Find players". Without a booking: sport, club, day (60 days), start time on the club's grid,
+  length 60/90/120. Players 1–30, level range or all levels, **Join straight away | Ask to join**
+  (one line each), note. One `post_match`. A lost answer is checked, never posted twice (booking_match;
+  otherwise the organiser's own game at that club, sport and start since the post began).
+- **Edit game** (`app/games/edit.tsx`): Manage game → Edit details; `update_match` fields only; not after
+  start or cancel; players never below those in; switching to Join straight away says what happens to
+  waiting requests (S15) before saving.
+- **Chat** (`app/chat/[id].tsx`, `lib/chat.ts`), staging bundle only: 4 s polling with 10 s overlap,
+  full reload on open / every 60 s / on return; phone-made message ids (a retry cannot duplicate);
+  delete own; delete a finished or cancelled conversation for oneself; read-only and offline states.
+- **M3-S draft** `docs/m3/sql/m3s_safety.draft.sql` (for review, applied nowhere): blocks (join refused,
+  board hidden, text withheld, no notices), reports with snapshot, community rules once, word filter.
+  `supabase/tests/m3/safety.sh` 32/32, 11/11 mutants. App side wired, `SAFETY_AVAILABLE = false`.
