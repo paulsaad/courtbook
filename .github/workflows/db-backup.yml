@@ -11,21 +11,23 @@ name: Database backup (verified)
 #      as a run artifact. Nothing unencrypted leaves the runner; logs show table names and numbers only.
 # Nothing is ever written to the source database. `staging` is the rehearsal; `live` needs the
 # LIVE_DB_URL secret (Session pooler string of project lgujfbwunokobjxlvpuf).
-# Until this file is on `main` (where GitHub allows starting it by hand), it starts by pushing the
-# current commit to branch `db-backup-staging` (rehearsal) or `db-backup-live` (only with approval).
+# A LIVE backup starts only by hand: Actions → "Database backup (verified)" → Run workflow on `main`,
+# source = live (GitHub shows that button only once this file is on `main`). Pushing to branch
+# `db-backup-staging` runs the staging rehearsal; no push ever backs up live.
 #
 # Security:
 # - LIVE_DB_URL and BACKUP_PASSPHRASE are secrets of the GitHub environment `live-backup` (not repository
 #   secrets): only a job of this workflow that names that environment can read them, only from the
-#   branches the environment allows (db-backup-live), and only after Paul approves the run on GitHub.
-# - A live backup starts only from branch db-backup-live (or a hand-started run on main); any other
-#   branch backs up staging and never names the live environment.
+#   branch the environment allows (main), and only after Paul approves the run on GitHub (required
+#   reviewers work on GitHub Free because this repository is public).
+# - Live = a hand-started run on `main` with source = live, nothing else. A push always backs up staging
+#   and never names the live environment.
 # - The connection string and its password are masked in logs; secrets are given only to the steps that
 #   use them; the passphrase goes to gpg on standard input; nothing unencrypted is uploaded.
 
 on:
   push:
-    branches: [db-backup-staging, db-backup-live]
+    branches: [db-backup-staging]   # staging rehearsal only
   workflow_dispatch:
     inputs:
       source:
@@ -39,7 +41,7 @@ on:
         default: 30
 
 concurrency:
-  group: db-backup-${{ inputs.source || github.ref_name }}
+  group: db-backup-${{ (github.event_name == 'workflow_dispatch' && inputs.source == 'live') && 'live' || 'staging' }}
   cancel-in-progress: false
 
 jobs:
@@ -47,9 +49,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # live only: secrets live in this environment, which requires Paul's approval for every run
-    environment: ${{ (inputs.source || (github.ref_name == 'db-backup-live' && 'live') || 'staging') == 'live' && 'live-backup' || 'staging-backup' }}
+    environment: ${{ (github.event_name == 'workflow_dispatch' && inputs.source == 'live') && 'live-backup' || 'staging-backup' }}
     env:
-      SOURCE: ${{ inputs.source || (github.ref_name == 'db-backup-live' && 'live') || 'staging' }}
+      SOURCE: ${{ (github.event_name == 'workflow_dispatch' && inputs.source == 'live') && 'live' || 'staging' }}
       LIVE_REF: lgujfbwunokobjxlvpuf
       STAGING_REF: pwznauyioqykdwodwpvx
     steps:
@@ -62,7 +64,7 @@ jobs:
           PASS: ${{ secrets.BACKUP_PASSPHRASE }}
         run: |
           if [ "$SOURCE" = live ]; then
-            case "$GITHUB_REF_NAME" in db-backup-live|main) ;; *) echo "::error::A live backup runs only from db-backup-live or main."; exit 1;; esac
+            [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$GITHUB_REF_NAME" = main ] || { echo "::error::A live backup runs only when started by hand on main."; exit 1; }
             url="$LIVE_DB_URL"; want="$LIVE_REF"
           else
             # a live secret must exist only in the live-backup environment, never as a repository secret
