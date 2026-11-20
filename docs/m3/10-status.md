@@ -263,3 +263,10 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
   Added the three Supabase variables for Preview branch `m3-dev` only (staging values; production unchanged),
   redeployed (`4e63143`). Checked in the preview: its code references staging only; its key belongs to
   staging; staging answers for `admin_reports` (exists, refuses anonymous callers).
+
+## Round 11 (20 Nov) — player safety completion
+
+- Help & Feedback verified by Paul on the Android staging app and Admin → Reports (PASS, closed).
+- Blocking after a report in Help & Feedback now uses the same confirmation as chat (`confirmBlock`).
+- **0075 candidate** (applied nowhere): `admin_blocks_received` — the Reports page shows "blocked by N
+  players" (§5.6 reported player's history). Additive; pack `supabase/live/0075_*`; `history_0075.sh` 4/4.
