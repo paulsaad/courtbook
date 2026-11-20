@@ -291,3 +291,7 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
   `1cfe3bf2-8db0-44d7-ab1f-0257c6ad1f5d`, Sun 22 Nov 18:00 Beirut, organiser `6138b979` (Paul Tester),
   `02111629` accepted, one message from Paul Tester. Keep until Paul confirms both device checks; then
   `m3_test_games_cleanup` with that id.
+- **Device checks PASS (Paul, 20 Nov):** Android (block / unblock) and iPhone (update, game, chat, rules,
+  report, block, unblock). Shared test game removed (run 44799369520: 1 game, 3 notices, 1 player row,
+  3 messages; nothing else).
+- **Community rules:** Paul's revised wording in the shared copy (`c8fdd1e`); terms-of-use sentence removed.
