@@ -98,7 +98,8 @@ jobs:
           volatile='^rows auth\.(sessions|refresh_tokens|audit_log_entries|flow_state|one_time_tokens|mfa_amr_claims|mfa_challenges)\|'
           echo "| check | source | restored |" >> "$GITHUB_STEP_SUMMARY"; echo "| --- | --- | --- |" >> "$GITHUB_STEP_SUMMARY"
           fails=0
-          join -t'|' -a1 -a2 -e MISSING -o 0,1.2,2.2 <(sort /tmp/source.txt) <(sort /tmp/restored.txt) > /tmp/compare.txt
+          export LC_ALL=C
+          join -t'|' -a1 -a2 -e MISSING -o 0,1.2,2.2 <(sort -t'|' -k1,1 /tmp/source.txt) <(sort -t'|' -k1,1 /tmp/restored.txt) > /tmp/compare.txt
           while IFS='|' read -r k a b; do
             mark=ok
             if [ "$a" != "$b" ]; then
