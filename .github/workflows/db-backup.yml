@@ -157,18 +157,32 @@ jobs:
         env:
           PASS: ${{ secrets.BACKUP_PASSPHRASE }}
         run: |
-          if [ -z "$PASS" ]; then echo "No BACKUP_PASSPHRASE: rehearsal only, nothing kept."; echo "KEEP=no" >> "$GITHUB_ENV"; exit 0; fi
+          KEEP=yes
+          if [ -z "$PASS" ]; then
+            [ "$SOURCE" = staging ] || exit 1
+            # rehearsal: exercise encryption and the check below with a throwaway key; nothing is kept
+            PASS=$(openssl rand -hex 32); echo "::add-mask::$PASS"; KEEP=no
+          fi
           name="courtbook-$SOURCE-$(date -u +%Y%m%d-%H%M)"
           cp /tmp/source.txt /tmp/backup/counts.txt
           tar -C /tmp -cf "/tmp/$name.tar" backup
           printf '%s' "$PASS" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 -o "/tmp/$name.tar.gpg" "/tmp/$name.tar"
           rm -f "/tmp/$name.tar"
-          # prove the kept file opens with the passphrase and holds the same three files
-          printf '%s' "$PASS" | gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 -d "/tmp/$name.tar.gpg" | tar -t | sort | tr '\n' ' '; echo
-          sha=$(sha256sum "/tmp/$name.tar.gpg" | cut -d' ' -f1)
-          echo "Kept: $name.tar.gpg  sha256 $sha"
-          echo "" >> "$GITHUB_STEP_SUMMARY"; echo "**Kept:** \`$name.tar.gpg\` · sha256 \`$sha\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "KEEP=yes" >> "$GITHUB_ENV"; echo "NAME=$name" >> "$GITHUB_ENV"
+          # prove the encrypted file opens with the passphrase and holds every part of the backup
+          set -o pipefail
+          files=$(printf '%s' "$PASS" | gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 -d "/tmp/$name.tar.gpg" | tar -t | sort | tr '\n' ' ')
+          for f in roles.sql schema.sql data.sql security.sql counts.txt; do
+            echo "$files" | grep -q "backup/$f" || { echo "::error::$f is missing from the encrypted file"; exit 1; }
+          done
+          echo "encrypted file opens with the passphrase and holds: $files"
+          echo "KEEP=$KEEP" >> "$GITHUB_ENV"; echo "NAME=$name" >> "$GITHUB_ENV"
+          if [ "$KEEP" = yes ]; then
+            sha=$(sha256sum "/tmp/$name.tar.gpg" | cut -d' ' -f1)
+            echo "Kept: $name.tar.gpg  sha256 $sha"
+            echo "" >> "$GITHUB_STEP_SUMMARY"; echo "**Kept:** \`$name.tar.gpg\` · sha256 \`$sha\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            rm -f "/tmp/$name.tar.gpg"; echo "Rehearsal: encryption and decryption checked with a throwaway key; nothing kept."
+          fi
 
       - uses: actions/upload-artifact@v4
         if: env.KEEP == 'yes'
