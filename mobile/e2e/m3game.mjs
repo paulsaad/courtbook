@@ -170,7 +170,7 @@ async function posted() {
   if (!id) return;
   addId("GP", uuid(id));
   check("posted with Ask to join, 3 players, her note, open, no booking",
-    mode === "approval" && needed === "3" && note === "M3 staging check post" && status === "open" && noBooking === "t", row);
+    mode === "approval" && needed === "3" && note === "M3 staging check post" && status === "open" && noBooking === "true", row);
   check("exactly one game posted (no duplicate)", sql(`select count(*) from matches m join auth.users u on u.id = m.organizer_id where u.email = '${EMMA}'`) === "1");
   await call(await helper(1), "join_match", { p_match: id });
   check("helper 1's request is waiting", statusOf(id, helperEmail(1)) === "pending", statusOf(id, helperEmail(1)));
