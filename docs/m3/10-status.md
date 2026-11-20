@@ -232,3 +232,16 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
   accepted (S15) and the player told; chat: message saved once, the reply appears, a non-member reads
   nothing. Found and fixed on the way: the keyboard hid the chat composer on Android (edge to edge, no
   window resize) — `components/KeyboardAware.tsx`, JS only.
+
+## Round 9 (20 Nov) — 0073 on staging; 0074 prepared for a coordinated rollout
+
+- **0073 on staging** (Paul's approval): preflight run 44754235645 all required true; apply run 44754364260
+  "applied 1 migration(s)" (73 on staging); postcheck run 44754489437 4/4 true. App posting key on for
+  staging (`POST_TOKEN_AVAILABLE = GAME_WRITES_AVAILABLE`).
+- **Decisions (Paul):** blocking model approved as written; five rules approved with explicit wording
+  (sports only; no harassment, unwanted romantic advances or solicitation); blocked-word list stays empty.
+- **0074 amended** (applied nowhere): `send_feedback` (app problem / suggestion in `reports`, admins only)
+  and `my_recent_players`. `safety.sh` 61/61, 22/22 mutants; `live_0074.sh` 12/12.
+- **App:** safety detected at run time; Profile → Help & Feedback; rules sheet on demand.
+- **Staging moderator:** none yet (0 admin accounts, run 44758049339). `m3_moderator_grant` prepared.
+- Rollout and monitoring: `11-0074-rollout.md`.
