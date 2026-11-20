@@ -215,3 +215,9 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
 - **M3-S draft** `docs/m3/sql/m3s_safety.draft.sql` (for review, applied nowhere): blocks (join refused,
   board hidden, text withheld, no notices), reports with snapshot, community rules once, word filter.
   `supabase/tests/m3/safety.sh` 32/32, 11/11 mutants. App side wired, `SAFETY_AVAILABLE = false`.
+
+- **Emulator on staging** (`suite=m3-post-chat`, run 44739579776): Post a game from Find a game (Ask to join,
+  3 players, note) → exactly one game, as chosen; a helper asks; Edit → Join straight away → the request
+  accepted (S15) and the player told; chat: message saved once, the reply appears, a non-member reads
+  nothing. Found and fixed on the way: the keyboard hid the chat composer on Android (edge to edge, no
+  window resize) — `components/KeyboardAware.tsx`, JS only.
