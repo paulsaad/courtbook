@@ -177,3 +177,10 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
   and all 13 database checks passed; the run's games and accounts were removed.
 - Large text: Android `lineHeight` now follows the size cap (shared `Text`); checked at ×2.0.
 - `m3-dev` website preview → staging: not yet verified (preview is behind Vercel sign-in).
+
+- **Android staging update (Paul approved, 20 Nov):** workflow "Mobile update" run 44723819962 from
+  `m3-dev` @ `9148605`; checks passed (staging database `pwznauyioqykdwodwpvx` confirmed for the
+  staging app, 434/434 tests, Android native fingerprint `4e91cfa…` matches the installed staging
+  build). Update `01a1f89e-f412-753b-beb5-ff8c29dc07b2`, group `15f59966-05e1-4644-a18c-3e2bcef2634a`,
+  runtime 0.3.0. Rollback: group `c6033820-eecb-46b3-be18-24bb3bf4a2a7` (18 Nov, `8885859`). iOS staging
+  and live untouched.
