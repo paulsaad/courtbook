@@ -115,7 +115,7 @@ export default function PostGame() {
           <>
             <Field label="Sport">
               <View style={styles.wrap}>
-                {sports.map((s) => <Chip key={s} tone="sport" label={sportName(s)} selected={d.sport === s} onPress={() => set({ sport: s, clubId: clubs.data!.find((c) => c.id === d.clubId)?.sports.includes(s) ? d.clubId : null })} />)}
+                {sports.map((s) => <Chip key={s} tone="sport" testID={`sport-${s}`} label={sportName(s)} selected={d.sport === s} onPress={() => set({ sport: s, clubId: clubs.data!.find((c) => c.id === d.clubId)?.sports.includes(s) ? d.clubId : null })} />)}
               </View>
             </Field>
             {d.sport ? (
@@ -137,7 +137,7 @@ export default function PostGame() {
                 </Field>
                 <Field label="Start time" hint={times.length === 0 ? "No start times left on this day. Choose another day." : `Club time (${club.name}).`}>
                   <View style={styles.wrap}>
-                    {times.map((t) => <Chip key={t} label={t} selected={d.time === t} onPress={() => set({ time: t })} />)}
+                    {times.map((t) => <Chip key={t} label={t} selected={d.time === t} onPress={() => set({ time: t })} testID={`start-${t}`} />)}
                   </View>
                 </Field>
               </>

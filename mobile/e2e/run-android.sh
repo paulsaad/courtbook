@@ -79,6 +79,34 @@ print('on screen at failure:', [x for n in nodes for x in re.findall(r'(?:text|c
   exit $status
 fi
 
+# m3-post-chat (workflow input suite = m3-post-chat): Post a game from Find a game (Ask to join), a
+# helper asks to join, Edit → Join straight away accepts the request, then the chat both ways. The
+# helper side and every database check are e2e/m3game.mjs.
+if [ "${SUITE:-full}" = "m3-post-chat" ]; then
+  mkdir -p "$OUT/shots/m3post"
+  adb shell monkey -p "$APP" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 45
+  (cd "$OUT" && maestro test "${envs[@]}" ../flows/_sign-in.yaml) || { echo "::error::sign-in failed"; exit 1; }
+  envs+=(-e "POST_DAY=$(TZ=Asia/Beirut date -d '+2 day' +%F)")
+  m3() { echo "::group::m3game $*"; OUT="$OUT" node e2e/m3game.mjs "$@"; local r=$?; echo "::endgroup::"; return $r; }
+  step() {
+    local ids=(); while IFS= read -r l; do [ -n "$l" ] && ids+=(-e "$l"); done < "$OUT/m3.env"
+    echo "::group::app $1"
+    if (cd "$OUT" && maestro test "${envs[@]}" "${ids[@]}" "../flows/$1.yaml"); then echo "app $1: PASS"; echo "::endgroup::"; return 0; fi
+    echo "::endgroup::"; echo "::error::app step $1 failed"
+    adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/fail-$1.xml" >/dev/null && python3 -c "
+import re,sys; t=open('$OUT/fail-$1.xml').read()
+nodes=[n for n in re.findall(r'<node [^>]*>', t) if 'EditText' not in n]
+print('on screen at failure:', [x for n in nodes for x in re.findall(r'(?:text|content-desc)=\"([^\"]+)\"', n) if x][:60])"
+    return 1
+  }
+  m3 helpers || { m3 cleanup; exit 1; }
+  { step m3-post && m3 posted && step m3-edit && m3 edited && step m3-chat && m3 chat-sent && step m3-chat-reply; } || status=1
+  adb logcat -d -v brief ReactNativeJS:V AndroidRuntime:E '*:F' '*:S' | tail -200 > "$OUT/logcat.txt"
+  m3 cleanup || true
+  [ $status = 0 ] && echo "M3 post, edit and chat on staging: every step passed" || echo "::error::M3 post/edit/chat: a step failed (see above)"
+  exit $status
+fi
+
 # booking-text (workflow input suite = booking-text): only the booking screens at the one setting where
 # the Android line-height correction applies (text above the app's 1.6 cap): 360 dp at x2.0 —
 # screenshots of every main screen, the booking panel with Reserve reachable and pressed, and the

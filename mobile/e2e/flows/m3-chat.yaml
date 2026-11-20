@@ -1,0 +1,12 @@
+# Post a game 3/4 — the organiser opens the chat and sends a message.
+appId: app.courtbook.mobile.staging
+---
+- extendedWaitUntil: { visible: { id: "game-primary" }, timeout: 30000 }
+- tapOn: { id: "game-primary" }
+- extendedWaitUntil: { visible: { id: "chat-input" }, timeout: 30000 }
+- tapOn: { id: "chat-input" }
+- inputText: "See you at six"
+- tapOn: { id: "chat-send" }
+- extendedWaitUntil: { visible: "See you at six", timeout: 15000 }
+- extendedWaitUntil: { notVisible: "Sending…", timeout: 15000 }
+- takeScreenshot: shots/m3post/5-chat-sent

@@ -16,6 +16,7 @@ export function DateStrip({ days, selected, onSelect, disabled = false }: { days
             key={d.key}
             accessibilityRole="tab"
             accessibilityLabel={d.a11y}
+            testID={`day-${d.key}`}
             accessibilityState={{ selected: on, disabled }}
             disabled={disabled}
             onPress={() => {

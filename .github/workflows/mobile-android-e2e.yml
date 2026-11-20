@@ -16,9 +16,9 @@ on:
         options: [android, ios]
         default: android
       suite:
-        description: "android only: full = every flow, size and audit; m3-screens = sign in, then Find a game and the Game screen in every state at three text sizes (no booking flows); m3-actions = game actions end to end on staging (ask/decline, join/leave, accept/decline, cancelled court); booking-text = booking screens at 360dp x2.0 only (screenshots, Reserve reachable, unresolved recovery)"
+        description: "android only: full = every flow, size and audit; m3-screens = sign in, then Find a game and the Game screen in every state at three text sizes (no booking flows); m3-actions = game actions end to end on staging (ask/decline, join/leave, accept/decline, cancelled court); booking-text = booking screens at 360dp x2.0 only (screenshots, Reserve reachable, unresolved recovery); m3-post-chat = post a game, edit it, chat (staging)"
         type: choice
-        options: [full, m3-screens, m3-actions, booking-text]
+        options: [full, m3-screens, m3-actions, booking-text, m3-post-chat]
         default: full
 
 # One staging-changing run at a time across BOTH workflows that change shared staging data (the demo
