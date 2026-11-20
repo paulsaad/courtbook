@@ -18,5 +18,5 @@ export default function E2EGames() {
   const me = session.status === "signed-in" ? session.session.user.id : "e2e-me";
   const qc = useMemo(() => e2eClient(view, state, me), [view, state, me]);
   if (!E2E_SCREENS) return <Redirect href="/" />;
-  return <QueryClientProvider client={qc}>{view === "board" ? <FindAGame /> : <GameScreen />}</QueryClientProvider>;
+  return <QueryClientProvider client={qc}>{view === "board" ? <FindAGame key="board" /> : <GameScreen key={state} />}</QueryClientProvider>;
 }

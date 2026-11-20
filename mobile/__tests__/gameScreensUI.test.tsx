@@ -55,6 +55,10 @@ describe("player privacy (names only where the database returns them)", () => {
     expect(screen.getByTestId("privacy-note")).toBeTruthy();
     expect(visibleNames()).toEqual(["Rami"]); // the organiser card only
   });
+  it("the details row gives the range once (not “Levels: Levels 4–6”)", async () => {
+    await show(g({}), []);
+    expect(screen.getByText("4–6")).toBeTruthy();
+  });
   it("B — a pending requester sees no names either, and the request banner", async () => {
     await show(g({ my_status: "pending" }), []);
     expect(screen.queryByTestId("player-names")).toBeNull();

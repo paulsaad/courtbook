@@ -106,7 +106,7 @@ export default function GameScreen() {
 
   return page(
     <>
-      <GameDetailView sections={screen.sections} me={me} pendingCount={d.i_organize ? d.pending ?? 0 : null} handlers={handlers}
+      <GameDetailView key={id} sections={screen.sections} me={me} pendingCount={d.i_organize ? d.pending ?? 0 : null} handlers={handlers}
                       refreshing={screen.refreshing} onRefresh={screen.refetch} />
       {SCREEN_FEATURES.writes && d.i_organize ? (
         <ManageSheet visible={managing} actions={organiserActions(d)} onClose={() => setManaging(false)}

@@ -126,7 +126,7 @@ export function GameDetailView({ sections, me, pendingCount, handlers = {}, refr
         </GameSection>
 
         <View style={styles.detailsCard} testID="details">
-          <DetailRow label="Levels" value={details.level} />
+          <DetailRow label="Levels" value={details.level.replace(/^Levels /, "")} />
           <DetailRow label="How to join" value={details.joinMode} />
           <View style={[styles.detailRow, !handlers.onOpenClub && styles.lastRow]}>
             <Text variant="secondary">Your level</Text>
@@ -215,6 +215,9 @@ function ChoiceRow({ c, onPress }: { c: ResolveChoice; onPress?: () => void }) {
  * The fixed bar under the screen: one primary action, or — while that action is not available in the
  * app — the sentence that says so (never a greyed button pretending to work). Text actions below.
  */
+/** The fixed bar stays a bar at the largest text sizes (it measured ~40% of a 360dp screen at ×2.0). */
+const BAR_MAX_FONT_SCALE = 1.3;
+
 function ActionBar({ actions, spots, onPrimary, onSecondary, busy, bottom }: {
   actions: Of<"actions">; spots: string | null; onPrimary?: () => void; onSecondary?: (s: Secondary) => void; busy?: (key: string) => boolean; bottom: number;
 }) {
@@ -225,7 +228,7 @@ function ActionBar({ actions, spots, onPrimary, onSecondary, busy, bottom }: {
       <View style={styles.barRow}>
         {spots ? (
           <View style={styles.barSpots}>
-            <Text style={styles.barSpotsText}>{spots}</Text>
+            <Text maxFontSizeMultiplier={BAR_MAX_FONT_SCALE} numberOfLines={1} style={styles.barSpotsText}>{spots}</Text>
           </View>
         ) : null}
         {actions.primary && onPrimary ? (
@@ -235,7 +238,7 @@ function ActionBar({ actions, spots, onPrimary, onSecondary, busy, bottom }: {
         ) : actions.notice ? (
           <View style={styles.notice} testID="action-notice">
             <Icon name="info" size={18} color={color.muted} />
-            <Text variant="secondary" style={{ flex: 1 }}>{actions.notice}</Text>
+            <Text variant="secondary" maxFontSizeMultiplier={BAR_MAX_FONT_SCALE} style={{ flex: 1 }}>{actions.notice}</Text>
           </View>
         ) : null}
       </View>
