@@ -6,6 +6,7 @@
 //   decline-emma     the organiser of game A declines Emma's request (API, as helper 1)
 //   cancel-booking   Emma's court booking under game B is cancelled (API, as Emma)
 //   check <step>     database checks after each app step: asked, declined, left, decided, court-lost, resolved
+//   helpers | posted | edited | chat-sent   suite m3-post-chat: Post a game, Edit game, chat
 //   cleanup          this run's games and helper accounts only (Emma's own account: staging.mjs cleanup)
 //
 // Staging only (refuses anything else). No password, token or code is ever printed.
@@ -57,8 +58,7 @@ const statusOf = (game, email) =>
   sql(`select coalesce((select mp.status from match_players mp join auth.users u on u.id = mp.profile_id
         where mp.match_id = '${uuid(game)}' and u.email = '${email}'), 'none')`);
 
-async function setup() {
-  const CLUB = uuid(sql("select id from clubs where slug='batroun'"));
+async function createHelpers() {
   const pw = {};
   for (const [n, name] of [[1, "Hadi Helper"], [2, "Nour Helper"]]) {
     pw[n] = randomBytes(18).toString("base64url");
@@ -67,6 +67,13 @@ async function setup() {
     sql(`update profiles set name='${name}' where id='${uuid(data.user.id)}'`);
   }
   fs.writeFileSync(PW_FILE, JSON.stringify(pw), { mode: 0o600 });
+  fs.mkdirSync(IDS.replace(/\/[^/]+$/, ""), { recursive: true });
+  if (!fs.existsSync(IDS)) fs.writeFileSync(IDS, "");
+}
+
+async function setup() {
+  const CLUB = uuid(sql("select id from clubs where slug='batroun'"));
+  await createHelpers();
   const [h1, me] = [await helper(1), await emma()];
 
   // Games without a court, organised by helper 1, three days ahead (no levels: nothing to confirm but the court).
@@ -151,6 +158,45 @@ function checkStep(step) {
   }
 }
 
+// ---- Post a game, edit, chat (suite m3-post-chat) ----
+const addId = (k, v) => fs.appendFileSync(IDS, `${k}=${v}\n`);
+
+/** The game Emma just posted in the app: approval, 3 players, her note; then helper 1 asks to join. */
+async function posted() {
+  const row = sql(`select m.id || '|' || m.join_mode || '|' || m.players_needed || '|' || coalesce(m.note, '') || '|' || m.status || '|' || (m.booking_id is null)
+    from matches m join auth.users u on u.id = m.organizer_id where u.email = '${EMMA}' order by m.created_at desc limit 1`);
+  const [id, mode, needed, note, status, noBooking] = row.split("|");
+  check("posted from the app: one game, organised by Emma", !!id, row);
+  if (!id) return;
+  addId("GP", uuid(id));
+  check("posted with Ask to join, 3 players, her note, open, no booking",
+    mode === "approval" && needed === "3" && note === "M3 staging check post" && status === "open" && noBooking === "t", row);
+  check("exactly one game posted (no duplicate)", sql(`select count(*) from matches m join auth.users u on u.id = m.organizer_id where u.email = '${EMMA}'`) === "1");
+  await call(await helper(1), "join_match", { p_match: id });
+  check("helper 1's request is waiting", statusOf(id, helperEmail(1)) === "pending", statusOf(id, helperEmail(1)));
+}
+
+/** After Edit -> Join straight away: the waiting request was accepted (S15) and helper 1 told. */
+function edited() {
+  const { GP } = ids();
+  check("edited to Join straight away", sql(`select join_mode from matches where id='${uuid(GP)}'`) === "open");
+  check("the waiting request was accepted (S15)", statusOf(GP, helperEmail(1)) === "accepted", statusOf(GP, helperEmail(1)));
+  const told = sql(`select count(*) from notifications n join auth.users u on u.id = n.profile_id where u.email='${helperEmail(1)}' and n.kind='join_accepted' and n.match_id='${uuid(GP)}'`);
+  check("helper 1 was told", Number(told) >= 1, told);
+}
+
+/** Emma's message arrived once; helper 1 answers through the API; an outsider reads nothing. */
+async function chatSent() {
+  const { GP } = ids();
+  const n = sql(`select count(*) from match_messages x join auth.users u on u.id = x.profile_id where x.match_id='${uuid(GP)}' and u.email='${EMMA}' and x.body='See you at six'`);
+  check("Emma's message saved once, server-stamped", n === "1", n);
+  const h1 = await helper(1);
+  const { error } = await h1.from("match_messages").insert({ match_id: GP, profile_id: sql(`select id from auth.users where email='${helperEmail(1)}'`), body: "On my way" });
+  check("helper 1 answers in the chat", !error, error?.message ?? "");
+  const { data } = await (await helper(2)).rpc("match_messages_list", { p_match: GP, p_after: null });
+  check("a player not in the game reads nothing", Array.isArray(data) && data.length === 0, JSON.stringify(data ?? null).slice(0, 80));
+}
+
 function cleanup() {
   const emails = [EMMA, helperEmail(1), helperEmail(2)];
   for (const e of emails.slice(1)) if (!HELPER_RE.test(e)) throw new Error(`refusing to clean up ${e}`);
@@ -171,5 +217,9 @@ if (cmd === "setup") await setup();
 else if (cmd === "decline-emma") await declineEmma();
 else if (cmd === "cancel-booking") await cancelBooking();
 else if (cmd === "check") checkStep(arg);
+else if (cmd === "helpers") await createHelpers();
+else if (cmd === "posted") await posted();
+else if (cmd === "edited") edited();
+else if (cmd === "chat-sent") await chatSent();
 else if (cmd === "cleanup") cleanup();
-else throw new Error("setup | decline-emma | cancel-booking | check <step> | cleanup");
+else throw new Error("setup | decline-emma | cancel-booking | check <step> | helpers | posted | edited | chat-sent | cleanup");
