@@ -10,7 +10,7 @@ jest.mock("expo-router", () => ({ router: { push: jest.fn(), replace: (...a: unk
 jest.mock("../lib/session", () => ({ useSession: () => ({ status: "signed-in", session: { user: { id: "me" } } }) }));
 jest.mock("../lib/online", () => ({ useOnline: () => true }));
 jest.mock("../lib/gameActions", () => ({ ...jest.requireActual("../lib/gameActions"), GAME_WRITES_AVAILABLE: true }));
-jest.mock("../lib/postGame", () => ({ ...jest.requireActual("../lib/postGame"), usePostGame: jest.fn() }));
+jest.mock("../lib/postGame", () => ({ ...jest.requireActual("../lib/postGame"), usePostGame: jest.fn(), POST_TOKEN_AVAILABLE: true }));
 
 import type { ReactNode } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
@@ -43,12 +43,12 @@ const show = async (ui: ReactNode, qc = client()) =>
   await render(<SafeAreaProvider initialMetrics={metrics}><QueryClientProvider client={qc}>{ui}</QueryClientProvider></SafeAreaProvider>);
 
 /** usePostGame backed by a fake post_match: real postGame (single flight, outcomes), fake RPC. */
-function fakePost(rpc: jest.Mock) {
+function fakePost(rpc: jest.Mock, lookup: () => Promise<string | null> = async () => null) {
   const real = jest.requireActual("../lib/postGame") as typeof postGameLib;
   (postGameLib.usePostGame as jest.Mock).mockImplementation(() => {
     const qc = new QueryClient();
     return {
-      post: (args: Parameters<typeof real.postGame>[1]) => real.postGame(qc, args, { available: true, rpc, lookup: async () => null }),
+      post: (args: Parameters<typeof real.postGame>[1]) => real.postGame(qc, args, { available: true, rpc, lookup }),
       check: jest.fn(async () => ({ kind: "none" })),
       busy: false,
     };
@@ -133,6 +133,23 @@ describe("Post a game", () => {
     await fireEvent.press(screen.getByTestId("post-submit"));
     expect(await screen.findByText("You already have 10 open games. Close one to post another.")).toBeTruthy();
     expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("with 0073: a lost answer the check can't settle offers Try again, which re-posts with the same key", async () => {
+    const rpc = jest.fn()
+      .mockImplementationOnce(async () => { throw new TypeError("Network request failed"); })
+      .mockImplementationOnce(async () => ({ data: "g-1", error: null }));
+    fakePost(rpc, async () => { throw new TypeError("Network request failed"); });
+    await show(<PostGame />);
+    await fireEvent.press(screen.getByText("No booking — choose a time"));
+    await chooseTime();
+    await fireEvent.press(screen.getByTestId("post-submit"));
+    expect(await screen.findByText("We couldn't confirm whether your game was posted. Check again before posting.")).toBeTruthy();
+    await fireEvent.press(screen.getByTestId("post-retry"));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith({ pathname: "/game/[id]", params: { id: "g-1" } }));
+    const keys = rpc.mock.calls.map((c) => (c[1] as { p_token?: string }).p_token);
+    expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(keys[1]).toBe(keys[0]);
   });
 
   it("Post stays off until the time is chosen", async () => {

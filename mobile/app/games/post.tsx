@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { Text } from "../../components/Text";
@@ -15,9 +15,10 @@ import { bookingDays, sportName } from "../../lib/days";
 import { durationLabel } from "../../lib/courts";
 import { GAME_WRITES_AVAILABLE } from "../../lib/gameActions";
 import {
-  bookingLine, DURATIONS, initialDraft, MAX_PLAYERS, missing, NOTE_MAX, POST_DAYS, postArgs, startTimes, usePostBookings, usePostClubs, usePostGame,
+  bookingLine, DURATIONS, initialDraft, POST_TOKEN_AVAILABLE, MAX_PLAYERS, missing, NOTE_MAX, POST_DAYS, postArgs, startTimes, usePostBookings, usePostClubs, usePostGame,
   type PostBooking, type PostClub, type PostDraft,
 } from "../../lib/postGame";
+import { newMessageId as newKey } from "../../lib/chat";
 import { color, space } from "../../lib/theme";
 
 const playersUnit = (n: number) => (n === 1 ? "player needed" : "players needed");
@@ -40,6 +41,8 @@ export default function PostGame() {
   const [pending, setPending] = useState<{ args: ReturnType<typeof postArgs>; since: Date } | null>(null);
   const [checking, setChecking] = useState(false);
   const { post, check, busy } = usePostGame();
+  // one key for this visit (0073): every retry of the post sends it, so the server returns one game
+  const key = useRef(newKey());
   const set = (p: Partial<PostDraft>) => { setD((x) => ({ ...x, ...p })); setProblem(null); };
 
   const usable = useMemo(() => (bookings.data ?? []).filter((b) => !b.gameId), [bookings.data]);
@@ -78,9 +81,10 @@ export default function PostGame() {
 
   const why = missing(d);
   const where = booking?.clubName ?? club?.name;
-  const submit = async () => {
-    if (why || busy || pending) return;
-    const args = postArgs(d, club, booking);
+  const submit = async (retry = false) => {
+    if (why || busy || (pending && !retry)) return;
+    if (retry) setPending(null);
+    const args = postArgs(d, club, booking, POST_TOKEN_AVAILABLE ? key.current : undefined);
     const out = await post(args);
     if (out.kind === "done") { router.replace({ pathname: "/game/[id]", params: { id: out.gameId } }); return; }
     if (out.kind === "existing") { router.replace({ pathname: "/game/[id]", params: { id: out.gameId } }); return; }
@@ -156,7 +160,10 @@ export default function PostGame() {
         <View style={styles.footer}>
           {where && !why ? <Text variant="secondary" testID="post-review">Your game will appear on Find a game for players at {where}.</Text> : null}
           {problem ? <Text style={styles.problem} accessibilityRole="alert" accessibilityLiveRegion="polite" testID="post-problem">{problem}</Text> : null}
-          {pending ? (
+          {pending && POST_TOKEN_AVAILABLE ? (
+            // with the key a retry cannot make a second game: posting again is the check
+            <Button label="Try again" busy={busy} disabled={!online} onPress={() => void submit(true)} testID="post-retry" />
+          ) : pending ? (
             <Button label="Check again" variant="secondary" busy={checking} onPress={() => void checkAgain()} testID="post-check" />
           ) : (
             <Button label="Post game" busy={busy} disabled={!!why || !online} onPress={() => void submit()} testID="post-submit" />

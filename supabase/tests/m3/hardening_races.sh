@@ -20,7 +20,10 @@ gid() { printf 'f2000000-0000-4000-8000-%012d' "$1"; }
 
 setup() {   # $1 = migration file to apply on a fresh copy
   $PSQL -q -d postgres -c "drop database if exists $DB" -c "create database $DB template $SRC" >/dev/null || exit 2
+  # these races are 0072's: its 10-argument post_match, without 0073's key overload
+  $PSQL -X -q -d $DB -c "drop function if exists post_match(uuid, sport, timestamptz, timestamptz, int, int, int, text, uuid, text, uuid)" >/dev/null
   $PSQL -X -q -d $DB -v ON_ERROR_STOP=1 -1 -f "$1" >/dev/null 2>&1 || { echo "cannot apply $1"; exit 2; }
+  $PSQL -X -q -d $DB -c "grant execute on function post_match(uuid, sport, timestamptz, timestamptz, int, int, int, text, uuid, text) to authenticated" >/dev/null
   $PSQL -X -q -d $DB -v ON_ERROR_STOP=1 >/dev/null <<SQL
 insert into auth.users (id, email) values ('$R1','r1@race.test'), ('$R2','r2@race.test'), ('$R3','r3@race.test'), ('$R4','r4@race.test');
 insert into matches (id, club_id, sport, organizer_id, start_at, players_needed, join_mode)

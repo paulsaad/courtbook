@@ -2,8 +2,12 @@
 -- one transaction that is rolled back. psql variable :mig is the migration file under test.
 \set ON_ERROR_STOP 1
 begin;
+-- 0073 (post_match key) replaces post_match with an 11-argument version; these tests are 0072's, so
+-- they run on 0072's post_match exactly as written (rolled back with everything else)
+drop function if exists post_match(uuid, sport, timestamptz, timestamptz, int, int, int, text, uuid, text, uuid);
 \i :mig
 \i :mig
+grant execute on function post_match(uuid, sport, timestamptz, timestamptz, int, int, int, text, uuid, text) to authenticated;
 create temp table t (id text, pass boolean, detail text);
 insert into t values ('T-H0 the migration applies twice without error', true, '');
 

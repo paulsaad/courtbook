@@ -23,6 +23,13 @@ import type { JoinMode } from "./gameTypes";
  *  B. without a booking: club, sport, day, start time and length (60 / 90 / 120 min).
  */
 
+/**
+ * 0073 (post_match idempotency key) applied: the app sends one key per post (p_token) and a retry with
+ * the same key returns the same game. OFF until 0073 is approved and applied (the server would not
+ * know the argument); until then a lost answer is resolved by the lookup below.
+ */
+export const POST_TOKEN_AVAILABLE = false;
+
 export const DURATIONS = [60, 90, 120] as const;
 export const MAX_PLAYERS = 30;
 export const NOTE_MAX = 300;
@@ -144,11 +151,12 @@ export function missing(d: PostDraft): string | null {
 }
 
 /** post_match's arguments, in its own names. Pure, so both paths are unit-tested. */
-export function postArgs(d: PostDraft, club: Pick<PostClub, "timezone"> | null, booking: Pick<PostBooking, "sport"> | null) {
+export function postArgs(d: PostDraft, club: Pick<PostClub, "timezone"> | null, booking: Pick<PostBooking, "sport"> | null, token?: string) {
   const note = d.note.trim();
   const common = {
     p_level_min: d.levelMin, p_level_max: d.levelMax, p_players_needed: d.playersNeeded,
     p_note: note === "" ? null : note, p_join_mode: d.joinMode,
+    ...(token ? { p_token: token } : {}),
   };
   if (d.bookingId) {
     // the server takes club, start and end from the booking; the sport must be the court's
@@ -160,7 +168,7 @@ export function postArgs(d: PostDraft, club: Pick<PostClub, "timezone"> | null, 
     p_booking: null, ...common,
   };
 }
-export const POST_ARG_NAMES = ["p_club", "p_sport", "p_start", "p_end", "p_level_min", "p_level_max", "p_players_needed", "p_note", "p_booking", "p_join_mode"] as const;
+export const POST_ARG_NAMES = ["p_club", "p_sport", "p_start", "p_end", "p_level_min", "p_level_max", "p_players_needed", "p_note", "p_booking", "p_join_mode", "p_token"] as const;
 
 /**
  * done       — posted (or found already posted after a lost answer: `recovered`).

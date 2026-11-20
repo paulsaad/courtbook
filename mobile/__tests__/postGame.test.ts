@@ -20,7 +20,7 @@ const netErr = { message: "TypeError: Network request failed" };
 describe("post_match arguments", () => {
   it("without a booking: club, sport, club-time start, end after the chosen length (Beirut is UTC+2 in November)", () => {
     const a = postArgs(draftB({ minutes: 120, note: "  bring balls  " }), club, null);
-    expect(Object.keys(a).sort()).toEqual([...POST_ARG_NAMES].sort());
+    expect(Object.keys(a).sort()).toEqual(POST_ARG_NAMES.filter((n) => n !== "p_token").sort());
     expect(a).toMatchObject({ p_club: "c1", p_sport: "padel", p_start: "2026-11-25T16:00:00.000Z", p_end: "2026-11-25T18:00:00.000Z", p_booking: null, p_note: "bring balls", p_players_needed: 3 });
   });
   it.each(["open", "approval"] as const)("join mode %s is sent as chosen", (mode) => {
@@ -29,6 +29,11 @@ describe("post_match arguments", () => {
   it("from a booking: only the booking, the court's sport and the game's own choices; the server takes club and time", () => {
     const a = postArgs({ ...initialDraft("b1"), levelMin: 4, levelMax: 6, joinMode: "approval" }, null, { sport: "tennis" });
     expect(a).toEqual({ p_club: null, p_sport: "tennis", p_start: null, p_end: null, p_booking: "b1", p_level_min: 4, p_level_max: 6, p_players_needed: 1, p_note: null, p_join_mode: "approval" });
+  });
+  it("with 0073 the post carries its key; without, the arguments are the website's ten", () => {
+    expect(postArgs(draftB(), club, null, "k-1")).toMatchObject({ p_token: "k-1" });
+    expect(postArgs(draftB(), club, null)).not.toHaveProperty("p_token");
+    expect(Object.keys(postArgs(draftB(), club, null))).toHaveLength(10);
   });
   it("defaults are the website's: 1 player from a booking, 3 otherwise, join straight away, all levels", () => {
     expect(initialDraft("b1")).toMatchObject({ playersNeeded: 1, joinMode: "open", levelMin: null, levelMax: null });
