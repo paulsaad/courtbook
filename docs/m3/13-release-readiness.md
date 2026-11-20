@@ -21,8 +21,10 @@ safety (report, block, rules, suspension, moderation) and Help & Feedback. Every
 ## Still necessary before public release
 
 1. **Staging website check** of the `m3-dev` preview, because merging deploys the production website.
-2. **Live database:** 0067 → 0072 → 0073 → 0074 → 0075, each preflight, apply, postcheck; live
-   moderator account confirmed before 0074. Each needs its own approval.
+2. **Live database**, each step with its own approval and read-only checks before and after:
+   release fixes 0068 → 0069 → 0070 (only after reviewing the live clubs report) → 0071 if still not on
+   live (the 0072 preflight requires them), then 0067 → 0072 → 0073 → 0074 → 0075, with a live
+   moderator account confirmed before 0074.
 3. **Turn game features on for live:** today game actions and chat run only against staging
    (`gameWritesFor`). A small code change after step 2, then live app updates (fingerprint-checked).
 4. **Merge `m3-dev` → `main`** (production website) after steps 1–2.
@@ -35,3 +37,17 @@ safety (report, block, rules, suspension, moderation) and Help & Feedback. Every
 
 Push and email (delivery milestone; in-app notices only, as decided) · email to the moderator per report
 · admin removing a player from a game · chat design review · duplicate staging account `966f79cf`.
+
+## Recommended order from here
+
+1. **Staging website check** (Paul, browser, `m3-dev` preview): play board and game page (join, leave,
+   organiser actions, court cancelled), chat (new rules text, blocked sender), refusals, Admin → Reports;
+   plus the 7 release-fix web checks still listed in the release-fixes doc. The automated staging
+   `smoke` and `api` actions run alongside.
+2. **Live readiness check (read only):** release-fixes preflight on live to learn exactly what live has;
+   a live database backup confirmed.
+3. **Live migrations** in the order above, one approval per step, outside desk hours.
+4. **Code switch for live game features**, then **merge to `main`** (production website) and the live
+   app updates (Android and iOS), each approved.
+5. **Store items** in parallel: moderator and review frequency, 180-day evidence clearing (small job to
+   build), filter decision, final privacy policy and terms, accessibility check.
