@@ -5,6 +5,7 @@
 #   create <player> <a> <b>   two games at the demo club, no court booked, tagged "[M3 TEST]":
 #                         G1 open game organised by account <a> — <player> can join it
 #                         G2 approval game organised by <player>, with <a> and <b> waiting
+#   shared <player> <helper>  ONE open game by <helper> with <player> in it and one message from <helper>
 #   cleanup [ids...]    removes the "[M3 TEST]" games (with their players, messages and notices); given
 #                       the recorded ids, removes nothing unless the tagged games are exactly those
 #
@@ -77,6 +78,43 @@ SQL
                        (select count(*) from notifications n where n.match_id = m.id) || ' notice(s)'
                  from matches m where m.note like '$TAG%' order by m.start_at"
   ;;
+shared)
+  # One shared game for both phones (block / unblock check): an open game organised by <helper>, with
+  # <player> already in it and one chat message from <helper> to report or block. Made through the real
+  # functions acting as each account; the helper accepts the community rules first (test account).
+  player="${2:-}"; helper="${3:-}"
+  for v in "$player" "$helper"; do [[ "$v" =~ ^[0-9a-f]{8}$ ]] || { echo "give two account ids (8 hex characters each)"; exit 1; }; done
+  [ "$player" != "$helper" ] || { echo "two different accounts needed"; exit 1; }
+  q <<SQL
+begin;
+do \$\$
+declare
+  me uuid; h uuid; club uuid; g uuid;
+  d timestamptz := (date_trunc('day', now() at time zone 'Asia/Beirut') + interval '2 days 18 hours') at time zone 'Asia/Beirut';
+begin
+  if exists (select 1 from matches where note like '$TAG%' and status <> 'cancelled') then
+    raise exception 'test games already exist: run cleanup first';
+  end if;
+  select id into strict me from auth.users where left(id::text, 8) = '$player';
+  select id into strict h from auth.users where left(id::text, 8) = '$helper';
+  select id into strict club from clubs where slug = 'batroun' and is_demo;
+  perform set_config('request.jwt.claim.sub', h::text, true), set_config('request.jwt.claims', json_build_object('sub', h, 'role', 'authenticated')::text, true);
+  perform accept_community_rules();
+  g := post_match(club, 'padel', d, d + interval '90 minutes', null, null, 3, '$TAG Shared game: chat, report and block', null, 'open');
+  perform set_config('request.jwt.claim.sub', me::text, true), set_config('request.jwt.claims', json_build_object('sub', me, 'role', 'authenticated')::text, true);
+  perform join_match(g);
+  perform set_config('request.jwt.claim.sub', h::text, true), set_config('request.jwt.claims', json_build_object('sub', h, 'role', 'authenticated')::text, true);
+  insert into match_messages (match_id, profile_id, body) values (g, h, 'Hi! Test message from the other player.');
+  perform set_config('request.jwt.claim.sub', '', true), set_config('request.jwt.claims', '', true);
+  raise notice 'shared game  %  % (Beirut)  organiser %  player % (in the game)', g, to_char(d at time zone 'Asia/Beirut', 'Dy DD Mon HH24:MI'), left(h::text, 8), left(me::text, 8);
+end \$\$;
+commit;
+SQL
+  q -F ' | ' -c "select m.id, m.status, to_char(m.start_at at time zone 'Asia/Beirut', 'Dy DD Mon HH24:MI'),
+                       (select count(*) from match_players mp where mp.match_id = m.id and mp.status = 'accepted') || ' accepted',
+                       (select count(*) from match_messages x where x.match_id = m.id) || ' message(s)'
+                 from matches m where m.note like '$TAG%' order by m.start_at"
+  ;;
 cleanup)
   # Optional: the exact game ids expected (from the record). If given, nothing is removed unless the
   # tagged games are exactly those.
@@ -105,5 +143,5 @@ select count(*) || ' tagged game(s) left' from matches where note like '$TAG%';
 commit;
 SQL
   ;;
-*) echo "accounts | create <player> | cleanup"; exit 1 ;;
+*) echo "accounts | create <player> <a> <b> | shared <player> <helper> | cleanup"; exit 1 ;;
 esac

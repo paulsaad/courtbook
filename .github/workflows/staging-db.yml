@@ -19,14 +19,14 @@ on:
       action:
         description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else); m3_0067_preflight / m3_0067_postcheck and m3_0072_preflight / m3_0072_postcheck, m3_0073_*, m3_0074_* and m3_0075_* = read-only checks before / after applying 0067 0072, 0073 or 0074 (supabase/live/00xx_*.sql)"
         type: choice
-        options: [check, apply, smoke, api, reset_demo, tester, demo_at_desk, m3_0067_preflight, m3_0067_postcheck, m3_0072_preflight, m3_0072_postcheck, m3_0073_preflight, m3_0073_postcheck, m3_0074_preflight, m3_0074_postcheck, m3_0075_preflight, m3_0075_postcheck, m3_accounts, m3_test_games, m3_test_games_cleanup, m3_moderator_check, m3_moderator_grant]
+        options: [check, apply, smoke, api, reset_demo, tester, demo_at_desk, m3_0067_preflight, m3_0067_postcheck, m3_0072_preflight, m3_0072_postcheck, m3_0073_preflight, m3_0073_postcheck, m3_0074_preflight, m3_0074_postcheck, m3_0075_preflight, m3_0075_postcheck, m3_accounts, m3_test_games, m3_test_games_shared, m3_test_games_cleanup, m3_moderator_check, m3_moderator_grant]
         default: check
       migrations:
         description: "apply only: the exact migration numbers to apply, e.g. '0068 0069 0070 0071' — nothing else is applied; 'check' lists what is pending"
         type: string
         default: ""
       accounts:
-        description: "m3_moderator_grant: one account id (first 8 characters, from m3_accounts). m3_test_games: three account ids (first 8 characters, from m3_accounts): your player, then two other accounts. m3_test_games_cleanup: the recorded game ids (full), so nothing else can be removed"
+        description: "m3_moderator_grant: one account id (first 8 characters, from m3_accounts). m3_test_games_shared: your account, then the other player (8 characters each). m3_test_games: three account ids (first 8 characters, from m3_accounts): your player, then two other accounts. m3_test_games_cleanup: the recorded game ids (full), so nothing else can be removed"
         type: string
         default: ""
       confirm_ref:
@@ -229,6 +229,11 @@ jobs:
         env:
           ACCOUNTS: ${{ inputs.accounts }}
         run: bash supabase/staging/m3_test_games.sh create $ACCOUNTS
+      - name: One shared temporary test game (m3_test_games_shared)
+        if: inputs.action == 'm3_test_games_shared'
+        env:
+          ACCOUNTS: ${{ inputs.accounts }}
+        run: bash supabase/staging/m3_test_games.sh shared $ACCOUNTS
       - name: Remove the temporary M3 test games (m3_test_games_cleanup)
         if: inputs.action == 'm3_test_games_cleanup'
         env:
