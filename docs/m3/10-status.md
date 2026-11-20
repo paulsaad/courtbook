@@ -270,3 +270,10 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
 - Blocking after a report in Help & Feedback now uses the same confirmation as chat (`confirmBlock`).
 - **0075 candidate** (applied nowhere): `admin_blocks_received` — the Reports page shows "blocked by N
   players" (§5.6 reported player's history). Additive; pack `supabase/live/0075_*`; `history_0075.sh` 4/4.
+
+## Round 12 (20 Nov) — 0075 on staging; release readiness
+
+- 0075 on staging (Paul's approval): preflight run 44789807477 2/2 true; apply run 44789928661 "applied 1
+  migration(s)" (75 on staging); postcheck run 44790111845 2/2 true; moderator check run 44790215077:
+  `admin_blocks_received` answers for `02111629`, refuses a player.
+- Release readiness: `13-release-readiness.md`.
