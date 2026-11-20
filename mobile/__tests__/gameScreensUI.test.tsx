@@ -301,7 +301,7 @@ import { gameKeys } from "../lib/games";
 import { DEFAULT_FILTERS } from "../lib/gameFilters";
 
 describe("emulator screenshot route (test builds only)", () => {
-  it("is off outside the emulator test build", () => expect(E2E_SCREENS).toBe(false));
+  it("is on only in the emulator test build (EXPO_PUBLIC_E2E=1)", () => expect(E2E_SCREENS).toBe(process.env.EXPO_PUBLIC_E2E === "1"));
   it("holds the sample answers fresh, so the screens make no call", () => {
     const qc = e2eClient("board", "A", "me");
     expect(qc.getQueryData(gameKeys.board(DEFAULT_FILTERS))).toBe(E2E_BOARD);
