@@ -67,6 +67,12 @@ print('on screen at failure:', [x for n in nodes for x in re.findall(r'(?:text|c
   { step m3-act-ask && m3 check asked && m3 decline-emma && step m3-act-declined && m3 check declined; } || status=1
   { step m3-act-join-leave && m3 check left; } || status=1
   { step m3-act-organiser && m3 check decided && m3 cancel-booking && m3 check court-lost && step m3-act-court && m3 check resolved; } || status=1
+  # Large text after the line-spacing fix: the sample states A and E at x2.0 on a 360dp screen.
+  adb shell wm size 1080x1920; adb shell wm density 480; adb shell settings put system font_scale 2.0
+  for st in A E; do
+    (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=360dp-text2.0" -e "STATE=$st" ../flows/m3-detail.yaml) || { echo "::error::large text $st"; status=1; }
+  done
+  adb shell settings put system font_scale 1.0; adb shell wm size reset; adb shell wm density reset
   adb logcat -d -v brief ReactNativeJS:V AndroidRuntime:E '*:F' '*:S' | tail -200 > "$OUT/logcat.txt"
   m3 cleanup || true
   [ $status = 0 ] && echo "M3 game actions on staging: every step passed" || echo "::error::M3 game actions: a step failed (see above)"

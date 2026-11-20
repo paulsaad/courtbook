@@ -233,7 +233,7 @@ function ActionBar({ actions, spots, onPrimary, onSecondary, busy, bottom }: {
         ) : null}
         {actions.primary && onPrimary ? (
           <View style={{ flex: 1, minWidth: 180 }}>
-            <Button label={actions.primary.label} busy={busy?.(actions.primary.kind)} onPress={onPrimary} />
+            <Button testID="game-primary" label={actions.primary.label} busy={busy?.(actions.primary.kind)} onPress={onPrimary} />
           </View>
         ) : actions.notice ? (
           <View style={styles.notice} testID="action-notice">

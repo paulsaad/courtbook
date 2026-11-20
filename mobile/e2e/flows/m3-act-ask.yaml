@@ -5,7 +5,7 @@ appId: app.courtbook.mobile.staging
 - extendedWaitUntil: { visible: { id: "game-detail" }, timeout: 30000 }
 - extendedWaitUntil: { visible: "Ask to join", timeout: 20000 }
 - takeScreenshot: shots/m3act/1-game-A-before
-- tapOn: "Ask to join"
+- tapOn: { id: "game-primary" }
 - extendedWaitUntil: { visible: "Before you go ahead", timeout: 10000 }
 - tapOn: { id: "android:id/button1" }
 - extendedWaitUntil: { visible: "Withdraw request", timeout: 20000 }
