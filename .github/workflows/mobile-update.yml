@@ -20,9 +20,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "What to do"
+        description: "What to do (check = every publish gate — database wiring, typecheck, tests, native fingerprint — and nothing is published)"
         type: choice
-        options: ["publish", "rollback-to-previous", "rollback-to-built-in"]
+        options: ["publish", "check", "rollback-to-previous", "rollback-to-built-in"]
         default: "publish"
       app:
         description: "Which app: live (CourtBook, channel preview) or staging (CourtBook Staging, channel staging)"
@@ -99,7 +99,7 @@ jobs:
         run: bash ../.github/scripts/eas-app-env.sh "${{ inputs.app }}"
 
       - name: Checks (publish only)
-        if: inputs.action == 'publish'
+        if: (inputs.action == 'publish' || inputs.action == 'check')
         run: |
           npm run typecheck
           npm test -- --ci
@@ -110,7 +110,7 @@ jobs:
       # version. It refuses to publish unless a finished preview build exists whose native
       # fingerprint is identical to this code's.
       - name: Native fingerprint must match an installed build (publish only)
-        if: inputs.action == 'publish'
+        if: (inputs.action == 'publish' || inputs.action == 'check')
         run: |
           platforms=$([ "$PLATFORM" = "all" ] && echo "ios android" || echo "$PLATFORM")
           for p in $platforms; do
@@ -138,7 +138,7 @@ jobs:
           done
 
       - name: Keep the fingerprint comparison (when the gate refused)
-        if: failure() && inputs.action == 'publish'
+        if: failure() && (inputs.action == 'publish' || inputs.action == 'check')
         uses: actions/upload-artifact@v4
         with:
           name: fingerprint-compare
