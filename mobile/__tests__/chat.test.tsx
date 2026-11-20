@@ -3,6 +3,8 @@
  * can never be doubled (phone-made id; the copy hits the primary key), refusals are explained, and
  * the screen only lets members write — and only while the game takes messages.
  */
+// the first test renders the whole chat screen cold; on a busy CI runner that can pass 5 s
+jest.setTimeout(20_000);
 jest.mock("../lib/supabase", () => ({ supabase: { rpc: jest.fn(), from: jest.fn(), auth: { onAuthStateChange: jest.fn(() => ({ data: { subscription: { unsubscribe: jest.fn() } } })) } } }));
 const mockParams = { current: { id: "m1" } as Record<string, string> };
 const mockBack = jest.fn();
