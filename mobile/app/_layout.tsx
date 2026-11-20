@@ -73,6 +73,7 @@ function RootLayout() {
               <Stack.Screen name="games/index" options={{ title: "" }} />
               <Stack.Screen name="games/post" options={{ title: "Post a game" }} />
               <Stack.Screen name="games/edit" options={{ title: "Edit game" }} />
+              <Stack.Screen name="chat/[id]" options={{ title: "Chat" }} />
               <Stack.Screen name="game/[id]" options={{ title: "Game" }} />
               <Stack.Screen name="match/[id]" options={{ title: "Game" }} />
               <Stack.Screen name="activity" options={{ title: "Activity" }} />

@@ -118,7 +118,8 @@ export function detailSections(d: GameDetail, people: ParticipantRow[] | undefin
 }
 
 /** What the switches are today. Each turns on in the change that ships its stage. */
-export const SCREEN_FEATURES: Omit<DetailOptions, "now"> = { writes: GAME_WRITES_AVAILABLE, chat: false, report: false };
+/** Writes and chat: on where 0072 is applied (staging). Report needs M3-S (not applied). */
+export const SCREEN_FEATURES: Omit<DetailOptions, "now"> = { writes: GAME_WRITES_AVAILABLE, chat: GAME_WRITES_AVAILABLE, report: false };
 
 /** Game screen: load state, sections and actions for one game id. */
 export function useGameScreen(id: string | undefined, { signedIn }: { signedIn: boolean }) {

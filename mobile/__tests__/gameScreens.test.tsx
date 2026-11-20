@@ -46,7 +46,7 @@ describe("section order follows §4.4", () => {
 
 describe("stage 1 is read-only (§7.2)", () => {
   it("is what the switches say today", () => {
-    expect(SCREEN_FEATURES).toEqual({ writes: GAME_WRITES_AVAILABLE, chat: false, report: false });
+    expect(SCREEN_FEATURES).toEqual({ writes: GAME_WRITES_AVAILABLE, chat: GAME_WRITES_AVAILABLE, report: false });
   });
   it("a stranger sees the joining sentence instead of a button", () => {
     const a = pick(detailSections(g({}), [], STAGE1), "actions")!;

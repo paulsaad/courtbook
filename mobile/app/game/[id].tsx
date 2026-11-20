@@ -82,6 +82,7 @@ export default function GameScreen() {
       : key === "join" || key === "ask" ? screen.actions.busy({ kind: "join" }) : false;
     handlers.onPrimary = async () => {
       if (v?.kind !== "actions" || !v.primary) return;
+      if (v.primary.kind === "chat") { router.push({ pathname: "/chat/[id]", params: { id: d.match_id } }); return; }
       if (v.primary.kind === "join" || v.primary.kind === "ask") {
         if (await confirmAll(v.joinConfirm, v.primary.label)) await run({ kind: "join" });
       }
