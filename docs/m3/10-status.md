@@ -258,3 +258,8 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
   senders); apply run 44773756013 "applied 1 migration(s)" (74 on staging); postcheck run 44773905030
   40/40 true; moderator check run 44773997558: admin_reports answers for `02111629`, a player is refused.
 - Open question recorded: `12-staging-duplicate-account.md`.
+- **Preview on the wrong database (found and fixed, 20 Nov):** Vercel's `NEXT_PUBLIC_SUPABASE_URL` and
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY` were one setting for "Production and Preview", so every preview used live.
+  Added the three Supabase variables for Preview branch `m3-dev` only (staging values; production unchanged),
+  redeployed (`4e63143`). Checked in the preview: its code references staging only; its key belongs to
+  staging; staging answers for `admin_reports` (exists, refuses anonymous callers).
