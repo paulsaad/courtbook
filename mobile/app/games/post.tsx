@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { Text } from "../../components/Text";
+import { KeyboardAware } from "../../components/KeyboardAware";
 import { Button } from "../../components/Button";
 import { Chip } from "../../components/Chip";
 import { DateStrip } from "../../components/DateStrip";
@@ -98,7 +99,7 @@ export default function PostGame() {
   };
 
   return page(
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAware>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" testID="post-game">
         {usable.length > 0 || booking ? (
           <Field label="Court" hint={booking ? "Club, sport and time come from your booking." : null}>
@@ -163,7 +164,7 @@ export default function PostGame() {
           {!pending && (why || !online) ? <Text variant="secondary">{!online ? "You're offline. Connect to post a game." : why}</Text> : null}
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>,
+    </KeyboardAware>,
   );
 }
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { Text } from "../../components/Text";
+import { KeyboardAware } from "../../components/KeyboardAware";
 import { Button } from "../../components/Button";
 import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { SignInPrompt } from "../../components/SignInPrompt";
@@ -63,7 +64,7 @@ export default function EditGame() {
   };
 
   return page(
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAware>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" testID="edit-game">
         <Text variant="secondary" testID="edit-summary">{(() => { const w = gameWhen(d.start_at, d.end_at, d.club_timezone ?? undefined); return [sportName(d.sport), w.day, w.time, d.club_name].filter(Boolean).join(" · "); })()}</Text>
         <Field label="Players needed" hint={lim.minPlayers > 1 ? `Not counting you. ${d.joined} already in, so at least ${lim.minPlayers}.` : "Not counting you."}>
@@ -78,7 +79,7 @@ export default function EditGame() {
           {!online ? <Text variant="secondary">You're offline. Connect to save changes.</Text> : null}
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>,
+    </KeyboardAware>,
   );
 }
 

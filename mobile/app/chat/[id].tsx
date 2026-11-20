@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { Alert, FlatList, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { hhmm } from "@shared/time";
 import { Text } from "../../components/Text";
+import { KeyboardAware } from "../../components/KeyboardAware";
 import { Icon } from "../../components/Icon";
 import { Button } from "../../components/Button";
 import { Empty, ErrorState, Loading } from "../../components/StateView";
@@ -151,7 +152,7 @@ export default function Chat() {
   })();
 
   return page(
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}>
+    <KeyboardAware>
       {body ?? (
         <View style={{ flex: 1 }}>
           <FlatList
@@ -226,7 +227,7 @@ export default function Chat() {
                       onAgree={async () => { const f = await acceptRules(); if (!f) { setRulesOpen(false); void send(true); } return f?.message ?? null; }} />
         </>
       ) : null}
-    </KeyboardAvoidingView>,
+    </KeyboardAware>,
   );
 }
 
