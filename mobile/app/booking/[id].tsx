@@ -16,6 +16,7 @@ import { money } from "../../lib/queries";
 import { durationLabel } from "../../lib/courts";
 import { sportName } from "../../lib/days";
 import { useCancellation } from "../../lib/cancel";
+import { GAME_WRITES_AVAILABLE } from "../../lib/gameActions";
 import { color, font, radius, space } from "../../lib/theme";
 
 /**
@@ -119,6 +120,10 @@ export default function Booking() {
         {isNew && <Button label="See it in Bookings" onPress={() => router.dismissTo("/bookings")} />}
         {upcoming && b.club.location_url && (
           <Button label="Directions" variant="secondary" onPress={() => void Linking.openURL(b.club.location_url!)} />
+        )}
+        {GAME_WRITES_AVAILABLE && b.status === "confirmed" && Date.parse(b.start_at) > Date.now() && (
+          // J6 path A: open this booking to other players (the game screen handles an already-posted booking)
+          <Button label="Find players" variant="secondary" onPress={() => router.push({ pathname: "/games/post", params: { booking: b.id } })} testID="find-players" />
         )}
         {isNew && <Button label="Done" variant="quiet" onPress={() => router.dismissTo("/courts")} />}
       </View>

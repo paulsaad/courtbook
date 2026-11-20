@@ -3,17 +3,20 @@
 import { useEffect, useRef, useState } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
+import { COMMUNITY_RULES, COMMUNITY_RULES_TITLE, friendlyError } from "@/lib/types";
 
-type Msg = { id: string; profile_id: string; name: string | null; body: string; created_at: string; deleted?: boolean };
+type Msg = { id: string; profile_id: string; name: string | null; body: string; created_at: string; deleted?: boolean; /** M3-S: the reader blocked the sender (text withheld) */ blocked?: boolean };
 
 // what the thread looks like right now, so we only re-render when it really changed
-const signature = (rows: Msg[]) => rows.map((r) => `${r.id}:${r.deleted ? 1 : 0}`).join(",");
+const signature = (rows: Msg[]) => rows.map((r) => `${r.id}:${r.deleted ? 1 : 0}${r.blocked ? 1 : 0}`).join(",");
 
 export default function MatchChat({ matchId, meId, tz, initial, finished, hidden }: { matchId: string; meId: string; tz: string; initial: Msg[]; finished: boolean; hidden: boolean }) {
   const [gone, setGone] = useState(hidden);
   const [msgs, setMsgs] = useState<Msg[]>(initial);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [rules, setRules] = useState(false);   // M3-S: shown when the server asks for the rules first
   const bottom = useRef<HTMLDivElement>(null);
 
   // poll the whole thread every 5 s, not just what is newer: a message deleted further up
@@ -40,15 +43,29 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
     if (!error) { setGone(true); setMsgs([]); }
   }
 
-  async function send(e: React.FormEvent) {
-    e.preventDefault();
+  async function send(e?: React.FormEvent) {
+    e?.preventDefault();
     const body = text.trim();
     if (!body) return;
-    setBusy(true);
+    setBusy(true); setError(null);
     const supabase = createClient();
     const { data, error } = await supabase.from("match_messages").insert({ match_id: matchId, profile_id: meId, body }).select("id, profile_id, body, created_at").single();
     setBusy(false);
-    if (!error && data) { setMsgs((cur) => [...cur, { ...data, name: "You" }]); setText(""); fetch("/api/notify/email", { method: "POST" }).catch(() => {}); }
+    if (error) {
+      // the text stays in the box; the rules are asked for once, then the same message is sent
+      if (error.message?.includes("rules_not_accepted")) setRules(true);
+      else setError(friendlyError(error.message));
+      return;
+    }
+    if (data) { setMsgs((cur) => [...cur, { ...data, name: "You" }]); setText(""); fetch("/api/notify/email", { method: "POST" }).catch(() => {}); }
+  }
+  async function acceptRules() {
+    setBusy(true); setError(null);
+    const { error } = await createClient().rpc("accept_community_rules");
+    setBusy(false);
+    if (error) { setError(friendlyError(error.message)); return; }
+    setRules(false);
+    await send();
   }
 
   if (gone) return (
@@ -67,14 +84,25 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
         {msgs.length === 0 && <p className="text-muted">No messages yet. Agree on balls, who brings what, where to meet.</p>}
         {msgs.map((x) => (
           <div key={x.id} className={`group max-w-[85%] rounded-2xl px-3 py-2 ${x.deleted ? "self-start border border-dashed border-grid bg-white text-muted" : x.profile_id === meId ? "self-end bg-turf text-white" : "self-start bg-paper"}`}>
-            {x.profile_id !== meId && !x.deleted && <div className="text-xs font-medium opacity-70">{x.name ?? "Player"}</div>}
-            {x.deleted ? <div className="text-xs italic">Message deleted</div> : <div>{x.body}</div>}
+            {x.profile_id !== meId && !x.deleted && !x.blocked && <div className="text-xs font-medium opacity-70">{x.name ?? "Player"}</div>}
+            {x.deleted ? <div className="text-xs italic">Message deleted</div> : x.blocked ? <div className="text-xs italic text-muted">Message from a player you blocked</div> : <div>{x.body}</div>}
             {!x.deleted && x.profile_id === meId && <button onClick={() => removeMessage(x.id)} className="mt-0.5 text-[10px] text-white/80 underline">Delete</button>}
             <div className={`mt-0.5 text-[10px] ${x.profile_id === meId ? "text-white/70" : "text-muted"}`}>{formatInTimeZone(new Date(x.created_at), tz, "EEE HH:mm")}</div>
           </div>
         ))}
         <div ref={bottom} />
       </div>
+      {rules && (
+        <div className="mt-3 rounded-xl border border-grid bg-paper p-3 text-sm" role="dialog" aria-label={COMMUNITY_RULES_TITLE}>
+          <p className="mb-2 font-medium">{COMMUNITY_RULES_TITLE}</p>
+          <ol className="mb-3 list-decimal space-y-1 pl-5">{COMMUNITY_RULES.map((r) => <li key={r}>{r}</li>)}</ol>
+          <div className="flex gap-2">
+            <button disabled={busy} onClick={acceptRules} className="rounded-xl bg-action px-4 py-2 font-medium text-white disabled:opacity-50">I agree</button>
+            <button disabled={busy} onClick={() => setRules(false)} className="rounded-xl border border-grid bg-white px-4 py-2">Not now</button>
+          </div>
+        </div>
+      )}
+      {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
       <form onSubmit={send} className="mt-3 flex gap-2">
         <input className="flex-1 rounded-xl border border-grid px-3 py-2.5 text-base outline-none focus:border-action" placeholder="Message" maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
         <button disabled={busy || !text.trim()} className="rounded-xl bg-action px-4 font-medium text-white disabled:opacity-50">Send</button>

@@ -2,6 +2,9 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { Text } from "./Text";
 import { color, font } from "../lib/theme";
 
+/** Labels stay on one line at large text sizes ("This week" wrapped at ×2.0 on 360dp). */
+const SEG_MAX_FONT_SCALE = 1.3;
+
 /** Two or three mutually exclusive views of one list (Courts | Games). */
 export function Segmented<T extends string>({ options, value, onChange }: { options: { key: T; label: string }[]; value: T; onChange: (k: T) => void }) {
   return (
@@ -10,7 +13,7 @@ export function Segmented<T extends string>({ options, value, onChange }: { opti
         const on = o.key === value;
         return (
           <Pressable key={o.key} accessibilityRole="tab" accessibilityState={{ selected: on }} onPress={() => onChange(o.key)} style={[styles.seg, on && styles.segOn]}>
-            <Text style={[styles.text, on && styles.textOn]}>{o.label}</Text>
+            <Text maxFontSizeMultiplier={SEG_MAX_FONT_SCALE} numberOfLines={1} adjustsFontSizeToFit style={[styles.text, on && styles.textOn]}>{o.label}</Text>
           </Pressable>
         );
       })}

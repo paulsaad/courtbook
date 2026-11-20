@@ -1,0 +1,19 @@
+# Post a game 2/4 — the organiser edits the game to Join straight away; the waiting request is accepted.
+appId: app.courtbook.mobile.staging
+---
+- extendedWaitUntil: { visible: { id: "game-detail" }, timeout: 30000 }
+- runFlow: _m3-refresh.yaml
+- extendedWaitUntil: { visible: "(?i)requests \\(1\\)", timeout: 30000 }
+- tapOn: "Manage game"
+- extendedWaitUntil: { visible: "Edit details", timeout: 10000 }
+- tapOn: "Edit details"
+- extendedWaitUntil: { visible: { id: "edit-game" }, timeout: 30000 }
+- scrollUntilVisible: { element: "Join straight away", timeout: 15000, centerElement: true }
+- tapOn: "Join straight away"
+- extendedWaitUntil: { visible: ".*will be accepted when you save.*", timeout: 10000 }
+- takeScreenshot: shots/m3post/3-edit
+- scrollUntilVisible: { element: { id: "edit-save" }, timeout: 15000, centerElement: true }
+- tapOn: { id: "edit-save" }
+- extendedWaitUntil: { visible: { id: "game-detail" }, timeout: 30000 }
+- extendedWaitUntil: { notVisible: { id: "requests" }, timeout: 30000 }
+- takeScreenshot: shots/m3post/4-edited

@@ -1,0 +1,6 @@
+# Post a game 4/4 — a player's answer (sent through the API) appears without leaving the chat.
+appId: app.courtbook.mobile.staging
+---
+- extendedWaitUntil: { visible: "On my way", timeout: 30000 }
+- hideKeyboard
+- takeScreenshot: shots/m3post/6-chat-reply

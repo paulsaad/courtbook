@@ -38,3 +38,8 @@ it("opening /booking/<id> shows the booking screen with that id", async () => {
   await renderRouter(map, { initialUrl: "/booking/6f1c2a8e-1111-4111-8111-111111111111" });
   expect(screen.getByText("booking/[id]:6f1c2a8e-1111-4111-8111-111111111111")).toBeTruthy();
 });
+
+it("M3: the game screens and the reserved links exist (courtbook://match/<id>, courtbook://activity)", () => {
+  expect(routes(appDir)).toEqual(expect.arrayContaining(["games/index", "game/[id]", "match/[id]", "activity"]));
+  expect(extractExpoPathFromURL(["courtbook"], "courtbook://match/6f1c2a8e-1111-4111-8111-111111111111")).toBe("match/6f1c2a8e-1111-4111-8111-111111111111");
+});

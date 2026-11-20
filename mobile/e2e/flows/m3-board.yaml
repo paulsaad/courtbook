@@ -1,0 +1,14 @@
+# M3 screenshots: Find a game over the Stitch sample data (test build only), then the real staging
+# board. Signed in already (run-android.sh, m3-screens). SUFFIX = size and text scale.
+appId: app.courtbook.mobile.staging
+---
+- openLink: "courtbook-staging://e2e-games?view=board"
+- extendedWaitUntil: { visible: { id: "game-card-e2e-1" }, timeout: 30000 }
+- takeScreenshot: shots/m3/board-1-${SUFFIX}
+- scroll
+- takeScreenshot: shots/m3/board-2-${SUFFIX}
+- scroll
+- takeScreenshot: shots/m3/board-3-${SUFFIX}
+- openLink: "courtbook-staging://games"
+- extendedWaitUntil: { visible: { id: "game-card-.*" }, timeout: 20000, optional: true }
+- takeScreenshot: shots/m3/board-staging-${SUFFIX}

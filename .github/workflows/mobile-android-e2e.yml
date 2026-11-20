@@ -15,6 +15,11 @@ on:
         type: choice
         options: [android, ios]
         default: android
+      suite:
+        description: "android only: full = every flow, size and audit; m3-screens = sign in, then Find a game and the Game screen in every state at three text sizes (no booking flows); m3-actions = game actions end to end on staging (ask/decline, join/leave, accept/decline, cancelled court); booking-text = booking screens at 360dp x2.0 only (screenshots, Reserve reachable, unresolved recovery); m3-post-chat = post a game, edit it, chat (staging)"
+        type: choice
+        options: [full, m3-screens, m3-actions, booking-text, m3-post-chat]
+        default: full
 
 # One staging-changing run at a time across BOTH workflows that change shared staging data (the demo
 # club's payment mode, test accounts): "Staging database" and "Mobile Android tests". A run waits
@@ -124,11 +129,13 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           working-directory: mobile
-          script: bash e2e/run-android.sh
+          script: SUITE=${{ inputs.suite }} bash e2e/run-android.sh
 
       - name: Clean up staging
         if: always()
-        run: node e2e/staging.mjs cleanup || true
+        run: |
+          node e2e/m3game.mjs cleanup || true   # this run's games and helper players first (they reference the account)
+          node e2e/staging.mjs cleanup || true
 
       # Screenshots also go to a branch of their own (replaced each run), so they can be looked at
       # without downloading the artifact. Nothing else is committed.
@@ -232,7 +239,9 @@ jobs:
 
       - name: Clean up staging
         if: always()
-        run: node e2e/staging.mjs cleanup || true
+        run: |
+          node e2e/m3game.mjs cleanup || true   # this run's games and helper players first (they reference the account)
+          node e2e/staging.mjs cleanup || true
 
       - name: Publish screenshots and audit to the e2e-screenshots-ios branch
         if: always()

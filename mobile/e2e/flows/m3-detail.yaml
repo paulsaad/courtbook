@@ -1,0 +1,12 @@
+# M3 screenshots: the Game screen in one state (STATE) over the Stitch sample data (test build only).
+appId: app.courtbook.mobile.staging
+---
+- openLink: "courtbook-staging://e2e-games?view=detail&state=${STATE}&id=e2e-g"
+# The screen, not the hero: in state E at large text the organiser strip and court banner come
+# first (Stitch 30) and the hero starts below the first screen.
+- extendedWaitUntil: { visible: { id: "game-detail" }, timeout: 30000 }
+- takeScreenshot: shots/m3/detail-${STATE}-1-${SUFFIX}
+- scroll
+- takeScreenshot: shots/m3/detail-${STATE}-2-${SUFFIX}
+- scroll
+- takeScreenshot: shots/m3/detail-${STATE}-3-${SUFFIX}

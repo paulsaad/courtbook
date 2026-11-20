@@ -11,14 +11,34 @@ import { Button } from "../../components/Button";
 import { Loading } from "../../components/StateView";
 import { SignInPrompt } from "../../components/SignInPrompt";
 import { Segmented } from "../../components/Segmented";
+import { Icon } from "../../components/Icon";
+import { badgeText, unreadCount, useActivity } from "../../lib/activity";
 import { FAULT_LABEL, currentFault, faultsAvailable, setFault, subscribeFault, type Fault } from "../../lib/testFaults";
 import { sendTestReport } from "../../lib/crash";
-import { color, font, radius, space, text, MAX_FONT_SCALE } from "../../lib/theme";
+import { useSafety } from "../../lib/safety";
+import { BlockedPlayers } from "../../components/BlockedPlayers";
+import { color, font, radius, space, text, MAX_FONT_SCALE, TOUCH } from "../../lib/theme";
 
 /**
  * M1: account and About. About is what Paul reads to say exactly which code he tested — the update
  * ID matches what the Mobile update workflow printed.
  */
+/** Profile → Activity, with the unread count in words and as a badge (§4.7). */
+function ActivityLink() {
+  const q = useActivity({ signedIn: true });
+  const n = unreadCount(q.data);
+  const badge = badgeText(n);
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={n ? `Activity, ${n} unread` : "Activity"} onPress={() => router.push("/activity")}
+               style={({ pressed }) => [styles.card, styles.activity, pressed && { opacity: 0.85 }]} testID="profile-activity">
+      <Icon name="bell" size={22} color={color.cedarDeep} />
+      <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.activityText}>Activity</Text>
+      {badge ? <View style={styles.badge}><Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.badgeText}>{badge}</Text></View> : null}
+      <Icon name="chevronRight" size={20} color={color.muted} />
+    </Pressable>
+  );
+}
+
 export default function Profile() {
   const session = useSession();
   const [busy, setBusy] = useState(false);
@@ -31,6 +51,7 @@ export default function Profile() {
   const name = useProfileName(session.status === "signed-in" ? session.session.user.id : null);
   const email = session.status === "signed-in" ? session.session.user.email ?? null : null;
   const shownName = name.data?.trim() || null;
+  const safety = useSafety(session.status === "signed-in");
 
   async function signOut() {
     setBusy(true);
@@ -59,6 +80,19 @@ export default function Profile() {
           <Button label="Sign out" variant="secondary" busy={busy} onPress={signOut} />
         </View>
       )}
+      {session.status === "signed-in" ? <ActivityLink /> : null}
+      <Pressable accessibilityRole="button" accessibilityLabel="Help & Feedback" onPress={() => router.push("/help")}
+                 style={({ pressed }) => [styles.card, styles.activity, pressed && { opacity: 0.85 }]} testID="profile-help">
+        <Icon name="info" size={22} color={color.cedarDeep} />
+        <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.activityText}>Help & Feedback</Text>
+        <Icon name="chevronRight" size={20} color={color.muted} />
+      </Pressable>
+      {session.status === "signed-in" && safety.available ? (
+        <>
+          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.section}>Blocked players</Text>
+          <BlockedPlayers />
+        </>
+      ) : null}
 
       <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.section}>About this app</Text>
       <View style={styles.card}>
@@ -123,6 +157,10 @@ const styles = StyleSheet.create({
   value: { ...text.body, color: color.ink },
   row: { flexDirection: "row", justifyContent: "space-between", gap: space.md },
   previewLink: { minHeight: 48, justifyContent: "center", alignItems: "center" },
+  activity: { flexDirection: "row", alignItems: "center", gap: space.md, minHeight: TOUCH + 8 },
+  activityText: { ...text.label, flex: 1, color: color.ink, fontSize: 16 },
+  badge: { minWidth: 24, height: 24, paddingHorizontal: 6, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: color.red },
+  badgeText: { color: color.onDark, fontSize: 13, fontFamily: font.bold },
   previewText: { ...text.label, color: color.cedarDeep },
   stacked: { gap: 2 },
   longValue: { fontFamily: font.semibold, fontSize: 14, lineHeight: 19, color: color.ink, fontVariant: ["tabular-nums"] },

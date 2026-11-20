@@ -1,0 +1,9 @@
+# M3 actions 2/5 — after the organiser declines (helper, through the API), Emma's screen says so.
+appId: app.courtbook.mobile.staging
+---
+- openLink: "courtbook-staging://game/${GA}"
+- extendedWaitUntil: { visible: { id: "game-detail" }, timeout: 30000 }
+- runFlow: _m3-refresh.yaml
+- extendedWaitUntil: { visible: ".*didn.t accept you for this game.*", timeout: 30000 }
+- assertNotVisible: "Withdraw request"
+- takeScreenshot: shots/m3act/3-game-A-declined

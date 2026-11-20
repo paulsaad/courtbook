@@ -14,9 +14,12 @@ STAFF_B=44444444-4444-4444-4444-444444444444
 $PSQL -q -c "drop database if exists $DB" -c "create database $DB" >/dev/null
 # each migration file in its own transaction (0011 adds enum values that 0012 uses)
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql || exit 1
-for f in $(ls supabase/migrations/*.sql | sort); do
+for f in $(ls supabase/migrations/*.sql | sort) ${EXTRA_MIGRATIONS:-}; do
   $PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f "$f" || { echo "MIGRATION FAILED: $f"; exit 1; }
 done
+# EXTRA_MIGRATIONS: drafts not yet numbered (e.g. docs/favourites/sql/club_favourites.draft.sql), applied after
+# the folder so the whole suite can run against them. Empty by default.
+[ -n "${EXTRA_MIGRATIONS:-}" ] && echo "extra migrations: $EXTRA_MIGRATIONS"
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/seed.sql || exit 1
 echo "migrations + seed: OK"
 # SELFTEST=1: deliberately break a privacy rule to prove the suite fails (expect exit 1 with 82f/I9 failing)
@@ -800,6 +803,9 @@ check service "90p badminton is a sport"                           "select count
 
 
 echo "--- AF. delete activity / chat, open a booking"
+# With M3-S (community rules before the first message) the chat checks' players have accepted the
+# rules; without M3-S the column does not exist and nothing changes.
+$PSQL -q -d $DB -c "do \$\$ begin if exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'rules_accepted_at') then execute 'update profiles set rules_accepted_at = now()'; end if; end \$\$;"
 $PSQL -q -d $DB -c "insert into notifications (profile_id, kind, body) values ('$P1','test','a'),('$P1','test','b'),('$P2','test','c');"
 NID=$($PSQL -At -d $DB -c "select id from notifications where profile_id='$P1' and kind='test' limit 1")
 { as_user $P2; echo "select delete_notification('$NID');"; } | $PSQL -q -d $DB >/dev/null
@@ -1002,35 +1008,38 @@ MV=$($PSQL -At -q -d $DB -c "insert into bookings (club_id, court_id, guest_name
 check $ADMIN "98a a move lands on the day it was given, three days later" "select move_booking('$MV','$COURT4', (current_date + 19 + time '14:00') at time zone 'Asia/Beirut', (current_date + 19 + time '15:00') at time zone 'Asia/Beirut'); select ((start_at at time zone 'Asia/Beirut')::date - current_date)||'/'||to_char(start_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='$MV';" "19/14:00"
 
 echo "--- AH. how many players a match is looking for (1-30)"
-mk () { { as_user $P1; echo "select post_match('$CLUB','football', now()+interval '$2 day', now()+interval '$2 day 90 min', null, null, $1, 'squad', null, 'open');"; } | $PSQL -At -d $DB | tail -1; }
+# its own organiser: by this point P1 runs many live games, and M3-H caps an organiser at 10 (S12)
+AHO=55555555-5555-4555-8555-555555555555
+$PSQL -q -d $DB -c "insert into auth.users (id, phone) values ('$AHO', '+9619') on conflict do nothing;" >/dev/null
+mk () { { as_user $AHO; echo "select post_match('$CLUB','football', now()+interval '$2 day', now()+interval '$2 day 90 min', null, null, $1, 'squad', null, 'open');"; } | $PSQL -At -d $DB | tail -1; }
 for n in 6 10 18 24; do
   M=$(mk $n 21)
-  check $P1 "99-$n a match can ask for $n players"                  "select players_needed from match_board(null, 30) where match_id='$M';" $n
-  { as_user $P1; echo "select set_match_status('$M','cancelled');"; } | $PSQL -q -d $DB >/dev/null
+  check $AHO "99-$n a match can ask for $n players"                  "select players_needed from match_board(null, 30) where match_id='$M';" $n
+  { as_user $AHO; echo "select set_match_status('$M','cancelled');"; } | $PSQL -q -d $DB >/dev/null
 done
 B30=$(mk 30 22)
-check $P1 "99a the upper boundary, 30, is allowed"                  "select players_needed from match_board(null, 30) where match_id='$B30';" 30
-denied $P1 "99b 31 is refused"                                      "select post_match('$CLUB','football', now()+interval '23 day', now()+interval '23 day 90 min', null, null, 31, 'too many', null, 'open');"
-denied $P1 "99c 0 is refused"                                       "select post_match('$CLUB','football', now()+interval '23 day', now()+interval '23 day 90 min', null, null, 0, 'none', null, 'open');"
-denied $P1 "99d a negative number is refused"                       "select post_match('$CLUB','football', now()+interval '23 day', now()+interval '23 day 90 min', null, null, -3, 'negative', null, 'open');"
-denied $P1 "99e no number at all is refused"                        "select post_match('$CLUB','football', now()+interval '23 day', now()+interval '23 day 90 min', null, null, null, 'null', null, 'open');"
-denied service "99f the table refuses 31 even behind the functions" "insert into matches (club_id, sport, organizer_id, start_at, end_at, players_needed, status) values ('$CLUB','football','$P1', now()+interval '23 day', now()+interval '23 day 90 min', 31, 'open');"
+check $AHO "99a the upper boundary, 30, is allowed"                  "select players_needed from match_board(null, 30) where match_id='$B30';" 30
+denied $AHO "99b 31 is refused"                                      "select post_match('$CLUB','football', now()+interval '23 day', now()+interval '23 day 90 min', null, null, 31, 'too many', null, 'open');"
+denied $AHO "99c 0 is refused"                                       "select post_match('$CLUB','football', now()+interval '23 day', now()+interval '23 day 90 min', null, null, 0, 'none', null, 'open');"
+denied $AHO "99d a negative number is refused"                       "select post_match('$CLUB','football', now()+interval '23 day', now()+interval '23 day 90 min', null, null, -3, 'negative', null, 'open');"
+denied $AHO "99e no number at all is refused"                        "select post_match('$CLUB','football', now()+interval '23 day', now()+interval '23 day 90 min', null, null, null, 'null', null, 'open');"
+denied service "99f the table refuses 31 even behind the functions" "insert into matches (club_id, sport, organizer_id, start_at, end_at, players_needed, status) values ('$CLUB','football','$AHO', now()+interval '23 day', now()+interval '23 day 90 min', 31, 'open');"
 
 # editing: up to 30, down to the number already accepted but no further
 ED=$(mk 6 24)
-check $P1 "99g edit 6 -> 24"                                        "select update_match('$ED', 24, null, null, 'bigger', 'open'); select players_needed from match_board(null, 30) where match_id='$ED';" 24
-check $P1 "99h edit 24 -> 30"                                       "select update_match('$ED', 30, null, null, 'bigger', 'open'); select players_needed from match_board(null, 30) where match_id='$ED';" 30
-denied $P1 "99i edit above 30 is refused"                           "select update_match('$ED', 31, null, null, 'nope', 'open');"
+check $AHO "99g edit 6 -> 24"                                        "select update_match('$ED', 24, null, null, 'bigger', 'open'); select players_needed from match_board(null, 30) where match_id='$ED';" 24
+check $AHO "99h edit 24 -> 30"                                       "select update_match('$ED', 30, null, null, 'bigger', 'open'); select players_needed from match_board(null, 30) where match_id='$ED';" 30
+denied $AHO "99i edit above 30 is refused"                           "select update_match('$ED', 31, null, null, 'nope', 'open');"
 { as_user $P2; echo "select join_match('$ED');"; } | $PSQL -q -d $DB >/dev/null
 { as_user $P3; echo "select join_match('$ED');"; } | $PSQL -q -d $DB >/dev/null
-check $P1 "99j two joined, so it can be cut to 2"                   "select update_match('$ED', 2, null, null, 'smaller', 'open'); select status||'/'||closed_reason from match_board(null, 30) where match_id='$ED';" "closed/full"
-denied $P1 "99k but not to 1, below the players already in"         "select update_match('$ED', 1, null, null, 'too small', 'open');"
-check $P1 "99l raising it again reopens the match"                  "select update_match('$ED', 5, null, null, 'room again', 'open'); select status||'/'||(5 - joined) from match_board(null, 30) where match_id='$ED';" "open/3"
+check $AHO "99j two joined, so it can be cut to 2"                   "select update_match('$ED', 2, null, null, 'smaller', 'open'); select status||'/'||closed_reason from match_board(null, 30) where match_id='$ED';" "closed/full"
+denied $AHO "99k but not to 1, below the players already in"         "select update_match('$ED', 1, null, null, 'too small', 'open');"
+check $AHO "99l raising it again reopens the match"                  "select update_match('$ED', 5, null, null, 'room again', 'open'); select status||'/'||(5 - joined) from match_board(null, 30) where match_id='$ED';" "open/3"
 
 # the last spot, wanted by two people at once: the database decides, not the screen
 LS=$(mk 24 25)
 $PSQL -q -d $DB -c "insert into match_players (match_id, profile_id, status) select '$LS', id, 'accepted' from profiles where id in ('$P2','$P3');" >/dev/null
-{ as_user $P1; echo "select update_match('$LS', 3, null, null, 'one left', 'open');"; } | $PSQL -q -d $DB >/dev/null
+{ as_user $AHO; echo "select update_match('$LS', 3, null, null, 'one left', 'open');"; } | $PSQL -q -d $DB >/dev/null
 { as_user $P4; echo "begin; select pg_sleep(0.1); select join_match('$LS'); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
 { as_user $ADMIN; echo "begin; select pg_sleep(0.1); select join_match('$LS'); commit;"; } | $PSQL -q -d $DB >/dev/null 2>&1 &
 wait

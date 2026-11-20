@@ -17,12 +17,16 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else)"
+        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else); m3_0067_preflight / m3_0067_postcheck and m3_0072_preflight / m3_0072_postcheck, m3_0073_*, m3_0074_* and m3_0075_* = read-only checks before / after applying 0067 0072, 0073 or 0074 (supabase/live/00xx_*.sql)"
         type: choice
-        options: [check, apply, smoke, api, reset_demo, tester, demo_at_desk]
+        options: [check, apply, smoke, api, reset_demo, tester, demo_at_desk, m3_0067_preflight, m3_0067_postcheck, m3_0072_preflight, m3_0072_postcheck, m3_0073_preflight, m3_0073_postcheck, m3_0074_preflight, m3_0074_postcheck, m3_0075_preflight, m3_0075_postcheck, m3_accounts, m3_test_games, m3_test_games_shared, m3_test_games_cleanup, m3_moderator_check, m3_moderator_grant]
         default: check
       migrations:
         description: "apply only: the exact migration numbers to apply, e.g. '0068 0069 0070 0071' — nothing else is applied; 'check' lists what is pending"
+        type: string
+        default: ""
+      accounts:
+        description: "m3_moderator_grant: one account id (first 8 characters, from m3_accounts). m3_test_games_shared: your account, then the other player (8 characters each). m3_test_games: three account ids (first 8 characters, from m3_accounts): your player, then two other accounts. m3_test_games_cleanup: the recorded game ids (full), so nothing else can be removed"
         type: string
         default: ""
       confirm_ref:
@@ -198,6 +202,82 @@ jobs:
           select 'before: ' || name || ' (' || payment_mode || ')' from public.clubs where slug = 'batroun' and is_demo;
           update public.clubs set payment_mode = 'at_desk' where slug = 'batroun' and is_demo returning 'after: ' || name || ' (' || payment_mode || ')';
           SQL
+
+      # M3 0067 (match_detail), the same read-only scripts as on live: preflight once before 'apply' with
+      # migrations "0067", postcheck once after. Part 1 / every row must be true; they change nothing.
+      - name: 0067 preflight, read only (m3_0067_preflight)
+        if: inputs.action == 'm3_0067_preflight'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0067_preflight.sql
+
+      - name: 0067 postcheck, read only (m3_0067_postcheck)
+        if: inputs.action == 'm3_0067_postcheck'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0067_postcheck.sql
+
+      # M3 0072 (game hardening), the same read-only scripts as for live: preflight once before 'apply'
+      # with migrations "0072", postcheck once after.
+      - name: 0072 preflight, read only (m3_0072_preflight)
+        if: inputs.action == 'm3_0072_preflight'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0072_preflight.sql
+
+      # Temporary M3 test games for Paul's phone (supabase/staging/m3_test_games.sh): read-only account
+      # list with personal addresses hidden; create two "[M3 TEST]" games; remove them again.
+      - name: Staging accounts, read only (m3_accounts)
+        if: inputs.action == 'm3_accounts'
+        run: PGOPTIONS="-c default_transaction_read_only=on" bash supabase/staging/m3_test_games.sh accounts
+      - name: Temporary M3 test games (m3_test_games)
+        if: inputs.action == 'm3_test_games'
+        env:
+          ACCOUNTS: ${{ inputs.accounts }}
+        run: bash supabase/staging/m3_test_games.sh create $ACCOUNTS
+      - name: One shared temporary test game (m3_test_games_shared)
+        if: inputs.action == 'm3_test_games_shared'
+        env:
+          ACCOUNTS: ${{ inputs.accounts }}
+        run: bash supabase/staging/m3_test_games.sh shared $ACCOUNTS
+      - name: Remove the temporary M3 test games (m3_test_games_cleanup)
+        if: inputs.action == 'm3_test_games_cleanup'
+        env:
+          ACCOUNTS: ${{ inputs.accounts }}
+        run: bash supabase/staging/m3_test_games.sh cleanup $ACCOUNTS
+
+      - name: 0072 postcheck, read only (m3_0072_postcheck)
+        if: inputs.action == 'm3_0072_postcheck'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0072_postcheck.sql
+
+      # M3 0073 (post_match idempotency key): read-only preflight once before 'apply' with migrations "0073", postcheck once after.
+      - name: 0073 preflight, read only (m3_0073_preflight)
+        if: inputs.action == 'm3_0073_preflight'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0073_preflight.sql
+      - name: 0073 postcheck, read only (m3_0073_postcheck)
+        if: inputs.action == 'm3_0073_postcheck'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0073_postcheck.sql
+
+      # M3 0074 (chat and player safety): read-only preflight once before 'apply' with migrations "0074", postcheck once after.
+      - name: 0074 preflight, read only (m3_0074_preflight)
+        if: inputs.action == 'm3_0074_preflight'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0074_preflight.sql
+      - name: 0074 postcheck, read only (m3_0074_postcheck)
+        if: inputs.action == 'm3_0074_postcheck'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0074_postcheck.sql
+
+      # The staging moderator (supabase/staging/m3_moderator.sh): read-only check that the admin accounts can
+      # use Admin → Reports and a player cannot; grant = the admin role for ONE named account (approval).
+      - name: Staging moderator, read only (m3_moderator_check)
+        if: inputs.action == 'm3_moderator_check'
+        run: PGOPTIONS="-c default_transaction_read_only=on" bash supabase/staging/m3_moderator.sh check
+      - name: Make one account the staging moderator (m3_moderator_grant)
+        if: inputs.action == 'm3_moderator_grant'
+        env:
+          ACCOUNTS: ${{ inputs.accounts }}
+        run: bash supabase/staging/m3_moderator.sh grant $ACCOUNTS
+
+      # M3 0075 (moderator history: blocks received): read-only preflight before 'apply' "0075", postcheck after.
+      - name: 0075 preflight, read only (m3_0075_preflight)
+        if: inputs.action == 'm3_0075_preflight'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0075_preflight.sql
+      - name: 0075 postcheck, read only (m3_0075_postcheck)
+        if: inputs.action == 'm3_0075_postcheck'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0075_postcheck.sql
 
       - name: Booking-protection checks on staging
         if: inputs.action == 'smoke'

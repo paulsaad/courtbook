@@ -11,11 +11,12 @@ export default async function MatchPage({ params }: { params: Promise<{ id: stri
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?next=/matches/${id}`);
-  const { data: rows } = await supabase.rpc("match_board", { p_club: null, p_days: 60 });
-  const m = ((rows ?? []) as MatchRow[]).find((x) => x.match_id === id);
-  if (!m) notFound();
-  const { data: tzRow } = await supabase.from("clubs").select("timezone").eq("id", m.club_id).single();
-  const tz = tzRow?.timezone ?? "Asia/Beirut";
+  const found = await loadMatch(supabase, id);
+  if (!found) notFound();
+  const m = found.m;
+  const tz: string = found.tz
+    ?? (await supabase.from("clubs").select("timezone").eq("id", m.club_id).single()).data?.timezone
+    ?? "Asia/Beirut";
   const member = m.i_organize || m.my_status === "accepted";
   // finished means the match has ended, not merely started (same rule as hide_match)
   const endsAt = m.end_at ? new Date(m.end_at).getTime() : new Date(m.start_at).getTime() + 3 * 60 * 60 * 1000;
@@ -52,4 +53,24 @@ export default async function MatchPage({ params }: { params: Promise<{ id: stri
       {member && m.status !== "cancelled" && <MatchChat matchId={id} meId={user.id} tz={tz} finished={finished} hidden={!!hidden} initial={(msgs ?? []) as { id: string; profile_id: string; name: string | null; body: string; created_at: string; deleted?: boolean }[]} />}
     </main>
   );
+}
+
+type Supa = Awaited<ReturnType<typeof createClient>>;
+type DetailRow = Omit<MatchRow, "pending" | "organizer_id"> & { pending: number | null; organizer_id: string | null; club_timezone: string | null };
+
+// One game, whatever its state: match_detail (migration 0067) shows a game to its organiser and
+// players after it starts too, where match_board (future games only) made this page 404. Until 0067
+// is on the database the function does not exist (PostgREST PGRST202) and the page falls back to
+// the board, exactly as before.
+async function loadMatch(supabase: Supa, id: string): Promise<{ m: MatchRow; tz: string | null } | null> {
+  const detail = await supabase.rpc("match_detail", { p_match: id });
+  if (!detail.error) {
+    const d = ((detail.data ?? []) as DetailRow[])[0];
+    if (!d) return null;
+    return { m: { ...d, pending: d.pending ?? 0, organizer_id: d.organizer_id ?? "" }, tz: d.club_timezone };
+  }
+  if (detail.error.code !== "PGRST202") throw new Error(detail.error.message);
+  const { data: rows } = await supabase.rpc("match_board", { p_club: null, p_days: 60 });
+  const m = ((rows ?? []) as MatchRow[]).find((x) => x.match_id === id);
+  return m ? { m, tz: null } : null;
 }
