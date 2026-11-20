@@ -79,6 +79,17 @@ print('on screen at failure:', [x for n in nodes for x in re.findall(r'(?:text|c
   exit $status
 fi
 
+# booking-text (workflow input suite = booking-text): only the booking screens at the one setting where
+# the Android line-height correction applies (text above the app's 1.6 cap): 360 dp at x2.0 —
+# screenshots of every main screen, the booking panel with Reserve reachable and pressed, and the
+# unresolved-booking recovery. Sections 0, 1 and the TalkBack audit are skipped.
+BOOKING_TEXT=0; [ "${SUITE:-full}" = "booking-text" ] && BOOKING_TEXT=1
+if [ $BOOKING_TEXT = 1 ]; then
+  adb shell monkey -p "$APP" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 45
+  (cd "$OUT" && maestro test "${envs[@]}" ../flows/_sign-in.yaml) || { echo "::error::sign-in failed"; exit 1; }
+fi
+
+if [ $BOOKING_TEXT = 0 ]; then
 # 0. Does it start? First launch, then what is on screen and anything the app logged.
 adb logcat -c
 adb shell monkey -p "$APP" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
@@ -113,6 +124,8 @@ echo "::endgroup::"
 # skipped entirely, so nothing typed (such as the test password) can be printed.
 # A fresh screen dump or nothing: `uiautomator dump` can fail while the screen animates yet exit 0,
 # leaving the previous file behind, so the old file is removed first and its absence is an error.
+fi  # sections 0, 1, 1b
+
 dumpui() {
   adb shell rm -f /sdcard/ui.xml
   for _ in 1 2 3 4 5; do
@@ -143,10 +156,12 @@ PY
 #    and Android's maximum (200%). The narrow phone gets every step: the Galaxy A17's largest-text
 #    findings (18 Nov, F1–F4) were cut-off names and a broken word that only show when narrow and large.
 density=$(adb shell wm density | tr -dc '0-9\n' | tail -1)
-for cfg in "1080x2400 420 412dp" "1080x1920 480 360dp"; do
+cfgs=("1080x2400 420 412dp" "1080x1920 480 360dp"); [ $BOOKING_TEXT = 1 ] && cfgs=("1080x1920 480 360dp")
+for cfg in "${cfgs[@]}"; do
   set -- $cfg; size=$1; dpi=$2; name=$3
   adb shell wm size "$size"; adb shell wm density "$dpi"
   case "$name" in 412dp) scales="1.0 1.6" ;; *) scales="1.0 1.3 1.6 2.0" ;; esac
+  [ $BOOKING_TEXT = 1 ] && scales="2.0"
   for fs in $scales; do
     adb shell settings put system font_scale "$fs"
     adb shell am force-stop "$APP"
@@ -175,6 +190,7 @@ for cfg in "1080x2400 420 412dp" "1080x1920 480 360dp"; do
   done
   adb shell settings put system font_scale 1.0
   # 3. TalkBack audit of each screen at this size, normal text.
+  [ $BOOKING_TEXT = 1 ] && continue
   for route in "" "courts" "bookings" "profile" "club/${E2E_CLUB}?date=${E2E_DATE}" "sign-in"; do
     adb shell am start -W -a android.intent.action.VIEW -d "courtbook-staging://${route}" "$APP" >/dev/null
     sleep 4
