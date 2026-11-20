@@ -141,3 +141,20 @@ CourtBook", not a struck-out court.
 
 Not verified on a device: layouts are built to wrap (Dynamic Type up to 1.6×, time capped at 1.2×
 like the ticket) and pass the unit tests, but have not been seen on a phone or emulator.
+
+## 10.10 Round 5 (20 Nov) — screenshot pass, mark-read, 0072 package
+
+- **Activity marks notices read** (`mark_notifications_read`, own rows only, existing grant). Rows
+  unread on opening stay bold for that visit; opening a game marks that game's notices. Deletion: later.
+- **Emulator screenshot pass** (`suite=m3-screens`): board and detail states at 412dp ×1.0 (all
+  states) and 360dp ×1.0 / ×1.6 / ×2.0 (A–E), from a test-build-only route with sample data
+  (`EXPO_PUBLIC_E2E=1`; the route redirects home in any other build). Fixes from it: the Game screen
+  remounts per game (a reused route kept the previous scroll position); the details row shows the
+  level range once; Segmented labels and the action bar are capped at ×1.3 so they stay one line /
+  one bar at ×2.0.
+- **0072 staging package** (`supabase/live/0072_*`, applied nowhere): read-only preflight, guarded
+  apply (stops unless the eight functions are byte-identical to 0001–0071), postcheck (13 function
+  hashes, trigger, grants), rollback (refuses while any game depends on the new court states).
+  `live_0072.sh` 15/15. Test with the `m3-dev` website: `main`'s website shows a court-cancelled game
+  as "Private" and new refusals as raw codes.
+- Game writes stay off until 0072 is approved and applied to staging.
