@@ -21,7 +21,7 @@ const REASONS: Record<string, string> = { spam: "Spam", abuse: "Abuse or harassm
 const KINDS: Record<string, string> = { message: "Message", player: "Player", game: "Game", feedback: "Help & Feedback" };
 const TABS = [["open", "Open"], ["actioned", "Handled"], ["dismissed", "Dismissed"]] as const;
 
-export default function ReportsBoard({ status, reports, unavailable, failed }: { status: string; reports: Report[]; unavailable: boolean; failed: boolean }) {
+export default function ReportsBoard({ status, reports, unavailable, failed, blocksReceived = {} }: { status: string; reports: Report[]; unavailable: boolean; failed: boolean; blocksReceived?: Record<string, number> }) {
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-5 p-5 pb-16">
       <Link href="/admin" className="text-sm text-muted">‹ Admin</Link>
@@ -40,14 +40,14 @@ export default function ReportsBoard({ status, reports, unavailable, failed }: {
         (list as Report[]).length > 0 && (
           <section key={title as string} className="flex flex-col gap-3" aria-label={title as string}>
             <h2 className="text-sm font-medium text-muted">{title as string} · {(list as Report[]).length}</h2>
-            {(list as Report[]).map((r) => <ReportCard key={r.id} r={r} />)}
+            {(list as Report[]).map((r) => <ReportCard key={r.id} r={r} blocks={r.profile_id ? blocksReceived[r.profile_id] : undefined} />)}
           </section>
         ))}
     </main>
   );
 }
 
-function ReportCard({ r }: { r: Report }) {
+function ReportCard({ r, blocks }: { r: Report; blocks?: number }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,7 +79,7 @@ function ReportCard({ r }: { r: Report }) {
       </div>
       <p className="mt-1 text-muted">
         Reported by {r.reporter_name ?? "a player"}
-        {r.profile_id && <> · about <span className="text-ink">{r.reported_name ?? "a player"}</span>{r.reported_suspended && <span className="ml-1 rounded bg-red-50 px-1.5 py-0.5 text-xs text-danger">suspended</span>}{r.reports_against > 1 && <> · {r.reports_against} reports in total</>}</>}
+        {r.profile_id && <> · about <span className="text-ink">{r.reported_name ?? "a player"}</span>{r.reported_suspended && <span className="ml-1 rounded bg-red-50 px-1.5 py-0.5 text-xs text-danger">suspended</span>}{r.reports_against > 1 && <> · {r.reports_against} reports in total</>}{!!blocks && <> · blocked by {blocks} player{blocks > 1 ? "s" : ""}</>}</>}
       </p>
       {r.target_kind === "feedback" ? (
         <>

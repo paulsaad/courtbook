@@ -20,7 +20,7 @@ import {
   CHAT_AVAILABLE, chatKey, chatRows, COUNTER_FROM, composerState, MESSAGE_MAX, useChat, useChatActions, type ChatData, type ChatMessage, type ChatRow,
 } from "../../lib/chat";
 import { afterBlockChange, blockPlayer, reportContent, useAcceptRules, useRulesAccepted, useSafety } from "../../lib/safety";
-import { ReportSheet, RulesSheet } from "../../components/game/SafetySheets";
+import { confirmBlock, ReportSheet, RulesSheet } from "../../components/game/SafetySheets";
 import { useQueryClient } from "@tanstack/react-query";
 import { color, font, MAX_FONT_SCALE, radius, space, TOUCH } from "../../lib/theme";
 
@@ -113,11 +113,10 @@ export default function Chat() {
     }
     if (out.kind === "signed-out") router.push("/sign-in");
   };
-  const block = (m: ChatMessage) => Alert.alert(`Block ${m.name ?? "this player"}?`,
-    "You won't see their messages or games, and they can't join yours. They aren't told. You can unblock them in Profile.", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Block", style: "destructive", onPress: async () => { const f = await blockPlayer(m.profile_id); if (f) setProblem(f.message); else { afterBlockChange(qc); reloadChat(); } } },
-    ]);
+  const block = (m: ChatMessage) => confirmBlock(m.name, async () => {
+    const f = await blockPlayer(m.profile_id);
+    if (f) setProblem(f.message); else { afterBlockChange(qc); reloadChat(); }
+  });
   const onLong = (m: ChatMessage) => {
     if (m.local) return;
     if (m.profile_id !== me) {

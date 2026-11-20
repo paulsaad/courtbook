@@ -7,6 +7,7 @@ jest.mock("../lib/buildInfo", () => ({ currentBuild: () => [{ label: "Version", 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { fireEvent, render, screen } from "@testing-library/react-native";
+import { Alert } from "react-native";
 import { supabase } from "../lib/supabase";
 import Help from "../app/help";
 
@@ -59,5 +60,19 @@ describe("Profile → Help & Feedback", () => {
     await fireEvent.press(screen.getByTestId("report-send"));
     await screen.findByText(/Thanks for reporting this/);
     expect(calls.find((c) => c.fn === "report_content")?.args).toEqual({ p_kind: "player", p_target: "p-sami", p_reason: "abuse", p_note: null });
+  });
+
+  it("block after the report asks first, then blocks and says so", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation((_t, _m, buttons) => { buttons?.find((x) => x.text === "Block")?.onPress?.(); });
+    await show(true);
+    await fireEvent.press(await screen.findByTestId("help-report-player"));
+    await fireEvent.press(await screen.findByTestId("recent-p-sami"));
+    await fireEvent.press(await screen.findByTestId("reason-abuse"));
+    await fireEvent.press(screen.getByTestId("report-send"));
+    await fireEvent.press(await screen.findByText("Block this player"));
+    expect(alert).toHaveBeenCalledWith("Block Sami?", expect.stringContaining("They aren't told"), expect.any(Array));
+    expect((await screen.findByTestId("block-note")).props.children).toBe("Sami is blocked. You can unblock them in Profile.");
+    expect(calls.find((c) => c.fn === "block_player")?.args).toEqual({ p_profile: "p-sami" });
+    alert.mockRestore();
   });
 });

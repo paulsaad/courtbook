@@ -31,6 +31,15 @@ describe("Reports (admin)", () => {
     expect(screen.getByText(/2 reports in total/)).toBeTruthy();
   });
 
+  it("shows how many players blocked the reported player (0075), and nothing when none or unknown", () => {
+    const { rerender } = render(<ReportsBoard status="open" reports={[report()]} blocksReceived={{ p2: 3 }} unavailable={false} failed={false} />);
+    expect(screen.getByText(/blocked by 3 players/)).toBeTruthy();
+    rerender(<ReportsBoard status="open" reports={[report()]} blocksReceived={{ p2: 0 }} unavailable={false} failed={false} />);
+    expect(screen.queryByText(/blocked by/)).toBeNull();
+    rerender(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} />);
+    expect(screen.queryByText(/blocked by/)).toBeNull();
+  });
+
   it("marks a report handled, with what was done", async () => {
     render(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} />);
     fireEvent.change(screen.getByLabelText("What was done (optional)"), { target: { value: "warned" } });

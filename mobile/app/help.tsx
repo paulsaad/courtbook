@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Text } from "../components/Text";
 import { Icon, type IconName } from "../components/Icon";
 import { Loading } from "../components/StateView";
-import { FeedbackSheet, ReportSheet } from "../components/game/SafetySheets";
+import { confirmBlock, FeedbackSheet, ReportSheet } from "../components/game/SafetySheets";
 import { useSession } from "../lib/session";
 import { currentBuild } from "../lib/buildInfo";
 import {
@@ -28,6 +28,14 @@ export default function Help() {
   const [kind, setKind] = useState<FeedbackKind | null>(null);
   const [picking, setPicking] = useState(false);
   const [reporting, setReporting] = useState<RecentPlayer | null>(null);
+  const [blockNote, setBlockNote] = useState<string | null>(null);
+  // after a report: block too, with the same confirmation as in chat
+  const block = (p: RecentPlayer) => confirmBlock(p.name, async () => {
+    const f = await blockPlayer(p.profile_id);
+    if (f) { setBlockNote(f.message); return; }
+    afterBlockChange(qc);
+    setBlockNote(`${p.name ?? "This player"} is blocked. You can unblock them in Profile.`);
+  });
   const players = useRecentPlayers(picking && safety.available);
   const context = feedbackContext(Platform.OS, currentBuild());
 
@@ -55,6 +63,7 @@ export default function Help() {
                 <Icon name="chevronRight" size={20} color={color.muted} />
               </Pressable>
             ))}
+          {blockNote ? <Text variant="body" accessibilityLiveRegion="polite" testID="block-note">{blockNote}</Text> : null}
           <Text variant="caption">To report a message or a game, use Report in that chat or on the game.</Text>
         </View>
       ) : null}
@@ -72,7 +81,7 @@ export default function Help() {
                      onSend={async (k, text) => (await sendFeedback(k, text, context))?.message ?? null} />
       <ReportSheet visible={!!reporting} what={reporting?.name ?? "player"} onClose={() => setReporting(null)}
                    onSend={async (reason, note) => (await reportContent("player", reporting!.profile_id, reason, note))?.message ?? null}
-                   onBlock={reporting ? async () => { const f = await blockPlayer(reporting.profile_id); if (!f) afterBlockChange(qc); } : undefined} />
+                   onBlock={reporting ? () => block(reporting) : undefined} />
     </ScrollView>
   );
 }

@@ -19,5 +19,10 @@ export default async function AdminReports({ searchParams }: { searchParams: Pro
   const { data, error } = await supabase.rpc("admin_reports", { p_status: status });
   // before migration 0074 the function does not exist: say so instead of failing
   const missing = !!error && (error.code === "PGRST202" || /admin_reports/.test(error.message ?? ""));
-  return <ReportsBoard status={status} reports={(data ?? []) as Report[]} unavailable={missing} failed={!!error && !missing} />;
+  const reports = (data ?? []) as Report[];
+  // 0075: how many players blocked each reported player (moderator history); left out before 0075
+  const ids = [...new Set(reports.map((r) => r.profile_id).filter((x): x is string => !!x))];
+  const { data: blocks } = ids.length ? await supabase.rpc("admin_blocks_received", { p_profiles: ids }) : { data: null };
+  const blocksReceived = Object.fromEntries(((blocks ?? []) as { profile_id: string; blocks_received: number }[]).map((b) => [b.profile_id, b.blocks_received]));
+  return <ReportsBoard status={status} reports={reports} blocksReceived={blocksReceived} unavailable={missing} failed={!!error && !missing} />;
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text } from "../Text";
 import { Icon } from "../Icon";
@@ -9,6 +9,16 @@ import {
   COMMUNITY_RULES, FEEDBACK_MAX, FEEDBACK_TEXT, FEEDBACK_THANKS, type FeedbackKind, REPORT_BLOCK_OFFER, REPORT_DANGER, REPORT_NOTE_MAX, REPORT_REASONS, REPORT_THANKS, type ReportReason,
 } from "../../lib/safety";
 import { color, font, MAX_FONT_SCALE, radius, space, TOUCH } from "../../lib/theme";
+
+export const BLOCK_EXPLAINED = "You won't see their messages or games, and they can't join yours. They aren't told. You can unblock them in Profile.";
+
+/** The one confirmation before blocking, wherever the block starts (chat, a report, Help & Feedback). */
+export function confirmBlock(name: string | null, onBlock: () => void) {
+  Alert.alert(`Block ${name ?? "this player"}?`, BLOCK_EXPLAINED, [
+    { text: "Cancel", style: "cancel" },
+    { text: "Block", style: "destructive", onPress: onBlock },
+  ]);
+}
 
 function Sheet({ visible, title, onClose, children }: { visible: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
   const insets = useSafeAreaInsets();
