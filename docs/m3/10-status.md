@@ -158,3 +158,9 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
   `live_0072.sh` 15/15. Test with the `m3-dev` website: `main`'s website shows a court-cancelled game
   as "Private" and new refusals as raw codes.
 - Game writes stay off until 0072 is approved and applied to staging.
+- Screenshot run 44657558112 (`ffa0ae0`): all configurations passed except state E at 360dp ×2.0,
+  where the flow's own check expected the game summary on the first screen; the screen was correct
+  (organiser strip and court banner first, as in Stitch 30). The flow now waits for the screen.
+- Open, not fixed: at ×2.0 on Android, line spacing grows more than the letters (fixed `lineHeight`
+  values seem to ignore the size cap). Affects every screen; one change in the shared `Text`, to be
+  proposed separately.
