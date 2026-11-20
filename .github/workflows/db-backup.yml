@@ -77,7 +77,7 @@ jobs:
 
       - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1.7.3
         with:
-          version: latest
+          version: 2.122.1   # pinned: "latest" asks GitHub's API and can hit its rate limit
 
       - name: Dump roles, schema and data (Supabase CLI)
         env:
