@@ -295,3 +295,58 @@ describe("Activity (read-only)", () => {
     expect(relativeTime("2026-11-14T12:00:00Z", NOW)).toBe("Sat 14 Nov");
   });
 });
+
+import { E2E_BOARD, E2E_SCREENS, e2eClient, e2eDetail } from "../lib/e2eGames";
+import { gameKeys } from "../lib/games";
+import { DEFAULT_FILTERS } from "../lib/gameFilters";
+
+describe("emulator screenshot route (test builds only)", () => {
+  it("is off outside the emulator test build", () => expect(E2E_SCREENS).toBe(false));
+  it("holds the sample answers fresh, so the screens make no call", () => {
+    const qc = e2eClient("board", "A", "me");
+    expect(qc.getQueryData(gameKeys.board(DEFAULT_FILTERS))).toBe(E2E_BOARD);
+    expect(qc.getQueryState(gameKeys.board(DEFAULT_FILTERS))!.dataUpdatedAt).toBeGreaterThan(Date.now());
+  });
+  it.each(["A", "B", "C", "D", "E", "playing", "played", "private", "full", "cancelled", "nocourt"])("state %s renders", async (st) => {
+    const { d, people } = e2eDetail(st, "me");
+    await render(wrap(<GameDetailView sections={detailSections(d, people, OFF)} me="me" pendingCount={d.i_organize ? d.pending ?? 0 : null} />));
+    expect(screen.getByTestId("game-hero")).toBeTruthy();
+  });
+});
+
+import { activityKey, markRead, type Notice } from "../lib/activity";
+import Activity from "../app/activity";
+
+describe("Activity marks notices read (mark_notifications_read, own rows)", () => {
+  const rows: Notice[] = [
+    { id: "n1", kind: "join_request", match_id: "g1", body: "Adam wants to join your match", created_at: "2026-11-19T09:55:00Z", read_at: null },
+    { id: "n2", kind: "match_message", match_id: "g2", body: "Rami: see you", created_at: "2026-11-19T09:00:00Z", read_at: null },
+    { id: "n3", kind: "player_left", match_id: "g1", body: "Joe left your match", created_at: "2026-11-18T09:00:00Z", read_at: "2026-11-18T10:00:00Z" },
+  ];
+  const rpc = supabase.rpc as jest.Mock;
+  beforeEach(() => { rpc.mockReset(); rpc.mockResolvedValue({ data: null, error: null }); mockSession.current = { status: "signed-in", session: { user: { id: "me" } } }; });
+
+  it("marks exactly the given ids and clears them in the cache (badges drop at once)", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
+    qc.setQueryData(activityKey, rows);
+    await markRead(qc, ["n1"]);
+    expect(rpc).toHaveBeenCalledWith("mark_notifications_read", { p_ids: ["n1"] });
+    expect(qc.getQueryData<Notice[]>(activityKey)!.map((r) => !!r.read_at)).toEqual([true, false, true]);
+  });
+  it("a refused call changes nothing", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
+    qc.setQueryData(activityKey, rows);
+    rpc.mockResolvedValueOnce({ data: null, error: { message: "boom" } });
+    await markRead(qc, ["n1"]);
+    expect(qc.getQueryData<Notice[]>(activityKey)![0].read_at).toBeNull();
+  });
+  it("opening Activity marks the unread rows shown, once; they stay bold for this visit", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity, retry: false } } });
+    qc.setQueryData(activityKey, rows, { updatedAt: Date.now() + 86_400_000 });
+    await render(wrap(<QueryClientProvider client={qc}><Activity /></QueryClientProvider>));
+    await waitFor(() => expect(rpc).toHaveBeenCalledWith("mark_notifications_read", { p_ids: ["n1", "n2"] }));
+    expect(rpc.mock.calls.filter((c) => c[0] === "mark_notifications_read")).toHaveLength(1);
+    expect(screen.getByTestId("notice-n1").props.accessibilityLabel).toMatch(/^Unread\./);
+    expect(screen.getByTestId("notice-n3").props.accessibilityLabel).not.toMatch(/^Unread\./);
+  });
+});

@@ -15,6 +15,11 @@ on:
         type: choice
         options: [android, ios]
         default: android
+      suite:
+        description: "android only: full = every flow, size and audit; m3-screens = sign in, then Find a game and the Game screen in every state at three text sizes (no booking flows)"
+        type: choice
+        options: [full, m3-screens]
+        default: full
 
 # One staging-changing run at a time across BOTH workflows that change shared staging data (the demo
 # club's payment mode, test accounts): "Staging database" and "Mobile Android tests". A run waits
@@ -124,7 +129,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           working-directory: mobile
-          script: bash e2e/run-android.sh
+          script: SUITE=${{ inputs.suite }} bash e2e/run-android.sh
 
       - name: Clean up staging
         if: always()

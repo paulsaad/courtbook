@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { router, Stack } from "expo-router";
 import { Text } from "../components/Text";
@@ -6,18 +6,22 @@ import { Icon } from "../components/Icon";
 import { Empty, ErrorState, Loading } from "../components/StateView";
 import { SignInPrompt } from "../components/SignInPrompt";
 import { useSession } from "../lib/session";
-import { kindIcon, relativeTime, useActivity, type Notice } from "../lib/activity";
+import { kindIcon, relativeTime, useActivity, useMarkRead, type Notice } from "../lib/activity";
 import { color, font, radius, space, TOUCH } from "../lib/theme";
 
 /**
  * Activity (§4.7): the player's own notices, newest first. A row opens its game. Unread rows are bold
- * with a leading dot (two signals, not colour alone). Read-only in this step: opening the list does
- * not mark anything read and nothing can be deleted from the app yet (the website still can).
+ * with a leading dot (two signals, not colour alone). Like the website, opening the list marks what it
+ * shows as read; the rows that were unread stay bold for this visit. Deleting is not in the app yet.
  */
 export default function Activity() {
   const session = useSession();
   const signedIn = session.status === "signed-in";
   const q = useActivity({ signedIn });
+  // unread when first seen on this visit: they stay marked as new until the person leaves
+  const fresh = useRef(new Set<string>());
+  (q.data ?? []).forEach((n) => { if (!n.read_at) fresh.current.add(n.id); });
+  useMarkRead(q.data);
   const page = (body: ReactNode) => <View style={styles.page}><Stack.Screen options={{ title: "Activity" }} />{body}</View>;
 
   if (session.status === "signed-out") return page(<SignInPrompt title="Your activity" body="Sign in to see requests, messages and changes to your games." />);
@@ -31,14 +35,13 @@ export default function Activity() {
       contentContainerStyle={styles.list}
       ItemSeparatorComponent={() => <View style={styles.sep} />}
       ListEmptyComponent={<Empty title="Nothing here yet" body="Join requests, messages and changes to your games show up here." action="Find a game" onAction={() => router.push("/games")} />}
-      renderItem={({ item }) => <ActivityRow n={item} />}
+      renderItem={({ item }) => <ActivityRow n={item} unread={fresh.current.has(item.id)} />}
       refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => void q.refetch()} tintColor={color.cedar} />}
     />,
   );
 }
 
-export function ActivityRow({ n, now }: { n: Notice; now?: Date }) {
-  const unread = !n.read_at;
+export function ActivityRow({ n, now, unread = !n.read_at }: { n: Notice; now?: Date; unread?: boolean }) {
   const when = relativeTime(n.created_at, now);
   const inner = (
     <>

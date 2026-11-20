@@ -1,0 +1,10 @@
+# M3 screenshots: the Game screen in one state (STATE) over the Stitch sample data (test build only).
+appId: app.courtbook.mobile.staging
+---
+- openLink: "courtbook-staging://e2e-games?view=detail&state=${STATE}&id=e2e-g"
+- extendedWaitUntil: { visible: { id: "game-hero" }, timeout: 30000 }
+- takeScreenshot: shots/m3/detail-${STATE}-1-${SUFFIX}
+- scroll
+- takeScreenshot: shots/m3/detail-${STATE}-2-${SUFFIX}
+- scroll
+- takeScreenshot: shots/m3/detail-${STATE}-3-${SUFFIX}

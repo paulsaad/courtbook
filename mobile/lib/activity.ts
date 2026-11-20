@@ -1,12 +1,14 @@
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { formatInTimeZone } from "date-fns-tz";
 import { supabase } from "./supabase";
 import type { IconName } from "../components/Icon";
 
 /**
  * Activity (docs/m3/04-ux-spec.md §4.7, 05-architecture.md §5.7): the player's own notices, newest
- * 50, read under their session (RLS: own rows only) — the same list the website shows. READ-ONLY in
- * this step: nothing is marked read or deleted from the app yet.
+ * 50, read under their session (RLS: own rows only) — the same list the website shows. Notices are
+ * marked read with mark_notifications_read (own unread rows only; the 0069 grant allows nothing but
+ * read_at). Deleting notices is not in the app yet.
  */
 export type Notice = { id: string; kind: string; match_id: string | null; body: string; created_at: string; read_at: string | null };
 
@@ -58,4 +60,30 @@ export function relativeTime(iso: string, now: Date = new Date(), tz = "Asia/Bei
   if (day(new Date(iso)) === day(now)) return `${Math.floor(ms / 3_600_000)} h ago`;
   if (day(new Date(iso)) === day(new Date(now.getTime() - 86_400_000))) return "Yesterday";
   return formatInTimeZone(new Date(iso), tz, "EEE d MMM");
+}
+
+/**
+ * Marks these notices read on the server, then in the cached list so the badges clear at once.
+ * Best effort: a failure changes nothing on screen and the next visit tries again.
+ */
+export async function markRead(qc: QueryClient, ids: string[], rpc = (fn: string, args: object) => supabase.rpc(fn, args)) {
+  if (ids.length === 0) return;
+  const { error } = await rpc("mark_notifications_read", { p_ids: ids });
+  if (error) return;
+  const now = new Date().toISOString();
+  qc.setQueryData<Notice[]>(activityKey, (rows) => rows?.map((r) => (ids.includes(r.id) && !r.read_at ? { ...r, read_at: now } : r)));
+}
+
+/** Unread ids among `rows` (optionally only one game's), each marked once per screen visit. */
+export function useMarkRead(rows: Notice[] | undefined, matchId?: string) {
+  const qc = useQueryClient();
+  const sent = useRef(new Set<string>());
+  const ids = (rows ?? []).filter((r) => !r.read_at && (matchId == null || r.match_id === matchId) && !sent.current.has(r.id)).map((r) => r.id);
+  const key = ids.join(",");
+  useEffect(() => {
+    if (!key) return;
+    const list = key.split(",");
+    list.forEach((id) => sent.current.add(id));
+    void markRead(qc, list);
+  }, [key, qc]);
 }

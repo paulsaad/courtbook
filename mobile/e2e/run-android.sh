@@ -15,6 +15,33 @@ adb shell settings put global window_animation_scale 0
 adb shell settings put global transition_animation_scale 0
 adb shell settings put global animator_duration_scale 0
 
+# M3 screens only (workflow input suite = m3-screens): sign in, then Find a game and the Game screen
+# in every state at three text sizes, and a TalkBack audit of each. No booking flows.
+if [ "${SUITE:-full}" = "m3-screens" ]; then
+  mkdir -p "$OUT/shots/m3"
+  adb shell monkey -p "$APP" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 45
+  (cd "$OUT" && maestro test "${envs[@]}" ../flows/_sign-in.yaml) || { echo "::error::sign-in failed"; exit 1; }
+  for cfg in "1080x2400 420 412dp 1.0 all" "1080x1920 480 360dp 1.0 some" "1080x1920 480 360dp 1.6 some" "1080x1920 480 360dp 2.0 some"; do
+    set -- $cfg; adb shell wm size "$1"; adb shell wm density "$2"; adb shell settings put system font_scale "$4"
+    sfx="$3-text$4"
+    (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=$sfx" ../flows/m3-board.yaml) || { echo "::error::board $sfx"; status=1; }
+    states="A B C D E"; [ "$5" = all ] && states="A B C D E playing played private full cancelled nocourt"
+    for st in $states; do
+      (cd "$OUT" && maestro test "${envs[@]}" -e "SUFFIX=$sfx" -e "STATE=$st" ../flows/m3-detail.yaml) || { echo "::error::detail $st $sfx"; status=1; }
+    done
+    if [ "$4" = 1.0 ]; then
+      for route in "e2e-games?view=board" "e2e-games?view=detail&state=A&id=e2e-g" "e2e-games?view=detail&state=D&id=e2e-g" "e2e-games?view=detail&state=E&id=e2e-g"; do
+        adb shell am start -W -a android.intent.action.VIEW -d "courtbook-staging://${route}" "$APP" >/dev/null; sleep 5
+        adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/ui.xml" >/dev/null
+        python3 e2e/a11y_audit.py "$OUT/ui.xml" "$3:/${route}" "$2" | tee -a "$OUT/a11y.txt" || status=1
+      done
+    fi
+  done
+  adb shell settings put system font_scale 1.0; adb shell wm size reset; adb shell wm density reset
+  adb logcat -d -v brief ReactNativeJS:V AndroidRuntime:E '*:F' '*:S' | tail -200 > "$OUT/logcat.txt"
+  exit $status
+fi
+
 # 0. Does it start? First launch, then what is on screen and anything the app logged.
 adb logcat -c
 adb shell monkey -p "$APP" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1

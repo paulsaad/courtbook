@@ -9,6 +9,7 @@ import { BookingPicker } from "../../components/game/BookingPicker";
 import { ManageSheet } from "../../components/game/ManageSheet";
 import { useSession } from "../../lib/session";
 import { SCREEN_FEATURES, useGameScreen } from "../../lib/gameScreens";
+import { useActivity, useMarkRead } from "../../lib/activity";
 import type { ActionOutcome, GameAction } from "../../lib/gameActions";
 import { NOT_AVAILABLE, organiserActions } from "../../lib/gameState";
 import { color, space } from "../../lib/theme";
@@ -41,6 +42,9 @@ export default function GameScreen() {
   const signedIn = session.status === "signed-in";
   const me = signedIn ? session.session.user.id : null;
   const screen = useGameScreen(id, { signedIn });
+  // Opening a game marks its notices read (§5.7), as the website's Activity does.
+  const activity = useActivity({ signedIn });
+  useMarkRead(screen.load.kind === "ready" ? activity.data : undefined, id);
   const [picking, setPicking] = useState(false);
   const [managing, setManaging] = useState(false);
   const d = screen.detail;
