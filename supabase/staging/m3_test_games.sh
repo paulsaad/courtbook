@@ -5,7 +5,8 @@
 #   create <player> <a> <b>   two games at the demo club, no court booked, tagged "[M3 TEST]":
 #                         G1 open game organised by account <a> — <player> can join it
 #                         G2 approval game organised by <player>, with <a> and <b> waiting
-#   cleanup             removes every "[M3 TEST]" game (its players, messages and notices go with it)
+#   cleanup [ids...]    removes the "[M3 TEST]" games (with their players, messages and notices); given
+#                       the recorded ids, removes nothing unless the tagged games are exactly those
 #
 # Acting as an account sets both settings auth.uid() reads (request.jwt.claim.sub and request.jwt.claims).
 # Each account is given as the first 8 characters of an account id, as `accounts` prints them. Games are made through
@@ -77,11 +78,30 @@ SQL
                  from matches m where m.note like '$TAG%' order by m.start_at"
   ;;
 cleanup)
+  # Optional: the exact game ids expected (from the record). If given, nothing is removed unless the
+  # tagged games are exactly those.
+  shift; expected=$(printf '%s\n' "$@" | grep -E '^[0-9a-f-]{36}$' | sort | paste -sd, -)
   q <<SQL
 begin;
-select count(*) || ' test game(s) to remove' from matches where note like '$TAG%';
+do \$\$
+declare found text;
+begin
+  select coalesce(string_agg(id::text, ',' order by id::text), '') into found from matches where note like '$TAG%';
+  raise notice 'tagged games: %', nullif(found, '');
+  if '$expected' <> '' and found <> '$expected' then
+    raise exception 'tagged games (%) are not exactly the expected ones (%): nothing removed', found, '$expected';
+  end if;
+end \$\$;
+select count(*) || ' notice(s) of tagged games' from notifications where match_id in (select id from matches where note like '$TAG%');
+select count(*) || ' player row(s) of tagged games' from match_players where match_id in (select id from matches where note like '$TAG%');
+select count(*) || ' message(s) of tagged games' from match_messages where match_id in (select id from matches where note like '$TAG%');
+select count(*) || ' booking(s) linked to tagged games (must be 0)' from matches where note like '$TAG%' and booking_id is not null;
+do \$\$ begin
+  if exists (select 1 from matches where note like '$TAG%' and booking_id is not null) then raise exception 'a tagged game is linked to a booking: nothing removed'; end if;
+end \$\$;
 delete from notifications where match_id in (select id from matches where note like '$TAG%');
 delete from matches where note like '$TAG%';   -- players and messages cascade
+select count(*) || ' tagged game(s) left' from matches where note like '$TAG%';
 commit;
 SQL
   ;;

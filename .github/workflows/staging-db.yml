@@ -26,7 +26,7 @@ on:
         type: string
         default: ""
       accounts:
-        description: "m3_test_games only: three account ids (first 8 characters, from m3_accounts): your player, then two other accounts, e.g. 'aaaaaaaa bbbbbbbb cccccccc'"
+        description: "m3_test_games: three account ids (first 8 characters, from m3_accounts): your player, then two other accounts. m3_test_games_cleanup: the recorded game ids (full), so nothing else can be removed"
         type: string
         default: ""
       confirm_ref:
@@ -231,7 +231,9 @@ jobs:
         run: bash supabase/staging/m3_test_games.sh create $ACCOUNTS
       - name: Remove the temporary M3 test games (m3_test_games_cleanup)
         if: inputs.action == 'm3_test_games_cleanup'
-        run: bash supabase/staging/m3_test_games.sh cleanup
+        env:
+          ACCOUNTS: ${{ inputs.accounts }}
+        run: bash supabase/staging/m3_test_games.sh cleanup $ACCOUNTS
 
       - name: 0072 postcheck, read only (m3_0072_postcheck)
         if: inputs.action == 'm3_0072_postcheck'
