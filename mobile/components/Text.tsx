@@ -1,4 +1,4 @@
-import { Text as RNText, type TextProps, type TextStyle } from "react-native";
+import { Platform, StyleSheet, Text as RNText, useWindowDimensions, type StyleProp, type TextProps, type TextStyle } from "react-native";
 import { color, font, MAX_FONT_SCALE } from "../lib/theme";
 
 /**
@@ -20,6 +20,24 @@ export const variants = {
 
 export type Variant = keyof typeof variants;
 
-export function Text({ variant = "body", style, ...rest }: TextProps & { variant?: Variant }) {
-  return <RNText maxFontSizeMultiplier={MAX_FONT_SCALE} style={[variants[variant], style]} {...rest} />;
+export function Text({ variant = "body", style, maxFontSizeMultiplier = MAX_FONT_SCALE, ...rest }: TextProps & { variant?: Variant }) {
+  const capped = useCappedLineHeight([variants[variant], style], maxFontSizeMultiplier, rest.allowFontScaling);
+  return <RNText maxFontSizeMultiplier={maxFontSizeMultiplier} style={[variants[variant], style, capped]} {...rest} />;
+}
+
+/**
+ * React Native on Android scales `lineHeight` by the phone's full text size and ignores
+ * `maxFontSizeMultiplier`, while the letters stop growing at the cap (TextAttributeProps.kt). At the
+ * largest sizes that left wide gaps between lines (×2.0 phone setting, ×1.6 cap: lines 1.25× too far
+ * apart). Past the cap, the line height given here is pre-shrunk so it lands where the cap puts the
+ * letters. iOS already applies the cap to both, so nothing changes there.
+ */
+export function cappedLineHeight(lineHeight: number | undefined, fontScale: number, cap: number | undefined, os: string, allowFontScaling = true) {
+  if (os !== "android" || !allowFontScaling || !lineHeight || !cap || cap < 1 || fontScale <= cap) return null;
+  return { lineHeight: (lineHeight * cap) / fontScale };
+}
+
+export function useCappedLineHeight(style: StyleProp<TextStyle>, cap: number | undefined, allowFontScaling?: boolean) {
+  const { fontScale } = useWindowDimensions();
+  return cappedLineHeight(StyleSheet.flatten(style)?.lineHeight, fontScale, cap, Platform.OS, allowFontScaling);
 }

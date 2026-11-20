@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook } from "@testing-library/react-native";
 import { supabase } from "../lib/supabase";
+import { GAME_WRITES_AVAILABLE } from "../lib/gameActions";
 import { CHAT_LATER_TEXT, detailSections, SCREEN_FEATURES, useFindGames, useGameScreen, type DetailOptions, type DetailSection } from "../lib/gameScreens";
 import { JOIN_LATER_TEXT, MANAGE_LATER_TEXT } from "../lib/gameActions";
 import { DEFAULT_FILTERS } from "../lib/gameFilters";
@@ -45,7 +46,7 @@ describe("section order follows §4.4", () => {
 
 describe("stage 1 is read-only (§7.2)", () => {
   it("is what the switches say today", () => {
-    expect(SCREEN_FEATURES).toEqual({ writes: false, chat: false, report: false });
+    expect(SCREEN_FEATURES).toEqual({ writes: GAME_WRITES_AVAILABLE, chat: false, report: false });
   });
   it("a stranger sees the joining sentence instead of a button", () => {
     const a = pick(detailSections(g({}), [], STAGE1), "actions")!;

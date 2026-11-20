@@ -42,6 +42,37 @@ if [ "${SUITE:-full}" = "m3-screens" ]; then
   exit $status
 fi
 
+# M3 game actions (workflow input suite = m3-actions): one focused check on staging. The app, signed
+# in as the run's account (Emma), asks to join and is declined, joins and leaves an open game, then as
+# organiser declines one request and accepts another, and resolves a cancelled court. Two helper
+# players act through the API (e2e/m3game.mjs), which also checks every outcome in the database.
+if [ "${SUITE:-full}" = "m3-actions" ]; then
+  mkdir -p "$OUT/shots/m3act"
+  adb shell monkey -p "$APP" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 45
+  (cd "$OUT" && maestro test "${envs[@]}" ../flows/_sign-in.yaml) || { echo "::error::sign-in failed"; exit 1; }
+  m3() { echo "::group::m3game $*"; OUT="$OUT" node e2e/m3game.mjs "$@"; local r=$?; echo "::endgroup::"; return $r; }
+  step() {
+    local ids=(); while IFS= read -r l; do [ -n "$l" ] && ids+=(-e "$l"); done < "$OUT/m3.env"
+    echo "::group::app $1"
+    if (cd "$OUT" && maestro test "${envs[@]}" "${ids[@]}" "../flows/$1.yaml"); then echo "app $1: PASS"; echo "::endgroup::"; return 0; fi
+    echo "::endgroup::"; echo "::error::app step $1 failed"
+    # Visible words only; editable fields are skipped, so nothing typed can be printed.
+    adb shell uiautomator dump /sdcard/ui.xml >/dev/null && adb pull /sdcard/ui.xml "$OUT/fail-$1.xml" >/dev/null && python3 -c "
+import re,sys; t=open('$OUT/fail-$1.xml').read()
+nodes=[n for n in re.findall(r'<node [^>]*>', t) if 'EditText' not in n]
+print('on screen at failure:', [x for n in nodes for x in re.findall(r'(?:text|content-desc)=\"([^\"]+)\"', n) if x][:60])"
+    return 1
+  }
+  m3 setup || { m3 cleanup; exit 1; }
+  { step m3-act-ask && m3 check asked && m3 decline-emma && step m3-act-declined && m3 check declined; } || status=1
+  { step m3-act-join-leave && m3 check left; } || status=1
+  { step m3-act-organiser && m3 check decided && m3 cancel-booking && m3 check court-lost && step m3-act-court && m3 check resolved; } || status=1
+  adb logcat -d -v brief ReactNativeJS:V AndroidRuntime:E '*:F' '*:S' | tail -200 > "$OUT/logcat.txt"
+  m3 cleanup || true
+  [ $status = 0 ] && echo "M3 game actions on staging: every step passed" || echo "::error::M3 game actions: a step failed (see above)"
+  exit $status
+fi
+
 # 0. Does it start? First launch, then what is on screen and anything the app logged.
 adb logcat -c
 adb shell monkey -p "$APP" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1

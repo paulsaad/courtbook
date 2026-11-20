@@ -1,0 +1,4 @@
+# Pull the Game screen down to re-read it from the server (it must be scrolled to the top).
+appId: app.courtbook.mobile.staging
+---
+- swipe: { start: "50%, 30%", end: "50%, 80%", duration: 700 }

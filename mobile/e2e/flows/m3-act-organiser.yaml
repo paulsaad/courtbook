@@ -1,0 +1,14 @@
+# M3 actions 4/5 — Emma organises game B (her court booking): declines one request, accepts the other.
+appId: app.courtbook.mobile.staging
+---
+- openLink: "courtbook-staging://game/${GB}"
+- extendedWaitUntil: { visible: { id: "game-detail" }, timeout: 30000 }
+- extendedWaitUntil: { visible: "(?i)requests \\(2\\)", timeout: 20000 }
+- scrollUntilVisible: { element: "Decline", direction: DOWN }
+- takeScreenshot: shots/m3act/6-game-B-requests
+- tapOn: { text: "Decline", index: 0 }
+- extendedWaitUntil: { visible: "(?i)requests \\(1\\)", timeout: 20000 }
+- scrollUntilVisible: { element: "Accept", direction: DOWN }
+- tapOn: "Accept"
+- extendedWaitUntil: { notVisible: { id: "requests" }, timeout: 20000 }
+- takeScreenshot: shots/m3act/7-game-B-decided

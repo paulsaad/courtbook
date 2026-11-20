@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react-native";
 import { supabase } from "../lib/supabase";
 import {
-  actionBusy, actionKey, GAME_RPC_ARGS, GAME_WRITES_AVAILABLE, JOIN_LATER_TEXT, MANAGE_LATER_TEXT, outcomeOf, rpcFor,
+  actionBusy, actionKey, GAME_RPC_ARGS, GAME_WRITES_AVAILABLE, gameWritesFor, JOIN_LATER_TEXT, MANAGE_LATER_TEXT, outcomeOf, rpcFor,
   runGameAction, useGameActions, type GameAction,
 } from "../lib/gameActions";
 import { COURT_PAUSED, GAME_ERRORS } from "../lib/gameErrors";
@@ -32,14 +32,22 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-describe("writes stay off until M3-H is approved (D1)", () => {
-  it("the switch is off on this branch", () => {
-    expect(GAME_WRITES_AVAILABLE).toBe(false);
+describe("writes are on only against the staging database, where 0072 is applied", () => {
+  it("staging on; live, unknown and missing off", () => {
+    expect(gameWritesFor("https://pwznauyioqykdwodwpvx.supabase.co")).toBe(true);
+    expect(gameWritesFor("https://pwznauyioqykdwodwpvx.supabase.co/")).toBe(true);
+    expect(gameWritesFor("https://lgujfbwunokobjxlvpuf.supabase.co")).toBe(false);
+    expect(gameWritesFor("https://abcdefghijklmnopqrst.supabase.co")).toBe(false);
+    expect(gameWritesFor("")).toBe(false);
+    expect(gameWritesFor(undefined)).toBe(false);
+  });
+  it("this bundle follows its database", () => {
+    expect(GAME_WRITES_AVAILABLE).toBe(gameWritesFor(process.env.EXPO_PUBLIC_SUPABASE_URL));
   });
   it("with the switch off, no action reaches the server and each says when it arrives", async () => {
     const qc = client();
     for (const a of ALL) {
-      const out = await runGameAction(qc, G, a);
+      const out = await runGameAction(qc, G, a, { available: false });
       expect(out.kind).toBe("refused");
       if (out.kind === "refused") expect(out.failure.message).toBe(ORGANISER.has(a.kind) ? MANAGE_LATER_TEXT : JOIN_LATER_TEXT);
     }

@@ -88,9 +88,8 @@ describe("player privacy (names only where the database returns them)", () => {
 });
 
 describe("game writes stay off (M3-H not applied)", () => {
-  it("the switches are off", () => {
-    expect(GAME_WRITES_AVAILABLE).toBe(false);
-    expect(SCREEN_FEATURES.writes).toBe(false);
+  it("the screen switch follows the database switch", () => {
+    expect(SCREEN_FEATURES.writes).toBe(GAME_WRITES_AVAILABLE);
   });
   it("a non-member gets the joining sentence, not a button", async () => {
     await show(g({}));

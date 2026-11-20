@@ -6,21 +6,23 @@ import { gameFailure } from "./gameErrors";
 import { createSingleFlight } from "./singleFlight";
 import { gameKeys, invalidateAfterGameChange } from "./games";
 import type { JoinMode, MatchStatus } from "./gameTypes";
+import { PROJECT_REF, refFromUrl } from "./variant";
 
 /**
  * Game actions (stage 3, "Taking part"; docs/m3/05-architecture.md §5.3, 07-roadmap.md stage 3).
  *
- * NOT IN USE: no screen imports this yet, and every call refuses while GAME_WRITES_AVAILABLE is false.
- * It is switched on in the same change that ships the stage 3 screens, after M3-H (hardening) is
- * approved and applied — decision D1: the reproduced defects are fixed before the app can write
- * (e.g. S4: today `leave_match` lets a declined player ask again).
- *
  * Each call is one existing database function under the caller's own session. The phone decides
  * nothing: membership, capacity, level fit and court state are the server's (§5.3).
- * `remove` and `resolveCourt` call functions that exist only once M3-H is applied
- * (supabase/migrations/0072_game_hardening.sql).
+ * `remove` and `resolveCourt` call functions added by 0072 (M3-H hardening).
+ *
+ * Switched on only where 0072 is applied: the staging database (approved and applied 20 Nov 2026).
+ * A bundle pointed at any other database — the live one included — keeps every call refused and
+ * draws no action control. Turning it on for live is a separate decision after 0072 reaches live.
  */
-export const GAME_WRITES_AVAILABLE = false;
+export function gameWritesFor(supabaseUrl: string | undefined): boolean {
+  return refFromUrl(supabaseUrl ?? "") === PROJECT_REF.staging;
+}
+export const GAME_WRITES_AVAILABLE = gameWritesFor(process.env.EXPO_PUBLIC_SUPABASE_URL);
 
 /** join_match answers with the caller's status: `accepted` (open game) or `pending` (approval game). */
 export type JoinResult = "accepted" | "pending";

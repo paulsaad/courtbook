@@ -32,8 +32,8 @@ function confirm(title: string, text: string, okLabel: string, destructive = fal
 /**
  * Game (approved Stitch exports 26–30; docs/m3/04-ux-spec.md §4.4). Reads match_detail (0067) and,
  * for the organiser and accepted players only, match_participants — both under the player's own
- * session, so the database decides what this person may see. Game actions are wired here but stay
- * off until M3-H is approved and applied (SCREEN_FEATURES.writes, GAME_WRITES_AVAILABLE): while off,
+ * session, so the database decides what this person may see. Game actions are on only against the
+ * staging database, where 0072 is applied (SCREEN_FEATURES.writes, GAME_WRITES_AVAILABLE); elsewhere
  * no handler is passed and no action control is drawn.
  */
 export default function GameScreen() {

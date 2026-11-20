@@ -1,0 +1,12 @@
+# M3 actions 1/5 — Emma asks to join an approval game with no court booked (confirm, then waiting).
+appId: app.courtbook.mobile.staging
+---
+- openLink: "courtbook-staging://game/${GA}"
+- extendedWaitUntil: { visible: { id: "game-detail" }, timeout: 30000 }
+- extendedWaitUntil: { visible: "Ask to join", timeout: 20000 }
+- takeScreenshot: shots/m3act/1-game-A-before
+- tapOn: "Ask to join"
+- extendedWaitUntil: { visible: "Before you go ahead", timeout: 10000 }
+- tapOn: { id: "android:id/button1" }
+- extendedWaitUntil: { visible: "Withdraw request", timeout: 20000 }
+- takeScreenshot: shots/m3act/2-game-A-asked

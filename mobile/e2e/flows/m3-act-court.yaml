@@ -1,0 +1,18 @@
+# M3 actions 5/5 — the court booking under game B was cancelled: Emma sees it and goes ahead without one.
+appId: app.courtbook.mobile.staging
+---
+- openLink: "courtbook-staging://game/${GB}"
+- extendedWaitUntil: { visible: { id: "game-detail" }, timeout: 30000 }
+- scrollUntilVisible: { element: { id: "organiser-strip" }, direction: UP }
+- runFlow: _m3-refresh.yaml
+- extendedWaitUntil: { visible: { id: "banner-court_lost" }, timeout: 30000 }
+- takeScreenshot: shots/m3act/8-game-B-court-cancelled
+- tapOn: "Choose what to do"
+- scrollUntilVisible: { element: "Proceed without a CourtBook reservation", direction: DOWN }
+- takeScreenshot: shots/m3act/9-game-B-choices
+- tapOn: "Proceed without a CourtBook reservation"
+- extendedWaitUntil: { visible: "Go ahead without a court booking\\?", timeout: 10000 }
+- tapOn: { id: "android:id/button1" }
+- extendedWaitUntil: { notVisible: { id: "banner-court_lost" }, timeout: 20000 }
+- scrollUntilVisible: { element: "No court booked through CourtBook", direction: UP }
+- takeScreenshot: shots/m3act/10-game-B-goes-ahead

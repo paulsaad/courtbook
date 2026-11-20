@@ -1,0 +1,17 @@
+# M3 actions 3/5 — Emma joins an open game (confirm: no court), then leaves it.
+appId: app.courtbook.mobile.staging
+---
+- openLink: "courtbook-staging://game/${GO}"
+- extendedWaitUntil: { visible: { id: "game-detail" }, timeout: 30000 }
+- extendedWaitUntil: { visible: "Join", timeout: 20000 }
+- tapOn: "Join"
+- extendedWaitUntil: { visible: "Before you go ahead", timeout: 10000 }
+- tapOn: { id: "android:id/button1" }
+- extendedWaitUntil: { visible: "Leave game", timeout: 20000 }
+- takeScreenshot: shots/m3act/4-open-game-joined
+- tapOn: "Leave game"
+- extendedWaitUntil: { visible: "Leave this game?", timeout: 10000 }
+- tapOn: { id: "android:id/button1" }
+- extendedWaitUntil: { visible: "Join", timeout: 20000 }
+- assertNotVisible: "Leave game"
+- takeScreenshot: shots/m3act/5-open-game-left
