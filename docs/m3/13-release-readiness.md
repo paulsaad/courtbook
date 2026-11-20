@@ -51,3 +51,13 @@ Push and email (delivery milestone; in-app notices only, as decided) · email to
    app updates (Android and iOS), each approved.
 5. **Store items** in parallel: moderator and review frequency, 180-day evidence clearing (small job to
    build), filter decision, final privacy policy and terms, accessibility check.
+
+## Live state (Paul's read-only check, 20 Nov)
+
+0065–0066 present; 0067–0075 absent (release fixes 0068–0071 included); 1 admin; 0 real clubs, 1 demo
+club; 0 real clubs on simulated payment; 0 running holds; 0 upcoming confirmed bookings; 4 games not
+cancelled. **0070 assessment:** it would switch no club and release no hold — it only makes new clubs
+default to payment at the desk, adds the "simulated only at demo clubs" rule, and makes the admin
+switch refuse simulated for real clubs. The club-level read-only check (`fixes_0070_clubs.sql`) is run
+again immediately before 0070. Free plan, no automatic backups: verified manual backup first
+(`16-live-backup.md`).
