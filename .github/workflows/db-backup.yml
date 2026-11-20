@@ -99,6 +99,7 @@ jobs:
           DB_URL=$([ "$SOURCE" = live ] && echo "$LIVE_DB_URL" || echo "$STAGING_DB_URL")
           sudo apt-get -qq install -y postgresql-client >/dev/null
           PGOPTIONS="-c default_transaction_read_only=on" psql "$DB_URL" -X -v ON_ERROR_STOP=1 -f .github/scripts/db-snapshot.sql > /tmp/source.txt
+          PGOPTIONS="-c default_transaction_read_only=on" psql "$DB_URL" -X -v ON_ERROR_STOP=1 -f .github/scripts/db-security-detail.sql > /tmp/source-security.txt
           echo "$(grep -c '^rows ' /tmp/source.txt) tables counted; source Postgres $(grep '^other server major' /tmp/source.txt | cut -d'|' -f2)"
 
       - name: Start a throwaway local Supabase (Postgres 17)
@@ -138,7 +139,12 @@ jobs:
             [ "$mark" = ok ] || echo "$mark: $k source=$a restored=$b"
           done < /tmp/compare.txt
           echo "$(wc -l < /tmp/compare.txt) checks compared, $fails different"
-          [ "$fails" = 0 ] || { echo "::error::The restored copy differs from the source. The backup is NOT kept."; exit 1; }
+          if [ "$fails" != 0 ]; then
+            psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -X -v ON_ERROR_STOP=1 -f .github/scripts/db-security-detail.sql > /tmp/restored-security.txt
+            echo "Security items only on the source (<) or only on the restored copy (>):"
+            diff <(sort /tmp/source-security.txt) <(sort /tmp/restored-security.txt) | grep '^[<>]' | head -80 || true
+            echo "::error::The restored copy differs from the source. The backup is NOT kept."; exit 1
+          fi
           echo "RESTORE VERIFIED: every row count, data hash (public tables, accounts, storage records), security setting and schema fingerprint matches"
 
       - name: Encrypt and keep (only after a verified restore)
@@ -168,4 +174,4 @@ jobs:
 
       - name: Remove everything unencrypted from the runner
         if: always()
-        run: rm -rf /tmp/backup /tmp/source.txt /tmp/restored.txt /tmp/compare.txt /tmp/restore.log
+        run: rm -rf /tmp/backup /tmp/source.txt /tmp/restored.txt /tmp/compare.txt /tmp/restore.log /tmp/source-security.txt /tmp/restored-security.txt
