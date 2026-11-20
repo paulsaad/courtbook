@@ -1,25 +1,21 @@
-# M3 — iPhone check (CourtBook Staging), after the iOS staging update
+# M3 — iPhone check (CourtBook Staging), short version
 
-Two phones: **iPhone** = your own account (email code); **Samsung** = Paul Tester
-(`paul.tester@courtbook.test`, the staging tester password). Report failures only, with the step number.
+Published 20 Nov: iOS staging update `01a1fa3f-d178-7e65-9584-5ca350b73cf5` (group
+`e1397c4b-55dd-44d1-9279-ae74f682520f`). Only what can differ on iOS is checked; the flows themselves
+already passed on Android and the emulator.
 
-**0. Get the update** — on the iPhone, close CourtBook Staging completely and reopen it, twice.
-Profile → About → Update shows the update ID from the publish report, Published today. (If it still
-shows an older one, close and reopen once more.)
+Uses the **shared test game** (Paul Tester's open game, you already in it, one message from him).
+The same game serves the Android block / unblock check. Blocks belong to the account, not the phone:
+finish one phone (block, then unblock) before starting the other.
 
-| # | Step | Expected |
+| # | iPhone step | Expected |
 | --- | --- | --- |
-| 1 | iPhone: sign in with your email, type the 8-digit code | Signed in; Profile shows your name |
-| 2 | Samsung: Find a game → Post a game → padel, demo club, tomorrow, Ask to join, 3 players → Post game | The game appears on the board once |
-| 3 | iPhone: Find a game (Any time, padel) | Paul Tester's game is listed; opening it shows the game screen |
-| 4 | iPhone: Ask to join → confirm | "Request sent" banner |
-| 5 | Samsung: open the game → Accept your request | iPhone (pull to refresh): you're in the game; Activity shows the notice |
-| 6 | iPhone: Chat → send "hello" (agree to the five rules if asked) | Message appears once; Samsung sees it |
-| 7 | Samsung: reply "hi" | iPhone shows it within a few seconds |
-| 8 | iPhone: long-press "hi" → Report message → Spam → Send report | Thanks message, with "Block this player" offered |
-| 9 | iPhone: Block this player → Block | "hi" now reads "Message from a player you blocked"; the game screen says you blocked the organiser |
-| 10 | iPhone: Profile → Blocked players → Unblock → Unblock | List empty; reopen the chat: "hi" shows again |
-| 11 | Website preview, Admin → Reports | Your report is under Open; Dismiss it |
-| 12 | Samsung: Manage game → Cancel game | Game cancelled (clean-up) |
+| 0 | Close CourtBook Staging completely and reopen it, twice | Profile → About → Update `01a1fa3f…` |
+| 1 | Sign in if asked (email, then the 8-digit code) | Signed in |
+| 2 | Find a game → open "[M3 TEST] Shared game" | You're in the game |
+| 3 | Chat → tap the message box, type, Send (agree to the rules if asked) | The keyboard never covers the box; the message appears once |
+| 4 | Long-press "Hi! Test message…" → Report message → Spam → Send report → Block this player → Block | It now reads "Message from a player you blocked" |
+| 5 | Profile → Blocked players → Unblock → Unblock; reopen the chat | The message shows again |
 
-Also note anything that looks wrong on the iPhone's screen (text cut off, keyboard covering the chat box).
+Report failures only, with the step number. When both phones are done, the game is removed with
+`m3_test_games_cleanup` and its id.

@@ -277,3 +277,12 @@ like the ticket) and pass the unit tests, but have not been seen on a phone or e
   migration(s)" (75 on staging); postcheck run 44790111845 2/2 true; moderator check run 44790215077:
   `admin_blocks_received` answers for `02111629`, refuses a player.
 - Release readiness: `13-release-readiness.md`.
+
+## Round 13 (20 Nov) — iOS staging update
+
+- Check run 44791514918 (no publish): staging app and database confirmed, 538/538, iOS fingerprint
+  `d0bca23e…` matches 1 staging build. Publish run 44794177707 (Paul's approval) from `m3-dev` @ `efc4066`:
+  iOS update `01a1fa3f-d178-7e65-9584-5ca350b73cf5`, group `e1397c4b-55dd-44d1-9279-ae74f682520f`.
+  Rollback: group `ebae6e05-8cd1-4cf7-97b4-962dc933b265` (16 Nov iOS staging update).
+- Shared temporary test game prepared (`m3_test_games_shared`), not run; short iPhone check:
+  `14-iphone-checklist.md`.
