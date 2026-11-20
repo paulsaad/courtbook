@@ -8,11 +8,11 @@ appId: app.courtbook.mobile.staging
 - extendedWaitUntil: { visible: "Edit details", timeout: 10000 }
 - tapOn: "Edit details"
 - extendedWaitUntil: { visible: { id: "edit-game" }, timeout: 30000 }
-- scrollUntilVisible: { element: "Join straight away", timeout: 15000 }
+- scrollUntilVisible: { element: "Join straight away", timeout: 15000, centerElement: true }
 - tapOn: "Join straight away"
 - extendedWaitUntil: { visible: ".*will be accepted when you save.*", timeout: 10000 }
 - takeScreenshot: shots/m3post/3-edit
-- scrollUntilVisible: { element: { id: "edit-save" }, timeout: 15000 }
+- scrollUntilVisible: { element: { id: "edit-save" }, timeout: 15000, centerElement: true }
 - tapOn: { id: "edit-save" }
 - extendedWaitUntil: { visible: { id: "game-detail" }, timeout: 30000 }
 - extendedWaitUntil: { notVisible: { id: "requests" }, timeout: 30000 }

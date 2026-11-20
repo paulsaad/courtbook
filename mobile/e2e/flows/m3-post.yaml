@@ -5,21 +5,21 @@ appId: app.courtbook.mobile.staging
 - extendedWaitUntil: { visible: { id: "post-a-game" }, timeout: 30000 }
 - tapOn: { id: "post-a-game" }
 - extendedWaitUntil: { visible: { id: "post-game" }, timeout: 30000 }
-- scrollUntilVisible: { element: { id: "sport-padel" }, timeout: 15000 }
+- scrollUntilVisible: { element: { id: "sport-padel" }, timeout: 15000, centerElement: true }
 - tapOn: { id: "sport-padel" }
-- scrollUntilVisible: { element: { id: "club-${E2E_CLUB}" }, timeout: 15000 }
+- scrollUntilVisible: { element: { id: "club-${E2E_CLUB}" }, timeout: 15000, centerElement: true }
 - tapOn: { id: "club-${E2E_CLUB}" }
-- scrollUntilVisible: { element: { id: "day-${POST_DAY}" }, timeout: 15000 }
+- scrollUntilVisible: { element: { id: "day-${POST_DAY}" }, timeout: 15000, centerElement: true }
 - tapOn: { id: "day-${POST_DAY}" }
-- scrollUntilVisible: { element: { id: "start-18:00" }, timeout: 15000 }
+- scrollUntilVisible: { element: { id: "start-18:00" }, timeout: 15000, centerElement: true }
 - tapOn: { id: "start-18:00" }
-- scrollUntilVisible: { element: "Ask to join", timeout: 15000 }
+- scrollUntilVisible: { element: "Ask to join", timeout: 15000, centerElement: true }
 - tapOn: "Ask to join"
-- scrollUntilVisible: { element: { id: "note" }, timeout: 15000 }
+- scrollUntilVisible: { element: { id: "note" }, timeout: 15000, centerElement: true }
 - tapOn: { id: "note" }
 - inputText: "M3 staging check post"
 - hideKeyboard
-- scrollUntilVisible: { element: { id: "post-submit" }, timeout: 15000 }
+- scrollUntilVisible: { element: { id: "post-submit" }, timeout: 15000, centerElement: true }
 - takeScreenshot: shots/m3post/1-post-form
 - tapOn: { id: "post-submit" }
 - extendedWaitUntil: { visible: "(?i)you're the organiser", timeout: 30000 }
