@@ -172,6 +172,8 @@ async function posted() {
   check("posted with Ask to join, 3 players, her note, open, no booking",
     mode === "approval" && needed === "3" && note === "M3 staging check post" && status === "open" && noBooking === "true", row);
   check("exactly one game posted (no duplicate)", sql(`select count(*) from matches m join auth.users u on u.id = m.organizer_id where u.email = '${EMMA}'`) === "1");
+  // 0073: the app sent its own key with the post (POST_TOKEN_AVAILABLE on staging), so a retry could not duplicate it
+  check("posted with the app's key (0073 client_token set)", sql(`select (client_token is not null)::text from matches where id = '${uuid(id)}'`) === "true");
   await call(await helper(1), "join_match", { p_match: id });
   check("helper 1's request is waiting", statusOf(id, helperEmail(1)) === "pending", statusOf(id, helperEmail(1)));
 }
