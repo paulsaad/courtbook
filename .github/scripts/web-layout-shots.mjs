@@ -13,6 +13,9 @@ const BASE = process.env.BASE_URL, HEAD = process.env.HEAD_URL;
 
 const browser = await puppeteer.launch({ args: ["--no-sandbox", "--font-render-hinting=none"] });
 const page = await browser.newPage();
+// The "Add CourtBook to your home screen" hint appears whenever Chrome happens to offer installing
+// the site (beforeinstallprompt), which varies between loads; dismiss it as a user's ✕ does.
+await page.evaluateOnNewDocument(() => { try { localStorage.setItem("cb_install_hint_dismissed", "1"); } catch {} });
 
 async function shot(url, width, height) {
   await page.setViewport({ width, height, deviceScaleFactor: 1 });
