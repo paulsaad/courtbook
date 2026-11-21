@@ -263,14 +263,17 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     return () => document.removeEventListener("click", onClick, true);
   }, [confirmDiscard]);
 
-  // Keyboard (Phase I-2a): ← / → previous / next day (or week), T today. Ignored while typing (any
-  // field, the customer search, the date field), inside the booking panel or a length choice, with a
-  // modifier key, and while saving. Enter is never a shortcut: on a slot it only opens the add form.
+  // Keyboard (Phase I-2a): ← / → previous / next day (or week), T today — only when no control has
+  // focus (so never while typing, in the customer search, the date field, the panel, a length choice or
+  // on a focused slot or link), never with a modifier key, never while saving. Enter is never a
+  // shortcut: on a slot it only opens the add form.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || busy) return;
+      // only when no control has keyboard focus (focus on the page itself): a focused button, link, field,
+      // date, length choice, panel or slot keeps its own arrow keys
       const el = e.target instanceof Element ? e.target : null;
-      if (el && (el.closest("input, textarea, select, [contenteditable=true], [role=dialog], [role=radiogroup], [role=listbox]") || (el as HTMLElement).isContentEditable)) return;
+      if (el && el !== document.body && el !== document.documentElement) return;
       const step = view === "week" ? 7 : 1;
       const to = e.key === "ArrowLeft" ? shiftDate(date, -step) : e.key === "ArrowRight" ? shiftDate(date, step)
         : e.key === "t" || e.key === "T" ? todayIn(club.timezone) : null;
@@ -545,33 +548,31 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
       </div>
       </div>
 
-      {/* Phones and tablets: the modal bottom sheet, unchanged. */}
-      {sheet && !isDesktop && (
-        <div className="fixed inset-0 z-20 flex items-end justify-center bg-ink/30" onClick={() => { if (!busy) { addDirty.current = false; setSheet(null); } }}>
-          <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={sheetTitle(sheet)} className="sheet-enter w-full max-w-lg rounded-t-2xl bg-white px-5 pb-8 pt-3 shadow-2xl outline-none" onClick={(e) => e.stopPropagation()}>
-            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-grid" />
-            {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
-            {sheetBody(sheet)}
-          </div>
-        </div>
-      )}
-
-      {/* Desktop (≥ 1024 px): a side panel beside the calendar, not modal — the calendar stays usable.
-          Nothing selected: the Now summary (today) or a hint. */}
-      {isDesktop && (
-        <aside className="sticky top-16 flex h-[calc(100vh-4rem)] w-[400px] shrink-0 flex-col border-l border-grid bg-white">
+      {/* One container for both layouts, restyled at 1024 px rather than replaced, so an open form keeps
+          what was typed when the window crosses the breakpoint.
+          Phones and tablets: the modal bottom sheet, as before. Desktop: a side panel beside the calendar,
+          not modal — the calendar stays usable; with nothing open it shows the Now summary or a hint. */}
+      {(sheet || isDesktop) && (
+        <div
+          className={isDesktop ? "sticky top-16 flex h-[calc(100vh-4rem)] w-[400px] shrink-0 flex-col border-l border-grid bg-white" : "fixed inset-0 z-20 flex items-end justify-center bg-ink/30"}
+          onClick={isDesktop ? undefined : () => { if (!busy) { addDirty.current = false; setSheet(null); } }}
+        >
           {sheet ? (
-            <section ref={dialogRef} role="dialog" aria-modal="false" aria-label={sheetTitle(sheet)} className="flex min-h-0 flex-1 flex-col outline-none">
-              <div className="flex items-center justify-between border-b border-grid px-5 py-3">
-                <h2 className="text-lg font-semibold">{sheetTitle(sheet)}</h2>
-                <button type="button" aria-label="Close" disabled={busy} onClick={closeSheet}
-                  className="grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-xl leading-none text-muted hover:text-ink disabled:opacity-40">×</button>
+            <div ref={dialogRef} role="dialog" aria-modal={isDesktop ? "false" : "true"} aria-label={sheetTitle(sheet)}
+              className={isDesktop ? "flex min-h-0 flex-1 flex-col outline-none" : "sheet-enter w-full max-w-lg rounded-t-2xl bg-white px-5 pb-8 pt-3 shadow-2xl outline-none"}
+              onClick={(e) => e.stopPropagation()}>
+              <div className={isDesktop ? "flex items-center justify-between border-b border-grid px-5 py-3" : "mx-auto mb-4 h-1 w-10 rounded-full bg-grid"}>
+                {isDesktop && <h2 className="text-lg font-semibold">{sheetTitle(sheet)}</h2>}
+                {isDesktop && (
+                  <button type="button" aria-label="Close" disabled={busy} onClick={closeSheet}
+                    className="grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-xl leading-none text-muted hover:text-ink disabled:opacity-40">×</button>
+                )}
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-                {error && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+              <div className={isDesktop ? "min-h-0 flex-1 overflow-y-auto px-5 py-4" : undefined}>
+                {error && <p role={isDesktop ? "alert" : undefined} className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
                 {sheetBody(sheet)}
               </div>
-            </section>
+            </div>
           ) : isToday && view !== "now" ? (
             <div className="min-h-0 flex-1 overflow-y-auto py-4">
               <NowPanel
@@ -583,7 +584,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
           ) : (
             <p className="px-5 py-6 text-sm text-muted">Select a booking to see its details, or a free time to add a booking.</p>
           )}
-        </aside>
+        </div>
       )}
     </main>
   );

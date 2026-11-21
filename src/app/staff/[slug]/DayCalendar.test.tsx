@@ -259,9 +259,17 @@ describe("calendar header links (Phase I-1)", () => {
   });
 });
 
+/** A screen width the test can change while the page is open (the browser's "change" event). */
+const screenWidth = { desktop: false, listeners: new Set<() => void>() };
 const desktop = (on: boolean) => {
-  window.matchMedia = ((q: string) => ({ matches: on && q.includes("1024"), media: q, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+  screenWidth.desktop = on;
+  window.matchMedia = ((q: string) => ({
+    get matches() { return screenWidth.desktop && q.includes("1024"); }, media: q,
+    addEventListener: (_: string, f: () => void) => { screenWidth.listeners.add(f); },
+    removeEventListener: (_: string, f: () => void) => { screenWidth.listeners.delete(f); },
+  })) as unknown as typeof window.matchMedia;
 };
+const resizeTo = (on: boolean) => { screenWidth.desktop = on; screenWidth.listeners.forEach((f) => f()); };
 const typeName = (v: string) => fireEvent.change(screen.getByRole("textbox", { name: "Customer name" }), { target: { value: v } });
 
 describe("Phase I-2a: phone keeps the modal bottom sheet", () => {
@@ -289,7 +297,8 @@ describe("Phase I-2a: desktop side panel beside the calendar", () => {
     await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
     const panel = screen.getByRole("dialog", { name: "Add a booking" });
     expect(panel.getAttribute("aria-modal")).toBe("false");
-    expect(panel.closest("aside")).not.toBeNull();
+    expect(panel.parentElement!.className).toContain("w-[400px]");          // the side column, not an overlay
+    expect(panel.parentElement!.className).not.toContain("fixed");
     expect(screen.getByRole("heading", { name: "Add a booking" })).toBeDefined();
     // another slot can be clicked straight away (nothing typed yet)
     expect((screen.getByRole("button", { name: "Add booking Padel 2 11:00" }) as HTMLButtonElement).disabled).toBe(false);
@@ -403,3 +412,40 @@ describe("Phase I-2a: desktop side panel beside the calendar", () => {
     expect(nav.push).not.toHaveBeenCalled();
   });
 });
+
+describe("Phase I-2a review: crossing 1024 px and focused controls", () => {
+  beforeEach(() => { handler = async () => ok([]); nav.push.mockReset(); });
+  afterEach(() => { vi.restoreAllMocks(); desktop(false); });
+
+  it.each([[false, true], [true, false]])("typed details survive resizing (start desktop=%s → %s) and back", async (start, end) => {
+    desktop(start);
+    view();
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
+    typeName("Rami");
+    fireEvent.change(screen.getByPlaceholderText("Phone (optional)"), { target: { value: "03 123 456" } });
+    await act(async () => { resizeTo(end); });
+    const dialog = screen.getByRole("dialog", { name: "Add a booking" });
+    expect(dialog.getAttribute("aria-modal")).toBe(end ? "false" : "true");
+    expect((screen.getByRole("textbox", { name: "Customer name" }) as HTMLInputElement).value).toBe("Rami");
+    expect((screen.getByPlaceholderText("Phone (optional)") as HTMLInputElement).value).toBe("03 123 456");
+    await act(async () => { resizeTo(start); });
+    expect((screen.getByRole("textbox", { name: "Customer name" }) as HTMLInputElement).value).toBe("Rami");
+    expect(screen.getByRole("dialog", { name: "Add a booking" }).getAttribute("aria-modal")).toBe(start ? "false" : "true");
+  });
+
+  it("← / → do nothing while a slot, a link or another control has keyboard focus", async () => {
+    desktop(true);
+    view();
+    const slot = screen.getByRole("button", { name: "Add booking Padel 1 10:00" });
+    slot.focus();
+    await act(async () => { fireEvent.keyDown(slot, { key: "ArrowRight" }); fireEvent.keyDown(slot, { key: "t" }); });
+    const link = screen.getByRole("link", { name: "Next day" });
+    link.focus();
+    await act(async () => { fireEvent.keyDown(link, { key: "ArrowLeft" }); });
+    expect(nav.push).not.toHaveBeenCalled();
+    (document.activeElement as HTMLElement).blur();
+    await act(async () => { fireEvent.keyDown(document.body, { key: "ArrowRight" }); });
+    expect(nav.push).toHaveBeenCalledTimes(1);
+  });
+});
+
