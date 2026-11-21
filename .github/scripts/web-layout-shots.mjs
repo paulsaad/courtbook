@@ -20,7 +20,7 @@ async function shot(url, width, height) {
   await page.evaluate(() => document.fonts.ready);
   await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}" });
   await new Promise((r) => setTimeout(r, 300));
-  return page.screenshot({ fullPage: true });
+  return Buffer.from(await page.screenshot({ fullPage: true }));
 }
 
 // The first club on the Courts page gives the club pages to check.
