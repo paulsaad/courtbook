@@ -862,6 +862,78 @@ describe("Phase I-2b: keyboard calendar", () => {
   });
 });
 
+describe("Phase I-2b review: keyboard at the edges of the day (booking/block ending at closing)", () => {
+  const DAY = "2099-01-12";
+  const z = (hhmm: string) => new Date(`${DAY}T${hhmm}:00+02:00`).toISOString();
+  const late: Booking = { ...booking("b-late", "Late Game"), start_at: z("21:30"), end_at: z("23:00") };          // ends at closing
+  const allDay: Block = { id: "k-all", court_id: courtB.id, start_at: z("08:00"), end_at: z("23:00"), reason: "Closed" };
+  const focused = () => document.activeElement as HTMLElement;
+  const label = () => focused().getAttribute("aria-label");
+  const key = async (k: string) => { await act(async () => { fireEvent.keyDown(focused(), { key: k }); }); };
+  beforeEach(() => { handler = async () => ok([]); desktop(true); nav.push.mockReset(); });
+  afterEach(() => { desktop(false); });
+
+  it("a booking ending at closing: ↓ and End keep focus on it; ↑ leaves it; ← → still move; one Tab stop throughout", async () => {
+    view({ date: DAY, bookings: [late], blocks: [allDay] });
+    const grid = screen.getByRole("group", { name: /^Courts,/ });
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 21:00" }).focus(); });
+    await key("ArrowDown");
+    expect(label()).toMatch(/^Late Game, Padel 1, 21:30–23:00/);
+    for (const k of ["ArrowDown", "ArrowDown", "End"]) {                           // nowhere further down: stays, never lost
+      await key(k);
+      expect(label()).toMatch(/^Late Game,/);
+      expect(grid.contains(focused())).toBe(true);
+    }
+    expect(Array.from(grid.querySelectorAll<HTMLElement>("button")).filter((b) => b.tabIndex === 0).map((b) => b.getAttribute("aria-label"))).toEqual([expect.stringMatching(/^Late Game,/)]);
+    await key("ArrowUp");
+    expect(label()).toBe("Add booking Padel 1 21:00");                             // not trapped
+    await key("ArrowDown"); await key("ArrowRight");
+    expect(label()).toBe("Closed, Padel 2, 08:00–23:00, blocked");
+    expect(nav.push).not.toHaveBeenCalled();                                        // the arrows never changed the day
+  });
+
+  it("an all-day block: ↑ ↓ Home End stay on it (nothing else in that column), ← → leave it", async () => {
+    view({ date: DAY, blocks: [allDay] });
+    const grid = screen.getByRole("group", { name: /^Courts,/ });
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 12:00" }).focus(); });
+    await key("ArrowRight");
+    expect(label()).toBe("Closed, Padel 2, 08:00–23:00, blocked");
+    for (const k of ["ArrowUp", "ArrowDown", "Home", "End"]) {
+      await key(k);
+      expect(label()).toBe("Closed, Padel 2, 08:00–23:00, blocked");
+      expect(grid.contains(focused())).toBe(true);
+    }
+    await key("ArrowLeft");
+    expect(label()).toBe("Add booking Padel 1 22:30");                              // the block's last row was in use (End)
+    await key("ArrowRight"); await key("ArrowRight");                               // past the last court: stays on the block
+    expect(label()).toBe("Closed, Padel 2, 08:00–23:00, blocked");
+  });
+
+  it("first and last cells: ↑ at opening and ↓ at closing stay put on a free time", async () => {
+    view({ date: DAY });
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 08:00" }).focus(); });
+    await key("ArrowUp"); await key("ArrowLeft");
+    expect(label()).toBe("Add booking Padel 1 08:00");
+    await key("End"); await key("ArrowDown"); await key("ArrowRight"); await key("ArrowRight");
+    expect(label()).toBe("Add booking Padel 2 22:30");
+  });
+
+  it("Week view: a booking ending at closing keeps focus with ↓/End; ↑ leaves it", async () => {
+    handler = async (q) => ok(q.table === "bookings" ? [late] : []);
+    view({ date: DAY, view: "week", court: courtA.id });
+    const lastFree = await screen.findByRole("button", { name: "Add a booking on 2099-01-12 at 21:00" });
+    await waitFor(() => expect((lastFree as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => { lastFree.focus(); });
+    await key("ArrowDown");
+    expect(label()).toBe("Late Game on 2099-01-12 at 21:30");
+    await key("End"); await key("ArrowDown"); await key("ArrowDown");
+    expect(label()).toBe("Late Game on 2099-01-12 at 21:30");                       // the 22:30 cell of the same booking
+    expect(focused().getAttribute("data-week-cell")).toBe("2099-01-12|22:30");
+    await key("ArrowUp"); await key("ArrowUp"); await key("ArrowUp");
+    expect(label()).toBe("Add a booking on 2099-01-12 at 21:00");
+  });
+});
+
 describe("Phase I-2b: customer suggestions by keyboard", () => {
   const guests = [{ name: "Rami Haddad", phone: "+961 3 111 111", last_at: "2026-11-01" }, { name: "Rana Saad", phone: null, last_at: "2026-11-02" }];
   let calls: string[];
