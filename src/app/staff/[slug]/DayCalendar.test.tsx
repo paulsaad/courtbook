@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { act } from "react";
 
-const nav = vi.hoisted(() => ({ push: vi.fn() }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: nav.push }) }));
+const nav = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: nav.push, replace: nav.replace }) }));
 
 // next/link needs a router in tests and all we want is an anchor
 vi.mock("next/link", () => ({
@@ -275,7 +275,7 @@ const desktop = (on: boolean) => {
   })) as unknown as typeof window.matchMedia;
 };
 const resizeTo = (on: boolean) => { screenWidth.desktop = on; screenWidth.listeners.forEach((f) => f()); };
-const typeName = (v: string) => fireEvent.change(screen.getByRole("textbox", { name: "Customer name" }), { target: { value: v } });
+const typeName = (v: string) => fireEvent.change(screen.getByRole("combobox", { name: "Customer name" }), { target: { value: v } });
 
 describe("Phase I-2a: phone keeps the modal bottom sheet", () => {
   beforeEach(() => { handler = async () => ok([]); desktop(false); });
@@ -320,12 +320,12 @@ describe("Phase I-2a: desktop side panel beside the calendar", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false);
     await act(async () => { screen.getByRole("button", { name: "Add booking Padel 2 11:00" }).click(); });
     expect(confirm).toHaveBeenCalledTimes(1);
-    expect((screen.getByRole("textbox", { name: "Customer name" }) as HTMLInputElement).value).toBe("Rami");
+    expect((screen.getByRole("combobox", { name: "Customer name" }) as HTMLInputElement).value).toBe("Rami");
     expect(screen.getByRole("heading", { name: /Padel 1, 10:00/ })).toBeDefined();
     confirm.mockReturnValueOnce(true);
     await act(async () => { screen.getByRole("button", { name: "Add booking Padel 2 11:00" }).click(); });
     expect(screen.getByRole("heading", { name: /Padel 2, 11:00/ })).toBeDefined();
-    expect((screen.getByRole("textbox", { name: "Customer name" }) as HTMLInputElement).value).toBe("");
+    expect((screen.getByRole("combobox", { name: "Customer name" }) as HTMLInputElement).value).toBe("");
   });
 
   it("Close and Esc with typed details ask first too", async () => {
@@ -345,7 +345,7 @@ describe("Phase I-2a: desktop side panel beside the calendar", () => {
     view();
     await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
     typeName("Rami");
-    const nameField = screen.getByRole("textbox", { name: "Customer name" });
+    const nameField = screen.getByRole("combobox", { name: "Customer name" });
     // a browser submits a form when Enter is pressed in a field unless the keydown is cancelled: it is
     const ev = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
     await act(async () => { nameField.dispatchEvent(ev); });
@@ -370,7 +370,7 @@ describe("Phase I-2a: desktop side panel beside the calendar", () => {
     await act(async () => { screen.getByRole("button", { name: "Add booking" }).click(); });
     await waitFor(() => expect(screen.getByRole("alert")).toBeDefined());
     expect(calls).toEqual(["staff_book"]);
-    expect((screen.getByRole("textbox", { name: "Customer name" }) as HTMLInputElement).value).toBe("Rami");
+    expect((screen.getByRole("combobox", { name: "Customer name" }) as HTMLInputElement).value).toBe("Rami");
     expect(screen.getByRole("dialog", { name: "Add a booking" })).toBeDefined();
     rpcImpl = async () => ({ data: [], error: null });
   });
@@ -384,7 +384,7 @@ describe("Phase I-2a: desktop side panel beside the calendar", () => {
       handler = async () => failed;
       await act(async () => { await vi.advanceTimersByTimeAsync(61_000); });
       expect(screen.getByText(/Couldn.t load the latest bookings/)).toBeDefined();
-      expect((screen.getByRole("textbox", { name: "Customer name" }) as HTMLInputElement).value).toBe("Rami");
+      expect((screen.getByRole("combobox", { name: "Customer name" }) as HTMLInputElement).value).toBe("Rami");
       expect(screen.getByRole("dialog", { name: "Add a booking" })).toBeDefined();
       expect(nav.push).not.toHaveBeenCalled();                 // the date never changes by itself
       // fail-safe kept: no new add form can be opened while the day may be out of date
@@ -401,7 +401,7 @@ describe("Phase I-2a: desktop side panel beside the calendar", () => {
     nav.push.mockReset();
     await act(async () => { fireEvent.keyDown(document.body, { key: "ArrowRight", ctrlKey: true }); });
     await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
-    const field = screen.getByRole("textbox", { name: "Customer name" });
+    const field = screen.getByRole("combobox", { name: "Customer name" });
     await act(async () => { fireEvent.keyDown(field, { key: "ArrowRight" }); fireEvent.keyDown(field, { key: "t" }); });
     await act(async () => { fireEvent.keyDown(screen.getByRole("heading", { name: "Add a booking" }), { key: "ArrowLeft" }); });
     expect(nav.push).not.toHaveBeenCalled();
@@ -431,10 +431,10 @@ describe("Phase I-2a review: crossing 1024 px and focused controls", () => {
     await act(async () => { resizeTo(end); });
     const dialog = screen.getByRole("dialog", { name: "Add a booking" });
     expect(dialog.getAttribute("aria-modal")).toBe(end ? "false" : "true");
-    expect((screen.getByRole("textbox", { name: "Customer name" }) as HTMLInputElement).value).toBe("Rami");
+    expect((screen.getByRole("combobox", { name: "Customer name" }) as HTMLInputElement).value).toBe("Rami");
     expect((screen.getByPlaceholderText("Phone (optional)") as HTMLInputElement).value).toBe("03 123 456");
     await act(async () => { resizeTo(start); });
-    expect((screen.getByRole("textbox", { name: "Customer name" }) as HTMLInputElement).value).toBe("Rami");
+    expect((screen.getByRole("combobox", { name: "Customer name" }) as HTMLInputElement).value).toBe("Rami");
     expect(screen.getByRole("dialog", { name: "Add a booking" }).getAttribute("aria-modal")).toBe(start ? "false" : "true");
   });
 
@@ -543,11 +543,11 @@ describe("Calendar blocks (0076): longer blocks, start/end selectors and the 'No
     fireEvent.change(screen.getByLabelText("Block reason"), { target: { value: "Net repair" } });
     await act(async () => { screen.getByRole("button", { name: "Block this time" }).click(); });
     expect(draft()).not.toBeNull();                                                  // saving: still "Not saved"
-    expect(screen.queryByRole("button", { name: "Net repair" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Net repair,/ })).toBeNull();
     const saved: Block = { id: "blk-1", court_id: courtA.id, start_at: z("10:00"), end_at: z("14:00"), reason: "Net repair" };
     handler = async (q) => ok(q.table === "blocks" ? [saved] : []);
     await act(async () => { answer.settle({ data: "blk-1", error: null }); });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Net repair" })).toBeDefined());
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Net repair,/ })).toBeDefined());
     expect(draft()).toBeNull();
   });
 
@@ -698,7 +698,7 @@ describe("Calendar blocks: after saving, and refusals in words about blocks (rev
     rpcImpl = async (fn) => (fn === "staff_book" ? { data: null, error: { message: "bad_duration" } } : { data: [], error: null });
     view({ date: DAY });
     await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
-    fireEvent.change(screen.getByRole("textbox", { name: "Customer name" }), { target: { value: "Rami" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Customer name" }), { target: { value: "Rami" } });
     await act(async () => { screen.getByRole("button", { name: "Add booking" }).click(); });
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Duration must be whole slots, within what the club allows."));
   });
@@ -736,5 +736,318 @@ describe("UI corrections from the staging review (21 Nov)", () => {
   it("Home: the greeting's notification bell is for phones and tablets only (the desktop top bar has one)", () => {
     const src = readFileSync("src/app/page.tsx", "utf8");
     expect(src).toMatch(/<Link href="\/notifications" aria-label="Activity" className="[^"]*\blg:hidden\b[^"]*">/);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// Phase I-2b: keyboard grid, focus return, customer suggestions, find a booking, preferences, details
+// ---------------------------------------------------------------------------------------------------------
+describe("Phase I-2b: keyboard calendar", () => {
+  const DAY = "2099-01-12";                                            // future, Beirut UTC+2
+  const z = (hhmm: string) => new Date(`${DAY}T${hhmm}:00+02:00`).toISOString();
+  const rami: Booking = { ...booking("b-rami", "Rami Haddad"), start_at: z("11:00"), end_at: z("12:30"), guest_phone: "+961 3 123 456" };
+  const net: Block = { id: "k-net", court_id: courtB.id, start_at: z("10:00"), end_at: z("12:00"), reason: "Net repair" };
+  const group = () => screen.getByRole("group", { name: /^Courts,/ });
+  const focused = () => document.activeElement as HTMLElement;
+  const key = async (k: string, el: Element = focused(), extra = {}) => { await act(async () => { fireEvent.keyDown(el, { key: k, ...extra }); }); };
+  beforeEach(() => { handler = async () => ok([]); desktop(true); nav.push.mockReset(); nav.replace.mockReset(); window.localStorage.clear(); });
+  afterEach(() => { vi.restoreAllMocks(); desktop(false); rpcImpl = async () => ({ data: [], error: null }); });
+
+  it("the grid is one Tab stop; arrows move between times and courts", async () => {
+    view({ date: DAY, bookings: [rami], blocks: [net] });
+    const tabbable = Array.from(group().querySelectorAll<HTMLElement>("button")).filter((b) => b.tabIndex === 0);
+    expect(tabbable).toHaveLength(1);
+    expect(tabbable[0].getAttribute("aria-label")).toBe("Add booking Padel 1 08:00");
+    await act(async () => { tabbable[0].focus(); });
+    await key("ArrowDown");
+    expect(focused().getAttribute("aria-label")).toBe("Add booking Padel 1 08:30");
+    await key("ArrowRight");
+    expect(focused().getAttribute("aria-label")).toBe("Add booking Padel 2 08:30");
+    await key("End");
+    expect(focused().getAttribute("aria-label")).toBe("Add booking Padel 2 22:30");
+    await key("Home");
+    expect(focused().getAttribute("aria-label")).toBe("Add booking Padel 2 08:00");
+    // the I-2a day keys do not fire from inside the grid
+    await key("ArrowLeft"); await key("ArrowLeft");
+    expect(nav.push).not.toHaveBeenCalled();
+    expect(focused().getAttribute("aria-label")).toBe("Add booking Padel 1 08:00");
+  });
+
+  it("a booking or block is one stop: arrows land on it and step past it; covered slots are not reachable", async () => {
+    view({ date: DAY, bookings: [rami], blocks: [net] });
+    // the free slots under Rami (11:00–12:30) and the block (10:00–12:00) are not exposed at all
+    expect(screen.queryByRole("button", { name: "Add booking Padel 1 11:00" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add booking Padel 2 10:30" })).toBeNull();
+    const covered = group().querySelector<HTMLButtonElement>('[data-cell="court-a:6"]')!;   // Padel 1 11:00
+    expect(covered.disabled).toBe(true);
+    expect(covered.getAttribute("aria-hidden")).toBe("true");
+    expect(covered.tabIndex).toBe(-1);
+    // 10:30 → ↓ → Rami (11:00–12:30) → ↓ → 12:30
+    await act(async () => { (group().querySelector('[data-cell="court-a:5"]') as HTMLElement).focus(); });
+    await key("ArrowDown");
+    expect(focused().getAttribute("aria-label")).toBe("Rami Haddad, Padel 1, 11:00–12:30, desk booking, +961 3 123 456");
+    // → at 11:00 is the block on Padel 2, announced as what it is; ← back to Rami
+    await key("ArrowRight");
+    expect(focused().getAttribute("aria-label")).toBe("Net repair, Padel 2, 10:00–12:00, blocked");
+    await key("ArrowLeft");
+    expect(focused().getAttribute("aria-label")).toMatch(/^Rami Haddad,/);
+    await key("ArrowDown");
+    expect(focused().getAttribute("aria-label")).toBe("Add booking Padel 1 12:30");
+    await key("ArrowUp");
+    expect(focused().getAttribute("aria-label")).toMatch(/^Rami Haddad,/);
+    // from Rami's last half hour (12:00) → is Padel 2 at 12:00, free again after the block
+    await key("ArrowRight");
+    expect(focused().getAttribute("aria-label")).toBe("Add booking Padel 2 12:00");
+  });
+
+  it("Esc closes the panel and puts focus back on the cell it was opened from", async () => {
+    view({ date: DAY, bookings: [rami] });
+    const slot = screen.getByRole("button", { name: "Add booking Padel 2 15:00" });
+    await act(async () => { slot.focus(); slot.click(); });
+    expect(screen.getByRole("dialog", { name: "Add a booking" })).toBeDefined();
+    await act(async () => { fireEvent.keyDown(document, { key: "Escape" }); });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(focused()).toBe(screen.getByRole("button", { name: "Add booking Padel 2 15:00" }));
+    // the same for a booking
+    await act(async () => { screen.getByRole("button", { name: /^Rami Haddad,/ }).click(); });
+    await act(async () => { fireEvent.keyDown(document, { key: "Escape" }); });
+    expect(focused().getAttribute("aria-label")).toMatch(/^Rami Haddad,/);
+  });
+
+  it("after a save, focus goes to the saved booking once the calendar has re-read it", async () => {
+    const saved: Booking = { ...booking("b-new", "Maya Khoury"), court_id: courtB.id, start_at: z("15:00"), end_at: z("16:00") };
+    rpcImpl = async (fn) => { if (fn === "staff_book") handler = async (q) => ok(q.table === "bookings" ? [saved] : []); return { data: [], error: null }; };
+    view({ date: DAY });
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 2 15:00" }).click(); });
+    fireEvent.change(screen.getByRole("combobox", { name: "Customer name" }), { target: { value: "Maya Khoury" } });
+    await act(async () => { screen.getByRole("button", { name: "Add booking" }).click(); });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(focused().getAttribute("aria-label")).toMatch(/^Maya Khoury, Padel 2, 15:00–16:00/));
+  });
+
+  it("saved but the refresh failed: focus falls back safely to the calendar (the slot is not offered)", async () => {
+    rpcImpl = async (fn) => { if (fn === "staff_book") handler = async () => failed; return { data: [], error: null }; };
+    view({ date: DAY });
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 2 15:00" }).click(); });
+    fireEvent.change(screen.getByRole("combobox", { name: "Customer name" }), { target: { value: "Maya" } });
+    await act(async () => { screen.getByRole("button", { name: "Add booking" }).click(); });
+    await waitFor(() => expect(screen.getByText(/Saved\. Couldn.t load/)).toBeDefined());
+    await waitFor(() => expect(focused()).toBe(group()));
+    expect(group().tabIndex).toBe(0);                                 // still reachable by Tab while adding is off
+  });
+
+  it("arrow keys in fields, dropdowns and the search box never move around the grid or change the day", async () => {
+    view({ date: DAY });
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
+    const nameField = screen.getByRole("combobox", { name: "Customer name" });
+    await key("ArrowDown", nameField); await key("ArrowLeft", nameField);
+    await act(async () => { screen.getByRole("button", { name: "Block this time instead" }).click(); });
+    const end = screen.getByLabelText("Block end");
+    await key("ArrowDown", end); await key("ArrowRight", end);
+    const search = screen.getByRole("searchbox", { name: /Find a booking/ });
+    await key("ArrowLeft", search); await key("ArrowRight", search);
+    expect(nav.push).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Add a booking" })).toBeDefined();
+  });
+
+  it("Week view: one Tab stop, arrows move between days and times", async () => {
+    view({ date: DAY, view: "week", court: courtA.id });
+    const first = await screen.findByRole("button", { name: "Add a booking on 2099-01-12 at 08:00" });
+    await waitFor(() => expect((first as HTMLButtonElement).disabled).toBe(false));
+    const wk = screen.getByRole("group", { name: /^Week,/ });
+    expect(Array.from(wk.querySelectorAll<HTMLElement>("button")).filter((b) => b.tabIndex === 0)).toHaveLength(1);
+    await act(async () => { first.focus(); });
+    await key("ArrowRight"); await key("ArrowDown");
+    expect(focused().getAttribute("aria-label")).toBe("Add a booking on 2099-01-13 at 08:30");
+  });
+});
+
+describe("Phase I-2b: customer suggestions by keyboard", () => {
+  const guests = [{ name: "Rami Haddad", phone: "+961 3 111 111", last_at: "2026-11-01" }, { name: "Rana Saad", phone: null, last_at: "2026-11-02" }];
+  let calls: string[];
+  beforeEach(() => { handler = async () => ok([]); desktop(true); calls = []; rpcImpl = async (fn) => { calls.push(fn); return { data: fn === "club_recent_guests" ? guests : [], error: null }; }; });
+  afterEach(() => { vi.restoreAllMocks(); desktop(false); rpcImpl = async () => ({ data: [], error: null }); });
+
+  it("↓/↑ highlight, Enter picks (name and phone filled, focus to the length) and never saves; Esc closes only the list", async () => {
+    view({ date: "2099-01-12" });
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
+    const field = screen.getByRole("combobox", { name: "Customer name" });
+    fireEvent.change(field, { target: { value: "Ra" } });
+    await screen.findByRole("listbox", { name: "Recent customers" });
+    expect(field.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.keyDown(field, { key: "ArrowDown" });
+    fireEvent.keyDown(field, { key: "ArrowDown" });
+    fireEvent.keyDown(field, { key: "ArrowUp" });
+    expect(field.getAttribute("aria-activedescendant")).toBe("guest-hint-0");
+    expect(screen.getByRole("option", { name: /Rami Haddad/ }).getAttribute("aria-selected")).toBe("true");
+    const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    await act(async () => { field.dispatchEvent(enter); });
+    expect(enter.defaultPrevented).toBe(true);
+    expect((field as HTMLInputElement).value).toBe("Rami Haddad");
+    expect((screen.getByLabelText("Phone (optional)") as HTMLInputElement).value).toBe("+961 3 111 111");
+    expect(calls).not.toContain("staff_book");
+    await waitFor(() => expect((document.activeElement as HTMLElement).getAttribute("role")).toBe("radio"));
+    // Esc with the list open closes the list and keeps the panel and the details
+    fireEvent.change(field, { target: { value: "Ran" } });
+    await screen.findByRole("listbox", { name: "Recent customers" });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);       // were the panel asked to close, it would
+    await act(async () => { fireEvent.keyDown(field, { key: "Escape" }); });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Add a booking" })).toBeDefined();
+    // Enter with no suggestion highlighted does nothing
+    const enter2 = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    await act(async () => { field.dispatchEvent(enter2); });
+    expect(calls).not.toContain("staff_book");
+  });
+});
+
+describe("Phase I-2b: find a booking on this day", () => {
+  const DAY = "2099-01-12";
+  const z = (hhmm: string) => new Date(`${DAY}T${hhmm}:00+02:00`).toISOString();
+  const rows: Booking[] = [
+    { ...booking("f1", "Rami Haddad"), start_at: z("09:00"), end_at: z("10:00"), guest_phone: "+961 3 123 456" },
+    { ...booking("f2", "Maya Khoury"), court_id: courtB.id, start_at: z("11:00"), end_at: z("12:00"), guest_phone: null, contact_phone: "70 999 888" },
+    { ...booking("f3", "Ramzi Aoun"), start_at: z("18:00"), end_at: z("19:00") },
+  ];
+  let queries: number;
+  beforeEach(() => { queries = 0; handler = async () => { queries++; return ok([]); }; desktop(true); rpcImpl = async () => { queries++; return { data: [], error: null }; }; });
+  afterEach(() => { vi.restoreAllMocks(); desktop(false); rpcImpl = async () => ({ data: [], error: null }); });
+
+  it("matches name or phone among the loaded bookings only, highlights them, and opens one; no database read", async () => {
+    view({ date: DAY, bookings: rows });
+    await act(async () => { await Promise.resolve(); });
+    const before = queries;
+    const box = screen.getByRole("searchbox", { name: /Find a booking/ });
+    fireEvent.change(box, { target: { value: "ram" } });
+    const list = screen.getByRole("list", { name: "Matching bookings" });
+    expect(Array.from(list.querySelectorAll("button")).map((b) => b.textContent)).toEqual([
+      expect.stringContaining("Rami Haddad"), expect.stringContaining("Ramzi Aoun"),
+    ]);
+    expect(screen.getByText("2 bookings found")).toBeDefined();
+    expect(screen.getByRole("button", { name: /^Rami Haddad,/ }).className).toContain("ring-turf");
+    expect(screen.getByRole("button", { name: /^Maya Khoury,/ }).className).not.toContain("ring-turf");
+    fireEvent.change(box, { target: { value: "999 8" } });                 // phone from club_booking_contacts
+    expect(Array.from(screen.getByRole("list", { name: "Matching bookings" }).querySelectorAll("button")).map((b) => b.textContent)).toEqual([expect.stringContaining("Maya Khoury")]);
+    expect(queries).toBe(before);                                           // searching read nothing
+    // Enter in the box does nothing; ↓ goes to the result; Enter/click opens it; Esc in the box clears it
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await act(async () => { fireEvent.keyDown(box, { key: "ArrowDown" }); });
+    expect(document.activeElement?.textContent).toContain("Maya Khoury");
+    await act(async () => { (document.activeElement as HTMLButtonElement).click(); });
+    expect(screen.getByRole("dialog", { name: "Booking" })).toBeDefined();
+    await act(async () => { fireEvent.keyDown(document, { key: "Escape" }); });
+    expect(document.activeElement).toBe(box);                               // back to the search box
+    await act(async () => { fireEvent.keyDown(box, { key: "Escape" }); });
+    expect((box as HTMLInputElement).value).toBe("");
+  });
+
+  it("is not offered on phones, in Now or in Week", async () => {
+    desktop(false);
+    view({ date: DAY, bookings: rows });
+    expect(screen.getByRole("searchbox", { name: /Find a booking/ }).parentElement!.className).toContain("hidden lg:block");
+    cleanup();
+    desktop(true);
+    view({ date: DAY, bookings: rows, view: "week", court: courtA.id });
+    expect(screen.queryByRole("searchbox", { name: /Find a booking/ })).toBeNull();
+  });
+});
+
+describe("Phase I-2b: remembered view and sport (desktop)", () => {
+  beforeEach(() => { handler = async () => ok([]); nav.replace.mockReset(); window.localStorage.clear(); });
+  afterEach(() => { desktop(false); });
+
+  it("an address that names a view is used as is and remembered", async () => {
+    desktop(true);
+    view({ date: "2099-01-12", view: "week", court: courtA.id, explicit: true });
+    await act(async () => { await Promise.resolve(); });
+    expect(JSON.parse(window.localStorage.getItem("courtbook:calendar:batroun")!)).toEqual({ view: "week", sport: null });
+    expect(nav.replace).not.toHaveBeenCalled();
+  });
+
+  it("a plain address opens on the remembered view", async () => {
+    desktop(true);
+    window.localStorage.setItem("courtbook:calendar:batroun", JSON.stringify({ view: "list", sport: null }));
+    view({ date: "2099-01-12", view: "grid", explicit: false });
+    await waitFor(() => expect(nav.replace).toHaveBeenCalledWith(expect.stringContaining("date=2099-01-12&view=list")));
+  });
+
+  it("an explicit address is never overridden, and phones keep today's defaults", async () => {
+    window.localStorage.setItem("courtbook:calendar:batroun", JSON.stringify({ view: "list", sport: null }));
+    desktop(true);
+    view({ date: "2099-01-12", view: "grid", explicit: true });
+    await act(async () => { await Promise.resolve(); });
+    expect(nav.replace).not.toHaveBeenCalled();
+    cleanup();
+    desktop(false);
+    window.localStorage.setItem("courtbook:calendar:batroun", JSON.stringify({ view: "list", sport: null }));
+    view({ date: "2099-01-12", view: "grid", explicit: false });
+    await act(async () => { await Promise.resolve(); });
+    expect(nav.replace).not.toHaveBeenCalled();
+  });
+
+  it("a remembered Now is used only for today; another day opens on Courts", async () => {
+    desktop(true);
+    window.localStorage.setItem("courtbook:calendar:batroun", JSON.stringify({ view: "now", sport: null }));
+    view({ date: "2099-01-12", view: "list", explicit: false });
+    await waitFor(() => expect(nav.replace).toHaveBeenCalledWith(expect.stringContaining("date=2099-01-12&view=grid")));
+  });
+});
+
+describe("Phase I-2b: full booking details on hover and keyboard focus", () => {
+  const DAY = "2099-01-12";
+  const z = (hhmm: string) => new Date(`${DAY}T${hhmm}:00+02:00`).toISOString();
+  const long: Booking = { ...booking("b-long", "Alexandrina Montgomery-Haddad"), start_at: z("11:00"), end_at: z("12:00"), guest_phone: "+961 3 555 444" };
+  beforeEach(() => { handler = async () => ok([]); desktop(true); });
+  afterEach(() => { desktop(false); });
+
+  it("hovering or focusing a booking shows its full details; leaving or blurring hides them", async () => {
+    view({ date: DAY, bookings: [long] });
+    const b = screen.getByRole("button", { name: /^Alexandrina/ });
+    await act(async () => { fireEvent.mouseEnter(b); });
+    const peek = screen.getByTestId("peek");
+    expect(peek.textContent).toContain("Alexandrina Montgomery-Haddad");
+    expect(peek.textContent).toContain("Padel 1 · 11:00–12:00");
+    expect(peek.textContent).toContain("Desk booking");
+    expect(peek.textContent).toContain("+961 3 555 444");
+    expect(peek.getAttribute("aria-hidden")).toBe("true");                  // the button's label says the same in words
+    await act(async () => { fireEvent.mouseLeave(b); });
+    expect(screen.queryByTestId("peek")).toBeNull();
+    await act(async () => { b.focus(); });
+    expect(screen.getByTestId("peek").textContent).toContain("Alexandrina Montgomery-Haddad");
+    await act(async () => { b.blur(); });
+    expect(screen.queryByTestId("peek")).toBeNull();
+    expect(b.getAttribute("aria-label")).toBe("Alexandrina Montgomery-Haddad, Padel 1, 11:00–12:00, desk booking, +961 3 555 444");
+  });
+});
+
+describe("Phase I-2b: accessibility scan (axe-core)", () => {
+  beforeEach(() => { handler = async () => ok([]); desktop(true); rpcImpl = async (fn) => ({ data: fn === "club_recent_guests" ? [{ name: "Rami Haddad", phone: null, last_at: "2026-11-01" }] : [], error: null }); });
+  afterEach(() => { desktop(false); rpcImpl = async () => ({ data: [], error: null }); });
+  const scan = async () => {
+    const axe = (await import("axe-core")).default;
+    // colour contrast cannot be computed without a real layout engine
+    const r = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
+    return r.violations.map((v) => `${v.id}: ${v.nodes.length}`);
+  };
+
+  it("Courts view with bookings, a block, search results and the add form with suggestions: no violations", async () => {
+    const DAY = "2099-01-12";
+    const z = (hhmm: string) => new Date(`${DAY}T${hhmm}:00+02:00`).toISOString();
+    view({ date: DAY, bookings: [{ ...booking("a1", "Rami Haddad"), start_at: z("11:00"), end_at: z("12:00") }],
+           blocks: [{ id: "k1", court_id: courtB.id, start_at: z("10:00"), end_at: z("12:00"), reason: "Net repair" }] });
+    fireEvent.change(screen.getByRole("searchbox", { name: /Find a booking/ }), { target: { value: "ram" } });
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 2 15:00" }).click(); });
+    fireEvent.change(screen.getByRole("combobox", { name: "Customer name" }), { target: { value: "Ra" } });
+    await screen.findByRole("listbox", { name: "Recent customers" });
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Customer name" }), { key: "ArrowDown" });
+    expect(await scan()).toEqual([]);
+  });
+
+  it("Week view: no violations", async () => {
+    view({ date: "2099-01-12", view: "week", court: courtA.id });
+    await screen.findByRole("group", { name: /^Week,/ });
+    expect(await scan()).toEqual([]);
   });
 });

@@ -97,6 +97,7 @@ export default async function StaffClubPage({
       loadFailed={Boolean(bookingsError || blocksError)}
       sport={sport && /^[a-z_]+$/.test(sport) ? sport : null}
       sportNames={sportNames}
+      explicit={Boolean(view || sport)}
     />
     </>
   );
