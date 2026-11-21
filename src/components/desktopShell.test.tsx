@@ -14,15 +14,19 @@ vi.mock("next/link", () => ({
 }));
 const nav = vi.hoisted(() => ({ path: "/", user: null as null | { id: string }, unread: 0 }));
 vi.mock("next/navigation", () => ({ usePathname: () => nav.path }));
+const save = vi.hoisted(() => ({ pending: null as null | Promise<unknown> }));
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
     auth: { getUser: async () => ({ data: { user: nav.user } }) },
     from: () => ({ select: () => ({ eq: () => ({ is: async () => ({ count: nav.unread }) }) }) }),
+    rpc: () => save.pending ?? Promise.resolve({ error: null }),
   }),
 }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({}) }));
 
 import TabBar from "./TabBar";
-import WorkNav from "./WorkNav";
+import { WorkNavBar as WorkNav } from "./WorkNav";
+import LevelSheet from "./LevelSheet";
 import { useDialog } from "./useDialog";
 
 afterEach(cleanup);
@@ -94,6 +98,16 @@ describe("staff and admin desktop bar", () => {
     const hrefs = [...container.querySelectorAll("a")].map((a) => a.getAttribute("href"));
     expect(hrefs).toEqual(["/", "/admin", "/admin/payments", "/admin/reports", "/staff", "/me", "/profile"]);
   });
+  it("admin: Reports shows the open count when there is one, and no count when unknown or zero", () => {
+    render(<WorkNav area="admin" active="clubs" openReports={4} />);
+    expect(screen.getByText("Reports (4 open)")).toBeTruthy();
+    cleanup();
+    render(<WorkNav area="admin" active="clubs" openReports={null} />);
+    expect(screen.getByText("Reports")).toBeTruthy();
+    cleanup();
+    render(<WorkNav area="admin" active="clubs" openReports={0} />);
+    expect(screen.getByText("Reports")).toBeTruthy();
+  });
 });
 
 function Sheet({ busy = false, modal = true }: { busy?: boolean; modal?: boolean }) {
@@ -120,14 +134,8 @@ describe("sheets: Esc and focus", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.getByTestId("panel")).toBeTruthy();
   });
-  it("phone: focus is not moved", () => {
-    desktop(false);
-    screen.queryByText("outside");
-    render(<Sheet />);
-    expect(document.activeElement).toBe(document.body);
-  });
-  it("desktop: focus moves into the panel and Tab wraps inside it", () => {
-    desktop(true);
+  it.each([[false, "phone"], [true, "desktop"]])("modal (%s / %s): focus moves into the panel and Tab wraps inside it", (wide) => {
+    desktop(wide as boolean);
     render(<Sheet />);
     expect(document.activeElement).toBe(screen.getByTestId("panel"));
     screen.getByText("last").focus();
@@ -135,6 +143,29 @@ describe("sheets: Esc and focus", () => {
     expect(document.activeElement).toBe(screen.getByText("first"));
     fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
     expect(document.activeElement).toBe(screen.getByText("last"));
+  });
+  it("focus that lands behind a modal panel is brought back, and Tab from outside enters the panel", () => {
+    desktop(true);
+    render(<Sheet />);
+    screen.getByText("outside").focus();
+    expect(document.activeElement).toBe(screen.getByTestId("panel"));
+    (document.activeElement as HTMLElement).blur();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(screen.getByText("first"));
+  });
+  it("focus returns to where it was when the sheet closes", () => {
+    desktop(true);
+    function Opener() {
+      const [open, setOpen] = useState(false);
+      const ref = useDialog<HTMLDivElement>(open, () => setOpen(false));
+      return <><button onClick={() => setOpen(true)}>open</button>{open && <div ref={ref} data-testid="p"><button>x</button></div>}</>;
+    }
+    render(<Opener />);
+    const opener = screen.getByText("open");
+    opener.focus(); fireEvent.click(opener);
+    expect(document.activeElement).toBe(screen.getByTestId("p"));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(document.activeElement).toBe(opener);
   });
   it("desktop, non-modal panel (club booking card): focus stays where it was", () => {
     desktop(true);
@@ -155,5 +186,30 @@ describe("page containers: phones keep max-w-md; tablet and desktop widen", () =
       expect(c, p).toMatch(/ md:max-w-2xl/);
       expect(c, p).toMatch(/ lg:max-w-(\[720px\]|3xl)/);
     }
+  });
+});
+
+describe("a sheet cannot be dismissed while saving (level sheet)", () => {
+  it("backdrop, Close, Cancel and Esc do nothing until the save finishes; it is a labelled modal dialog", async () => {
+    desktop(false);
+    let finish!: (v: unknown) => void;
+    save.pending = new Promise((r) => { finish = r; });
+    const onClose = vi.fn();
+    const { container } = render(<LevelSheet sport="padel" sportName="Padel" current={4} onClose={onClose} onSaved={() => {}} />);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.getAttribute("aria-label")).toBe("Padel level");
+    fireEvent.click(screen.getByText("Clear level"));
+    await waitFor(() => expect((screen.getByText("Close") as HTMLButtonElement).disabled).toBe(true));
+    fireEvent.click(container.firstChild as HTMLElement);
+    fireEvent.click(screen.getByText("Close"));
+    fireEvent.click(screen.getByText("Cancel"));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    finish({ error: { message: "x" } });
+    await waitFor(() => expect((screen.getByText("Close") as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(container.firstChild as HTMLElement);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    save.pending = null;
   });
 });
