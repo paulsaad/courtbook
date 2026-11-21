@@ -101,7 +101,26 @@ expect     $ADMIN  "A6 CourtBook admin"                                       "$
 expect     $DESK   "A7 desk staff, full day 08:00-23:00 (beyond the old 4 h)" "$(sb $CLUB $C2 "$(b 3 08:00)" "$(b 3 23:00)")" saved
 r=$($P -c "select reason from blocks where court_id='$C2' and start_at=$(b 3 08:00)"); [ "$r" = test ] && ok "A8 reason stored" || bad "A8 reason" "$r"
 expect     $DESK   "A9 empty reason becomes 'Blocked'"                         "select staff_block('$CLUB','$C3', $(b 3 08:00), $(b 3 09:00), '  ') is not null; select reason from blocks where court_id='$C3' and start_at=$(b 3 08:00);" Blocked
+expect     $DESK   "A9b ends exactly at closing time (22:30-23:00)"            "$(sb $CLUB $C1 "$(b 3 22:30)" "$(b 3 23:00)")" saved
 clear_court $C1; clear_court $C2; clear_court $C3
+
+echo "  midnight (a club closing at 24:00) and the two nights Beirut's clocks change"
+# the next nights the clocks change, found from the time zone data (so this keeps working every year)
+DAYLEN="((d + 1)::timestamp at time zone 'Asia/Beirut') - (d::timestamp at time zone 'Asia/Beirut')"
+SPRING=$($P -c "select (d - 1)::date from generate_series(current_date + 1, current_date + 400, interval '1 day') g, lateral (select g::date as d) x where $DAYLEN < interval '24 hours' order by d limit 1")
+FALL=$($P -c "select d from generate_series(current_date + 1, current_date + 400, interval '1 day') g, lateral (select g::date as d) x where $DAYLEN > interval '24 hours' order by d limit 1")
+nb() { echo "('$1 $2'::timestamp at time zone 'Asia/Beirut')"; }        # a Beirut wall-clock time on a given date
+mid() { echo "(('$1'::date + 1)::timestamp at time zone 'Asia/Beirut')"; } # the first instant of the next day
+len() { $P -c "select (end_at - start_at)::text from blocks where court_id='$N1' order by created_at desc limit 1"; }
+expect     $DESK   "A9c 22:00-24:00 on an ordinary day: ends at the next local midnight" "$(sb $NIGHT $N1 "$(b 6 22:00)" "$(b 7 00:00)")" saved
+[ "$(len)" = "02:00:00" ] && ok "A9d ...2 hours" || bad "A9d" "$(len)"
+expect_err $DESK   "A9e 23:30-00:30 runs past midnight: refused"               "$(sb $NIGHT $N1 "$(b 8 23:30)" "$(b 9 00:30)")" outside_opening_hours
+expect     $DESK   "A9f clocks go back ($FALL): 22:00-24:00 saved"            "$(sb $NIGHT $N1 "$(nb $FALL 22:00)" "$(mid $FALL)")" saved
+[ "$(len)" = "03:00:00" ] && ok "A9g ...as the 3 real hours of that wall-clock interval" || bad "A9g" "$(len)"
+expect     $DESK   "A9h clocks go forward ($SPRING): 22:00-23:30 saved"       "$(sb $NIGHT $N1 "$(nb $SPRING 22:00)" "$(nb $SPRING 23:30)")" saved
+expect_err $DESK   "A9i clocks go forward: 23:30-24:00 refused (known, as for bookings: the day ends at 01:00 that night)" "$(sb $NIGHT $N1 "$(nb $SPRING 23:30)" "$(mid $SPRING)")" outside_opening_hours
+expect_err $DESK   "A9j ...a desk booking ending at that midnight is refused the same way (unchanged booking rule)" "select staff_book('$NIGHT','$N1', $(nb $SPRING 23:00), $(mid $SPRING), 'W', null);" outside_opening_hours
+clear_court $N1
 
 echo "  grid and opening hours, in each club's own time zone"
 expect_err $DESK   "A10 Beirut 07:30-08:30 (before opening)"                  "$(sb $CLUB $C1 "$(b 3 07:30)" "$(b 3 08:30)")" outside_opening_hours
@@ -123,6 +142,7 @@ NOW_SLOT="(date_trunc('hour', now() at time zone 'Asia/Beirut') + case when extr
 expect_err $DESK   "A22 wholly in the past (3 days ago, inside hours)"        "$(sb $CLUB $C1 "$(b -3 10:00)" "$(b -3 11:00)")" slot_in_past
 expect_err $DESK   "A23 the slot that ended when the current one began"       "$(sb $NIGHT $N1 "$NOW_SLOT - interval '30 min'" "$NOW_SLOT")" slot_in_past
 expect     $DESK   "A24 the current slot (started, still running) is allowed" "$(sb $NIGHT $N1 "$NOW_SLOT" "$NOW_SLOT + interval '30 min'")" saved
+expect_err $DESK   "A24b a block ending exactly now is wholly past"           "$(sb $NIGHT $N1 "now() - interval '30 min'" "now()")" slot_in_past
 clear_court $N1
 
 echo "  overlap (unchanged rules)"
@@ -178,10 +198,15 @@ echo "--- stage B: 0077 applied, new website only"
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0077_blocks_through_functions.sql >/dev/null || { echo "0077 FAILED"; exit 1; }
 [ "$(blocks_hash)" = "$H0" ] && ok "B0 saved blocks unchanged by 0077" || bad "B0 saved blocks changed" "$(blocks_hash) vs $H0"
 expect     $DESK   "B1 staff_block works"                                     "$(sb $CLUB $C1 "$(b 7 10:00)" "$(b 7 20:00)")" saved
-expect_err $DESK   "B2 a page from before the change: clear 'reload' answer, nothing saved" "$(di $CLUB $C1 "$(b 8 10:00)" "$(b 8 11:00)")" "CourtBook has been updated. Reload the page, then block the time again."
+NB=$($P -c "select count(*) from blocks")
+expect_err $DESK   "B2 desk staff, direct insert: refused with the 'reload' answer" "$(di $CLUB $C1 "$(b 8 10:00)" "$(b 8 11:00)")" "CourtBook has been updated. Reload the page, then block the time again."
+expect_err $ADMIN  "B2b CourtBook admin, direct insert: refused the same way"  "$(di $CLUB $C1 "$(b 8 10:00)" "$(b 8 11:00)")" "CourtBook has been updated."
 $P -c "alter table blocks disable trigger blocks_direct_insert_refused" >/dev/null
-expect_err $DESK   "B3 ...and without that message trigger, row-level security still refuses" "$(di $CLUB $C1 "$(b 8 10:00)" "$(b 8 11:00)")" "row-level security"
+expect     owner   "B3a (test setup) the reload trigger is now off"          "select tgenabled from pg_trigger where tgname='blocks_direct_insert_refused';" D
+expect_err $DESK   "B3 desk staff, direct insert WITHOUT the reload trigger: row-level security refuses" "$(di $CLUB $C1 "$(b 8 10:00)" "$(b 8 11:00)")" "new row violates row-level security policy for table \"blocks\""
+expect_err $ADMIN  "B3b admin, direct insert without the trigger: refused too"  "$(di $CLUB $C1 "$(b 8 10:00)" "$(b 8 11:00)")" "row-level security"
 $P -c "alter table blocks enable trigger blocks_direct_insert_refused" >/dev/null
+expect     owner   "B3c nothing was saved by any of the four attempts"       "select count(*) from blocks;" "$NB"
 expect_err $DESK   "B4 direct change of a block: no right to update"          "update blocks set reason='x' where court_id='$C1';" "permission denied for table blocks"
 run anon "$(di $CLUB $C1 "$(b 8 12:00)" "$(b 8 13:00)")" >/dev/null
 expect     owner   "B5 signed out, direct insert: nothing saved"              "select count(*) from blocks where court_id='$C1' and start_at=$(b 8 12:00);" 0

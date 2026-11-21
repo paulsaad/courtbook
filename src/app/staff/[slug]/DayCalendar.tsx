@@ -6,8 +6,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
-import { bookingDate, clubLocalToUtc, dayBounds, hhmm, moveTarget, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
-import { friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
+import { bookingDate, clubLocalToUtc, dayBounds, hhmm, moveTarget, nextDayStart, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
+import { blockErrorText, friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
 import { blockEndOptions, blockStartOptions, bookingSlotOptions, minToHhmm, pickSlots, type Busy } from "./durations";
 import { useDialog, useIsDesktop } from "@/components/useDialog";
 
@@ -70,6 +70,10 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     !addDirty.current || window.confirm("Discard the details you have entered?"), []);
   // What the open add form has chosen, drawn on the grid as "Not saved" until the database has saved it.
   const [draft, setDraft] = useState<Selection | null>(null);
+  // A save succeeded and the calendar has not shown a fresh read since (see run()).
+  const [savedUnseen, setSavedUnseen] = useState(false);
+  const viewRef = useRef(view);
+  useEffect(() => { viewRef.current = view; }, [view]);
   /** Opens a sheet, unless saving is in progress or the desk keeps its unsaved details. */
   const openSheet = useCallback((next: Sheet) => {
     if (busy) return;
@@ -145,6 +149,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     setBlocks((k ?? []) as Block[]);
     setDayError(false);
     setDayLoading(false);
+    if (viewRef.current !== "week") setSavedUnseen(false);
     setLastUpdated(formatInTimeZone(new Date(), club.timezone, "HH:mm"));
   }, [club.id, club.timezone, date]);
 
@@ -202,6 +207,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
       setWeek({ key, bookings: rows, blocks: (k ?? []) as Block[] });
       setWeekError(false);
       setWeekLoading(false);
+      setSavedUnseen(false);
       setLastUpdated(formatInTimeZone(new Date(), club.timezone, "HH:mm"));
     })();
     return () => { alive = false; };
@@ -216,15 +222,18 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     return () => { alive = false; };
   }, [club.id]);
 
-  async function run(fn: () => PromiseLike<{ error: { message: string } | null }>) {
+  async function run(fn: () => PromiseLike<{ error: { message: string } | null }>, explain: (m: string) => string = friendlyError) {
     setBusy(true);
     setError(null);
     const { error } = await fn();
     if (error) {
       setBusy(false);
-      setError(friendlyError(error.message));
+      setError(explain(error.message));
       return;
     }
+    // Saved. The write is never repeated: if the reads below fail, the banner says the calendar may be
+    // out of date and that this was saved, and adding stays off until a read succeeds.
+    setSavedUnseen(true);
     await reload();
     setRefresh((n) => n + 1);   // the week view holds its own copy of the rows
     setBusy(false);
@@ -328,26 +337,31 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                 taken={takenOn(sheet.courtId, sheet.date ?? date)}
                 endedBefore={endedBefore(sheet.date ?? date)}
                 onSelection={setDraft}
-                onSave={(name, phone, slots, asBlock, blockStart) =>
+                onSave={(name, phone, slots, asBlock, blockStart, blockEnd) =>
                   run(async () => {
                     const supabase = createClient();
                     // in the week view the slot belongs to the column's day, not the page's date
-                    const start = clubLocalToUtc(sheet.date ?? date, asBlock && blockStart ? blockStart : sheet.time, club.timezone);
-                    const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
-                    if (asBlock) {
-                      // the database checks staff rights, the court, the grid, the hours, the past and overlaps (0076)
+                    const day = sheet.date ?? date;
+                    if (asBlock && blockStart && blockEnd) {
+                      // a block is the wall-clock interval the desk chose (start and end selectors), so on the night the
+                      // clocks go back 22:00–24:00 is 3 real hours; the database checks staff rights, the court, the grid,
+                      // the hours, the past and overlaps (0076)
+                      const bs = clubLocalToUtc(day, blockStart, club.timezone);
+                      const be = blockEnd === "24:00" ? nextDayStart(day, club.timezone) : clubLocalToUtc(day, blockEnd, club.timezone);
                       return supabase.rpc("staff_block", {
                         p_club: club.id, p_court: sheet.courtId,
-                        p_start: start.toISOString(), p_end: end.toISOString(), p_reason: name || null,
+                        p_start: bs.toISOString(), p_end: be.toISOString(), p_reason: name || null,
                       });
                     }
+                    const start = clubLocalToUtc(day, sheet.time, club.timezone);
+                    const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
                     // the database checks staff rights, the court, the hours, the grid and the duration, and prices it
                     return supabase.rpc("staff_book", {
                       p_club: club.id, p_court: sheet.courtId,
                       p_start: start.toISOString(), p_end: end.toISOString(),
                       p_name: name, p_phone: phone || null,
                     });
-                  })
+                  }, asBlock ? (m) => blockErrorText(m, club) : undefined)
                 }
               />
             )}
@@ -464,7 +478,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
 
       {viewError && (
         <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-danger/40 bg-red-50 px-3 py-2 text-sm text-danger">
-          <span className="flex-1">Couldn&apos;t load the latest {view === "week" ? "week" : "bookings"}. What you see may be out of date, so adding is off until this works.</span>
+          <span className="flex-1">{savedUnseen ? "Saved. " : ""}Couldn&apos;t load the latest {view === "week" ? "week" : "bookings"}. What you see may be out of date, so adding is off until this works.</span>
           {/* the flag is cleared by a successful read, never by tapping Retry */}
           <button disabled={viewLoading} onClick={() => { setRefresh((n) => n + 1); void reload(); }} className="shrink-0 rounded-lg border border-danger/40 px-3 py-1 disabled:opacity-50">{viewLoading ? "Checking…" : "Retry"}</button>
         </div>
@@ -841,8 +855,8 @@ export type Selection = { startMin: number; endMin: number; asBlock: boolean };
 
 export function AddSheet({ club, court, time, busy, defaultMinutes, onSave, onDirty, taken = [], endedBefore = -1, onSelection }: {
   club: Club; court: Court; time: string; busy: boolean; defaultMinutes: number | null;
-  /** a block also passes its own start ("HH:mm"), which the desk may have changed */
-  onSave: (name: string, phone: string, slots: number, asBlock: boolean, start?: string) => void;
+  /** a block also passes its own start and end ("HH:mm"; end "24:00" = midnight), which the desk chose */
+  onSave: (name: string, phone: string, slots: number, asBlock: boolean, start?: string, end?: string) => void;
   /** true while the desk has typed or chosen details that are not saved yet */
   onDirty?: (dirty: boolean) => void;
   /** bookings, holds and blocks already on this court that day, from the calendar's rows */
@@ -906,7 +920,7 @@ export function AddSheet({ club, court, time, busy, defaultMinutes, onSave, onDi
       e.preventDefault();
       if (asBlock) {
         if (bStart === null || bEnd === null) return;
-        onSave(reason.trim(), "", (bEnd - bStart) / club.slot_minutes, true, minToHhmm(bStart));
+        onSave(reason.trim(), "", (bEnd - bStart) / club.slot_minutes, true, minToHhmm(bStart), minToHhmm(bEnd));
       } else if (slots !== null) onSave(name.trim(), phone.trim(), slots, false);
     }}>
       <h2 className="text-lg font-semibold">{heading}</h2>

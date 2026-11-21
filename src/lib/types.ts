@@ -124,6 +124,19 @@ export function friendlyError(message: string | undefined): string {
   return message;
 }
 
+/** A refused block, in words about blocks: the database reuses the booking check's error names
+ *  (staff_block, 0076), but a block has no minimum or maximum length, so "bad_duration" must not read as
+ *  a booking-length rule. Everything else falls back to the shared list. */
+export function blockErrorText(message: string | undefined, club: Pick<Club, "open_time" | "close_time" | "slot_minutes">): string {
+  const m = message ?? "";
+  const hours = `${club.open_time.slice(0, 5)}–${club.close_time.slice(0, 5)}`;
+  if (m.includes("not_on_grid") || m.includes("bad_duration"))
+    return `A block must start and end on the club's ${club.slot_minutes}-minute time grid.`;
+  if (m.includes("outside_opening_hours")) return `A block must be within opening hours (${hours}), on one day.`;
+  if (m.includes("slot_in_past")) return "That time has already passed. A block must end later than now.";
+  return friendlyError(message);
+}
+
 /** Community rules, accepted once before a player's first chat message. Wording approved by Paul (20 Nov, revised). */
 export const COMMUNITY_RULES_TITLE = "Community rules";
 export const COMMUNITY_RULES = [

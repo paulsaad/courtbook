@@ -229,7 +229,7 @@ describe("walk-in sheet: a block never takes the customer's name (review fix)", 
     await act(async () => { screen.getByRole("button", { name: "Block this time instead" }).click(); });
     expect((screen.getByLabelText("Block reason") as HTMLInputElement).value).toBe("");
     await act(async () => { screen.getByRole("button", { name: "Block this time" }).click(); });
-    expect(onSave).toHaveBeenCalledWith("", "", 2, true, "10:00");       // reason empty, not "Ali Haddad"
+    expect(onSave).toHaveBeenCalledWith("", "", 2, true, "10:00", "11:00");       // reason empty, not "Ali Haddad"
     await act(async () => { screen.getByRole("button", { name: "Back to booking" }).click(); });
     expect((screen.getByLabelText("Customer name") as HTMLInputElement).value).toBe("Ali Haddad");
   });
@@ -242,7 +242,7 @@ describe("walk-in sheet: a block never takes the customer's name (review fix)", 
     expect((screen.getByLabelText("Customer name") as HTMLInputElement).value).toBe("");
     await act(async () => { screen.getByRole("button", { name: "Block this time instead" }).click(); });
     await act(async () => { screen.getByRole("button", { name: "Block this time" }).click(); });
-    expect(onSave).toHaveBeenCalledWith("Net repair", "", 2, true, "10:00");
+    expect(onSave).toHaveBeenCalledWith("Net repair", "", 2, true, "10:00", "11:00");
   });
 
   it("when no block length fits before closing, it says so for a block and cannot save", async () => {
@@ -611,5 +611,95 @@ describe("Calendar blocks (0076): longer blocks, start/end selectors and the 'No
       expect(start.value).toBe(String(14 * 60));
       expect(Array.from(start.options)[0].textContent).toBe("14:00");
     } finally { vi.useRealTimers(); }
+  });
+});
+
+describe("Calendar blocks: closing time, midnight and the clock-change nights (review 2)", () => {
+  const night: Club = { ...club, open_time: "00:00", close_time: "24:00:00" };
+  let calls: { fn: string; args: Record<string, unknown> }[];
+  beforeEach(() => {
+    handler = async () => ok([]); desktop(true); calls = [];
+    rpcImpl = async (fn, args) => { calls.push({ fn, args: args as Record<string, unknown> }); return { data: fn === "staff_block" ? "blk-1" : [], error: null }; };
+  });
+  afterEach(() => { vi.restoreAllMocks(); desktop(false); rpcImpl = async () => ({ data: [], error: null }); });
+  const blockFrom = async (c: Club, day: string, from: string, to: string) => {
+    view({ club: c, date: day });
+    await act(async () => { screen.getByRole("button", { name: `Add booking Padel 1 ${from}` }).click(); });
+    await act(async () => { screen.getByRole("button", { name: "Block this time instead" }).click(); });
+    const ends = Array.from((screen.getByLabelText("Block end") as HTMLSelectElement).options).map((o) => o.textContent);
+    fireEvent.change(screen.getByLabelText("Block end"), { target: { value: String(Number(to.slice(0, 2)) * 60 + Number(to.slice(3))) } });
+    await act(async () => { screen.getByRole("button", { name: "Block this time" }).click(); });
+    await waitFor(() => expect(calls.filter((x) => x.fn === "staff_block")).toHaveLength(1));
+    return { ends, args: calls.find((x) => x.fn === "staff_block")!.args };
+  };
+
+  it("a block can end exactly at closing time (23:00)", async () => {
+    const { ends, args } = await blockFrom(club, "2099-01-12", "22:00", "23:00");
+    expect(ends[ends.length - 1]).toBe("23:00");
+    expect(args).toMatchObject({ p_start: "2099-01-12T20:00:00.000Z", p_end: "2099-01-12T21:00:00.000Z" });
+  });
+  it("a club closing at midnight: the block can end at 24:00, sent as the next day's 00:00", async () => {
+    const { ends, args } = await blockFrom(night, "2099-01-12", "22:00", "24:00");
+    expect(ends[ends.length - 1]).toBe("24:00");
+    expect(args).toMatchObject({ p_start: "2099-01-12T20:00:00.000Z", p_end: "2099-01-12T22:00:00.000Z" });
+  });
+  it("the night the clocks go back (30 Oct 2027): 22:00–24:00 is sent as the 3 real hours chosen", async () => {
+    const { args } = await blockFrom(night, "2027-10-30", "22:00", "24:00");
+    expect(args).toMatchObject({ p_start: "2027-10-30T19:00:00.000Z", p_end: "2027-10-30T22:00:00.000Z" });
+  });
+  it("the night the clocks go forward (27 Mar 2027): midnight is sent as the real start of the next day", async () => {
+    const { args } = await blockFrom(night, "2027-03-27", "22:00", "24:00");
+    expect(args).toMatchObject({ p_start: "2027-03-27T20:00:00.000Z", p_end: "2027-03-27T22:00:00.000Z" });   // not 21:00Z, an hour early
+  });
+});
+
+describe("Calendar blocks: after saving, and refusals in words about blocks (review 2)", () => {
+  const DAY = "2099-01-12";
+  let calls: string[];
+  beforeEach(() => { handler = async () => ok([]); desktop(true); calls = []; });
+  afterEach(() => { vi.restoreAllMocks(); desktop(false); rpcImpl = async () => ({ data: [], error: null }); });
+  const block = async () => {
+    view({ date: DAY });
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
+    await act(async () => { screen.getByRole("button", { name: "Block this time instead" }).click(); });
+    await act(async () => { screen.getByRole("button", { name: "Block this time" }).click(); });
+  };
+
+  it("saved but the refresh fails: says it was saved and may be out of date, adding stays off, never saved again", async () => {
+    rpcImpl = async (fn) => { calls.push(fn); if (fn === "staff_block") handler = async () => failed; return { data: fn === "staff_block" ? "blk-1" : [], error: null }; };
+    await block();
+    await waitFor(() => expect(screen.getByText(/Saved\. Couldn.t load the latest bookings/)).toBeDefined());
+    expect(screen.queryByRole("dialog", { name: "Add a booking" })).toBeNull();     // the save is done: the panel closed
+    expect((screen.getByRole("button", { name: "Add booking Padel 2 11:00" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { screen.getByRole("button", { name: /Retry|Checking/ }).click(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(calls.filter((f) => f === "staff_block")).toHaveLength(1);
+    handler = async () => ok([]);                                                  // a read works again: back to normal
+    await act(async () => { screen.getByRole("button", { name: /Retry|Checking/ }).click(); });
+    await waitFor(() => expect(screen.queryByText(/Couldn.t load/)).toBeNull());
+    expect(screen.queryByText(/Saved\./)).toBeNull();
+  });
+
+  it.each([
+    ["not_on_grid", "A block must start and end on the club's 30-minute time grid."],
+    ["bad_duration", "A block must start and end on the club's 30-minute time grid."],
+    ["outside_opening_hours", "A block must be within opening hours (08:00–23:00), on one day."],
+    ["slot_in_past", "That time has already passed. A block must end later than now."],
+    ["block_overlaps_booking", "There is a booking in that range. Cancel or move it first."],
+    ["overlaps_existing_block", "That range is already blocked."],
+  ])("a refused block (%s) is explained without booking-length rules", async (code, text) => {
+    rpcImpl = async (fn) => (fn === "staff_block" ? { data: null, error: { message: code } } : { data: [], error: null });
+    await block();
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(text));
+    expect(screen.getByRole("alert").textContent).not.toMatch(/what the club allows|Bookings here/);
+  });
+
+  it("a refused booking keeps the booking wording", async () => {
+    rpcImpl = async (fn) => (fn === "staff_book" ? { data: null, error: { message: "bad_duration" } } : { data: [], error: null });
+    view({ date: DAY });
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
+    fireEvent.change(screen.getByRole("textbox", { name: "Customer name" }), { target: { value: "Rami" } });
+    await act(async () => { screen.getByRole("button", { name: "Add booking" }).click(); });
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Duration must be whole slots, within what the club allows."));
   });
 });
