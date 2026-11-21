@@ -98,3 +98,11 @@ pending, so every real row maps correctly. But the fallbacks are optimistic: any
 booking status (e.g. `pending` or `expired`, if the query ever includes them) or any other game role
 would show green "Confirmed" / "You're in". Proposed: green only for exactly `confirmed` and roles
 `accepted` / `organizer`; anything else neutral with "See details", plus tests for each unknown case.
+
+## Unknown-status fallback (21 Nov 2026)
+
+`2f7e8b4`: green only for a confirmed booking or a game you are accepted in or organise; any other
+status or role neutral "See details" (8 tests). Merged; published from `main` `af4c95e`, run
+44911516249: iOS `01a1fe69-33d3-7615-948d-c7de6efd64e7` (group `7914192f…`), Android
+`01a1fe69-f32f-7b9a-9a58-3d27df464cc0` (group `af01a96a…`). Previous groups: iOS `da534117…`, Android
+`3329bbfb…`. M3 closed: `20-m3-closure.md`.
