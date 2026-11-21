@@ -43,3 +43,12 @@ Website typecheck; 182/182 tests (20 calendar tests, 8 new); layout-only guard; 
 
 "Find a free court" helper (deferred), I-2b keyboard-first add (recent customers by keyboard), I-2c
 Week/List readability and the owner's phone summary.
+
+## Review corrections (21 Nov 2026, `f7ea2c3`)
+
+- **Typed details survive crossing 1024 px:** the bottom sheet and the side panel are now one container,
+  restyled at the breakpoint instead of replaced, so the add form is never rebuilt by a resize. Test:
+  resizing phone → desktop → phone and back keeps name and phone (fails when the form is rebuilt).
+- **Arrow shortcuts only when no control has focus:** ← / → / T act only when focus is on the page
+  itself; a focused slot, link, field, length choice or the panel keeps its own keys. Test added.
+- Checks: 185/185 tests; layout-only guard; layout run 44925538087 (phone width identical).
