@@ -44,3 +44,28 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   .sheet-enter { animation: sheet-in 160ms ease-out; }
   @keyframes sheet-in { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
 }
+
+/* Staff calendar dropdowns (Start, End, Move, Close courts). Usable: white, a clear neutral border (#8a918e,
+   3:1 on white) and a chevron. Disabled: paper grey, muted text and chevron, light border, not-allowed cursor. */
+.select-field {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: #ffffff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23121614' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px 16px;
+  border: 1px solid #8a918e;
+  color: var(--color-ink);
+  padding-right: 40px;
+  cursor: pointer;
+}
+.select-field:hover:not(:disabled) { border-color: var(--color-ink); }
+.select-field:focus-visible { outline: 2px solid var(--color-turf); outline-offset: 2px; border-color: var(--color-turf); }
+.select-field:disabled {
+  background-color: var(--color-paper);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7270' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  border-color: var(--color-grid);
+  color: var(--color-muted);
+  cursor: not-allowed;
+}

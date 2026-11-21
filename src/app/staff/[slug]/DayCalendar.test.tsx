@@ -703,3 +703,38 @@ describe("Calendar blocks: after saving, and refusals in words about blocks (rev
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Duration must be whole slots, within what the club allows."));
   });
 });
+
+describe("UI corrections from the staging review (21 Nov)", () => {
+  it("block Start/End are styled as usable dropdowns; while saving they are disabled (grey)", () => {
+    const { rerender } = render(<AddSheet club={club} court={courtA} time="10:00" busy={false} defaultMinutes={60} onSave={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Block this time instead" }));
+    for (const label of ["Block start", "Block end"]) {
+      const el = screen.getByLabelText(label) as HTMLSelectElement;
+      expect(el.className).toContain("select-field");
+      expect(el.className).not.toContain("bg-paper");                    // the grey that looked disabled
+      expect(el.disabled).toBe(false);
+    }
+    rerender(<AddSheet club={club} court={courtA} time="10:00" busy={true} defaultMinutes={60} onSave={vi.fn()} />);
+    expect((screen.getByLabelText("Block start") as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Block end") as HTMLSelectElement).disabled).toBe(true);
+  });
+
+  it("the dropdown style: white, clear border, chevron, focus ring; disabled is visibly different", () => {
+    const css = readFileSync("src/app/globals.css", "utf8");
+    const rule = (sel: string) => css.match(new RegExp(`${sel.replace(/[.:()]/g, "\\$&")}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+    const base = rule(".select-field");
+    expect(base).toMatch(/background-color:\s*#ffffff/);
+    expect(base).toMatch(/border:\s*1px solid #8a918e/);
+    expect(base).toMatch(/background-image:\s*url\("data:image\/svg\+xml/);
+    expect(rule(".select-field:focus-visible")).toMatch(/outline:\s*2px solid/);
+    const off = rule(".select-field:disabled");
+    expect(off).toMatch(/background-color:\s*var\(--color-paper\)/);
+    expect(off).toMatch(/color:\s*var\(--color-muted\)/);
+    expect(off).toMatch(/cursor:\s*not-allowed/);
+  });
+
+  it("Home: the greeting's notification bell is for phones and tablets only (the desktop top bar has one)", () => {
+    const src = readFileSync("src/app/page.tsx", "utf8");
+    expect(src).toMatch(/<Link href="\/notifications" aria-label="Activity" className="[^"]*\blg:hidden\b[^"]*">/);
+  });
+});

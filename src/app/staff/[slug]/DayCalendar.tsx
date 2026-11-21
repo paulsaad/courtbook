@@ -648,7 +648,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
 }
 
 const input = "rounded-xl border border-grid bg-paper px-4 py-3 text-base outline-none focus:border-action focus:ring-2 focus:ring-action/20";
-const select = "rounded-xl border border-grid bg-paper px-3 py-2 text-base";
+/** Dropdowns: white with a clear border and a chevron when usable; a disabled one is grey with muted text (globals.css .select-field). */
+const select = "select-field rounded-xl px-3 py-2 text-base";
 const primary = "rounded-xl bg-action py-3.5 text-base font-medium text-white disabled:opacity-50";
 const secondary = "rounded-xl border border-grid py-3.5 text-base";
 const secondaryDanger = "rounded-xl border border-danger/40 py-3.5 text-base text-danger";
@@ -951,13 +952,13 @@ export function AddSheet({ club, court, time, busy, defaultMinutes, onSave, onDi
           <>
             <div className="grid grid-cols-2 gap-3">
               <label className="flex flex-col gap-1 text-sm text-muted">Start
-                <select className={select} aria-label="Block start" value={bStart}
+                <select className={select} aria-label="Block start" disabled={busy} value={bStart}
                         onChange={(e) => { setStartWish(Number(e.target.value)); setTouched(true); }}>
                   {starts.map((m) => <option key={m} value={m}>{minToHhmm(m)}</option>)}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-sm text-muted">End
-                <select className={select} aria-label="Block end" value={bEnd}
+                <select className={select} aria-label="Block end" disabled={busy} value={bEnd}
                         onChange={(e) => { setEndWish(Number(e.target.value)); setTouched(true); }}>
                   {ends.map((m) => <option key={m} value={m}>{minToHhmm(m)}</option>)}
                 </select>
