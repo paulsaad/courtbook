@@ -169,7 +169,7 @@ export default function SignIn() {
         </>
       ) : (
         <>
-          <Text style={styles.muted}>We sent a code to {email.trim()}. Type the code here — the link in the email opens the website, not this app.</Text>
+          <Text style={styles.muted}>We sent a code to {email.trim()}. Type it here to sign in.</Text>
           <TextInput
             testID="code"
             accessibilityLabel="Code from the email"

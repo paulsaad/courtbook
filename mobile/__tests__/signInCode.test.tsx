@@ -73,9 +73,10 @@ describe("sign-in screen, code step", () => {
     expect(mockVerifyOtp).not.toHaveBeenCalled();
   });
 
-  it("says to type the code, because the email link opens the website", async () => {
+  it("asks for the code only: no fixed length, no email link", async () => {
     await toCodeStep();
-    expect(screen.getByText(/Type the code here — the link in the email opens the website, not this app\./)).toBeTruthy();
+    expect(screen.getByText(/We sent a code to player@example\.com\. Type it here to sign in\./)).toBeTruthy();
     expect(screen.queryByText(/6-digit/)).toBeNull();
+    expect(screen.queryByText(/link/i)).toBeNull();
   });
 });

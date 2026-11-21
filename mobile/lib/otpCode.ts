@@ -6,6 +6,7 @@
  * So the app accepts any length Supabase can be set to — the same 6–10 rule as the website's
  * sign-in (src/app/login/LoginForm.tsx) — and the server decides whether the code is right.
  * A fixed 6 here was the 0.3.0 sign-in fault: an 8-digit live code could not be typed in.
+ * The email carries the code only (no sign-in link): docs/m3/email/.
  */
 export const CODE_MIN = 6;
 export const CODE_MAX = 10;

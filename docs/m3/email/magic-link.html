@@ -1,0 +1,18 @@
+<!-- CourtBook sign-in email: code only. Never add a sign-in link variable here, not even in a comment: Supabase fills it in. -->
+<div style="margin:0;padding:24px 12px;background:#F3EFE7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#0F1512;">
+  <div style="max-width:440px;margin:0 auto;background:#FFFFFF;border:1px solid #E2DCCF;border-radius:16px;overflow:hidden;">
+    <div style="background:#062B1C;padding:18px 24px;">
+      <span style="font-size:20px;font-weight:800;letter-spacing:-0.3px;color:#FFFFFF;">CourtBook</span>
+    </div>
+    <div style="padding:24px;">
+      <h1 style="margin:0 0 12px;font-size:20px;line-height:1.3;color:#0F1512;">Your sign-in code</h1>
+      <p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#0F1512;">Type this code in CourtBook — in the app or on the website — to sign in to {{ .Email }}:</p>
+      <p style="margin:0 0 16px;padding:14px 0;text-align:center;font-size:32px;font-weight:800;letter-spacing:6px;color:#0A5C36;background:#DCEFE3;border-radius:12px;font-family:'SF Mono',Menlo,Consolas,monospace;">{{ .Token }}</p>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.5;color:#4A5450;">The code expires in EXPIRY and works once. Asked for a new one? Only the latest code works.</p>
+      <p style="margin:0;font-size:15px;line-height:1.5;color:#4A5450;">If you didn't ask for this code, ignore this email — nobody can sign in without it.</p>
+    </div>
+    <div style="padding:16px 24px;border-top:1px solid #E2DCCF;font-size:13px;line-height:1.5;color:#4A5450;">
+      CourtBook · courts and players in North Lebanon · courtbook.contact@gmail.com
+    </div>
+  </div>
+</div>
