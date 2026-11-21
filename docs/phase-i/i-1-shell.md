@@ -58,3 +58,15 @@ a plain module imported by both. Needs its own approval (not layout).
 
 Checks: website typecheck; 172/172 tests; layout-only guard; layout check run 44920621655 (phone width
 identical; Info page fixed; no server errors in the new build).
+
+## Second review (21 Nov 2026)
+
+- Duplicate links removed: the calendar header's Payments and Settings are hidden from 1024 px (the staff
+  bar has them); phones and tablets keep them (`20b24ce`, with a test).
+- Layout check made stable: the "Add CourtBook to your home screen" hint appears whenever Chrome offers
+  installation, which varies between loads; the check now dismisses it as a user's ✕ does. Run
+  44922440991: every public page identical at 390 px, visible text included; Info page fixed.
+- Booking side panel: visual check on a signed-in staging staff account still to do (pane signed out).
+- Moved to I-2: Week view readability (day headings, time labels, booking names); reception workflow
+  (availability at a glance, telephone bookings, quick changes) as the primary desktop design
+  requirement, with a practical phone view for owners checking remotely.
