@@ -41,15 +41,17 @@ function sheetTitle(s: NonNullable<Sheet>): string {
 
 
 /** Staff see who booked and how to reach them: the desk's whole job is ringing people.
- *  Scoped in the database to staff of this club and bookings at this club. */
+ *  Scoped in the database to staff of this club and bookings at this club. A failed read returns null, so the
+ *  caller treats the refresh as failed and keeps what it had, rather than showing bookings without names (W1). */
 async function withContacts(
   supabase: ReturnType<typeof createClient>,
   clubId: string,
   rows: Record<string, unknown>[],
-): Promise<Booking[]> {
+): Promise<Booking[] | null> {
   const ids = rows.map((r) => r.id as string);
   if (!ids.length) return [] as Booking[];
-  const { data } = await supabase.rpc("club_booking_contacts", { p_club: clubId, p_bookings: ids });
+  const { data, error } = await supabase.rpc("club_booking_contacts", { p_club: clubId, p_bookings: ids });
+  if (error) return null;
   const by = new Map((data as { booking_id: string; name: string | null; phone: string | null }[] | null ?? [])
     .map((c) => [c.booking_id, c] as const));
   return rows.map((r) => ({
@@ -190,6 +192,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     if (eb || ek) { setDayError(true); setDayLoading(false); return; }   // keep what we had rather than showing free slots
     const rows = await withContacts(supabase, club.id, b ?? []);
     if (seq !== dayReq.current) return;                                  // and again, after the second await
+    if (!rows) { setDayError(true); setDayLoading(false); return; }
     setBookings(rows);
     setBlocks((k ?? []) as Block[]);
     setDayError(false);
@@ -251,6 +254,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
       if (eb || ek) { if (alive) { setWeekError(true); setWeekLoading(false); } return; }
       const rows = await withContacts(supabase, club.id, b ?? []);
       if (!alive) return;
+      if (!rows) { setWeekError(true); setWeekLoading(false); return; }
       setWeek({ key, bookings: rows, blocks: (k ?? []) as Block[] });
       setWeekError(false);
       setWeekLoading(false);

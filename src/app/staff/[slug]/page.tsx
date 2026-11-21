@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { dayBounds, todayIn } from "@/lib/time";
+import { loaded } from "@/lib/load";
 import type { Block, Booking, Club, Court } from "@/lib/types";
 import DayCalendar from "./DayCalendar";
 import WorkNav from "@/components/WorkNav";
@@ -20,21 +21,21 @@ export default async function StaffClubPage({
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: club } = await supabase
+  const { data: club } = loaded(await supabase
     .from("clubs")
     .select("id, name, slug, timezone, slot_minutes, cancel_cutoff_hours, open_time, close_time, min_booking_minutes, max_booking_minutes")
     .eq("slug", slug)
-    .single<Club>();
+    .single<Club>(), "the calendar");
   if (!club) notFound();
 
   // Staff check (RLS enforces anyway; this is for a clear message instead of empty data)
-  const { data: profile } = await supabase.from("profiles").select("roles").eq("id", user.id).single();
+  const { data: profile } = loaded(await supabase.from("profiles").select("roles").eq("id", user.id).single(), "the calendar");
   const isAdmin = profile?.roles?.includes("admin") ?? false;
-  const { count } = await supabase
+  const { count } = loaded(await supabase
     .from("club_staff")
     .select("*", { count: "exact", head: true })
     .eq("club_id", club.id)
-    .eq("profile_id", user.id);
+    .eq("profile_id", user.id), "the calendar");
   if (!isAdmin && !count) {
     return (
       <main className="mx-auto max-w-md p-6 md:max-w-2xl lg:max-w-[720px]">
@@ -47,7 +48,8 @@ export default async function StaffClubPage({
   const date = qDate && /^\d{4}-\d{2}-\d{2}$/.test(qDate) ? qDate : todayIn(club.timezone);
   const { dayStart, dayEnd } = dayBounds(date, club.timezone);
 
-  const [{ data: courts }, { data: bookings, error: bookingsError }, { data: blocks, error: blocksError }, { data: sportRows }] = await Promise.all([
+  // the day's bookings and blocks keep DayCalendar's own "couldn't load" state (loadFailed); courts and sports must succeed
+  const [courtsRes, { data: bookings, error: bookingsError }, { data: blocks, error: blocksError }, sportRes] = await Promise.all([
     supabase.from("courts").select("id, name, sport, surface, sort, active").eq("club_id", club.id).eq("active", true).order("sort"),
     supabase
       .from("bookings")
@@ -66,13 +68,15 @@ export default async function StaffClubPage({
       .gt("end_at", dayStart),
     supabase.from("sports").select("code, name_en"),
   ]);
+  const { data: courts } = loaded(courtsRes, "the calendar");
+  const { data: sportRows } = loaded(sportRes, "the calendar");
   const sportNames = Object.fromEntries(((sportRows ?? []) as { code: string; name_en: string }[]).map((s) => [s.code, s.name_en]));
 
   // Who booked, and how the desk reaches them. Staff-only, scoped to this club's own bookings.
   const ids = (bookings ?? []).map((b) => b.id);
   const contacts = new Map<string, { name: string | null; phone: string | null }>();
   if (ids.length) {
-    const { data } = await supabase.rpc("club_booking_contacts", { p_club: club.id, p_bookings: ids });
+    const { data } = loaded(await supabase.rpc("club_booking_contacts", { p_club: club.id, p_bookings: ids }), "the calendar");
     (data as { booking_id: string; name: string | null; phone: string | null }[] | null)
       ?.forEach((c) => contacts.set(c.booking_id, { name: c.name, phone: c.phone }));
   }

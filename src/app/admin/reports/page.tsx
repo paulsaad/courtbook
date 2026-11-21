@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { loaded } from "@/lib/load";
 import ReportsBoard, { type Report } from "./ReportsBoard";
 import WorkNav from "@/components/WorkNav";
 
@@ -13,7 +14,7 @@ export default async function AdminReports({ searchParams }: { searchParams: Pro
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login?next=/admin/reports");
-  const { data: me } = await supabase.from("profiles").select("roles").eq("id", user.id).single();
+  const { data: me } = loaded(await supabase.from("profiles").select("roles").eq("id", user.id).single(), "the reports");
   if (!me?.roles?.includes("admin")) return <main className="p-6">Admins only.</main>;
 
   const status = (STATUSES as readonly string[]).includes(q ?? "") ? (q as (typeof STATUSES)[number]) : "open";
@@ -23,7 +24,7 @@ export default async function AdminReports({ searchParams }: { searchParams: Pro
   const reports = (data ?? []) as Report[];
   // 0075: how many players blocked each reported player (moderator history); left out before 0075
   const ids = [...new Set(reports.map((r) => r.profile_id).filter((x): x is string => !!x))];
-  const { data: blocks } = ids.length ? await supabase.rpc("admin_blocks_received", { p_profiles: ids }) : { data: null };
+  const { data: blocks } = ids.length ? loaded(await supabase.rpc("admin_blocks_received", { p_profiles: ids }), "the reports") : { data: null };
   const blocksReceived = Object.fromEntries(((blocks ?? []) as { profile_id: string; blocks_received: number }[]).map((b) => [b.profile_id, b.blocks_received]));
   return <><WorkNav area="admin" active="reports" /><ReportsBoard status={status} reports={reports} blocksReceived={blocksReceived} unavailable={missing} failed={!!error && !missing} /></>;
 }

@@ -44,7 +44,9 @@ vi.mock("@/lib/supabase/server", () => ({
 vi.mock("next/headers", () => ({ cookies: async () => ({ getAll: () => [], set: () => {} }), headers: async () => new Headers() }));
 
 type Page = (props: { params: Promise<Record<string, string>>; searchParams: Promise<Record<string, string>> }) => Promise<unknown>;
-const PAGES: [string, () => Promise<{ default: unknown }>, Record<string, string>][] = [
+/** The fourth entry names reads a page already reports inside the page itself (an in-page "couldn't load" state with
+ *  the risky actions disabled); failing one of those must NOT replace the page, and every other read must. */
+const PAGES: [string, () => Promise<{ default: unknown }>, Record<string, string>, string[]?][] = [
   ["home", () => import("./page"), {}],
   ["my bookings", () => import("./me/page"), {}],
   ["a booking", () => import("./bookings/[id]/page"), { id: "id-1" }],
@@ -66,6 +68,10 @@ const PAGES: [string, () => Promise<{ default: unknown }>, Record<string, string
   ["admin", () => import("./admin/page"), {}],
   ["admin payments", () => import("./admin/payments/page"), {}],
   ["admin club", () => import("./admin/clubs/[slug]/page"), { slug: "batroun" }],
+  ["admin reports", () => import("./admin/reports/page"), {}, ["rpc:admin_reports"]],
+  ["club booking page", () => import("./club/[slug]/page"), { slug: "batroun" }, ["from:occupancy"]],
+  ["courts", () => import("./courts/page"), {}, ["rpc:club_day_slots"]],
+  ["staff calendar", () => import("./staff/[slug]/page"), { slug: "batroun" }, ["from:bookings", "from:blocks"]],
 ];
 
 /** Runs the page; returns what it threw (or null). Next's redirect/notFound are thrown errors too. */
@@ -78,7 +84,7 @@ async function run(load: () => Promise<{ default: unknown }>, params: Record<str
 beforeEach(() => { state.reads = []; state.failAt = -1; });
 
 describe("failed reads never look like empty data (W1, audit B2)", () => {
-  for (const [label, load, params] of PAGES) {
+  for (const [label, load, params, inPage = []] of PAGES) {
     it(`${label}: every read checked; successful (even empty) reads never raise LoadError`, async () => {
       state.failAt = -1;
       const ok = await run(load, params);
@@ -86,10 +92,16 @@ describe("failed reads never look like empty data (W1, audit B2)", () => {
       if (ok && !(String((ok as { digest?: string }).digest ?? "").startsWith("NEXT_"))) throw ok;   // only redirect/notFound allowed
       const reads = [...state.reads];
       expect(reads.length, `${label} made no reads`).toBeGreaterThan(0);
+      for (const name of inPage) expect(reads, `${label}: ${name} is not read any more`).toContain(name);
       for (let k = 0; k < reads.length; k++) {
         state.reads = []; state.failAt = k;
         const err = await run(load, params);
-        expect(err instanceof LoadError, `${label}: failing read #${k + 1} (${reads[k]}) did not stop the page`).toBe(true);
+        if (inPage.includes(reads[k])) {
+          expect(err instanceof LoadError, `${label}: ${reads[k]} is reported inside the page, not by replacing it`).toBe(false);
+          if (err && !(String((err as { digest?: string }).digest ?? "").startsWith("NEXT_"))) throw err;
+        } else {
+          expect(err instanceof LoadError, `${label}: failing read #${k + 1} (${reads[k]}) did not stop the page`).toBe(true);
+        }
       }
     });
   }
