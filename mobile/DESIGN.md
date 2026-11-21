@@ -36,8 +36,9 @@ the code disagree, the code wins and this file is corrected.
 | booked | #6B6455 | unavailable times (striped, struck through) |
 
 **Rules**
-- Red never means "error", "cancelled" or "booked". Those have their own treatments, so red can
-  never be read as something going wrong.
+- **Brand red** (`red` #C8102E) never means error, cancelled or booked: it is decoration only, so it
+  can never be read as something going wrong. Errors and the **Cancelled** status use the separate
+  error red (`danger` #B42318), always with words; booked times use `booked`.
 - **Bookings list status** (21 Nov 2026): each row has a coloured edge and a status chip with words —
   Confirmed / You're in / You're organising (cedar), Waiting for the organiser (warn), Cancelled
   (danger, never brand red), Completed / Played / No-show (neutral). The brand-red edge stays on the

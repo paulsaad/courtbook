@@ -1,7 +1,9 @@
-# M3 — mobile release 0.3.0 (prepared 21 Nov 2026)
+# M3 — mobile release 0.3.0 (released to registered devices 21 Nov 2026)
 
 Branch `mobile-release-0.3.0` = `m3-dev` + `release-native-fixes` (`1c8b9b8`, merged cleanly) + the
-live game-features switch. Nothing built or published.
+live game-features switch, then the sign-in and Bookings-status fixes (sections below). **Status:**
+both live 0.3.0 builds made and installed; Android and iPhone read-only checks PASS; merged into
+`m3-dev` and `main`. Not in any store.
 
 ## What "release" means today
 
@@ -18,13 +20,17 @@ blocked on D5 (publisher account), D6 (privacy policy and terms) and the store i
 | M3 on phones | staging: Android and iPhone device checks PASS (games, chat, rules, report, block, unblock, Help & Feedback) |
 | Live switch | `gameWritesFor` on for staging **and live**; any other database stays off |
 | Database wiring | EAS `preview` → `lgujfbwunokobjxlvpuf` (verified by the workflow on 20 Nov; re-checked by every build run before building); the app also refuses a bundle/database mismatch (`lib/variant.ts`) |
-| Version | 0.3.0 (runtime 0.3.0; live iOS is 0.2.0, so no 0.2.0 update can reach 0.3.0 or the reverse); build numbers kept by EAS |
+| Version | 0.3.0 (runtime 0.3.0) installed on Paul's iPhone and Galaxy A17 (the iPhone's earlier 0.2.0 build is replaced; 0.2.0 updates cannot reach 0.3.0 or the reverse); build numbers kept by EAS |
 | Native config | `check-native-config.sh` all ok: Android declares only INTERNET and VIBRATE, unused permissions blocked; iOS privacy manifest (4 API reasons, no tracking, no data collected); no Face ID text; live/staging isolation |
 | Crash reporting | off for the live app (decision 15 Nov); the Sentry library is built in but sends nothing without the DSN |
 | Checks on the branch | typecheck; 538/538 unit tests (also as a live bundle); shared copies; release bundling iOS + Android |
-| Signing | iOS: ad hoc credentials exist (0.2.0). Android: no live build yet — the workflow checks the keystore before building and stops if there is none |
+| Signing | iOS: ad hoc certificate and profile valid to 13 Nov 2027 (2 devices). Android: keystore "Build Credentials 12pYrq-bTC" created by Paul 21 Nov (default for `app.courtbook.mobile`) |
 
-## Release steps
+## Release steps (all done 21 Nov 2026)
+
+Builds from `d7629ba`: Android run 44900766606 (build `721cd144-7869-4bcf-991b-f362c32a8503`), iOS run
+44899732537 (build `05d7f527-4b06-4fb1-8f8c-294f0aa325d4`).
+
 
 1. Approve the branch contents.
 2. Mobile build workflow from `mobile-release-0.3.0`: app live, Android; then app live, iOS.
