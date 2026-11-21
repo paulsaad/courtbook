@@ -1210,25 +1210,61 @@ describe("Phase I-2c: Week readable at a glance (desktop)", () => {
     expect(screen.queryByTestId("week-peek")).toBeNull();
   });
 
-  it("past times are shaded and the now line is on today, without hiding bookings or the keyboard", async () => {
+  it("only today's elapsed times are shaded; earlier days and later times stay white; the now line is on today", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.setSystemTime(new Date("2099-01-12T12:10:00.000Z"));       // 14:10 in Beirut, Monday
-    const early: Booking = { ...booking("w-early", "Early Bird"), start_at: z(DAY, "09:00"), end_at: z(DAY, "10:00") };
-    handler = async (q) => ok(q.table === "bookings" ? [early] : []);
-    view({ date: DAY, view: "week", court: courtA.id });
+    vi.setSystemTime(new Date("2099-01-14T12:10:00.000Z"));       // Wednesday 14 Jan, 14:10 in Beirut
+    const WED = "2099-01-14";
+    const early: Booking = { ...booking("w-early", "Early Bird"), start_at: z(WED, "09:00"), end_at: z(WED, "10:00") };
+    const monday: Booking = { ...booking("w-mon", "Monday Match"), start_at: z(DAY, "18:00"), end_at: z(DAY, "19:00"), source: "app" };
+    const wedBlock: Block = { id: "w-wblk", court_id: courtA.id, start_at: z(WED, "11:00"), end_at: z(WED, "12:00"), reason: "Coaching" };
+    handler = async (q) => ok(q.table === "bookings" ? [early, monday] : q.table === "blocks" ? [wedBlock] : []);
+    view({ date: WED, view: "week", court: courtA.id });
     await waitFor(() => expect(document.querySelector('[data-week-block="w-early"]')).not.toBeNull());
-    expect(cellAt(DAY, "13:30").dataset.past).toBe("true");        // ended 14:00
-    expect(cellAt(DAY, "14:00").dataset.past).toBeUndefined();     // still running
-    expect(cellAt("2099-01-13", "08:00").dataset.past).toBeUndefined();
-    expect(cellAt(DAY, "13:30").className).toMatch(/lg:bg-\[#e4e7e3\]/);
-    // a past booking is still drawn and still opens; it is not greyed out
-    expect(cellAt(DAY, "09:00").getAttribute("aria-label")).toMatch(/^Early Bird/);
-    expect(cellAt(DAY, "09:00").className).not.toMatch(/#e4e7e3/);
+    const shaded = (el: HTMLElement) => /#eef0ed/.test(el.className);
+    // today: ended times shaded, the time in progress and later ones white
+    expect(cellAt(WED, "13:30").dataset.past).toBe("true");        // ended 14:00
+    expect(shaded(cellAt(WED, "13:30"))).toBe(true);
+    expect(cellAt(WED, "14:00").dataset.past).toBeUndefined();     // still running
+    expect(shaded(cellAt(WED, "14:00"))).toBe(false);
+    expect(shaded(cellAt(WED, "22:30"))).toBe(false);
+    // earlier days keep a white grid, all day long; later days too
+    for (const d of [DAY, "2099-01-13"]) for (const t of ["08:00", "13:30", "22:30"]) {
+      expect(cellAt(d, t).dataset.past).toBeUndefined();
+      expect(shaded(cellAt(d, t))).toBe(false);
+    }
+    expect(shaded(cellAt("2099-01-15", "08:00"))).toBe(false);
+    expect(document.querySelectorAll("[data-past]").length).toBe(8);    // 08:00–13:30 today (12), less 2 booked and 2 blocked rows
+    // bookings and blocks keep their own look, past or not: colours, hatching, text
+    expect(cellAt(WED, "09:00").getAttribute("aria-label")).toMatch(/^Early Bird/);
+    expect(shaded(cellAt(WED, "09:00"))).toBe(false);
+    expect(document.querySelector<HTMLElement>('[data-week-block="w-mon"]')!.className).toMatch(/bg-turf-soft/);
+    const blk = document.querySelector<HTMLElement>('[data-week-block="w-wblk"]')!;
+    expect(blk.className).toMatch(/\bhatch\b/);
+    expect(shaded(blk)).toBe(false);
+    expect(cellAt(WED, "11:00").className).toMatch(/repeating-linear-gradient/);   // phone hatching kept
+    // the now line: today's column (Wednesday = third day), at 14:10, below a focused cell's outline
     const line = screen.getByTestId("week-now");
-    expect(line.style.gridColumn).toBe("2");
+    expect(line.style.gridColumn).toBe("4");
     expect(parseFloat((line.firstElementChild as HTMLElement).style.top)).toBeCloseTo(((14 * 60 + 10 - 480) / 30) * 34, 2);
-    expect(line.className).toMatch(/z-\[4\]/);                     // below a focused cell's outline (z-6)
-    expect(cellAt(DAY, "14:00").className).toMatch(/focus-visible:z-\[6\]/);
+    expect(line.className).toMatch(/z-\[4\]/);
+    expect(cellAt(WED, "14:00").className).toMatch(/focus-visible:z-\[6\]/);
+    // keyboard focus still reaches a shaded time and moves on
+    await act(async () => { cellAt(WED, "13:30").focus(); });
+    await act(async () => { fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" }); });
+    expect(document.activeElement).toBe(cellAt(WED, "14:00"));
+  });
+
+  it("All courts: only today's elapsed times are shaded; earlier days show their counts on white", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2099-01-14T12:10:00.000Z"));
+    handler = async () => ok([]);
+    view({ date: "2099-01-14", view: "week", court: "all" });
+    await waitFor(() => expect(cellAt(DAY, "08:00").textContent).toBe("2 free"));
+    expect(cellAt(DAY, "08:00").dataset.past).toBeUndefined();
+    expect(cellAt(DAY, "08:00").className).toMatch(/bg-white/);
+    expect(cellAt("2099-01-14", "13:30").dataset.past).toBe("true");
+    expect(cellAt("2099-01-14", "14:00").dataset.past).toBeUndefined();
+    expect(document.querySelectorAll("[data-past]").length).toBe(12);   // 08:00–13:30 today only
   });
 
   it("Courts view: today's ended times are shaded too; the time in progress is not", async () => {

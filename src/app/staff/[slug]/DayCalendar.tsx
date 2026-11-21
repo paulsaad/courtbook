@@ -960,9 +960,10 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   );
 }
 
-/** Times that have ended (Phase I-2c, desktop): a flat grey, unlike a block's hatching; bookings stay as drawn. */
-const PAST_BG = "bg-[#e4e7e3]";
-const PAST_BG_LG = "lg:bg-[#e4e7e3]";
+/** Times that have ended today (Phase I-2c, desktop): a subtle flat grey, unlike a block's hatching; bookings stay as
+ *  drawn. Earlier days and later times stay white (Paul, 21 Nov: a grey week looked disabled). */
+const PAST_BG = "bg-[#eef0ed]";
+const PAST_BG_LG = "lg:bg-[#eef0ed]";
 
 const input = "rounded-xl border border-grid bg-paper px-4 py-3 text-base outline-none focus:border-action focus:ring-2 focus:ring-action/20";
 /** Dropdowns: white with a clear border and a chevron when usable; a disabled one is grey with muted text (globals.css .select-field). */
@@ -1134,8 +1135,6 @@ function useClubClock(tz: string) {
 }
 
 const dayLabelOf = (d: string, tz: string) => formatInTimeZone(clubLocalToUtc(d, "12:00", tz), tz, "EEE d MMM");
-/** Today's free times in Week (desktop): a faint tint, so the day stands out without looking booked. */
-const TODAY_BG_LG = "lg:bg-[#f3faf6]";
 
 /** The red now line over today's column (desktop). Above the drawn bookings, below a focused cell's outline. */
 function WeekNowLine({ clock, days, times, slot, rowPx }: { clock: { today: string; nowMin: number } | null; days: string[]; times: string[]; slot: number; rowPx: number }) {
@@ -1195,7 +1194,8 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
   type Cell = NonNullable<ReturnType<typeof at>>;
   const cellId = (c: Cell) => (c.kind === "booking" ? c.b.id : c.k.id);
   const activeFree = !at(days[wc.d], times[wc.r]);
-  const ended = (d: string, i: number) => !!clock && (d < clock.today || (d === clock.today && toMin(times[i]) + club.slot_minutes <= clock.nowMin));
+  // only today's elapsed times are shaded; earlier days keep a white grid
+  const ended = (d: string, i: number) => !!clock && d === clock.today && toMin(times[i]) + club.slot_minutes <= clock.nowMin;
   const range = (c: Cell) => c.kind === "booking" ? `${hhmm(c.b.start_at, tz)}–${hhmm(c.b.end_at, tz)}` : `${hhmm(c.k.start_at, tz)}–${hhmm(c.k.end_at, tz)}`;
   const who = (b: Booking) => b.guest_name ?? b.player_name ?? "Player";
   const kindWord = (b: Booking) => (b.status === "pending" ? "being paid" : b.source === "app" ? "app booking" : "desk booking");
@@ -1262,7 +1262,7 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
                   return (
                     <button key={d + t} {...cellProps(d, t)} onClick={() => onAdd(d, t)} disabled={!canAdd} aria-label={`Add a booking on ${d} at ${t}`}
                             data-draft={inDraft ? "true" : undefined} data-past={past ? "true" : undefined}
-                            className={`relative border-l focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf disabled:cursor-not-allowed ${inDraft ? "border-x-2 border-dashed border-draft bg-draft-soft" : `border-b border-grid/60 bg-white ${past ? PAST_BG_LG : d === today ? TODAY_BG_LG : ""}`} ${head ? "border-t-2" : ""} ${inDraft && m + club.slot_minutes === draft.endMin ? "border-b-2" : ""}`}
+                            className={`relative border-l focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf disabled:cursor-not-allowed ${inDraft ? "border-x-2 border-dashed border-draft bg-draft-soft" : `border-b border-grid/60 bg-white ${past ? PAST_BG_LG : ""}`} ${head ? "border-t-2" : ""} ${inDraft && m + club.slot_minutes === draft.endMin ? "border-b-2" : ""}`}
                             style={place}>
                       {head && <span aria-hidden="true" className="absolute inset-x-0 top-0.5 truncate px-0.5 text-[10px] font-semibold leading-tight text-draft">Not saved</span>}
                     </button>
@@ -1402,7 +1402,8 @@ function AllCourtsWeek({ club, courts, days, times, data, failed = false, cellHr
   const rowPx = club.slot_minutes <= 30 ? 34 : 48;
   const labelEvery = club.slot_minutes <= 30 ? 2 : 1;
   const total = courts.length;
-  const ended = (d: string, i: number) => !!clock && (d < clock.today || (d === clock.today && toMin(times[i]) + club.slot_minutes <= clock.nowMin));
+  // only today's elapsed times are shaded; earlier days keep a white grid
+  const ended = (d: string, i: number) => !!clock && d === clock.today && toMin(times[i]) + club.slot_minutes <= clock.nowMin;
   const tone = (n: number) => n === total ? "bg-white text-turf" : n === 0 ? "bg-[#cfd4ce] font-semibold text-ink" : n / total >= 0.5 ? "bg-[#eef3ef] text-ink" : "bg-[#dde5df] text-ink";
 
   return (
