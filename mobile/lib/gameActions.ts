@@ -15,12 +15,13 @@ import { PROJECT_REF, refFromUrl } from "./variant";
  * nothing: membership, capacity, level fit and court state are the server's (§5.3).
  * `remove` and `resolveCourt` call functions added by 0072 (M3-H hardening).
  *
- * Switched on only where 0072 is applied: the staging database (approved and applied 20 Nov 2026).
- * A bundle pointed at any other database — the live one included — keeps every call refused and
- * draws no action control. Turning it on for live is a separate decision after 0072 reaches live.
+ * Switched on where 0067–0075 are applied: the staging database (20 Nov 2026) and the live database
+ * (packages 1 and 3, 20–21 Nov 2026). A bundle pointed at any other database keeps every call refused
+ * and draws no action control.
  */
 export function gameWritesFor(supabaseUrl: string | undefined): boolean {
-  return refFromUrl(supabaseUrl ?? "") === PROJECT_REF.staging;
+  const ref = refFromUrl(supabaseUrl ?? "");
+  return ref === PROJECT_REF.staging || ref === PROJECT_REF.production;
 }
 export const GAME_WRITES_AVAILABLE = gameWritesFor(process.env.EXPO_PUBLIC_SUPABASE_URL);
 

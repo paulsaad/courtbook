@@ -32,11 +32,11 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-describe("writes are on only against the staging database, where 0072 is applied", () => {
-  it("staging on; live, unknown and missing off", () => {
+describe("writes are on against the staging and live databases, where 0067–0075 are applied", () => {
+  it("staging and live on; unknown and missing off", () => {
     expect(gameWritesFor("https://pwznauyioqykdwodwpvx.supabase.co")).toBe(true);
     expect(gameWritesFor("https://pwznauyioqykdwodwpvx.supabase.co/")).toBe(true);
-    expect(gameWritesFor("https://lgujfbwunokobjxlvpuf.supabase.co")).toBe(false);
+    expect(gameWritesFor("https://lgujfbwunokobjxlvpuf.supabase.co")).toBe(true);
     expect(gameWritesFor("https://abcdefghijklmnopqrst.supabase.co")).toBe(false);
     expect(gameWritesFor("")).toBe(false);
     expect(gameWritesFor(undefined)).toBe(false);
