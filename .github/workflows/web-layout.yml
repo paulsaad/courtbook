@@ -46,3 +46,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: layout-shots, path: shots, retention-days: 14 }
+      - name: Server errors seen while taking the screenshots (both builds)
+        if: always()
+        run: |
+          for f in /tmp/before.log /tmp/after.log; do echo "== $f"; grep -iE -A6 "error|digest" "$f" | head -40 || true; done
