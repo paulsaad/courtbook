@@ -212,7 +212,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
 
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col">
-      <header className="sticky top-0 z-10 bg-paper/95 backdrop-blur">
+      <header className="sticky top-0 z-10 bg-paper/95 backdrop-blur lg:top-16">
         <div className="flex items-center justify-between px-4 pt-3 text-sm">
           <Link href="/" className="text-muted">‹ {club.name}</Link>
           <div className="flex gap-4"><Link href={`/staff/${club.slug}/payments`} className="text-muted">Payments</Link><Link href={`/staff/${club.slug}/settings`} className="text-muted">Settings</Link><button onClick={() => setSheet({ kind: "close" })} className="text-danger">Close courts…</button></div>
@@ -378,7 +378,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
 
       {sheet && (
         <div className="fixed inset-0 z-20 flex items-end justify-center bg-ink/30 lg:items-stretch lg:justify-end" onClick={() => !busy && setSheet(null)}>
-          <div ref={dialogRef} className="sheet-enter w-full max-w-lg rounded-t-2xl bg-white px-5 pb-8 pt-3 shadow-2xl outline-none lg:max-w-md lg:overflow-y-auto lg:rounded-none lg:pt-6" onClick={(e) => e.stopPropagation()}>
+          <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={sheet.kind === "add" ? "Add a booking" : sheet.kind === "booking" ? "Booking" : sheet.kind === "block" ? "Blocked time" : "Close courts"} className="sheet-enter w-full max-w-lg rounded-t-2xl bg-white px-5 pb-8 pt-3 shadow-2xl outline-none lg:max-w-md lg:overflow-y-auto lg:rounded-none lg:pt-6" onClick={(e) => e.stopPropagation()}>
             <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-grid" />
             {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
 

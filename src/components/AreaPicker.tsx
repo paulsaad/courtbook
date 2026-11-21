@@ -29,7 +29,7 @@ export default function AreaPicker({ areas, value, onChange, trigger }: { areas:
       )}
       {open && (
         <div className="fixed inset-0 z-30 flex items-end bg-ink/40 lg:items-center lg:justify-center lg:p-6" onClick={() => setOpen(false)}>
-          <div ref={dialogRef} className="sheet-enter max-h-[80vh] w-full overflow-y-auto rounded-t-3xl bg-paper p-5 pb-8 outline-none lg:max-w-lg lg:rounded-3xl" style={{ paddingBottom: "calc(2rem + env(safe-area-inset-bottom))" }} onClick={(e) => e.stopPropagation()}>
+          <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Choose an area" className="sheet-enter max-h-[80vh] w-full overflow-y-auto rounded-t-3xl bg-paper p-5 pb-8 outline-none lg:max-w-lg lg:rounded-3xl" style={{ paddingBottom: "calc(2rem + env(safe-area-inset-bottom))" }} onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-lg font-semibold">{g ? g.name_en : "Where do you want to play?"}</h2>
               {g ? <button onClick={() => setGov(null)} className="text-sm text-action">‹ Governorates</button> : <button onClick={() => setOpen(false)} className="text-sm text-muted">Close</button>}

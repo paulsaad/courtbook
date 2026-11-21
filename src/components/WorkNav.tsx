@@ -1,16 +1,32 @@
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
 import { Wordmark } from "./Brand";
 
 type Item = { href: string; label: string; key: string };
+type Props =
+  | { area: "staff"; slug: string; clubName: string; active: "calendar" | "payments" | "settings" }
+  | { area: "admin"; active: "clubs" | "payments" | "reports" };
+
+/**
+ * Admin pages show the open-reports count on Reports, read with the same admin-only call the admin
+ * home page already makes (admin_reports, 0074). If it fails or is missing, no count is shown.
+ */
+export default async function WorkNav(props: Props) {
+  let openReports: number | null = null;
+  if (props.area === "admin") {
+    const supabase = await createClient();
+    const { data: open } = await supabase.rpc("admin_reports", { p_status: "open" });
+    openReports = Array.isArray(open) ? open.length : null;
+  }
+  return <WorkNavBar {...props} openReports={openReports} />;
+}
 
 /**
  * Desktop-only (≥ 1024 px) top bar for the staff and admin areas, which have no player tab bar.
  * Below 1024 px it renders nothing visible, so phones and tablets are unchanged. Every item is a
  * plain link to a page that already exists; the right side always leads back to the player side.
  */
-export default function WorkNav(props:
-  | { area: "staff"; slug: string; clubName: string; active: "calendar" | "payments" | "settings" }
-  | { area: "admin"; active: "clubs" | "payments" | "reports" }) {
+export function WorkNavBar(props: Props & { openReports?: number | null }) {
   const items: Item[] = props.area === "staff"
     ? [
         { key: "calendar", label: "Calendar", href: `/staff/${props.slug}` },
@@ -20,7 +36,7 @@ export default function WorkNav(props:
     : [
         { key: "clubs", label: "Clubs", href: "/admin" },
         { key: "payments", label: "Payments", href: "/admin/payments" },
-        { key: "reports", label: "Reports", href: "/admin/reports" },
+        { key: "reports", label: props.openReports ? `Reports (${props.openReports} open)` : "Reports", href: "/admin/reports" },
       ];
   const title = props.area === "staff" ? props.clubName : "Admin";
   return (
