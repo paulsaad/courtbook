@@ -6,3 +6,6 @@ const { data: open } = await supabase.rpc("admin_reports", { p_status: "open" })
 # another day — the same page the ‹ › and Today links open; no data read or written.
 onChange={(e) => { const d = e.target.value; if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d !== date && confirmDiscard()) { addDirty.current = false; router.push(nav(d)); } }}
 router.push(nav(to));
+# Phase I-2b (approved 21 Nov, decision D6 / F): a plain calendar address opens on the view and sport last used in
+# this browser (desktop); same page, same reads; an address naming a view or sport is never overridden.
+if (v !== view || sp !== sport) router.replace(q(v === "now" ? todayIn(club.timezone) : date, v, sp, v === "week" ? courtParam : null));
