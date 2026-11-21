@@ -52,12 +52,15 @@ insert into r select 'R2c ...and is not offered the blocked hour (club_day_slots
 select set_config('request.jwt.claim.sub', 'f0000000-0000-4000-8000-0000000000b1', false) \g /dev/null
 insert into r select 'R2d staff read their own club''s blocks, with the reason',
   (select count(*) from blocks where reason like 'Private lesson%') = 1 and pg_temp.cnt('select * from blocks') = 1, pg_temp.cnt('select * from blocks')::text;
+-- since 0076/0077 a block is added through staff_block (docs/phase-i/blocks.md); before 0076 directly
 insert into r select 'R2e staff still add and remove a block (staff calendar)',
-  pg_temp.err($$insert into blocks (id, club_id, court_id, start_at, end_at, reason, created_by)
-                select 'f0000000-0000-4000-8000-0000000b10c3', club_id, id, pg_temp.at(5, '09:00'), pg_temp.at(5, '10:00'), 'Maintenance', 'f0000000-0000-4000-8000-0000000000b1'
-                from courts where name = 'Padel 2'$$) = 'no error'
-  and pg_temp.err($$delete from blocks where id = 'f0000000-0000-4000-8000-0000000b10c3'$$) = 'no error'
-  and pg_temp.cnt($$select * from blocks where id = 'f0000000-0000-4000-8000-0000000b10c3'$$) = 0, '';
+  pg_temp.err(case when to_regproc('public.staff_block') is not null
+    then $$select staff_block(club_id, id, pg_temp.at(5, '09:00'), pg_temp.at(5, '10:00'), 'Maintenance') from courts where name = 'Padel 2'$$
+    else $$insert into blocks (club_id, court_id, start_at, end_at, reason, created_by)
+           select club_id, id, pg_temp.at(5, '09:00'), pg_temp.at(5, '10:00'), 'Maintenance', 'f0000000-0000-4000-8000-0000000000b1'
+           from courts where name = 'Padel 2'$$ end) = 'no error'
+  and pg_temp.err($$delete from blocks where reason = 'Maintenance' and start_at = pg_temp.at(5, '09:00')$$) = 'no error'
+  and pg_temp.cnt($$select * from blocks where reason = 'Maintenance' and start_at = pg_temp.at(5, '09:00')$$) = 0, '';
 select set_config('request.jwt.claim.sub', 'f0000000-0000-4000-8000-0000000000b2', false) \g /dev/null
 insert into r select 'R2f staff of another club read only their own club''s blocks',
   pg_temp.cnt('select * from blocks') = 1 and pg_temp.cnt($$select * from blocks where reason like 'Private%'$$) = 0, pg_temp.cnt('select * from blocks')::text;
