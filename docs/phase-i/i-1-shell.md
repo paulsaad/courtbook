@@ -70,3 +70,12 @@ identical; Info page fixed; no server errors in the new build).
 - Moved to I-2: Week view readability (day headings, time labels, booking names); reception workflow
   (availability at a glance, telephone bookings, quick changes) as the primary desktop design
   requirement, with a practical phone view for owners checking remotely.
+
+## Final visual fixes (21 Nov 2026)
+
+- Calendar side panel (desktop) starts below the 64 px top bar and fills the remaining height; it has a
+  title and a visible Close (×), disabled while saving. Esc and outside click still close it. Phones keep
+  the bottom sheet and its handle (`695f3ce`, test covers Close, Esc and outside click).
+- Checks: 174/174 tests, layout-only guard, layout run 44923147428 (phone width identical; Info fixed).
+- For I-2: consider a non-modal booking panel so the calendar stays usable beside it (receptionists
+  compare availability while handling a booking).
