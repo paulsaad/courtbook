@@ -79,3 +79,9 @@ identical; Info page fixed; no server errors in the new build).
 - Checks: 174/174 tests, layout-only guard, layout run 44923147428 (phone width identical; Info fixed).
 - For I-2: consider a non-modal booking panel so the calendar stays usable beside it (receptionists
   compare availability while handling a booking).
+
+## COMPLETE (21 Nov 2026)
+
+Merged into `main` as `4cf3036` (tree identical to the reviewed `0574120`). Vercel production deployment
+succeeded (`courtbook-three.vercel.app`). Production club Info page renders (desktop and phone), with its
+Facilities section. I-2 (staff calendar) is next, starting with a proposal.
