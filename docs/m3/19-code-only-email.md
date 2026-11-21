@@ -62,3 +62,16 @@ In Supabase → live project → Authentication:
 4. Sign in once on each phone with a fresh code.
 
 Undo: paste the previous template text back (copy it before step 1).
+
+## Done (21 Nov 2026)
+
+- **Live templates: VERIFIED.** Magic Link and Confirm signup replaced by Paul (previous text kept by
+  him for rollback); production website email shows the 8-digit code and "1 hour", no link; code
+  sign-in works.
+- **Website wording:** `main` fast-forwarded to `9b8287f` (one file, `LoginForm.tsx`); Vercel
+  production deployment succeeded.
+- **App wording** (run 44907853205 from `d913f32`; live database; 545/545 tests; fingerprints matched
+  the 0.3.0 builds): iOS update `01a1fe40-6a33-7ac3-a554-e7ed935eac86` (group
+  `9b2260c7-4d75-4920-9341-5cabf47e9967`), Android update `01a1fe41-1af3-71e4-8d9e-0b742881ef3c`
+  (group `5160d955-72aa-4697-a66c-902c908a15cf`). Previous groups for rollback: iOS `89fb8488…`,
+  Android `ebc2b01a…`.
