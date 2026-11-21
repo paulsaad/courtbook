@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { act } from "react";
 
@@ -242,5 +243,13 @@ describe("walk-in sheet: a block never takes the customer's name (review fix)", 
     expect(screen.queryByText(/for a booking/)).toBeNull();
     expect((screen.getByRole("button", { name: "Block this time" }) as HTMLButtonElement).disabled).toBe(true);
     expect(onSave).not.toHaveBeenCalled();
+  });
+});
+
+describe("calendar header links (Phase I-1)", () => {
+  it("Payments and Settings are hidden from 1024 px, where the staff bar has them; shown on phones and tablets", () => {
+    const src = readFileSync("src/app/staff/[slug]/DayCalendar.tsx", "utf8");
+    expect(src).toMatch(/payments`\} className="text-muted lg:hidden">Payments</);
+    expect(src).toMatch(/settings`\} className="text-muted lg:hidden">Settings</);
   });
 });
