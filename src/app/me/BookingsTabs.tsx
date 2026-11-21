@@ -32,7 +32,7 @@ export default function BookingsTabs({ bookings, matches, past }: { bookings: Ag
   const hero = bookings[0] ?? null;
   const chip = (on: boolean) => `chip ${on ? "chip-on" : ""}`;
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 p-5 pt-12">
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-3xl flex-col gap-4 p-5 pt-12">
       <div className="-mx-5 flex gap-2 overflow-x-auto px-5">
         <button onClick={() => setTab("courts")} className={chip(tab === "courts")}>Courts ({bookings.length})</button>
         <button onClick={() => setTab("matches")} className={chip(tab === "matches")}>Matches ({matches.length})</button>

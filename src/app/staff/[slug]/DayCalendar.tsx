@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { bookingDate, clubLocalToUtc, dayBounds, hhmm, moveTarget, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
 import { friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
 import { blockSlotOptions, bookingSlotOptions, pickSlots } from "./durations";
+import { useDialog } from "@/components/useDialog";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string> };
 
@@ -54,6 +55,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const [sheet, setSheet] = useState<Sheet>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const dialogRef = useDialog<HTMLDivElement>(!!sheet, () => setSheet(null), { canClose: !busy });
   const [nowMin, setNowMin] = useState<number | null>(null);
   const [freeNow, setFreeNow] = useState<FreeNow[] | null>(null);
   const [showLater, setShowLater] = useState(false);
@@ -375,8 +377,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
       )}
 
       {sheet && (
-        <div className="fixed inset-0 z-20 flex items-end justify-center bg-ink/30" onClick={() => !busy && setSheet(null)}>
-          <div className="sheet-enter w-full max-w-lg rounded-t-2xl bg-white px-5 pb-8 pt-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-20 flex items-end justify-center bg-ink/30 lg:items-stretch lg:justify-end" onClick={() => !busy && setSheet(null)}>
+          <div ref={dialogRef} className="sheet-enter w-full max-w-lg rounded-t-2xl bg-white px-5 pb-8 pt-3 shadow-2xl outline-none lg:max-w-md lg:overflow-y-auto lg:rounded-none lg:pt-6" onClick={(e) => e.stopPropagation()}>
             <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-grid" />
             {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
 

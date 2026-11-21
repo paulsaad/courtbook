@@ -19,7 +19,7 @@ export default async function Home() {
 
   if (!user) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 p-5 pt-12">
+      <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-3xl flex-col gap-4 p-5 pt-12">
         <header className="flex items-center justify-between">
           <h1 className="flex items-center gap-2 text-[30px] font-extrabold tracking-tight"><Cedar size={24} />CourtBook</h1>
           <Link href="/login" className="rounded-full bg-turf px-4 py-2 text-sm font-semibold text-white">Sign in</Link>
@@ -44,7 +44,7 @@ export default async function Home() {
     .sort((a, b) => a.start_at.localeCompare(b.start_at))[0] ?? null;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-3.5 p-5 pt-10">
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-3xl flex-col gap-3.5 p-5 pt-10">
       <header className="flex items-center justify-between">
         <h1 className="flex items-center gap-2 text-[28px] font-extrabold tracking-tight"><Cedar size={24} />{firstName ? `Hello ${firstName}` : "CourtBook"}</h1>
         <Link href="/notifications" aria-label="Activity" className="relative flex h-11 w-11 items-center justify-center rounded-full border border-grid bg-white">

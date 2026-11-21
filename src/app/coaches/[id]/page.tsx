@@ -28,7 +28,7 @@ export default async function CoachPage({ params, searchParams }: { params: Prom
   const waText = encodeURIComponent(`Hi ${card.name ?? ""}, I found you on CourtBook${club ? ` (${club.name})` : ""}. I'd like to book a session. — ${me?.name ?? ""}`);
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5 pb-28">
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5 pb-28">
       <Link href={club ? `/club/${club.slug}/coaches` : "/"} className="text-sm text-muted">‹ Coaches</Link>
       <div>
         <div className="flex items-baseline justify-between"><h1 className="text-2xl font-semibold tracking-tight">{card.name ?? "Coach"}</h1><span className="text-lg font-semibold">${Number(card.price_usd).toFixed(0)}/h</span></div>
@@ -59,7 +59,7 @@ export default async function CoachPage({ params, searchParams }: { params: Prom
         </section>
       )}
 
-      <div className="fixed inset-x-0 bottom-0 mx-auto max-w-md p-4">
+      <div className="fixed inset-x-0 bottom-0 mx-auto max-w-md p-4 md:max-w-2xl lg:max-w-[720px]">
         {waNum ? (
           <a href={`https://wa.me/${waNum}?text=${waText}`} target="_blank" rel="noreferrer" className="block rounded-xl bg-[#25D366] py-3.5 text-center font-medium text-white shadow-lg">Message on WhatsApp</a>
         ) : (

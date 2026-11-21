@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import NewClubForm from "./NewClubForm";
+import WorkNav from "@/components/WorkNav";
 
 export default async function AdminHome() {
   const supabase = await createClient();
@@ -16,7 +17,9 @@ export default async function AdminHome() {
   const { data: clubs } = await supabase.from("clubs").select("id, name, slug, active, service_fee_usd, courts(count)").order("name");
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5">
+    <>
+    <WorkNav area="admin" active="clubs" />
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5">
       <Link href="/" className="text-sm text-muted">‹ Home</Link>
       <h1 className="text-2xl font-semibold tracking-tight">Clubs</h1>
       <ul className="divide-y divide-grid rounded-2xl border border-grid bg-white">
@@ -38,5 +41,6 @@ export default async function AdminHome() {
         <Link href="/admin/reports" className="text-sm text-action underline">Reports{openCount ? ` (${openCount} open)` : ""}</Link>
       </div>
     </main>
+    </>
   );
 }

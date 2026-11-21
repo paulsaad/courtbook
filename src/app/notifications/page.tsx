@@ -11,7 +11,7 @@ export default async function NotificationsPage() {
   const rows = (data ?? []) as Note[];
   if (rows.some((r) => !r.read_at)) await supabase.rpc("mark_notifications_read", { p_ids: rows.filter((r) => !r.read_at).map((r) => r.id) });
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 p-5 pt-12">
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-4 p-5 pt-12">
       <Link href="/profile" className="text-sm text-muted">‹ Profile</Link>
       <ActivityList initial={rows} />
     </main>

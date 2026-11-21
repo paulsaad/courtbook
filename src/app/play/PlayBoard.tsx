@@ -39,7 +39,7 @@ export default function PlayBoard({ areas, sports, initial, clubs }: { areas: Go
   const update = (p: Prefs) => { setPrefs(p); writePrefs(p); };
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 p-5">
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-3xl flex-col gap-4 p-5">
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Find a game</h1>
         <AreaPicker areas={areas} value={{ gov: prefs.gov, district: prefs.district }} onChange={(a) => update({ ...prefs, gov: a.gov, district: a.district })} />

@@ -9,6 +9,7 @@ import { clubLocalToUtc, dayBounds, hhmm, shiftDate, slotTimes, todayIn, toMin }
 import { friendlyError, type Club, type Court } from "@/lib/types";
 import { readPrefs } from "@/lib/prefs";
 import { newToken, reserve as reserveSlot } from "@/lib/reserve";
+import { useDialog } from "@/components/useDialog";
 
 export type Occ = { id?: string | null; court_id: string; start_at: string; end_at: string; status?: string; mine?: boolean; kind: "booking" | "block" };
 type ClubX = Club & { booking_window_days: number; service_fee_usd: number; location_url: string | null; hold_minutes: number };
@@ -52,6 +53,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
   const [quoteTick, setQuoteTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const dialogRef = useDialog<HTMLDivElement>(!!pick, () => setPick(null), { canClose: !busy, modal: false });
   const stripRef = useRef<HTMLDivElement>(null);
   const tokenRef = useRef<string | null>(null);   // one token per attempt, reused if it is retried
 
@@ -224,7 +226,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
       </div>
 
       {pick && (
-        <div className="sheet-enter fixed inset-x-0 bottom-0 z-30 mx-auto max-w-lg rounded-t-2xl border-t border-grid bg-white px-5 pb-8 pt-4 shadow-2xl">
+        <div ref={dialogRef} className="sheet-enter fixed inset-x-0 bottom-0 z-30 mx-auto max-w-lg rounded-t-2xl border-t border-grid bg-white px-5 pb-8 pt-4 shadow-2xl lg:inset-x-auto lg:bottom-6 lg:right-6 lg:w-[420px] lg:rounded-2xl lg:border">
           {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
           <div className="flex items-baseline justify-between">
             <h2 className="text-lg font-semibold">{allCourts.find((c) => c.id === pick.courtId)?.name} · {pick.time}–{endLabel(pick.time, slots)}</h2>

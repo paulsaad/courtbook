@@ -42,7 +42,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
   const waText = encodeURIComponent(`Court booked ✅ ${club.name}, ${court.name}\n${day}, ${time}\n${club.location_url ?? ""}`.trim());
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5">
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5">
       <Link href="/me" className="text-sm text-muted">‹ My CourtBook</Link>
       <div>
         {isNew && b.status === "confirmed" && <p className="mb-2 inline-block rounded-full bg-turf-soft px-3 py-1 text-sm font-medium text-turf">{atDesk ? `Reservation confirmed · Pay $${Number(b.price_usd ?? 0).toFixed(2)} at the club` : "Booked"}</p>}

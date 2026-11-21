@@ -23,7 +23,7 @@ export default async function CoachPage() {
     : [{ data: [] }, { data: [] }, { data: [] }];
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5 pb-16">
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5 pb-16">
       <Link href="/" className="text-sm text-muted">‹ Home</Link>
       <CoachDashboard coach={coach} sports={ref.sports} clubs={clubs ?? []} links={links ?? []} rules={rules ?? []} exceptions={exceptions ?? []} />
     </main>

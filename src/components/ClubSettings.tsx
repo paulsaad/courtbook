@@ -56,7 +56,7 @@ export default function ClubSettings({ club, courts, rules, staff, coaches, isAd
   }));
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5 pb-16">
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5 pb-16">
       <Link href={backHref} className="text-sm text-muted">‹ Back</Link>
       <h1 className="text-2xl font-semibold tracking-tight">{club.name}</h1>
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}

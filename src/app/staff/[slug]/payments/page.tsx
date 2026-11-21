@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import PaymentsDashboard, { type Balance, type PaymentRow, type RefundRow, type Summary } from "@/components/PaymentsDashboard";
+import WorkNav from "@/components/WorkNav";
 
 export default async function StaffPayments({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ month?: string }> }) {
   const { slug } = await params;
@@ -22,6 +23,9 @@ export default async function StaffPayments({ params, searchParams }: { params: 
   if (mine.length === 0) return <main className="p-6">You are not staff at {club.name}.</main>;
 
   return (
+    <>
+    <WorkNav area="staff" slug={slug} clubName={club.name} active="payments" />
     <PaymentsDashboard month={month} summary={mine} refunds={((refunds ?? []) as RefundRow[]).filter((r) => r.club_id === club.id)} rows={rows as PaymentRow[]} clubId={club.id} balances={((balances ?? []) as Balance[]).filter((b) => b.club_id === club.id)} isAdmin={false} backHref={`/staff/${slug}`} title={`${club.name} payments`} basePath={`/staff/${slug}/payments`} />
+    </>
   );
 }
