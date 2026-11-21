@@ -84,6 +84,14 @@ begin
   exception when others then
     if sqlerrm in ('not_on_grid', 'outside_opening_hours') or sqlerrm like 'CourtBook has been updated.%' then raise notice 'ok    7 old page, off grid: refused (%)', sqlerrm;
     else fails := fails + 1; raise notice 'FAIL  7 old page off grid: %', sqlerrm; end if; end;
+  -- 7b a direct change of a saved block's time (no page has ever done this)
+  begin
+    update blocks set end_at = end_at - make_interval(mins => v_slot) where id = v_id;
+    if v_stage = '0076' then raise notice 'ok    7b direct update allowed before 0077 (with 0076 rules)';
+    else fails := fails + 1; raise notice 'FAIL  7b direct update was allowed after 0077'; end if;
+  exception when others then
+    if v_stage = '0077' and sqlerrm = 'permission denied for table blocks' then raise notice 'ok    7b direct update refused (%)', sqlerrm;
+    else fails := fails + 1; raise notice 'FAIL  7b direct update: %', sqlerrm; end if; end;
   -- 8 delete the block from case 1
   begin
     delete from blocks where id = v_id;
@@ -97,7 +105,31 @@ begin
     -- another court may be busy on that day; that is Close courts' normal refusal
     if sqlerrm in ('block_overlaps_booking', 'overlaps_existing_block') then raise notice 'ok    9 Close courts answered as before (%)', sqlerrm;
     else fails := fails + 1; raise notice 'FAIL  9 Close courts: %', sqlerrm; end if; end;
-  raise notice 'RESULT: % failure(s); everything above is rolled back', fails;
+  perform set_config('blocks_check.fails', fails::text, true);
+  perform set_config('blocks_check.court', v_court::text, true);
+  perform set_config('blocks_check.day', v_day::text, true);
 end $t$;
+-- 0077 only: with the reload trigger switched off (inside this transaction; the rollback switches it back),
+-- row-level security alone must still refuse a direct insert by desk staff
+reset role;
+do $r$
+declare fails int := current_setting('blocks_check.fails')::int; v_court uuid := current_setting('blocks_check.court')::uuid;
+  v_day date := current_setting('blocks_check.day')::date; v_tz text; v_open time; v_club uuid;
+begin
+  if to_regproc('public.blocks_direct_insert_refused') is not null then
+    select c.id, c.timezone, c.open_time into v_club, v_tz, v_open from courts k join clubs c on c.id = k.club_id where k.id = v_court;
+    execute 'alter table blocks disable trigger blocks_direct_insert_refused';
+    set local role authenticated;
+    begin
+      insert into blocks (club_id, court_id, start_at, end_at, reason, created_by)
+      values (v_club, v_court, (v_day + v_open + interval '14 hours') at time zone v_tz, (v_day + v_open + interval '15 hours') at time zone v_tz, 'old page', 'b10c0076-0000-4000-8000-000000000001');
+      fails := fails + 1; raise notice 'FAIL  10 without the reload trigger a direct insert was saved';
+    exception when others then
+      if sqlerrm like 'new row violates row-level security policy%' then raise notice 'ok    10 without the reload trigger, row-level security refuses (%)', sqlerrm;
+      else fails := fails + 1; raise notice 'FAIL  10 without the reload trigger: %', sqlerrm; end if;
+    end;
+  end if;
+  raise notice 'RESULT: % failure(s); everything above is rolled back', fails;
+end $r$;
 rollback;
 select 'rolled back: nothing kept' as result;
