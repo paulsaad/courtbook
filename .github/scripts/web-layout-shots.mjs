@@ -50,6 +50,7 @@ console.log(`club used: ${club || "(none found)"}`);
 
 let failures = 0;
 const preexisting = [];
+const fixedPages = [];
 const name = (p) => (p === "/" ? "home" : p.slice(1).replace(/\//g, "_"));
 for (const p of paths) {
   // control: main against itself, a few seconds apart — shows what changes on its own (clocks, data)
@@ -71,13 +72,17 @@ for (const p of paths) {
   const norm = (s) => s.replace(/ERROR \d+/g, "ERROR #");
   const bothError = /ERROR \d+/.test(tb) && /ERROR \d+/.test(th) && norm(tb) === norm(th);
   if (bothError) preexisting.push(p);
-  const ok = r.n === 0 || bothError || (r.n > 0 && noise.n > 0 && sameText && r.box === noise.box);
+  // a page that errors on main and renders on this branch: fixed here (the club Info page)
+  const fixed = /ERROR \d+/.test(tb) && !/ERROR \d+/.test(th);
+  if (fixed) fixedPages.push(p);
+  const ok = r.n === 0 || bothError || fixed || (r.n > 0 && noise.n > 0 && sameText && r.box === noise.box);
   if (!ok) { failures++; writeFileSync(`${out}/before-390-${name(p)}.png`, PNG.sync.write(a)); writeFileSync(`${out}/after-390-${name(p)}.png`, PNG.sync.write(b)); }
   console.log(`${ok ? "ok  " : "FAIL"}  390 px ${p}: after vs before ${r.n < 0 ? r.box : `${r.n} px${r.box ? ` (${r.box})` : ""}`} · before vs before ${noise.n < 0 ? noise.box : `${noise.n} px${noise.box ? ` (${noise.box})` : ""}`} · visible text ${sameText ? "same" : "DIFFERENT"}`);
   for (const w of [768, 1280, 1440]) writeFileSync(`${out}/after-${w}-${name(p)}.png`, await shot(HEAD + p, w, 900));
   writeFileSync(`${out}/before-1280-${name(p)}.png`, await shot(BASE + p, 1280, 900));
 }
 await browser.close();
+if (fixedPages.length) console.log(`FIXED: page errors on main and renders on this branch: ${fixedPages.join(", ")}`);
 if (preexisting.length) console.log(`NOTE: page error in both builds (exists on main, not caused by this change): ${preexisting.join(", ")}`);
 console.log(failures ? `RESULT: ${failures} page(s) changed at phone width` : "RESULT: phone width identical on every page");
 process.exit(failures ? 1 : 0);
