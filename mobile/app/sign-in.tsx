@@ -9,6 +9,7 @@ import { AUTH_REDIRECT_URL } from "../lib/authRedirect";
 import { appleAvailable, signInWithApple } from "../lib/appleAuth";
 import { installedVariant } from "../lib/appIdentity";
 import { color, radius, TOUCH } from "../lib/theme";
+import { CODE_MAX, cleanCode, codeReady } from "../lib/otpCode";
 
 type Stage = "email" | "code";
 
@@ -60,7 +61,7 @@ export default function SignIn() {
   async function verifyCode() {
     setBusy(true);
     setError(null);
-    const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email" });
+    const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token: cleanCode(code), type: "email" });
     setBusy(false);
     if (error) {
       setError("That code is wrong or expired. Check the latest email, or request a new one.");
@@ -168,25 +169,27 @@ export default function SignIn() {
         </>
       ) : (
         <>
-          <Text style={styles.muted}>We sent a 6-digit code to {email.trim()}.</Text>
+          <Text style={styles.muted}>We sent a code to {email.trim()}. Type it here to sign in.</Text>
           <TextInput
             testID="code"
-            accessibilityLabel="6-digit code from the email"
+            accessibilityLabel="Code from the email"
             style={styles.input}
-            placeholder="123456"
+            placeholder="12345678"
             placeholderTextColor="#9a9a9a"
             value={code}
-            onChangeText={setCode}
+            onChangeText={(t) => setCode(cleanCode(t))}
             keyboardType="number-pad"
             textContentType="oneTimeCode"
-            maxLength={6}
+            autoComplete="one-time-code"
+            maxLength={CODE_MAX}
           />
           <Pressable
+            testID="verify"
             accessibilityRole="button"
-            accessibilityState={{ disabled: busy || code.trim().length < 6 }}
-            style={[styles.primary, (busy || code.trim().length < 6) && styles.disabled]}
+            accessibilityState={{ disabled: busy || !codeReady(code) }}
+            style={[styles.primary, (busy || !codeReady(code)) && styles.disabled]}
             onPress={verifyCode}
-            disabled={busy || code.trim().length < 6}
+            disabled={busy || !codeReady(code)}
           >
             <Text style={styles.primaryText}>Sign in</Text>
           </Pressable>

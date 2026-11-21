@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Tests Package 1 (supabase/live/pkg1_*.sql: 0067 + 0072 + 0073 in one transaction) on LOCAL disposable
-# databases only: a build of origin/main (0001–0071 = live's schema after the release fixes) with
+# databases only: a build of main before the M3 merge (cd5eb3a, 0001–0071 = live's schema after the release fixes) with
 # live-like games (4 not cancelled, players, chat), and copies of it.
 #   PSQL="sudo -u postgres psql" bash supabase/tests/m3/live_package1.sh
 set -u
 cd "$(dirname "$0")/../../.."
 PSQL=${PSQL:-psql}
 OLD=courtbook_p1_old; REF=courtbook_p1_ref; AP=courtbook_p1_ap; X=courtbook_p1_x
-BASE=${BASE:-origin/main}
+BASE=${BASE:-cd5eb3a19598c8345ab958f8f5448beec3b35a24}   # main before the M3 merge = 0001–0071
 oks=0; fails=0
 rep() { if [ "$2" = true ]; then echo "ok    $1"; oks=$((oks+1)); else echo "FAIL  $1  [$3]"; fails=$((fails+1)); fi; }
 copy() { $PSQL -q -d postgres -c "drop database if exists $2" -c "create database $2 template $1" >/dev/null; }
