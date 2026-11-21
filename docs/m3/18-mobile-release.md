@@ -77,3 +77,18 @@ live), so every staging sign-in test passed while live could not sign in. Kept f
    check that found this.
 4. Later, if a read-only Supabase management token is ever approved: an automated comparison of the
    two projects' auth settings in the release checklist.
+
+## Bookings status update (21 Nov 2026)
+
+Approved design `cc45baf` (status in colour and words; cancelled = danger red, never brand red).
+Published, run 44909064418: live database, 559/559 tests, fingerprints matched the 0.3.0 builds.
+iOS `01a1fe4d-80b9-7eb0-9452-22a356700fd8` (group `da534117-7792-4a48-a3eb-22ff821eb2bb`), Android
+`01a1fe4e-2130-7721-99f1-f63dcd61a22f` (group `3329bbfb-fdb3-4947-993d-59f321c97afd`). Previous groups:
+iOS `9b2260c7…`, Android `5160d955…`.
+
+**Follow-up (non-blocking): unknown statuses.** `my_agenda` today returns bookings only as confirmed,
+cancelled or no_show, and games as open, closed or cancelled with role organizer, accepted or
+pending, so every real row maps correctly. But the fallbacks are optimistic: any other upcoming
+booking status (e.g. `pending` or `expired`, if the query ever includes them) or any other game role
+would show green "Confirmed" / "You're in". Proposed: green only for exactly `confirmed` and roles
+`accepted` / `organizer`; anything else neutral with "See details", plus tests for each unknown case.
