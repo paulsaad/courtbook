@@ -10,12 +10,12 @@ describe("security headers (W1)", () => {
     expect(h["Content-Security-Policy"]).toBe("frame-ancestors 'self'");
     expect(h["X-Content-Type-Options"]).toBe("nosniff");
     expect(h["Referrer-Policy"]).toBe("strict-origin-when-cross-origin");
-    expect(h["Permissions-Policy"]).toBe("camera=(), microphone=(), geolocation=()");
+    expect(h["Permissions-Policy"]).toBe("camera=(), microphone=(), geolocation=(self)");
   });
 
-  it("the site never asks for camera, microphone or location (so turning them off breaks nothing)", async () => {
+  it("the site never asks for camera or microphone (so turning them off breaks nothing)", async () => {
     const { execSync } = await import("node:child_process");
-    const hits = execSync("grep -rlE 'navigator\\.geolocation|getUserMedia|mediaDevices' src --include=*.ts --include=*.tsx || true").toString()
+    const hits = execSync("grep -rlE 'getUserMedia|mediaDevices' src --include=*.ts --include=*.tsx || true").toString()
       .split("\n").filter((f) => f && !f.endsWith(".test.ts"));
     expect(hits).toEqual([]);
   });

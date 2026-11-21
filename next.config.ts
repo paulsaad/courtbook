@@ -8,8 +8,9 @@ export const securityHeaders = [
   { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  // CourtBook uses none of these
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+  // Camera and microphone: never used. Location: CourtBook's own pages may ask (the approved optional "Use my
+  // location" for nearby clubs, still behind the browser's own prompt); embedded third-party frames may not.
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(self)" },
 ];
 
 const nextConfig: NextConfig = {
