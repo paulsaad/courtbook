@@ -49,6 +49,7 @@ const paths = ["/", "/courts", "/play", "/coaches", "/levels", "/login",
 console.log(`club used: ${club || "(none found)"}`);
 
 let failures = 0;
+const preexisting = [];
 const name = (p) => (p === "/" ? "home" : p.slice(1).replace(/\//g, "_"));
 for (const p of paths) {
   // control: main against itself, a few seconds apart — shows what changes on its own (clocks, data)
@@ -65,12 +66,18 @@ for (const p of paths) {
     console.log(`      text only before: ${JSON.stringify(gone)} · only after: ${JSON.stringify(added)}`);
   }
   // identical, or the only differences are ones main also shows against itself, with the same visible text
-  const ok = r.n === 0 || (r.n > 0 && noise.n > 0 && sameText && r.box === noise.box);
+  // a page that shows Next.js's error screen in BOTH builds differs only by the random error number:
+  // a fault that already exists on main, reported separately, not a layout change
+  const norm = (s) => s.replace(/ERROR \d+/g, "ERROR #");
+  const bothError = /ERROR \d+/.test(tb) && /ERROR \d+/.test(th) && norm(tb) === norm(th);
+  if (bothError) preexisting.push(p);
+  const ok = r.n === 0 || bothError || (r.n > 0 && noise.n > 0 && sameText && r.box === noise.box);
   if (!ok) { failures++; writeFileSync(`${out}/before-390-${name(p)}.png`, PNG.sync.write(a)); writeFileSync(`${out}/after-390-${name(p)}.png`, PNG.sync.write(b)); }
   console.log(`${ok ? "ok  " : "FAIL"}  390 px ${p}: after vs before ${r.n < 0 ? r.box : `${r.n} px${r.box ? ` (${r.box})` : ""}`} · before vs before ${noise.n < 0 ? noise.box : `${noise.n} px${noise.box ? ` (${noise.box})` : ""}`} · visible text ${sameText ? "same" : "DIFFERENT"}`);
   for (const w of [768, 1280, 1440]) writeFileSync(`${out}/after-${w}-${name(p)}.png`, await shot(HEAD + p, w, 900));
   writeFileSync(`${out}/before-1280-${name(p)}.png`, await shot(BASE + p, 1280, 900));
 }
 await browser.close();
+if (preexisting.length) console.log(`NOTE: page error in both builds (exists on main, not caused by this change): ${preexisting.join(", ")}`);
 console.log(failures ? `RESULT: ${failures} page(s) changed at phone width` : "RESULT: phone width identical on every page");
 process.exit(failures ? 1 : 0);
