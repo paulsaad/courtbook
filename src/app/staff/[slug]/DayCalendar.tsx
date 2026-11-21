@@ -6,9 +6,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
-import { bookingDate, clubLocalToUtc, dayBounds, hhmm, moveTarget, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
-import { friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
-import { blockSlotOptions, bookingSlotOptions, pickSlots } from "./durations";
+import { bookingDate, clubLocalToUtc, dayBounds, hhmm, moveTarget, nextDayStart, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
+import { blockErrorText, friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
+import { blockEndOptions, blockStartOptions, bookingSlotOptions, minToHhmm, pickSlots, type Busy } from "./durations";
 import { useDialog, useIsDesktop } from "@/components/useDialog";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string> };
@@ -67,7 +67,13 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   // Typed but unsaved booking details: switching slot, changing day or closing the panel asks first.
   const addDirty = useRef(false);
   const confirmDiscard = useCallback(() =>
-    !addDirty.current || window.confirm("Discard the booking details you have typed?"), []);
+    !addDirty.current || window.confirm("Discard the details you have entered?"), []);
+  // What the open add form has chosen, drawn on the grid as "Not saved" until the database has saved it.
+  const [draft, setDraft] = useState<Selection | null>(null);
+  // A save succeeded and the calendar has not shown a fresh read since (see run()).
+  const [savedUnseen, setSavedUnseen] = useState(false);
+  const viewRef = useRef(view);
+  useEffect(() => { viewRef.current = view; }, [view]);
   /** Opens a sheet, unless saving is in progress or the desk keeps its unsaved details. */
   const openSheet = useCallback((next: Sheet) => {
     if (busy) return;
@@ -143,6 +149,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     setBlocks((k ?? []) as Block[]);
     setDayError(false);
     setDayLoading(false);
+    if (viewRef.current !== "week") setSavedUnseen(false);
     setLastUpdated(formatInTimeZone(new Date(), club.timezone, "HH:mm"));
   }, [club.id, club.timezone, date]);
 
@@ -200,6 +207,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
       setWeek({ key, bookings: rows, blocks: (k ?? []) as Block[] });
       setWeekError(false);
       setWeekLoading(false);
+      setSavedUnseen(false);
       setLastUpdated(formatInTimeZone(new Date(), club.timezone, "HH:mm"));
     })();
     return () => { alive = false; };
@@ -214,15 +222,18 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     return () => { alive = false; };
   }, [club.id]);
 
-  async function run(fn: () => PromiseLike<{ error: { message: string } | null }>) {
+  async function run(fn: () => PromiseLike<{ error: { message: string } | null }>, explain: (m: string) => string = friendlyError) {
     setBusy(true);
     setError(null);
     const { error } = await fn();
     if (error) {
       setBusy(false);
-      setError(friendlyError(error.message));
+      setError(explain(error.message));
       return;
     }
+    // Saved. The write is never repeated: if the reads below fail, the banner says the calendar may be
+    // out of date and that this was saved, and adding stays off until a read succeeds.
+    setSavedUnseen(true);
     await reload();
     setRefresh((n) => n + 1);   // the week view holds its own copy of the rows
     setBusy(false);
@@ -240,6 +251,26 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     const endRow = Math.min(times.length, Math.ceil((e - openMin) / club.slot_minutes));
     return { row, span: Math.max(1, endRow - row) };
   }
+
+  /** Minutes after club midnight of `iso` as seen on `day`: 0 before that day, 1440 after it. */
+  function minutesOn(iso: string, day: string) {
+    const d = formatInTimeZone(parseISO(iso), club.timezone, "yyyy-MM-dd");
+    return d < day ? 0 : d > day ? 24 * 60 : toMin(hhmm(iso, club.timezone));
+  }
+  /** What the calendar's rows say is taken on one court and day: bookings, unexpired holds and blocks. */
+  function takenOn(courtId: string, day: string): Busy[] {
+    const src = view === "week" ? week ?? { bookings: [], blocks: [] } : { bookings, blocks };
+    const rows = [...src.bookings.filter((b) => b.court_id === courtId), ...src.blocks.filter((k) => k.court_id === courtId)];
+    return rows.map((r) => [minutesOn(r.start_at, day), minutesOn(r.end_at, day)] as const).filter(([a, b]) => b > a && b > 0 && a < 24 * 60);
+  }
+  /** Minutes before which every slot of `day` has ended: today the current minute, a past day all of it. */
+  function endedBefore(day: string) {
+    const today = todayIn(club.timezone);
+    return day < today ? 24 * 60 : day > today ? -1 : toMin(formatInTimeZone(new Date(nowMs()), club.timezone, "HH:mm"));
+  }
+  /** The open add form's choice on this court and day, if any (for the "Not saved" highlight). */
+  const draftOn = (courtId: string, day: string) =>
+    sheet?.kind === "add" && draft && sheet.courtId === courtId && (sheet.date ?? date) === day ? draft : null;
 
   // only the view being looked at decides whether its rows can be trusted
   const viewError = view === "week" ? weekError : dayError;
@@ -303,23 +334,34 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                 onDirty={(d) => { addDirty.current = d; }}
                 club={club} court={courts.find((c) => c.id === sheet.courtId)!} time={sheet.time} busy={busy}
                 defaultMinutes={commonMins}
-                onSave={(name, phone, slots, asBlock) =>
+                taken={takenOn(sheet.courtId, sheet.date ?? date)}
+                endedBefore={endedBefore(sheet.date ?? date)}
+                onSelection={setDraft}
+                onSave={(name, phone, slots, asBlock, blockStart, blockEnd) =>
                   run(async () => {
                     const supabase = createClient();
                     // in the week view the slot belongs to the column's day, not the page's date
-                    const start = clubLocalToUtc(sheet.date ?? date, sheet.time, club.timezone);
-                    const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
-                    if (asBlock) {
-                      const { data: { user } } = await supabase.auth.getUser();
-                      return supabase.from("blocks").insert({ club_id: club.id, court_id: sheet.courtId, start_at: start.toISOString(), end_at: end.toISOString(), reason: name || "Blocked", created_by: user!.id });
+                    const day = sheet.date ?? date;
+                    if (asBlock && blockStart && blockEnd) {
+                      // a block is the wall-clock interval the desk chose (start and end selectors), so on the night the
+                      // clocks go back 22:00–24:00 is 3 real hours; the database checks staff rights, the court, the grid,
+                      // the hours, the past and overlaps (0076)
+                      const bs = clubLocalToUtc(day, blockStart, club.timezone);
+                      const be = blockEnd === "24:00" ? nextDayStart(day, club.timezone) : clubLocalToUtc(day, blockEnd, club.timezone);
+                      return supabase.rpc("staff_block", {
+                        p_club: club.id, p_court: sheet.courtId,
+                        p_start: bs.toISOString(), p_end: be.toISOString(), p_reason: name || null,
+                      });
                     }
+                    const start = clubLocalToUtc(day, sheet.time, club.timezone);
+                    const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
                     // the database checks staff rights, the court, the hours, the grid and the duration, and prices it
                     return supabase.rpc("staff_book", {
                       p_club: club.id, p_court: sheet.courtId,
                       p_start: start.toISOString(), p_end: end.toISOString(),
                       p_name: name, p_phone: phone || null,
                     });
-                  })
+                  }, asBlock ? (m) => blockErrorText(m, club) : undefined)
                 }
               />
             )}
@@ -436,7 +478,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
 
       {viewError && (
         <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-danger/40 bg-red-50 px-3 py-2 text-sm text-danger">
-          <span className="flex-1">Couldn&apos;t load the latest {view === "week" ? "week" : "bookings"}. What you see may be out of date, so adding is off until this works.</span>
+          <span className="flex-1">{savedUnseen ? "Saved. " : ""}Couldn&apos;t load the latest {view === "week" ? "week" : "bookings"}. What you see may be out of date, so adding is off until this works.</span>
           {/* the flag is cleared by a successful read, never by tapping Retry */}
           <button disabled={viewLoading} onClick={() => { setRefresh((n) => n + 1); void reload(); }} className="shrink-0 rounded-lg border border-danger/40 px-3 py-1 disabled:opacity-50">{viewLoading ? "Checking…" : "Retry"}</button>
         </div>
@@ -452,6 +494,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
           onOpenBooking={(b) => openSheet({ kind: "booking", booking: b })}
           onOpenBlock={(bl) => openSheet({ kind: "block", block: bl })}
           onAdd={(d, t) => { if (weekCourt) openSheet({ kind: "add", courtId: weekCourt.id, time: t, date: d }); }}
+          draft={weekCourt && sheet?.kind === "add" && sheet.date ? (draftOn(weekCourt.id, sheet.date) ? { day: sheet.date, ...draft! } : null) : null}
         />
       ) : view === "now" ? (
         <NowPanel
@@ -471,8 +514,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
             {/* courts */}
             <div className="grid flex-1 gap-x-1.5 [--col-min:7rem] lg:[--col-min:9rem]" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(var(--col-min), 1fr))` }}>
               {courts.map((c) => (
-                <div key={c.id} className="h-9 px-1 text-center text-sm lg:sticky lg:top-0 lg:z-10 lg:bg-paper">
-                  <div className="font-medium leading-tight lg:text-[15px]">{c.name}</div>
+                <div key={c.id} className={`h-9 px-1 text-center text-sm lg:sticky lg:top-0 lg:z-10 ${draftOn(c.id, date) ? "rounded-t-lg bg-draft-soft lg:bg-draft-soft" : "lg:bg-paper"}`}>
+                  <div className={`font-medium leading-tight lg:text-[15px] ${draftOn(c.id, date) ? "text-draft" : ""}`}>{c.name}</div>
                   <div className="text-xs text-muted">{sportNames[c.sport] ?? c.sport}</div>
                 </div>
               ))}
@@ -516,6 +559,20 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                       </button>
                     );
                   })}
+                  {/* the open form's choice, not saved yet: above the free slots, never catching their taps */}
+                  {(() => {
+                    const d = draftOn(c.id, date);
+                    if (!d) return null;
+                    const row = (d.startMin - openMin) / club.slot_minutes, span = (d.endMin - d.startMin) / club.slot_minutes;
+                    return (
+                      <div data-testid="draft" aria-hidden="true"
+                           className="pointer-events-none absolute inset-x-1 z-[5] overflow-hidden rounded-md border-2 border-dashed border-draft bg-draft-soft/90 px-2 py-1 text-left text-xs lg:text-sm"
+                           style={{ top: row * ROW_PX + 2, height: span * ROW_PX - 4 }}>
+                        <div className="font-semibold text-draft">Not saved</div>
+                        <div className="text-ink">{minToHhmm(d.startMin)}–{minToHhmm(d.endMin)}{d.asBlock ? " · block" : ""}</div>
+                      </div>
+                    );
+                  })()}
                   {/* now line */}
                   {nowMin !== null && nowMin >= openMin && nowMin <= openMin + times.length * club.slot_minutes && (
                     <div className="pointer-events-none absolute inset-x-0 border-t-2 border-danger" style={{ top: ((nowMin - openMin) / club.slot_minutes) * ROW_PX }} />
@@ -591,7 +648,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
 }
 
 const input = "rounded-xl border border-grid bg-paper px-4 py-3 text-base outline-none focus:border-action focus:ring-2 focus:ring-action/20";
-const select = "rounded-xl border border-grid bg-paper px-3 py-2 text-base";
+/** Dropdowns: white with a clear border and a chevron when usable; a disabled one is grey with muted text (globals.css .select-field). */
+const select = "select-field rounded-xl px-3 py-2 text-base";
 const primary = "rounded-xl bg-action py-3.5 text-base font-medium text-white disabled:opacity-50";
 const secondary = "rounded-xl border border-grid py-3.5 text-base";
 const secondaryDanger = "rounded-xl border border-danger/40 py-3.5 text-base text-danger";
@@ -613,8 +671,10 @@ function closeMinutes(club: Club) {
 /** One court, seven days. Days are columns because seven of them fit a phone and five courts do not.
  *  Time labels stay in a sticky gutter, a cell opens the usual sheets, and a column header opens that
  *  day in the Courts view, which is where names and controls are readable. */
-function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOpenBooking, onOpenBlock, onAdd }: {
+function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOpenBooking, onOpenBlock, onAdd, draft }: {
   club: Club; court: Court | null; days: string[]; times: string[]; today: string;
+  /** the open add form's choice on this court, not saved yet */
+  draft?: (Selection & { day: string }) | null;
   data: { bookings: Booking[]; blocks: Block[] } | null;
   canAdd: boolean;
   dayHref: (d: string) => string;
@@ -661,9 +721,17 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
               {days.map((d) => {
                 const cell = at(d, t);
                 if (!cell) {
+                  // inside the open form's choice: drawn "not saved", still a free slot to tap
+                  const m = toMin(t);
+                  const inDraft = draft && draft.day === d && m >= draft.startMin && m < draft.endMin;
+                  const head = inDraft && m === draft.startMin;
                   return (
                     <button key={d + t} onClick={() => onAdd(d, t)} disabled={!canAdd} aria-label={`Add a booking on ${d} at ${t}`}
-                            className="border-b border-l border-grid/60 bg-white disabled:cursor-not-allowed" style={{ height: rowPx }} />
+                            data-draft={inDraft ? "true" : undefined}
+                            className={`relative border-l disabled:cursor-not-allowed ${inDraft ? "border-x-2 border-dashed border-draft bg-draft-soft" : "border-b border-grid/60 bg-white"} ${head ? "border-t-2" : ""} ${inDraft && m + club.slot_minutes === draft.endMin ? "border-b-2" : ""}`}
+                            style={{ height: rowPx }}>
+                      {head && <span aria-hidden="true" className="absolute inset-x-0 top-0.5 truncate px-0.5 text-[10px] font-semibold leading-tight text-draft">Not saved</span>}
+                    </button>
                   );
                 }
                 if (cell.kind === "block") {
@@ -783,11 +851,21 @@ function NowPanel({ club, courts, bookings, freeNow, sportNames, showLater, onTo
   );
 }
 
-export function AddSheet({ club, court, time, busy, defaultMinutes, onSave, onDirty }: {
+/** What the add form has chosen, for the provisional highlight on the grid (minutes after club midnight). */
+export type Selection = { startMin: number; endMin: number; asBlock: boolean };
+
+export function AddSheet({ club, court, time, busy, defaultMinutes, onSave, onDirty, taken = [], endedBefore = -1, onSelection }: {
   club: Club; court: Court; time: string; busy: boolean; defaultMinutes: number | null;
-  onSave: (name: string, phone: string, slots: number, asBlock: boolean) => void;
-  /** true while the desk has typed details that are not saved yet */
+  /** a block also passes its own start and end ("HH:mm"; end "24:00" = midnight), which the desk chose */
+  onSave: (name: string, phone: string, slots: number, asBlock: boolean, start?: string, end?: string) => void;
+  /** true while the desk has typed or chosen details that are not saved yet */
   onDirty?: (dirty: boolean) => void;
+  /** bookings, holds and blocks already on this court that day, from the calendar's rows */
+  taken?: readonly Busy[];
+  /** minutes before which every slot of that day has ended (see blockStartOptions) */
+  endedBefore?: number;
+  /** the chosen interval, on every change, and null when the form goes away */
+  onSelection?: (s: Selection | null) => void;
 }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -795,17 +873,34 @@ export function AddSheet({ club, court, time, busy, defaultMinutes, onSave, onDi
   const [reason, setReason] = useState("");
   const [picked, setPicked] = useState(false);
   const [hints, setHints] = useState<Guest[]>([]);
-  // bookings get the club's minimum to maximum; a block has its own lengths (see durations.ts)
+  // a length, start or end the desk chose: switching slots asks first, like typed text
+  const [touched, setTouched] = useState(false);
+  // bookings get the club's minimum to maximum; a block has its own start and end (see durations.ts)
   const [asBlock, setAsBlock] = useState(false);
-  const startMin = toMin(time);
+  const openMin = toMin(club.open_time);
   const closeMin = closeMinutes(club);
-  const bookOpts = bookingSlotOptions(club, startMin, closeMin);
-  const blockOpts = blockSlotOptions(club, startMin, closeMin);
-  const opts = asBlock ? blockOpts : bookOpts;
+  const bookOpts = bookingSlotOptions(club, toMin(time), closeMin);
   const wanted = Math.max(1, Math.round((defaultMinutes ?? club.min_booking_minutes) / club.slot_minutes));
   const [wish, setWish] = useState(wanted);
-  const slots = pickSlots(opts, wish, Math.round(club.min_booking_minutes / club.slot_minutes));
-  useEffect(() => { onDirty?.(Boolean(name.trim() || phone.trim() || reason.trim())); }, [name, phone, reason, onDirty]);
+  const slots = pickSlots(bookOpts, wish, Math.round(club.min_booking_minutes / club.slot_minutes));
+
+  // block: start on the grid (the tapped slot unless it is taken or over), end up to closing or the next taken time
+  const starts = blockStartOptions(club, openMin, closeMin, taken, endedBefore);
+  const [startWish, setStartWish] = useState(toMin(time));
+  const bStart = starts.includes(startWish) ? startWish : (starts.find((m) => m >= startWish) ?? null);
+  const ends = bStart === null ? [] : blockEndOptions(club, bStart, closeMin, taken);
+  const [endWish, setEndWish] = useState<number | null>(null);
+  const bEnd = endWish !== null && ends.includes(endWish) ? endWish
+    : ends.includes((bStart ?? 0) + wanted * club.slot_minutes) ? (bStart ?? 0) + wanted * club.slot_minutes
+    : ends[ends.length - 1] ?? null;
+
+  const selection: Selection | null = asBlock
+    ? (bStart !== null && bEnd !== null ? { startMin: bStart, endMin: bEnd, asBlock: true } : null)
+    : (slots !== null ? { startMin: toMin(time), endMin: toMin(time) + slots * club.slot_minutes, asBlock: false } : null);
+  const selKey = selection ? `${selection.startMin}-${selection.endMin}-${selection.asBlock}` : "";
+  useEffect(() => { onSelection?.(selection); }, [selKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onSelection?.(null), []);            // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onDirty?.(Boolean(name.trim() || phone.trim() || reason.trim() || touched)); }, [name, phone, reason, touched, onDirty]);
 
   // customers this club has booked before, matched on what the desk has typed so far
   useEffect(() => {
@@ -818,18 +913,18 @@ export function AddSheet({ club, court, time, busy, defaultMinutes, onSave, onDi
     return () => { alive = false; clearTimeout(t); };
   }, [name, picked, club.id]);
 
-  const endTime = (n: number) => {
-    const m = toMin(time) + n * club.slot_minutes;
-    return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-  };
+  const heading = asBlock
+    ? `${court.name}, ${bStart !== null ? minToHhmm(bStart) : time}${bEnd !== null ? `–${minToHhmm(bEnd)}` : ""} · block`
+    : `${court.name}, ${time}${slots !== null ? `–${minToHhmm(toMin(time) + slots * club.slot_minutes)}` : ""}`;
   return (
     <form className="flex flex-col gap-3" onKeyDown={noEnterSubmit} onSubmit={(e) => {
       e.preventDefault();
-      if (slots === null) return;
-      if (asBlock) onSave(reason.trim(), "", slots, true);
-      else onSave(name.trim(), phone.trim(), slots, false);
+      if (asBlock) {
+        if (bStart === null || bEnd === null) return;
+        onSave(reason.trim(), "", (bEnd - bStart) / club.slot_minutes, true, minToHhmm(bStart), minToHhmm(bEnd));
+      } else if (slots !== null) onSave(name.trim(), phone.trim(), slots, false);
     }}>
-      <h2 className="text-lg font-semibold">{court.name}, {time}{slots !== null ? `–${endTime(slots)}` : ""}{asBlock ? " · block" : ""}</h2>
+      <h2 className="text-lg font-semibold">{heading}</h2>
       {asBlock ? (
         <input key="reason" className={input} placeholder="Reason (optional)" aria-label="Block reason" value={reason} autoFocus
                onChange={(e) => setReason(e.target.value)} />
@@ -852,10 +947,32 @@ export function AddSheet({ club, court, time, busy, defaultMinutes, onSave, onDi
         </ul>
       )}
       {!asBlock && <input className={input} placeholder="Phone (optional)" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />}
-      {opts.length > 0 ? (
-        <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label={asBlock ? "Block length" : "Booking length"}>
-          {opts.map((n) => (
-            <button type="button" key={n} role="radio" aria-checked={slots === n} onClick={() => setWish(n)}
+      {asBlock ? (
+        bStart !== null && bEnd !== null ? (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1 text-sm text-muted">Start
+                <select className={select} aria-label="Block start" disabled={busy} value={bStart}
+                        onChange={(e) => { setStartWish(Number(e.target.value)); setTouched(true); }}>
+                  {starts.map((m) => <option key={m} value={m}>{minToHhmm(m)}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm text-muted">End
+                <select className={select} aria-label="Block end" disabled={busy} value={bEnd}
+                        onChange={(e) => { setEndWish(Number(e.target.value)); setTouched(true); }}>
+                  {ends.map((m) => <option key={m} value={m}>{minToHhmm(m)}</option>)}
+                </select>
+              </label>
+            </div>
+            <p className="-mt-1 text-xs text-muted">{fmtDur(bEnd - bStart)}. Ends by closing ({minToHhmm(closeMin)}) or the next booking or block on this court.</p>
+          </>
+        ) : (
+          <p className="text-sm text-muted">Not enough time before closing for a block.</p>
+        )
+      ) : bookOpts.length > 0 ? (
+        <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="Booking length">
+          {bookOpts.map((n) => (
+            <button type="button" key={n} role="radio" aria-checked={slots === n} onClick={() => { setWish(n); if (n !== slots) setTouched(true); }}
                     className={`rounded-xl border py-2 text-sm ${slots === n ? "border-ink bg-ink text-white" : "border-grid"}`}>
               {fmtDur(n * club.slot_minutes)}
             </button>
@@ -863,15 +980,13 @@ export function AddSheet({ club, court, time, busy, defaultMinutes, onSave, onDi
         </div>
       ) : (
         <p className="text-sm text-muted">
-          {asBlock
-            ? "Not enough time before closing for a block."
-            : `Not enough time before closing for a booking. Bookings here: ${fmtDur(club.min_booking_minutes)} to ${fmtDur(club.max_booking_minutes)}.`}
+          {`Not enough time before closing for a booking. Bookings here: ${fmtDur(club.min_booking_minutes)} to ${fmtDur(club.max_booking_minutes)}.`}
         </p>
       )}
-      {!asBlock && opts.length > 0 && (
+      {!asBlock && bookOpts.length > 0 && (
         <p className="-mt-1 text-xs text-muted">Bookings at this club: {fmtDur(club.min_booking_minutes)} to {fmtDur(club.max_booking_minutes)}.</p>
       )}
-      <button type="submit" disabled={busy || slots === null} className={primary}>{busy ? "Saving…" : asBlock ? "Block this time" : "Add booking"}</button>
+      <button type="submit" disabled={busy || (asBlock ? bStart === null || bEnd === null : slots === null)} className={primary}>{busy ? "Saving…" : asBlock ? "Block this time" : "Add booking"}</button>
       {asBlock
         ? <button type="button" disabled={busy} onClick={() => setAsBlock(false)} className={backLink}>Back to booking</button>
         : <button type="button" disabled={busy} onClick={() => setAsBlock(true)} className={secondary}>Block this time instead</button>}

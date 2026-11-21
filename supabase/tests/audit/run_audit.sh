@@ -77,7 +77,7 @@ insert into r select 'CAT6 anonymous visitors can read nothing from personal or 
 -- Any new client write path must be reviewed: the exact set of write policies is pinned here.
 insert into r select 'CAT7 write policies are exactly the reviewed set (a new one must be reviewed and added here)',
   string_agg(tablename || '.' || cmd, ',' order by tablename, cmd, policyname) =
-  'availability_exceptions.ALL,availability_rules.ALL,blocks.ALL,bookings.DELETE,club_staff.ALL,clubs.ALL,coach_clubs.DELETE,coach_clubs.INSERT,coaches.DELETE,coaches.INSERT,coaches.UPDATE,courts.ALL,credit_packs.ALL,credit_transactions.INSERT,districts.ALL,governorates.ALL,match_messages.INSERT,${MATCHES_DELETE}notifications.UPDATE,price_rules.ALL,profiles.UPDATE,sports.ALL,towns.ALL',
+  'availability_exceptions.ALL,availability_rules.ALL,blocks.DELETE,bookings.DELETE,club_staff.ALL,clubs.ALL,coach_clubs.DELETE,coach_clubs.INSERT,coaches.DELETE,coaches.INSERT,coaches.UPDATE,courts.ALL,credit_packs.ALL,credit_transactions.INSERT,districts.ALL,governorates.ALL,match_messages.INSERT,${MATCHES_DELETE}notifications.UPDATE,price_rules.ALL,profiles.UPDATE,sports.ALL,towns.ALL',
   'pass', string_agg(tablename || '.' || cmd, ',' order by tablename, cmd, policyname)
   from pg_policies where schemaname = 'public' and cmd in ('INSERT','UPDATE','DELETE','ALL');
 insert into r select 'CAT8 bookings and payments have no client write policy (all writes go through checked functions)',

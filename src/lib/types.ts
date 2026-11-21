@@ -46,6 +46,7 @@ export const ERRORS: Record<string, string> = {
   slot_taken: "That slot was just taken.",
   block_overlaps_booking: "There is a booking in that range. Cancel or move it first.",
   overlaps_existing_block: "That range is already blocked.",
+  no_overlapping_blocks: "That range is already blocked.",
   outside_opening_hours: "Outside opening hours.",
   not_on_grid: "Start time must be on the slot grid.",
   bad_duration: "Duration must be whole slots, within what the club allows.",
@@ -121,6 +122,19 @@ export function friendlyError(message: string | undefined): string {
   if (!message) return "Something went wrong.";
   for (const key of ERROR_KEYS) if (message.includes(key)) return ERRORS[key];
   return message;
+}
+
+/** A refused block, in words about blocks: the database reuses the booking check's error names
+ *  (staff_block, 0076), but a block has no minimum or maximum length, so "bad_duration" must not read as
+ *  a booking-length rule. Everything else falls back to the shared list. */
+export function blockErrorText(message: string | undefined, club: Pick<Club, "open_time" | "close_time" | "slot_minutes">): string {
+  const m = message ?? "";
+  const hours = `${club.open_time.slice(0, 5)}–${club.close_time.slice(0, 5)}`;
+  if (m.includes("not_on_grid") || m.includes("bad_duration"))
+    return `A block must start and end on the club's ${club.slot_minutes}-minute time grid.`;
+  if (m.includes("outside_opening_hours")) return `A block must be within opening hours (${hours}), on one day.`;
+  if (m.includes("slot_in_past")) return "That time has already passed. A block must end later than now.";
+  return friendlyError(message);
 }
 
 /** Community rules, accepted once before a player's first chat message. Wording approved by Paul (20 Nov, revised). */

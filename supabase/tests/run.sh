@@ -137,9 +137,9 @@ echo "--- E. staff rules (blocks, moves, cross-club, direct updates)"
 { as_user $ADMIN; cat <<EOF
 \set ON_ERROR_STOP off
 \echo '14. block over player1 confirmed booking -> expect ERROR block_overlaps_booking'
-insert into blocks (club_id, court_id, start_at, end_at, reason, created_by) values ('$CLUB','$COURT', $S, $S + interval '60 min','maint','$ADMIN');
+select staff_block('$CLUB','$COURT', $S, $S + interval '60 min','maint');   -- blocks are created through staff_block since 0076/0077
 \echo '15. block a free window (day+3 08:00-12:30) -> ok ; then player holds inside it -> expect slot_taken'
-insert into blocks (club_id, court_id, start_at, end_at, reason, created_by) values ('$CLUB','$COURT', (current_date + 3 + time '08:00') at time zone 'Asia/Beirut', (current_date + 3 + time '12:30') at time zone 'Asia/Beirut','tournament','$ADMIN');
+select staff_block('$CLUB','$COURT', (current_date + 3 + time '08:00') at time zone 'Asia/Beirut', (current_date + 3 + time '12:30') at time zone 'Asia/Beirut','tournament') is not null as blocked;
 EOF
 as_user $P1; cat <<EOF
 select booking_id from hold_slot('$CLUB','$COURT', (current_date + 3 + time '09:30') at time zone 'Asia/Beirut', (current_date + 3 + time '11:00') at time zone 'Asia/Beirut');

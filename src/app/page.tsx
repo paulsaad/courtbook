@@ -47,7 +47,8 @@ export default async function Home() {
     <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-3xl flex-col gap-3.5 p-5 pt-10">
       <header className="flex items-center justify-between">
         <h1 className="flex items-center gap-2 text-[28px] font-extrabold tracking-tight"><Cedar size={24} />{firstName ? `Hello ${firstName}` : "CourtBook"}</h1>
-        <Link href="/notifications" aria-label="Activity" className="relative flex h-11 w-11 items-center justify-center rounded-full border border-grid bg-white">
+        {/* phones and tablets only: from 1024 px the top bar has the notification bell */}
+        <Link href="/notifications" aria-label="Activity" className="relative flex h-11 w-11 items-center justify-center rounded-full border border-grid bg-white lg:hidden">
           <IconBell size={24} />
           {(unread ?? 0) > 0 && <span className="absolute right-1.5 top-1.5 min-w-[18px] rounded-full bg-cedar px-1 text-center text-[11px] font-bold leading-[18px] text-white">{unread}</span>}
         </Link>
