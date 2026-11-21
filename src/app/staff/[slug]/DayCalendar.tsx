@@ -420,12 +420,27 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     el?.focus();
   }, [sheet]);   // eslint-disable-line react-hooks/exhaustive-deps -- only when the panel opens or closes
 
-  // Arriving from the All courts week (Phase I-2c): show that time and put the keyboard on it (first court).
+  // Arriving from the All courts week (Phase I-2c): show that time and put the keyboard on it (first court). The
+  // calendar stays mounted when only the view changes (same day), so this follows the address: a new arrival is
+  // noticed while rendering (React's "adjust state when a prop changes"), then focused once after it is drawn.
+  const arrivalKey = view === "grid" && focusTime ? `${date}|${focusTime}` : null;
+  const arrivalRow = (t: string | null) => {
+    if (!t) return null;
+    const r = (toMin(t) - openMin) / club.slot_minutes;
+    return Number.isInteger(r) && r >= 0 && r < times.length ? r : null;
+  };
+  const [arrival, setArrival] = useState(() => ({ key: arrivalKey, row: arrivalKey ? arrivalRow(focusTime) : null }));
+  if (arrival.key !== arrivalKey) {
+    const r = arrivalKey ? arrivalRow(focusTime) : null;
+    setArrival({ key: arrivalKey, row: r });
+  }
+  const arrived = useRef<string | null>(null);
   useEffect(() => {
-    if (view !== "grid" || !cell || !focusTime || !courts[0]) return;
-    gridRef.current?.querySelector<HTMLElement>(`[data-cell="${courts[0].id}:${cell.r}"]`)?.scrollIntoView?.({ block: "center" });
-    (cellElement(courts[0].id, cell.r) ?? gridRef.current)?.focus({ preventScroll: true });
-  }, []);   // eslint-disable-line react-hooks/exhaustive-deps -- once, on arrival
+    if (arrival.row === null || !arrival.key || arrived.current === arrival.key || !courts[0]) return;
+    arrived.current = arrival.key;
+    gridRef.current?.querySelector<HTMLElement>(`[data-cell="${courts[0].id}:${arrival.row}"]`)?.scrollIntoView?.({ block: "center" });
+    (cellElement(courts[0].id, arrival.row) ?? gridRef.current)?.focus({ preventScroll: true });
+  }, [arrival]);   // eslint-disable-line react-hooks/exhaustive-deps -- once per arrival
 
   // Find a booking (Phase I-2b): only the bookings of this day already on screen; never a new read.
   const found = view === "grid" || view === "list" ? matchBookings(shownBookings, find) : [];
@@ -1279,7 +1294,7 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
               : c.b.status === "pending" ? "border border-l-4 border-dashed border-turf bg-white"
               : c.b.source === "app" ? "border-l-4 border-turf bg-turf-soft" : "border-l-4 border-sand bg-sand-soft";
             const title = c.kind === "booking" ? who(c.b) : c.k.reason ?? "Blocked";
-            const detail = c.kind === "booking" ? `${range(c)} · ${c.b.status === "pending" ? "being paid" : c.b.source === "app" ? "app" : "desk"}` : `${range(c)} · blocked`;
+            const type = c.kind === "booking" ? (c.b.status === "pending" ? "being paid" : c.b.source === "app" ? "app" : "desk") : "blocked";
             return (
               <div key={`${cellId(c)}|${g.di}`} aria-hidden="true" data-week-block={cellId(c)} data-rows={`${g.r0}-${g.r1}`}
                    style={{ gridColumn: g.di + 2, gridRow: `${g.r0 + 2} / ${g.r1 + 2}` }}
@@ -1288,8 +1303,10 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
                   <div className="truncate text-[13px]"><span className="font-medium text-ink">{title}</span> <span className="text-xs text-muted">{range(c)}</span></div>
                 ) : (
                   <>
+                    {/* name, then time and type on lines of their own: a week column is narrow */}
                     <div className={`text-[13px] font-medium text-ink ${span >= 3 ? "line-clamp-2" : "truncate"}`}>{title}</div>
-                    <div className="truncate text-xs text-muted">{detail}</div>
+                    <div className="truncate text-xs text-muted tabular-nums">{range(c)}</div>
+                    <div className="truncate text-xs text-muted">{type}</div>
                   </>
                 )}
               </div>

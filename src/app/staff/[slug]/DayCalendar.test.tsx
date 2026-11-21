@@ -1174,9 +1174,9 @@ describe("Phase I-2c: Week readable at a glance (desktop)", () => {
     const drawn = (id: string) => document.querySelector<HTMLElement>(`[data-week-block="${id}"]`)!;
     expect(drawn("w-rami").dataset.rows).toBe("20-23");
     expect(drawn("w-maya").dataset.rows).toBe("23-25");
-    expect(drawn("w-rami").textContent).toBe("Rami Haddad18:00–19:30 · desk");
-    expect(drawn("w-maya").textContent).toBe("Maya Khoury19:30–20:30 · app");
-    expect(drawn("w-net").textContent).toBe("Net repair10:00–12:00 · blocked");
+    expect(drawn("w-rami").textContent).toBe("Rami Haddad18:00–19:30desk");
+    expect(drawn("w-maya").textContent).toBe("Maya Khoury19:30–20:30app");
+    expect(drawn("w-net").textContent).toBe("Net repair10:00–12:00blocked");
     // no Add booking action anywhere under a booking or block
     for (let r = 20; r < 25; r++) expect(cellAt(DAY, times[r]).getAttribute("aria-label")).not.toMatch(/^Add/);
     expect(cellAt(DAY, "18:30").getAttribute("aria-label")).toBe("Rami Haddad, Padel 1, Mon 12 Jan, 18:00–19:30, desk booking");
@@ -1349,6 +1349,22 @@ describe("Phase I-2c: All courts week (desktop)", () => {
     cleanup();
     view({ date: DAY, focusTime: "18:30", bookings: [{ ...booking("c1", "Covering"), start_at: z("18:00"), end_at: z("19:00") }] });
     expect(document.activeElement?.getAttribute("aria-label")).toMatch(/^Covering, Padel 1, 18:00–19:00/);
+  });
+
+  it("following a time on the same day (the calendar stays open, only the view changes) also arrives at that time", async () => {
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    const { rerender } = view({ date: DAY, view: "week", court: "all" });
+    await waitFor(() => expect(cell("18:00").textContent).toBe("Full"));
+    rerender(<DayCalendar club={club} courts={[courtA, courtB]} bookings={[]} blocks={[]} date={DAY} view="grid" sport={null} court={null}
+      sportNames={{ padel: "Padel" }} focusTime="20:30" explicit />);
+    await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Add booking Padel 1 20:30"));
+    expect(scrolled).toHaveBeenCalledWith({ block: "center" });
+    // a later refresh or re-render does not pull the keyboard back there
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 2 09:00" }).focus(); });
+    rerender(<DayCalendar club={club} courts={[courtA, courtB]} bookings={[]} blocks={[]} date={DAY} view="grid" sport={null} court={null}
+      sportNames={{ padel: "Padel" }} focusTime="20:30" explicit />);
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Add booking Padel 2 09:00");
   });
 
   it("phones never get All courts: an All courts address shows the first court as before", async () => {
