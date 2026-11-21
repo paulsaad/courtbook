@@ -137,6 +137,15 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const courtKey = courts.map((c) => c.id).join(",");
   const wkStart = weekStart(date);
   const weekDays = Array.from({ length: 7 }, (_, i) => shiftDate(wkStart, i));
+  // Entering All courts, or another week or set of courts there, starts with nothing: counts kept from an earlier
+  // visit are dropped while rendering, so not even the first frame shows unverified counts (review). Only a read
+  // made for this visit fills them (a quiet automatic refresh within the visit keeps them, as the day view does).
+  const allKey = weekAll ? `${wkStart}|all|${courtKey}` : null;
+  const [allVisit, setAllVisit] = useState<string | null>(null);
+  if (allKey !== allVisit) {
+    setAllVisit(allKey);
+    if (allKey) setAvail(null);
+  }
 
   // the sport filter must narrow the bookings too, not just which courts are drawn
   const shownCourtIds = new Set(courts.map((c) => c.id));

@@ -1453,8 +1453,18 @@ describe("Phase I-2c: All courts week (desktop)", () => {
     rerender(<DayCalendar {...props} view="week" court={courtA.id} />);
     await screen.findByRole("group", { name: "Week, Padel 1" });
     gate = deferred<Resp>();
+    // every link address and count the page writes from here on, even if replaced within the same update (a
+    // one-frame flash a page watcher would not see)
+    const written: string[] = [];
+    const realSet = Element.prototype.setAttribute;
+    const spy = vi.spyOn(Element.prototype, "setAttribute").mockImplementation(function (this: Element, n: string, v: string) {
+      if ((n === "href" && /time=/.test(v)) || n === "data-free") written.push(`${n}=${v}`);
+      return realSet.call(this, n, v);
+    });
     rerender(<DayCalendar {...props} view="week" court="all" />);
     await screen.findByRole("group", { name: "Week, all courts" });
+    spy.mockRestore();
+    expect(written).toEqual([]);                                                   // never drawn as counts with links
     expectUnverified();
     expect(screen.getByTestId("all-week-status").textContent).toBe("Loading availability…");
     await act(async () => { gate!.settle(ok([])); });
