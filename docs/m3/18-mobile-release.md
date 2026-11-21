@@ -55,3 +55,25 @@ website, strips spaces from a pasted code, sends the whole code, and says to typ
 link opens the website. Regression tests `__tests__/signInCode.test.tsx` (7; the old 6-digit limit
 fails one). JavaScript only — native fingerprint identical to the installed 0.3.0 builds (android
 `242979cd`, ios `de2d475b`) — so it ships as an update on the `preview` channel, no new build.
+
+**Published 21 Nov 2026** (approved), run 44904680261 from `0d14725`: database `lgujfbwunokobjxlvpuf`,
+545/545 tests, fingerprints matched one 0.3.0 preview build each. iOS update
+`01a1fe1c-f049-7e88-b525-21d661e5e200` (group `89fb8488-5f7a-4f05-a59d-9173d5a63c42`); Android update
+`01a1fe1d-aeb2-7959-8cde-0db4b5b7c79e` (group `ebc2b01a-0588-408b-b15c-7ff4cebb88f5`), runtime 0.3.0.
+Undo: Mobile update → rollback-to-built-in, app live.
+
+### Regression prevention: staging and live auth settings must match
+
+The fault came from a staging setting that differed from live (Email OTP length 6 on staging, 8 on
+live), so every staging sign-in test passed while live could not sign in. Kept from now on:
+
+1. **The app never depends on one project's setting:** it accepts the whole 6–10 range Supabase
+   allows, as the website does (`lib/otpCode.ts`, tested).
+2. **Auth parity list:** staging mirrors live for Email OTP length, OTP expiry, email templates (code
+   and link), Site URL and Redirect URLs (`courtbook://auth-callback`). Any change to one project's
+   auth settings is made on both, or recorded here as a deliberate difference. Known difference today:
+   OTP length (staging 6, live 8) — proposal: set staging to 8 (staging only, needs approval).
+3. **Every release includes one real sign-in on live** with the installed build before merge — the
+   check that found this.
+4. Later, if a read-only Supabase management token is ever approved: an automated comparison of the
+   two projects' auth settings in the release checklist.
