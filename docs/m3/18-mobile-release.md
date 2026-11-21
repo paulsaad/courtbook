@@ -41,3 +41,17 @@ Publisher account and app name (D5); privacy policy and terms (D6); Apple privac
 Data safety; listings, screenshots; reviewer demo account; moderator review frequency; 180-day report
 text clearing; independent VoiceOver / TalkBack check; Play closed test (12 testers, 14 days) if the
 Play account is personal.
+
+## Blocker found in the live phone check (21 Nov 2026) — release merge stopped
+
+**Email sign-in fails on 0.3.0 against live.** The live project sends 8-digit codes; the app's code
+field has stopped at 6 digits since the proof of concept (13 Nov). The website accepts 6–10 and so
+never showed it. Staging was set to 6 digits on 17 Nov (Galaxy sign-in work), which hid the mismatch
+from every staging test. The email's "Sign in" link goes to the live Site URL (the website), because
+the app does not ask for a return to the app; it signs in the phone's browser, never the app.
+
+Fix (branch `mobile-signin-code-fix`, `d085557`, not published): the app accepts 6–10 digits like the
+website, strips spaces from a pasted code, sends the whole code, and says to type the code because the
+link opens the website. Regression tests `__tests__/signInCode.test.tsx` (7; the old 6-digit limit
+fails one). JavaScript only — native fingerprint identical to the installed 0.3.0 builds (android
+`242979cd`, ios `de2d475b`) — so it ships as an update on the `preview` channel, no new build.
