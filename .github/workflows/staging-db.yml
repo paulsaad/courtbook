@@ -17,9 +17,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else); m3_0067_preflight / m3_0067_postcheck and m3_0072_preflight / m3_0072_postcheck, m3_0073_*, m3_0074_* and m3_0075_* = read-only checks before / after applying 0067 0072, 0073 or 0074 (supabase/live/00xx_*.sql)"
+        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else); m3_0067_preflight / m3_0067_postcheck and m3_0072_preflight / m3_0072_postcheck, m3_0073_*, m3_0074_* and m3_0075_* = read-only checks before / after applying 0067 0072, 0073 or 0074 (supabase/live/00xx_*.sql); blocks_0076_* / blocks_0077_* = read-only checks before / after 0076 or 0077 (calendar blocks); blocks_functional = the block rules tried as a demo-club desk account, in one transaction that is rolled back"
         type: choice
-        options: [check, apply, smoke, api, reset_demo, tester, demo_at_desk, m3_0067_preflight, m3_0067_postcheck, m3_0072_preflight, m3_0072_postcheck, m3_0073_preflight, m3_0073_postcheck, m3_0074_preflight, m3_0074_postcheck, m3_0075_preflight, m3_0075_postcheck, m3_accounts, m3_test_games, m3_test_games_shared, m3_test_games_cleanup, m3_moderator_check, m3_moderator_grant]
+        options: [check, apply, smoke, api, reset_demo, tester, demo_at_desk, m3_0067_preflight, m3_0067_postcheck, m3_0072_preflight, m3_0072_postcheck, m3_0073_preflight, m3_0073_postcheck, m3_0074_preflight, m3_0074_postcheck, m3_0075_preflight, m3_0075_postcheck, blocks_0076_preflight, blocks_0076_postcheck, blocks_0077_preflight, blocks_0077_postcheck, blocks_functional, m3_accounts, m3_test_games, m3_test_games_shared, m3_test_games_cleanup, m3_moderator_check, m3_moderator_grant]
         default: check
       migrations:
         description: "apply only: the exact migration numbers to apply, e.g. '0068 0069 0070 0071' — nothing else is applied; 'check' lists what is pending"
@@ -278,6 +278,26 @@ jobs:
       - name: 0075 postcheck, read only (m3_0075_postcheck)
         if: inputs.action == 'm3_0075_postcheck'
         run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0075_postcheck.sql
+
+      # Calendar blocks (0076 staff_block, 0077 blocks through functions): read-only preflight before 'apply' "0076"
+      # or "0077", postcheck after; blocks_functional tries the rules and rolls everything back.
+      - name: 0076 preflight, read only (blocks_0076_preflight)
+        if: inputs.action == 'blocks_0076_preflight'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0076_preflight.sql
+      - name: 0076 postcheck, read only (blocks_0076_postcheck)
+        if: inputs.action == 'blocks_0076_postcheck'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0076_postcheck.sql
+      - name: 0077 preflight, read only (blocks_0077_preflight)
+        if: inputs.action == 'blocks_0077_preflight'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0077_preflight.sql
+      - name: 0077 postcheck, read only (blocks_0077_postcheck)
+        if: inputs.action == 'blocks_0077_postcheck'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0077_postcheck.sql
+      - name: Block rules as a desk account, rolled back (blocks_functional)
+        if: inputs.action == 'blocks_functional'
+        run: |
+          out=$(psql "$DB" -v ON_ERROR_STOP=1 -f supabase/staging/blocks_functional.sql 2>&1); echo "$out" | sed 's/^psql:[^ ]* NOTICE:  //'
+          echo "$out" | grep -q "RESULT: 0 failure(s)" || { echo "::error::block checks failed"; exit 1; }
 
       - name: Booking-protection checks on staging
         if: inputs.action == 'smoke'
