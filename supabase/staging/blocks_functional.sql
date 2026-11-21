@@ -1,10 +1,17 @@
 -- STAGING ONLY (the workflow refuses the live project). Calendar blocks after 0076, and again after 0077:
--- tries the rules as a real desk-staff account of the demo club, inside ONE transaction that is ROLLED
--- BACK at the end, so nothing is kept. Each case prints a NOTICE line "ok ..." or "FAIL ...".
+-- tries the rules as a desk-staff account of the demo club, inside ONE transaction that is ROLLED BACK at
+-- the end, so nothing is kept. The account is a throwaway one created inside that transaction (staging has
+-- no permanent non-admin desk account), so it disappears with the rollback too. Each case prints a NOTICE
+-- line "ok ..." or "FAIL ...".
 -- Workflow action: blocks_functional.
 begin;
 set local lock_timeout = '5s';
 set local statement_timeout = '60s';
+-- the throwaway desk account (rolled back with everything else)
+insert into auth.users (id, email, aud, role)
+values ('b10c0076-0000-4000-8000-000000000001', 'blocks-check@courtbook.test', 'authenticated', 'authenticated');
+insert into club_staff (club_id, profile_id)
+select id, 'b10c0076-0000-4000-8000-000000000001' from clubs where is_demo order by created_at limit 1;
 do $t$
 declare
   v_staff uuid; v_club uuid; v_court uuid; v_tz text; v_day date; v_open time; v_slot int;
@@ -13,8 +20,8 @@ begin
   select cs.profile_id, c.id, c.timezone, c.open_time, c.slot_minutes into v_staff, v_club, v_tz, v_open, v_slot
   from club_staff cs join clubs c on c.id = cs.club_id
   join profiles p on p.id = cs.profile_id
-  where c.is_demo and not ('admin' = any(p.roles)) order by cs.profile_id limit 1;
-  if v_staff is null then raise exception 'no desk-staff account (not admin) on the demo club'; end if;
+  where cs.profile_id = 'b10c0076-0000-4000-8000-000000000001' and not ('admin' = any(p.roles));
+  if v_staff is null then raise exception 'the throwaway desk account was not set up'; end if;
   -- a court and a day 20-40 days ahead with nothing on it
   select k.id, d into v_court, v_day
   from courts k, (select current_date + g as d from generate_series(20, 40) g) x

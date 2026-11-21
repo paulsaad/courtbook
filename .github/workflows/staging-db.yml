@@ -296,8 +296,10 @@ jobs:
       - name: Block rules as a desk account, rolled back (blocks_functional)
         if: inputs.action == 'blocks_functional'
         run: |
-          out=$(psql "$DB" -v ON_ERROR_STOP=1 -f supabase/staging/blocks_functional.sql 2>&1); echo "$out" | sed 's/^psql:[^ ]* NOTICE:  //'
-          echo "$out" | grep -q "RESULT: 0 failure(s)" || { echo "::error::block checks failed"; exit 1; }
+          # show psql's output even when it stops on an error (a failed statement ends the transaction: nothing is kept)
+          rc=0; out=$(psql "$DB" -v ON_ERROR_STOP=1 -f supabase/staging/blocks_functional.sql 2>&1) || rc=$?
+          echo "$out" | sed 's/^psql:[^ ]* NOTICE:  //'
+          echo "$out" | grep -q "RESULT: 0 failure(s)" && [ "$rc" = 0 ] || { echo "::error::block checks failed (psql exit $rc)"; exit 1; }
 
       - name: Booking-protection checks on staging
         if: inputs.action == 'smoke'
