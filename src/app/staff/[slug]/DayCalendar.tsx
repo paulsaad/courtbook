@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
@@ -8,7 +9,7 @@ import { createClient } from "@/lib/supabase/client";
 import { bookingDate, clubLocalToUtc, dayBounds, hhmm, moveTarget, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
 import { friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
 import { blockSlotOptions, bookingSlotOptions, pickSlots } from "./durations";
-import { useDialog } from "@/components/useDialog";
+import { useDialog, useIsDesktop } from "@/components/useDialog";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string> };
 
@@ -59,7 +60,26 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const [sheet, setSheet] = useState<Sheet>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const dialogRef = useDialog<HTMLDivElement>(!!sheet, () => setSheet(null), { canClose: !busy });
+  const router = useRouter();
+  // Phones and tablets: the sheet is a modal bottom sheet, as before. Desktop (≥ 1024 px): a side panel
+  // beside the calendar that does not block it (Phase I-2a), with the Now summary when nothing is open.
+  const isDesktop = useIsDesktop();
+  // Typed but unsaved booking details: switching slot, changing day or closing the panel asks first.
+  const addDirty = useRef(false);
+  const confirmDiscard = useCallback(() =>
+    !addDirty.current || window.confirm("Discard the booking details you have typed?"), []);
+  /** Opens a sheet, unless saving is in progress or the desk keeps its unsaved details. */
+  const openSheet = useCallback((next: Sheet) => {
+    if (busy) return;
+    if (!confirmDiscard()) return;
+    addDirty.current = false;
+    setError(null);
+    setSheet(next);
+  }, [busy, confirmDiscard]);
+  const closeSheet = useCallback(() => openSheet(null), [openSheet]);
+  const dialogRef = useDialog<HTMLDivElement>(!!sheet, closeSheet, { canClose: !busy, modal: !isDesktop });
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const weekQuiet = useRef(false);
   const [nowMin, setNowMin] = useState<number | null>(null);
   const [freeNow, setFreeNow] = useState<FreeNow[] | null>(null);
   const [showLater, setShowLater] = useState(false);
@@ -103,9 +123,11 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   }, [isToday, club.timezone]);
 
   // Refetch only the day's rows from the browser: faster than re-rendering the page.
-  const reload = useCallback(async () => {
+  // `quiet` (the automatic refresh): the rows on screen stay usable while it runs, because they were
+  // just as current a moment ago; only a failure marks them as possibly outdated.
+  const reload = useCallback(async (quiet = false) => {
     const seq = ++dayReq.current;
-    setDayLoading(true);
+    if (!quiet) setDayLoading(true);
     const supabase = createClient();
     const { dayStart, dayEnd } = dayBounds(date, club.timezone);
     const [{ data: b, error: eb }, { data: k, error: ek }] = await Promise.all([
@@ -121,30 +143,46 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     setBlocks((k ?? []) as Block[]);
     setDayError(false);
     setDayLoading(false);
+    setLastUpdated(formatInTimeZone(new Date(), club.timezone, "HH:mm"));
   }, [club.id, club.timezone, date]);
 
-  // Now view: which courts are usable this minute, refreshed with the clock. The server decides what
-  // "busy" means (booking, unexpired hold or block) so the rule lives in one place.
+  // Automatic refresh (Phase I-2a): every 60 s while the page is visible, and on returning to it.
+  // It re-runs the reads the page already makes and changes nothing else: the open panel, the typed
+  // details and the date stay as they are; an older answer never replaces a newer one (dayReq, and
+  // the week effect's `alive`); a failed read shows the "may be out of date" banner and keeps adding
+  // off until a read succeeds. Now view and the desktop panel also refresh which courts are free now.
+  // The server decides what "busy" means (booking, unexpired hold or block).
   useEffect(() => {
-    if (view !== "now") return;
+    const wantsFree = view === "now" || (isDesktop && isToday);
     let alive = true;
-    const load = async () => {
+    const loadFree = async () => {
+      if (!wantsFree) return;
       const { data } = await createClient().rpc("club_courts_free_now", { p_club: club.id });
       if (alive && data) setFreeNow(data as FreeNow[]);
-      if (alive) await reload();
     };
-    load();
-    const id = setInterval(load, 60_000);
-    return () => { alive = false; clearInterval(id); };
-  }, [view, club.id, reload]);
+    const tick = async () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      if (view === "week") { weekQuiet.current = true; setRefresh((n) => n + 1); }
+      else await reload(true);
+      await loadFree();
+    };
+    if (view === "now") void (async () => { await loadFree(); if (alive) await reload(); })();
+    else void loadFree();
+    const id = setInterval(tick, 60_000);
+    const onVisible = () => { if (document.visibilityState === "visible") void tick(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { alive = false; clearInterval(id); document.removeEventListener("visibilitychange", onVisible); };
+  }, [view, isDesktop, isToday, club.id, reload]);
 
   // week view: one query for the whole week, keyed so a stale answer can never be shown
   useEffect(() => {
     if (view !== "week" || !weekCourt) return;
     const key = `${wkStart}|${weekCourt.id}`;
     let alive = true;
+    const quiet = weekQuiet.current;
+    weekQuiet.current = false;
     (async () => {
-      setWeekLoading(true);
+      if (!quiet) setWeekLoading(true);
       const supabase = createClient();
       const from = dayBounds(wkStart, club.timezone).dayStart;
       const to = dayBounds(shiftDate(wkStart, 6), club.timezone).dayEnd;
@@ -162,6 +200,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
       setWeek({ key, bookings: rows, blocks: (k ?? []) as Block[] });
       setWeekError(false);
       setWeekLoading(false);
+      setLastUpdated(formatInTimeZone(new Date(), club.timezone, "HH:mm"));
     })();
     return () => { alive = false; };
   }, [view, club.id, club.timezone, wkStart, weekCourt, refresh]);
@@ -187,6 +226,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     await reload();
     setRefresh((n) => n + 1);   // the week view holds its own copy of the rows
     setBusy(false);
+    addDirty.current = false;
     setSheet(null);
   }
 
@@ -209,191 +249,58 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const q = (d: string, v: string, sp: string | null, ct?: string | null) =>
     `/staff/${club.slug}?date=${d}&view=${v}${sp ? `&sport=${sp}` : ""}${ct ? `&court=${ct}` : ""}`;
   const nav = (d: string) => q(d, view, sport, view === "week" ? weekCourt?.id : null);
+
+  // Leaving the day (any link: ‹ ›, Today, a view, a sport, the staff bar) with typed booking details
+  // asks first, like switching slots.
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (!addDirty.current || e.defaultPrevented) return;
+      const a = (e.target as Element | null)?.closest?.("a[href]");
+      if (a && !confirmDiscard()) { e.preventDefault(); e.stopPropagation(); }
+      else if (a) addDirty.current = false;
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, [confirmDiscard]);
+
+  // Keyboard (Phase I-2a): ← / → previous / next day (or week), T today — only when no control has
+  // focus (so never while typing, in the customer search, the date field, the panel, a length choice or
+  // on a focused slot or link), never with a modifier key, never while saving. Enter is never a
+  // shortcut: on a slot it only opens the add form.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || busy) return;
+      // only when no control has keyboard focus (focus on the page itself): a focused button, link, field,
+      // date, length choice, panel or slot keeps its own arrow keys
+      const el = e.target instanceof Element ? e.target : null;
+      if (el && el !== document.body && el !== document.documentElement) return;
+      const step = view === "week" ? 7 : 1;
+      const to = e.key === "ArrowLeft" ? shiftDate(date, -step) : e.key === "ArrowRight" ? shiftDate(date, step)
+        : e.key === "t" || e.key === "T" ? todayIn(club.timezone) : null;
+      if (!to || to === date) return;
+      e.preventDefault();
+      if (!confirmDiscard()) return;
+      addDirty.current = false;
+      router.push(nav(to));
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
   const dayNum = formatInTimeZone(clubLocalToUtc(date, "12:00", club.timezone), club.timezone, "d");
   const dayName = formatInTimeZone(clubLocalToUtc(date, "12:00", club.timezone), club.timezone, "EEEE");
   const monthName = formatInTimeZone(clubLocalToUtc(date, "12:00", club.timezone), club.timezone, "MMMM yyyy");
   const courtName = (id: string | null) => courts.find((c) => c.id === id)?.name ?? "";
 
-  return (
-    <main className="mx-auto flex min-h-screen max-w-5xl flex-col">
-      <header className="sticky top-0 z-10 bg-paper/95 backdrop-blur lg:top-16">
-        <div className="flex items-center justify-between px-4 pt-3 text-sm">
-          <Link href="/" className="text-muted">‹ {club.name}</Link>
-          <div className="flex gap-4">{/* on desktop these two are in the staff bar (WorkNav) */}<Link href={`/staff/${club.slug}/payments`} className="text-muted lg:hidden">Payments</Link><Link href={`/staff/${club.slug}/settings`} className="text-muted lg:hidden">Settings</Link><button onClick={() => setSheet({ kind: "close" })} className="text-danger">Close courts…</button></div>
-        </div>
-        <div className="flex items-end justify-between px-4 pb-3 pt-1">
-          {view === "week" ? (
-            <div className="leading-tight">
-              <div className="text-2xl font-semibold tracking-tight">Week of {formatInTimeZone(clubLocalToUtc(wkStart, "12:00", club.timezone), club.timezone, "d MMM")}</div>
-              <div className="text-sm text-muted">{weekCourt?.name ?? "No courts"}</div>
-            </div>
-          ) : (
-            <div className="flex items-end gap-3">
-              <span className="text-5xl font-semibold leading-none tracking-tight">{dayNum}</span>
-              <div className="pb-0.5 leading-tight">
-                <div className="font-medium">{dayName}</div>
-                <div className="text-sm text-muted">{monthName}</div>
-              </div>
-            </div>
-          )}
-          <div className="flex items-center gap-1">
-            <Link href={nav(shiftDate(date, view === "week" ? -7 : -1))} aria-label={view === "week" ? "Previous week" : "Previous day"} className="grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-lg">‹</Link>
-            <Link href={nav(todayIn(club.timezone))} className={`h-10 rounded-full px-3 text-sm leading-10 ${isToday ? "text-muted" : "border border-grid bg-white"}`}>{view === "week" ? "This week" : "Today"}</Link>
-            <Link href={nav(shiftDate(date, view === "week" ? 7 : 1))} aria-label={view === "week" ? "Next week" : "Next day"} className="grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-lg">›</Link>
-          </div>
-        </div>
-        <div className="flex items-center justify-between px-4 pb-2">
-          <div className="flex rounded-full border border-grid bg-white p-0.5 text-sm">
-            <Link href={q(todayIn(club.timezone), "now", sport)} className={`rounded-full px-4 py-1.5 ${view === "now" ? "bg-ink text-white" : ""}`}>Now</Link>
-            <Link href={q(date, "grid", sport)} className={`rounded-full px-4 py-1.5 ${view === "grid" ? "bg-ink text-white" : ""}`}>Courts</Link>
-            <Link href={q(date, "week", sport, weekCourt?.id)} className={`rounded-full px-4 py-1.5 ${view === "week" ? "bg-ink text-white" : ""}`}>Week</Link>
-            <Link href={q(date, "list", sport)} className={`rounded-full px-4 py-1.5 ${view === "list" ? "bg-ink text-white" : ""}`}>List</Link>
-          </div>
-          <div className="flex items-center gap-3 text-xs text-muted">
-            <span className="flex items-center gap-1"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-turf" />app</span>
-            <span className="flex items-center gap-1"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-sand" />desk</span>
-          </div>
-        </div>
-        {sports.length > 1 && (
-          <div className="flex gap-1.5 overflow-x-auto px-4 pb-3">
-            <Link href={q(date, view, null)} className={`min-h-9 shrink-0 rounded-full border px-3 text-xs leading-9 ${!sport ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>All sports</Link>
-            {sports.map((sp) => (
-              <Link key={sp} href={q(date, view, sp)} className={`min-h-9 shrink-0 rounded-full border px-3 text-xs leading-9 ${sport === sp ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>{sportNames[sp] ?? sp}</Link>
-            ))}
-          </div>
-        )}
-        {view === "week" && courts.length > 1 && (
-          <div className="flex gap-1.5 overflow-x-auto px-4 pb-3">
-            {courts.map((c) => (
-              <Link key={c.id} href={q(date, "week", sport, c.id)} className={`min-h-9 shrink-0 rounded-full border px-3 text-xs leading-9 ${weekCourt?.id === c.id ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>{c.name}</Link>
-            ))}
-          </div>
-        )}
-      </header>
 
-      {viewError && (
-        <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-danger/40 bg-red-50 px-3 py-2 text-sm text-danger">
-          <span className="flex-1">Couldn&apos;t load the latest {view === "week" ? "week" : "bookings"}. What you see may be out of date, so adding is off until this works.</span>
-          {/* the flag is cleared by a successful read, never by tapping Retry */}
-          <button disabled={viewLoading} onClick={() => { setRefresh((n) => n + 1); void reload(); }} className="shrink-0 rounded-lg border border-danger/40 px-3 py-1 disabled:opacity-50">{viewLoading ? "Checking…" : "Retry"}</button>
-        </div>
-      )}
-
-      {view === "week" ? (
-        <WeekGrid
-          club={club} court={weekCourt} days={weekDays} times={times} today={todayIn(club.timezone)}
-          data={week && week.key === `${wkStart}|${weekCourt?.id}` ? week : null}
-          canAdd={canAdd}
-          dayHref={(d) => q(d, "grid", sport)}
-          onOpenBooking={(b) => setSheet({ kind: "booking", booking: b })}
-          onOpenBlock={(bl) => setSheet({ kind: "block", block: bl })}
-          onAdd={(d, t) => { if (weekCourt) setSheet({ kind: "add", courtId: weekCourt.id, time: t, date: d }); }}
-        />
-      ) : view === "now" ? (
-        <NowPanel
-          club={club} courts={courts} bookings={shownBookings} freeNow={freeNow} sportNames={sportNames}
-          showLater={showLater} onToggleLater={() => setShowLater((v) => !v)}
-          onOpen={(b) => setSheet({ kind: "booking", booking: b })}
-        />
-      ) : view === "grid" ? (
-        <div className="flex-1 overflow-x-auto px-2 pb-24">
-          <div className="flex min-w-max">
-            {/* time axis */}
-            <div className="relative w-12 shrink-0" style={{ height: times.length * ROW_PX, marginTop: 36 }}>
-              {times.map((t, i) => i % labelEvery === 0 && (
-                <div key={t} className="absolute right-2 -translate-y-1/2 text-xs text-muted" style={{ top: i * ROW_PX }}>{t}</div>
-              ))}
-            </div>
-            {/* courts */}
-            <div className="grid flex-1 gap-x-1.5" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(7rem, 1fr))` }}>
-              {courts.map((c) => (
-                <div key={c.id} className="h-9 px-1 text-center text-sm">
-                  <div className="font-medium leading-tight">{c.name}</div>
-                  <div className="text-xs text-muted">{sportNames[c.sport] ?? c.sport}</div>
-                </div>
-              ))}
-              {courts.map((c) => (
-                <div key={c.id} className="relative rounded-lg border border-grid bg-white" style={{ height: times.length * ROW_PX }}>
-                  {/* empty slots */}
-                  {times.map((t, i) => (
-                    <button
-                      key={t}
-                      onClick={() => setSheet({ kind: "add", courtId: c.id, time: t })}
-                      disabled={!canAdd}
-                      aria-label={`Add booking ${c.name} ${t}`}
-                      className={`absolute inset-x-0 border-t first:border-t-0 active:bg-slate-soft ${i % labelEvery === 0 ? "border-grid" : "border-grid/50 border-dashed"}`}
-                      style={{ top: i * ROW_PX, height: ROW_PX }}
-                    />
-                  ))}
-                  {/* blocks */}
-                  {blocks.filter((k) => k.court_id === c.id).map((k) => {
-                    const p = place(k.start_at, k.end_at);
-                    return (
-                      <button key={k.id} onClick={() => setSheet({ kind: "block", block: k })}
-                        className="hatch absolute inset-x-1 rounded-md border border-grid bg-slate-soft px-2 py-1 text-left text-xs text-muted"
-                        style={{ top: p.row * ROW_PX + 2, height: p.span * ROW_PX - 4 }}>
-                        {k.reason ?? "Blocked"}
-                      </button>
-                    );
-                  })}
-                  {/* bookings */}
-                  {bookings.filter((b) => b.court_id === c.id).map((b) => {
-                    const p = place(b.start_at, b.end_at);
-                    const app = b.source === "app";
-                    const pending = b.status === "pending";
-                    return (
-                      <button key={b.id} onClick={() => setSheet({ kind: "booking", booking: b })}
-                        className={`absolute inset-x-1 overflow-hidden rounded-md border-l-4 px-2 py-1 text-left text-xs ${pending ? "border-dashed border-turf bg-white" : app ? "border-turf bg-turf-soft" : "border-sand bg-sand-soft"}`}
-                        style={{ top: p.row * ROW_PX + 2, height: p.span * ROW_PX - 4 }}>
-                        <div className="truncate text-sm font-medium">{pending ? "Paying…" : b.guest_name ?? b.player_name ?? "Player"}</div>
-                        <div className="text-muted">{hhmm(b.start_at, club.timezone)}–{hhmm(b.end_at, club.timezone)}</div>
-                      </button>
-                    );
-                  })}
-                  {/* now line */}
-                  {nowMin !== null && nowMin >= openMin && nowMin <= openMin + times.length * club.slot_minutes && (
-                    <div className="pointer-events-none absolute inset-x-0 border-t-2 border-danger" style={{ top: ((nowMin - openMin) / club.slot_minutes) * ROW_PX }} />
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <ul className="mx-4 mb-24 divide-y divide-grid rounded-xl border border-grid bg-white">
-          {shownBookings.length === 0 && <li className="p-8 text-center text-muted">No bookings this day. Tap a court slot in Courts view to add one.</li>}
-          {shownBookings.map((b) => (
-            <li key={b.id}>
-              <button onClick={() => setSheet({ kind: "booking", booking: b })} className="flex w-full items-center gap-3 px-4 py-3 text-left">
-                <span className={`h-10 w-1 rounded ${b.source === "app" ? "bg-turf" : "bg-sand"}`} />
-                <div className="w-28 shrink-0">
-                  <div className="font-medium">{hhmm(b.start_at, club.timezone)}–{hhmm(b.end_at, club.timezone)}</div>
-                  <div className="text-sm text-muted">{courtName(b.court_id)}</div>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium">{b.guest_name ?? b.player_name ?? "Player"}</div>
-                  {b.guest_phone && <div className="text-sm text-muted">{b.guest_phone}</div>}
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {sheet && (
-        <div className="fixed inset-0 z-20 flex items-end justify-center bg-ink/30 lg:top-16 lg:items-stretch lg:justify-end" onClick={() => !busy && setSheet(null)}>
-          <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={sheetTitle(sheet)} className="sheet-enter w-full max-w-lg rounded-t-2xl bg-white px-5 pb-8 pt-3 shadow-2xl outline-none lg:max-w-md lg:overflow-y-auto lg:rounded-none lg:pt-6" onClick={(e) => e.stopPropagation()}>
-            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-grid lg:hidden" />
-            {/* desktop side panel: a title and a visible Close; on phones the sheet keeps its handle */}
-            <div className="mb-4 hidden items-center justify-between lg:flex">
-              <h2 className="text-lg font-semibold">{sheetTitle(sheet)}</h2>
-              <button type="button" aria-label="Close" disabled={busy} onClick={() => setSheet(null)}
-                className="grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-xl leading-none text-muted hover:text-ink disabled:opacity-40">×</button>
-            </div>
-            {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+  /** What a sheet holds — the same on phones (bottom sheet) and desktop (side panel). */
+  function sheetBody(sheet: NonNullable<Sheet>) {
+    return (
+      <>
 
             {sheet.kind === "add" && (
               <AddSheet
+                key={`${sheet.courtId}|${sheet.date ?? date}|${sheet.time}`}
+                onDirty={(d) => { addDirty.current = d; }}
                 club={club} court={courts.find((c) => c.id === sheet.courtId)!} time={sheet.time} busy={busy}
                 defaultMinutes={commonMins}
                 onSave={(name, phone, slots, asBlock) =>
@@ -419,6 +326,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
 
             {sheet.kind === "booking" && (
               <BookingSheet
+                key={sheet.booking.id}
                 club={club} courts={allCourts} booking={sheet.booking} times={times} busy={busy}
                 onMove={(courtId, time, slots) =>
                   run(() => {
@@ -456,7 +364,226 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                 }
               />
             )}
+      </>
+    );
+  }
+
+  return (
+    <main className="mx-auto flex min-h-screen max-w-5xl flex-col lg:max-w-[1600px] lg:flex-row">
+      {/* desktop: the calendar column scrolls on its own beside the panel; phones: no wrapper box */}
+      <div className="contents lg:flex lg:h-[calc(100vh-4rem)] lg:min-w-0 lg:flex-1 lg:flex-col">
+      <header className="sticky top-0 z-10 bg-paper/95 backdrop-blur lg:static lg:shrink-0">
+        <div className="flex items-center justify-between px-4 pt-3 text-sm">
+          <Link href="/" className="text-muted">‹ {club.name}</Link>
+          <div className="flex gap-4">{/* on desktop these two are in the staff bar (WorkNav) */}<Link href={`/staff/${club.slug}/payments`} className="text-muted lg:hidden">Payments</Link><Link href={`/staff/${club.slug}/settings`} className="text-muted lg:hidden">Settings</Link><button onClick={() => openSheet({ kind: "close" })} className="text-danger">Close courts…</button></div>
+        </div>
+        <div className="flex items-end justify-between px-4 pb-3 pt-1">
+          {view === "week" ? (
+            <div className="leading-tight">
+              <div className="text-2xl font-semibold tracking-tight">Week of {formatInTimeZone(clubLocalToUtc(wkStart, "12:00", club.timezone), club.timezone, "d MMM")}</div>
+              <div className="text-sm text-muted">{weekCourt?.name ?? "No courts"}</div>
+            </div>
+          ) : (
+            <div className="flex items-end gap-3">
+              <span className="text-5xl font-semibold leading-none tracking-tight">{dayNum}</span>
+              <div className="pb-0.5 leading-tight">
+                <div className="font-medium">{dayName}</div>
+                <div className="text-sm text-muted">{monthName}</div>
+              </div>
+            </div>
+          )}
+          <div className="flex items-center gap-1">
+            <Link href={nav(shiftDate(date, view === "week" ? -7 : -1))} aria-label={view === "week" ? "Previous week" : "Previous day"} className="grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-lg">‹</Link>
+            <Link href={nav(todayIn(club.timezone))} className={`h-10 rounded-full px-3 text-sm leading-10 ${isToday ? "text-muted" : "border border-grid bg-white"}`}>{view === "week" ? "This week" : "Today"}</Link>
+            <Link href={nav(shiftDate(date, view === "week" ? 7 : 1))} aria-label={view === "week" ? "Next week" : "Next day"} className="grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-lg">›</Link>
           </div>
+        </div>
+        <div className="flex items-center justify-between px-4 pb-2">
+          <div className="flex rounded-full border border-grid bg-white p-0.5 text-sm">
+            <Link href={q(todayIn(club.timezone), "now", sport)} className={`rounded-full px-4 py-1.5 ${view === "now" ? "bg-ink text-white" : ""}`}>Now</Link>
+            <Link href={q(date, "grid", sport)} className={`rounded-full px-4 py-1.5 ${view === "grid" ? "bg-ink text-white" : ""}`}>Courts</Link>
+            <Link href={q(date, "week", sport, weekCourt?.id)} className={`rounded-full px-4 py-1.5 ${view === "week" ? "bg-ink text-white" : ""}`}>Week</Link>
+            <Link href={q(date, "list", sport)} className={`rounded-full px-4 py-1.5 ${view === "list" ? "bg-ink text-white" : ""}`}>List</Link>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-muted">
+            <label className="hidden items-center gap-1.5 lg:flex">
+              <span className="sr-only">Go to date</span>
+              <input type="date" value={date} aria-label="Go to date"
+                onChange={(e) => { const d = e.target.value; if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d !== date && confirmDiscard()) { addDirty.current = false; router.push(nav(d)); } }}
+                className="h-9 rounded-lg border border-grid bg-white px-2 text-sm text-ink" />
+            </label>
+            {lastUpdated && <span className="hidden lg:inline" aria-live="polite">Updated {lastUpdated}</span>}
+            <span className="flex items-center gap-1"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-turf" />app</span>
+            <span className="flex items-center gap-1"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-sand" />desk</span>
+          </div>
+        </div>
+        {sports.length > 1 && (
+          <div className="flex gap-1.5 overflow-x-auto px-4 pb-3">
+            <Link href={q(date, view, null)} className={`min-h-9 shrink-0 rounded-full border px-3 text-xs leading-9 ${!sport ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>All sports</Link>
+            {sports.map((sp) => (
+              <Link key={sp} href={q(date, view, sp)} className={`min-h-9 shrink-0 rounded-full border px-3 text-xs leading-9 ${sport === sp ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>{sportNames[sp] ?? sp}</Link>
+            ))}
+          </div>
+        )}
+        {view === "week" && courts.length > 1 && (
+          <div className="flex gap-1.5 overflow-x-auto px-4 pb-3">
+            {courts.map((c) => (
+              <Link key={c.id} href={q(date, "week", sport, c.id)} className={`min-h-9 shrink-0 rounded-full border px-3 text-xs leading-9 ${weekCourt?.id === c.id ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>{c.name}</Link>
+            ))}
+          </div>
+        )}
+      </header>
+
+      {viewError && (
+        <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-danger/40 bg-red-50 px-3 py-2 text-sm text-danger">
+          <span className="flex-1">Couldn&apos;t load the latest {view === "week" ? "week" : "bookings"}. What you see may be out of date, so adding is off until this works.</span>
+          {/* the flag is cleared by a successful read, never by tapping Retry */}
+          <button disabled={viewLoading} onClick={() => { setRefresh((n) => n + 1); void reload(); }} className="shrink-0 rounded-lg border border-danger/40 px-3 py-1 disabled:opacity-50">{viewLoading ? "Checking…" : "Retry"}</button>
+        </div>
+      )}
+
+      <div className="contents lg:block lg:min-h-0 lg:flex-1 lg:overflow-auto">
+      {view === "week" ? (
+        <WeekGrid
+          club={club} court={weekCourt} days={weekDays} times={times} today={todayIn(club.timezone)}
+          data={week && week.key === `${wkStart}|${weekCourt?.id}` ? week : null}
+          canAdd={canAdd}
+          dayHref={(d) => q(d, "grid", sport)}
+          onOpenBooking={(b) => openSheet({ kind: "booking", booking: b })}
+          onOpenBlock={(bl) => openSheet({ kind: "block", block: bl })}
+          onAdd={(d, t) => { if (weekCourt) openSheet({ kind: "add", courtId: weekCourt.id, time: t, date: d }); }}
+        />
+      ) : view === "now" ? (
+        <NowPanel
+          club={club} courts={courts} bookings={shownBookings} freeNow={freeNow} sportNames={sportNames}
+          showLater={showLater} onToggleLater={() => setShowLater((v) => !v)}
+          onOpen={(b) => openSheet({ kind: "booking", booking: b })}
+        />
+      ) : view === "grid" ? (
+        <div className="flex-1 overflow-x-auto px-2 pb-24 lg:overflow-visible lg:pb-6">
+          <div className="flex min-w-max">
+            {/* time axis */}
+            <div className="relative w-12 shrink-0 lg:sticky lg:left-0 lg:z-20 lg:w-14 lg:bg-paper" style={{ height: times.length * ROW_PX, marginTop: 36 }}>
+              {times.map((t, i) => i % labelEvery === 0 && (
+                <div key={t} className="absolute right-2 -translate-y-1/2 text-xs text-muted lg:text-[13px]" style={{ top: i * ROW_PX }}>{t}</div>
+              ))}
+            </div>
+            {/* courts */}
+            <div className="grid flex-1 gap-x-1.5 [--col-min:7rem] lg:[--col-min:9rem]" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(var(--col-min), 1fr))` }}>
+              {courts.map((c) => (
+                <div key={c.id} className="h-9 px-1 text-center text-sm lg:sticky lg:top-0 lg:z-10 lg:bg-paper">
+                  <div className="font-medium leading-tight lg:text-[15px]">{c.name}</div>
+                  <div className="text-xs text-muted">{sportNames[c.sport] ?? c.sport}</div>
+                </div>
+              ))}
+              {courts.map((c) => (
+                <div key={c.id} className="relative rounded-lg border border-grid bg-white" style={{ height: times.length * ROW_PX }}>
+                  {/* empty slots */}
+                  {times.map((t, i) => (
+                    <button
+                      key={t}
+                      onClick={() => openSheet({ kind: "add", courtId: c.id, time: t })}
+                      disabled={!canAdd}
+                      aria-label={`Add booking ${c.name} ${t}`}
+                      className={`absolute inset-x-0 border-t first:border-t-0 active:bg-slate-soft ${i % labelEvery === 0 ? "border-grid" : "border-grid/50 border-dashed"}`}
+                      style={{ top: i * ROW_PX, height: ROW_PX }}
+                    />
+                  ))}
+                  {/* blocks */}
+                  {blocks.filter((k) => k.court_id === c.id).map((k) => {
+                    const p = place(k.start_at, k.end_at);
+                    return (
+                      <button key={k.id} onClick={() => openSheet({ kind: "block", block: k })}
+                        className="hatch absolute inset-x-1 rounded-md border border-grid bg-slate-soft px-2 py-1 text-left text-xs text-muted lg:text-sm"
+                        style={{ top: p.row * ROW_PX + 2, height: p.span * ROW_PX - 4 }}>
+                        {k.reason ?? "Blocked"}
+                      </button>
+                    );
+                  })}
+                  {/* bookings */}
+                  {bookings.filter((b) => b.court_id === c.id).map((b) => {
+                    const p = place(b.start_at, b.end_at);
+                    const app = b.source === "app";
+                    const pending = b.status === "pending";
+                    return (
+                      <button key={b.id} onClick={() => openSheet({ kind: "booking", booking: b })}
+                        aria-current={sheet?.kind === "booking" && sheet.booking.id === b.id ? "true" : undefined}
+                        className={`absolute inset-x-1 overflow-hidden rounded-md border-l-4 px-2 py-1 text-left text-xs lg:text-sm ${sheet?.kind === "booking" && sheet.booking.id === b.id ? "ring-2 ring-ink" : ""} ${pending ? "border-dashed border-turf bg-white" : app ? "border-turf bg-turf-soft" : "border-sand bg-sand-soft"}`}
+                        style={{ top: p.row * ROW_PX + 2, height: p.span * ROW_PX - 4 }}>
+                        <div className="truncate text-sm font-medium lg:text-[15px]">{pending ? "Paying…" : b.guest_name ?? b.player_name ?? "Player"}</div>
+                        <div className="text-muted">{hhmm(b.start_at, club.timezone)}–{hhmm(b.end_at, club.timezone)}<span className="hidden lg:inline"> · {pending ? "being paid" : app ? "app" : "desk"}</span></div>
+                        {(b.contact_phone ?? b.guest_phone) && <div className="hidden truncate text-muted lg:block">{b.contact_phone ?? b.guest_phone}</div>}
+                      </button>
+                    );
+                  })}
+                  {/* now line */}
+                  {nowMin !== null && nowMin >= openMin && nowMin <= openMin + times.length * club.slot_minutes && (
+                    <div className="pointer-events-none absolute inset-x-0 border-t-2 border-danger" style={{ top: ((nowMin - openMin) / club.slot_minutes) * ROW_PX }} />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <ul className="mx-4 mb-24 divide-y divide-grid rounded-xl border border-grid bg-white">
+          {shownBookings.length === 0 && <li className="p-8 text-center text-muted">No bookings this day. Tap a court slot in Courts view to add one.</li>}
+          {shownBookings.map((b) => (
+            <li key={b.id}>
+              <button onClick={() => openSheet({ kind: "booking", booking: b })} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+                <span className={`h-10 w-1 rounded ${b.source === "app" ? "bg-turf" : "bg-sand"}`} />
+                <div className="w-28 shrink-0">
+                  <div className="font-medium">{hhmm(b.start_at, club.timezone)}–{hhmm(b.end_at, club.timezone)}</div>
+                  <div className="text-sm text-muted">{courtName(b.court_id)}</div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">{b.guest_name ?? b.player_name ?? "Player"}</div>
+                  {b.guest_phone && <div className="text-sm text-muted">{b.guest_phone}</div>}
+                </div>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      </div>
+      </div>
+
+      {/* One container for both layouts, restyled at 1024 px rather than replaced, so an open form keeps
+          what was typed when the window crosses the breakpoint.
+          Phones and tablets: the modal bottom sheet, as before. Desktop: a side panel beside the calendar,
+          not modal — the calendar stays usable; with nothing open it shows the Now summary or a hint. */}
+      {(sheet || isDesktop) && (
+        <div
+          className={isDesktop ? "sticky top-16 flex h-[calc(100vh-4rem)] w-[400px] shrink-0 flex-col border-l border-grid bg-white" : "fixed inset-0 z-20 flex items-end justify-center bg-ink/30"}
+          onClick={isDesktop ? undefined : () => { if (!busy) { addDirty.current = false; setSheet(null); } }}
+        >
+          {sheet ? (
+            <div ref={dialogRef} role="dialog" aria-modal={isDesktop ? "false" : "true"} aria-label={sheetTitle(sheet)}
+              className={isDesktop ? "flex min-h-0 flex-1 flex-col outline-none" : "sheet-enter w-full max-w-lg rounded-t-2xl bg-white px-5 pb-8 pt-3 shadow-2xl outline-none"}
+              onClick={(e) => e.stopPropagation()}>
+              <div className={isDesktop ? "flex items-center justify-between border-b border-grid px-5 py-3" : "mx-auto mb-4 h-1 w-10 rounded-full bg-grid"}>
+                {isDesktop && <h2 className="text-lg font-semibold">{sheetTitle(sheet)}</h2>}
+                {isDesktop && (
+                  <button type="button" aria-label="Close" disabled={busy} onClick={closeSheet}
+                    className="grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-xl leading-none text-muted hover:text-ink disabled:opacity-40">×</button>
+                )}
+              </div>
+              <div className={isDesktop ? "min-h-0 flex-1 overflow-y-auto px-5 py-4" : undefined}>
+                {error && <p role={isDesktop ? "alert" : undefined} className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+                {sheetBody(sheet)}
+              </div>
+            </div>
+          ) : isToday && view !== "now" ? (
+            <div className="min-h-0 flex-1 overflow-y-auto py-4">
+              <NowPanel
+                compact club={club} courts={courts} bookings={shownBookings} freeNow={freeNow} sportNames={sportNames}
+                showLater={showLater} onToggleLater={() => setShowLater((v) => !v)}
+                onOpen={(b) => openSheet({ kind: "booking", booking: b })}
+              />
+            </div>
+          ) : (
+            <p className="px-5 py-6 text-sm text-muted">Select a booking to see its details, or a free time to add a booking.</p>
+          )}
         </div>
       )}
     </main>
@@ -469,6 +596,11 @@ const primary = "rounded-xl bg-action py-3.5 text-base font-medium text-white di
 const secondary = "rounded-xl border border-grid py-3.5 text-base";
 const secondaryDanger = "rounded-xl border border-danger/40 py-3.5 text-base text-danger";
 const backLink = "py-2 text-sm text-muted";
+
+/** Enter in a text field never saves a booking or closes courts: only the button does (Phase I-2a). */
+function noEnterSubmit(e: React.KeyboardEvent<HTMLFormElement>) {
+  if (e.key === "Enter" && e.target instanceof HTMLInputElement && e.target.type !== "submit") e.preventDefault();
+}
 
 function fmtDur(m: number) {
   return m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60}`;
@@ -565,9 +697,11 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
 }
 
 /** What the desk sees when it opens the calendar: on court now, next three hours, then the rest. */
-function NowPanel({ club, courts, bookings, freeNow, sportNames, showLater, onToggleLater, onOpen }: {
+function NowPanel({ club, courts, bookings, freeNow, sportNames, showLater, onToggleLater, onOpen, compact = false }: {
   club: Club; courts: Court[]; bookings: Booking[]; freeNow: FreeNow[] | null; sportNames: Record<string, string>;
   showLater: boolean; onToggleLater: () => void; onOpen: (b: Booking) => void;
+  /** the desktop side panel: no page margins */
+  compact?: boolean;
 }) {
   const now = nowMs();
   const live = bookings.filter((b) => Date.parse(b.start_at) <= now && Date.parse(b.end_at) > now);
@@ -598,7 +732,7 @@ function NowPanel({ club, courts, bookings, freeNow, sportNames, showLater, onTo
   );
 
   return (
-    <div className="mx-4 mb-24 flex flex-col gap-4">
+    <div className={compact ? "flex flex-col gap-4 px-4" : "mx-4 mb-24 flex flex-col gap-4"}>
       <section className="card p-4">
         {mine.length === 0 ? (
           <p className="text-sm text-muted">No active courts.</p>
@@ -649,9 +783,11 @@ function NowPanel({ club, courts, bookings, freeNow, sportNames, showLater, onTo
   );
 }
 
-export function AddSheet({ club, court, time, busy, defaultMinutes, onSave }: {
+export function AddSheet({ club, court, time, busy, defaultMinutes, onSave, onDirty }: {
   club: Club; court: Court; time: string; busy: boolean; defaultMinutes: number | null;
   onSave: (name: string, phone: string, slots: number, asBlock: boolean) => void;
+  /** true while the desk has typed details that are not saved yet */
+  onDirty?: (dirty: boolean) => void;
 }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -669,6 +805,7 @@ export function AddSheet({ club, court, time, busy, defaultMinutes, onSave }: {
   const wanted = Math.max(1, Math.round((defaultMinutes ?? club.min_booking_minutes) / club.slot_minutes));
   const [wish, setWish] = useState(wanted);
   const slots = pickSlots(opts, wish, Math.round(club.min_booking_minutes / club.slot_minutes));
+  useEffect(() => { onDirty?.(Boolean(name.trim() || phone.trim() || reason.trim())); }, [name, phone, reason, onDirty]);
 
   // customers this club has booked before, matched on what the desk has typed so far
   useEffect(() => {
@@ -686,7 +823,7 @@ export function AddSheet({ club, court, time, busy, defaultMinutes, onSave }: {
     return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
   };
   return (
-    <form className="flex flex-col gap-3" onSubmit={(e) => {
+    <form className="flex flex-col gap-3" onKeyDown={noEnterSubmit} onSubmit={(e) => {
       e.preventDefault();
       if (slots === null) return;
       if (asBlock) onSave(reason.trim(), "", slots, true);
@@ -844,7 +981,7 @@ function CloseSheet({ club, times, busy, onClose }: { club: Club; times: string[
   const [reason, setReason] = useState("");
   const ends = [...times.slice(1), closeT];
   return (
-    <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); onClose(from, to, reason.trim()); }}>
+    <form className="flex flex-col gap-3" onKeyDown={noEnterSubmit} onSubmit={(e) => { e.preventDefault(); onClose(from, to, reason.trim()); }}>
       <h2 className="text-lg font-semibold">Close all courts</h2>
       <p className="text-sm text-muted">Blocks every court for this range. If any booking exists in it, nothing is closed; cancel or move those bookings first.</p>
       <div className="flex gap-2">

@@ -1,8 +1,26 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** The width from which the website uses its desktop layout (Phase I, decision D1). */
 export const DESKTOP_QUERY = "(min-width: 1024px)";
+
+/**
+ * True from 1024 px. False on the server and on the first render, so the page first renders as on a
+ * phone and switches after hydration. Use only where the two layouts need different behaviour
+ * (e.g. a modal sheet on phones, a side panel on desktop); plain sizing stays in CSS.
+ */
+export function useIsDesktop(): boolean {
+  const [desktop, setDesktop] = useState(false);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia(DESKTOP_QUERY);
+    const on = () => setDesktop(mq.matches);
+    on();
+    mq.addEventListener?.("change", on);
+    return () => mq.removeEventListener?.("change", on);
+  }, []);
+  return desktop;
+}
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
