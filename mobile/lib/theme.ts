@@ -23,6 +23,7 @@ export const color = {
   red: "#C8102E", // brand accent (5.1:1 on ground, 5.9:1 on white): text only at 14 pt bold or larger
   redOnDark: "#F2A0AC", // red for text on night surfaces (7.6:1)
   danger: "#B42318", // errors, always with words
+  dangerSoft: "#FDECEA", // cancelled status chip fill (danger text on it 5.75:1)
   warnSoft: "#FCEFD2", // limited availability, pending states
   warnInk: "#7A4E00", // 6.3:1 on warnSoft
   booked: "#6B6455", // unavailable slots, 5.1:1 on ground

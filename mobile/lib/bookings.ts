@@ -49,6 +49,26 @@ export function cancellation(startAt: string, cutoffHours: number, now = Date.no
   return { cutoffAt, free: cutoffAt.getTime() > now };
 }
 
+/**
+ * How a row in Bookings shows its state: one colour AND one word, never colour alone.
+ *   confirmed (green)  — an upcoming confirmed booking, or an upcoming game you are in or organise
+ *   waiting   (amber)  — an upcoming game whose organiser has not accepted you yet
+ *   cancelled (red)    — cancelled booking or game (danger red, not the brand red)
+ *   past      (neutral)— finished, or marked a no-show by the club
+ * Display only: it reads the status the database returns and changes nothing.
+ */
+export type RowTone = "confirmed" | "waiting" | "cancelled" | "past";
+export function rowStatus(r: AgendaRow, now = Date.now()): { tone: RowTone; label: string } {
+  if (r.status === "cancelled") return { tone: "cancelled", label: "Cancelled" };
+  if (r.status === "no_show") return { tone: "past", label: "No-show" };
+  if (Date.parse(r.end_at ?? r.start_at) <= now) return { tone: "past", label: r.kind === "match" ? "Played" : "Completed" };
+  if (r.kind === "match") {
+    if (r.role === "pending") return { tone: "waiting", label: "Waiting for the organiser" };
+    return { tone: "confirmed", label: r.role === "organizer" ? "You're organising" : "You're in" };
+  }
+  return { tone: "confirmed", label: "Confirmed" };
+}
+
 export function splitAgenda(rows: AgendaRow[], now = Date.now()) {
   const end = (r: AgendaRow) => Date.parse(r.end_at ?? r.start_at);
   const upcoming = rows.filter((r) => end(r) > now && r.status !== "cancelled").sort((a, b) => Date.parse(a.start_at) - Date.parse(b.start_at));

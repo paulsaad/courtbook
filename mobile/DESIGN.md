@@ -30,13 +30,18 @@ the code disagree, the code wins and this file is corrected.
 | muted | #4A5450 | secondary text (6.9:1 on ground) |
 | red | #C8102E | **brand accent only**: wordmark "Book", sport marks, selected sport, ticket edge and perforation, open player spots, badges. Text only at 14 pt bold or larger |
 | redOnDark | #F2A0AC | red for text on night surfaces |
-| danger | #B42318 | errors, always with words |
+| danger | #B42318 | errors and the Cancelled status, always with words |
+| dangerSoft | #FDECEA | fill behind the Cancelled status chip (danger text 5.75:1) |
 | warnSoft / warnInk | #FCEFD2 / #7A4E00 | limited availability, pending and unconfirmed states, the demo label |
 | booked | #6B6455 | unavailable times (striped, struck through) |
 
 **Rules**
 - Red never means "error", "cancelled" or "booked". Those have their own treatments, so red can
   never be read as something going wrong.
+- **Bookings list status** (21 Nov 2026): each row has a coloured edge and a status chip with words —
+  Confirmed / You're in / You're organising (cedar), Waiting for the organiser (warn), Cancelled
+  (danger, never brand red), Completed / Played / No-show (neutral). The brand-red edge stays on the
+  ticket (booking detail), not on list rows.
 - Every action is green. One primary action per screen area.
 - Text contrast is at least WCAG AA (4.5:1 for body text) on its background.
 
