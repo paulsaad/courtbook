@@ -220,6 +220,7 @@ describe("Home header: one Sign in and one bell per screen size (staging/product
   it("signed out: the Sign in beside the heading is for phones and tablets; the desktop top bar has its own", () => {
     expect(src).toMatch(/<Link href="\/login" className="[^"]*\blg:hidden\b[^"]*">Sign in<\/Link>/);
     expect(src).toMatch(/<Link href="\/login" className="[^"]*focus-visible:outline-2[^"]*">Sign in<\/Link>/);   // keyboard focus visible
+    expect(src).toMatch(/<Link href="\/login" className="[^"]*\bmin-h-11\b[^"]*">Sign in<\/Link>/);          // 44 px tap target
     expect(top).toMatch(/hidden h-16 [^"]*lg:block/);                                        // the top bar exists only from 1024 px
     expect(top).toMatch(/<Link href="\/login"[^>]*>Sign in<\/Link>/);
   });

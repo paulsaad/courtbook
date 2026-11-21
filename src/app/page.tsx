@@ -23,7 +23,7 @@ export default async function Home() {
         <header className="flex items-center justify-between">
           <h1 className="flex items-center gap-2 text-[30px] font-extrabold tracking-tight"><Cedar size={24} />CourtBook</h1>
           {/* phones and tablets only: from 1024 px the top bar has the Sign in button */}
-          <Link href="/login" className="rounded-full bg-turf px-4 py-2 text-sm font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-turf lg:hidden">Sign in</Link>
+          <Link href="/login" className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full bg-turf px-5 text-sm font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-turf lg:hidden">Sign in</Link>
         </header>
         <p className="text-sm text-muted">Courts, games and coaches across Lebanon. Browse freely; sign in when you reserve.</p>
         <InstallHint />
