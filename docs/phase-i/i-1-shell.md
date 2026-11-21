@@ -45,3 +45,16 @@ back to the player side (CourtBook, My bookings, Profile).
 the page imports the facilities list from a browser-only component file (`ClubVenue.tsx`, "use client")
 since Phase 11b (13 Nov). Same error on main and on this branch. Proposed separate fix: move the list to
 a plain module imported by both. Needs its own approval (not layout).
+
+## Review corrections (21 Nov 2026)
+
+| Point | Done |
+| --- | --- |
+| 1. Admin open-reports count | Admin bar shows "Reports (N open)" via the same `admin_reports` read the admin home makes; no count if unknown or zero. The one read is allow-listed in the layout-only guard with its reason (`scripts/layout-only-allow.txt`). |
+| 2. No dismissal while saving | Backdrop, Close and Cancel do nothing while saving: level sheet, Courts booking sheet, club booking card (the staff calendar backdrop was already guarded); Esc as before. Applies at every width (also a phone safety fix). |
+| 3. Dialog semantics and focus | `role="dialog"`, `aria-modal` and a label on every sheet. Modal sheets at every width: focus moves in, Tab/Shift+Tab wrap, focus landing behind the panel is brought back, focus returns on close. Club booking card: non-modal (`aria-modal="false"`), Esc only. Checked in the browser on the staging preview (area picker at 1280 px: focus inside after 25 Tabs; Esc closes and returns focus). |
+| 4. Calendar header | Staff calendar sticky header at `lg:top-16`, directly under the 64 px desktop bar. |
+| 5. Club Info page | Separate commit `10484bc`: `FACILITIES` moved unchanged to `src/components/facilities.ts`. New test: no server file imports a plain value from a "use client" file (fails on the old code). Layout check: the page errors on main and renders on this branch; staging preview renders it. |
+
+Checks: website typecheck; 172/172 tests; layout-only guard; layout check run 44920621655 (phone width
+identical; Info page fixed; no server errors in the new build).
