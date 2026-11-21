@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
@@ -1163,25 +1163,27 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
   const clock = useClubClock(club.timezone);
   // the booking or block whose details are shown, at the cell pointed at or focused (desktop)
   const [peek, setPeek] = useState<{ d: number; r: number } | null>(null);
-  if (!court) return <p className="px-4 py-10 text-center text-sm text-muted">No active courts for this sport.</p>;
   const tz = club.timezone;
+  // what sits on this court at each day and time, worked out once per week read (not on every draw). The parent
+  // rebuilds the day and time lists on every draw, so the memo keys on their contents.
+  const daysKey = days.join(","), timesKey = times.join(",");
+  const grid = useMemo(() => daysKey.split(",").map((d) => timesKey.split(",").map((t) => {
+    const ms = clubLocalToUtc(d, t, tz).getTime();
+    if (!data) return { ms, cell: null };
+    const b = data.bookings.find((x) => Date.parse(x.start_at) <= ms && Date.parse(x.end_at) > ms);
+    if (b) return { ms, cell: { kind: "booking" as const, b } };
+    const k = data.blocks.find((x) => Date.parse(x.start_at) <= ms && Date.parse(x.end_at) > ms);
+    return { ms, cell: k ? { kind: "block" as const, k } : null };
+  })), [data, daysKey, timesKey, tz]);
+  const dayLabels = useMemo(() => daysKey.split(",").map((d) => dayLabelOf(d, tz)), [daysKey, tz]);
+  if (!court) return <p className="px-4 py-10 text-center text-sm text-muted">No active courts for this sport.</p>;
   const loading = data === null;
   const rowPx = club.slot_minutes <= 30 ? 34 : 48;
   const labelEvery = club.slot_minutes <= 30 ? 2 : 1;
 
-  // what sits on this court at this day and time, if anything
-  const at = (d: string, t: string) => {
-    if (!data) return null;
-    const ms = clubLocalToUtc(d, t, tz).getTime();
-    const b = data.bookings.find((x) => Date.parse(x.start_at) <= ms && Date.parse(x.end_at) > ms);
-    if (b) return { kind: "booking" as const, b };
-    const k = data.blocks.find((x) => Date.parse(x.start_at) <= ms && Date.parse(x.end_at) > ms);
-    return k ? { kind: "block" as const, k } : null;
-  };
+  const at = (d: string, t: string) => grid[days.indexOf(d)]?.[times.indexOf(t)]?.cell ?? null;
   type Cell = NonNullable<ReturnType<typeof at>>;
   const cellId = (c: Cell) => (c.kind === "booking" ? c.b.id : c.k.id);
-  const isStart = (d: string, t: string, startAt: string) =>
-    Math.abs(clubLocalToUtc(d, t, tz).getTime() - Date.parse(startAt)) < 60_000;
   const activeFree = !at(days[wc.d], times[wc.r]);
   const ended = (d: string, i: number) => !!clock && (d < clock.today || (d === clock.today && toMin(times[i]) + club.slot_minutes <= clock.nowMin));
   const range = (c: Cell) => c.kind === "booking" ? `${hhmm(c.b.start_at, tz)}–${hhmm(c.b.end_at, tz)}` : `${hhmm(c.k.start_at, tz)}–${hhmm(c.k.end_at, tz)}`;
@@ -1194,7 +1196,7 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
   for (let di = 0; di < days.length; di++) {
     let cur: Seg | null = null;
     for (let r = 0; r < times.length; r++) {
-      const c = at(days[di], times[r]);
+      const c = grid[di][r].cell;
       if (cur && c && cellId(cur.c) === cellId(c)) { cur.r1 = r + 1; continue; }
       if (cur) segs.push(cur);
       cur = c ? { di, r0: r, r1: r + 1, c } : null;
@@ -1224,10 +1226,10 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
               <div className="lg:hidden">
                 <div>{formatInTimeZone(clubLocalToUtc(d, "12:00", tz), tz, "EEE")}</div>
                 <div className="text-sm text-ink">{formatInTimeZone(clubLocalToUtc(d, "12:00", tz), tz, "d")}</div>
-                <div className="tabular-nums">{loading ? "·" : `${times.filter((t) => at(d, t) !== null).length}/${times.length}`}</div>
+                <div className="tabular-nums">{loading ? "·" : `${grid[di].filter((g) => g.cell !== null).length}/${times.length}`}</div>
               </div>
               <div className="hidden lg:block" data-testid="week-day-heading">
-                <div className="text-[15px] font-semibold text-ink">{dayLabelOf(d, tz)}{d === today && <span className="ml-1.5 text-xs font-semibold text-turf">Today</span>}</div>
+                <div className="text-[15px] font-semibold text-ink">{dayLabels[di]}{d === today && <span className="ml-1.5 text-xs font-semibold text-turf">Today</span>}</div>
                 <div className="text-[13px] font-normal text-muted">{loading ? "·" : closedOn(di) ? "Closed" : dayCount(bookingsOn(di), 0)}</div>
               </div>
             </Link>
@@ -1239,7 +1241,7 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
                 {i % labelEvery === 0 ? t : ""}
               </div>
               {days.map((d, di) => {
-                const cell = at(d, t);
+                const cell = grid[di][i].cell;
                 const place = { gridColumn: di + 2, gridRow: i + 2, height: rowPx };
                 if (!cell) {
                   // inside the open form's choice: drawn "not saved", still a free slot to tap
@@ -1262,17 +1264,17 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
                     <button key={d + t} {...cellProps(d, t)} {...peekProps(di, i)}
                             onFocus={() => { cellProps(d, t).onFocus(); setPeek({ d: di, r: i }); }}
                             onClick={() => onOpenBlock(k, d, t)}
-                            aria-label={`${k.reason ?? "Blocked"}, ${court.name}, ${dayLabelOf(d, tz)}, ${range(cell)}, blocked`}
+                            aria-label={`${k.reason ?? "Blocked"}, ${court.name}, ${dayLabels[di]}, ${range(cell)}, blocked`}
                             className="relative border-b border-l border-grid/60 bg-[repeating-linear-gradient(45deg,#e7e5e4_0,#e7e5e4_3px,#fff_3px,#fff_6px)] focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf lg:bg-none" style={place} />
                   );
                 }
                 const b = cell.b;
-                const head = isStart(d, t, b.start_at);
+                const head = Math.abs(grid[di][i].ms - Date.parse(b.start_at)) < 60_000;
                 return (
                   <button key={d + t} {...cellProps(d, t)} {...peekProps(di, i)}
                           onFocus={() => { cellProps(d, t).onFocus(); setPeek({ d: di, r: i }); }}
                           onClick={() => onOpenBooking(b, d, t)}
-                          aria-label={`${who(b)}, ${court.name}, ${dayLabelOf(d, tz)}, ${range(cell)}, ${kindWord(b)}`}
+                          aria-label={`${who(b)}, ${court.name}, ${dayLabels[di]}, ${range(cell)}, ${kindWord(b)}`}
                           className={`relative border-l border-grid/60 focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf lg:bg-transparent ${head ? "border-t" : ""} ${b.status === "pending" ? "border-dashed bg-sand/40" : b.source === "app" ? "bg-turf-soft" : "bg-sand"}`}
                           style={place}>
                     {head && (
@@ -1322,14 +1324,14 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
                 {peekCell.kind === "booking" ? (
                   <>
                     <div className="font-semibold">{who(peekCell.b)}</div>
-                    <div>{court.name} · {dayLabelOf(days[peek.d], tz)} · {range(peekCell)}</div>
+                    <div>{court.name} · {dayLabels[peek.d]} · {range(peekCell)}</div>
                     <div>{peekCell.b.status === "pending" ? "Being paid" : peekCell.b.source === "app" ? "App booking" : "Desk booking"}</div>
                     {(peekCell.b.contact_phone ?? peekCell.b.guest_phone) && <div>{peekCell.b.contact_phone ?? peekCell.b.guest_phone}</div>}
                   </>
                 ) : (
                   <>
                     <div className="font-semibold">{peekCell.k.reason ?? "Blocked"}</div>
-                    <div>{court.name} · {dayLabelOf(days[peek.d], tz)} · {range(peekCell)} · blocked</div>
+                    <div>{court.name} · {dayLabels[peek.d]} · {range(peekCell)} · blocked</div>
                   </>
                 )}
               </div>
@@ -1359,22 +1361,30 @@ function AllCourtsWeek({ club, courts, days, times, data, cellHref, dayHref, roo
   const clock = useClubClock(tz);
   const today = clock?.today ?? todayIn(tz);
   const { cellProps, onKey } = useWeekKeys(days, times, today, rootRef);
+  // free courts at each day and time, worked out once per week read and minute (a hold counts only until it
+  // expires — checked against the clock, not only when the week was read)
+  const nowKey = clock ? `${clock.today}|${clock.nowMin}` : "";
+  const daysKey = days.join(","), timesKey = times.join(","), courtsKey = courts.map((c) => c.id).join(",");
+  const slot = club.slot_minutes;
+  const free = useMemo(() => {
+    const now = nowMs();
+    const taken = new Map<string, [number, number][]>();
+    for (const r of [...(data?.bookings ?? []).filter((b) => b.status !== "pending" || (b.hold_expires_at && Date.parse(b.hold_expires_at) > now)), ...(data?.blocks ?? [])]) {
+      const list = taken.get(r.court_id) ?? [];
+      list.push([Date.parse(r.start_at), Date.parse(r.end_at)]);
+      taken.set(r.court_id, list);
+    }
+    const ids = courtsKey.split(",");
+    return daysKey.split(",").map((d) => timesKey.split(",").map((t) => {
+      const s = clubLocalToUtc(d, t, tz).getTime(), e = s + slot * 60_000;
+      return ids.filter((id) => !(taken.get(id) ?? []).some(([a, b]) => a < e && b > s)).length;
+    }));
+  }, [data, daysKey, timesKey, courtsKey, tz, slot, nowKey]);   // eslint-disable-line react-hooks/exhaustive-deps -- nowKey: holds expire with the clock
+  const dayLabels = useMemo(() => daysKey.split(",").map((d) => dayLabelOf(d, tz)), [daysKey, tz]);
   if (!courts.length) return <p className="px-4 py-10 text-center text-sm text-muted">No active courts for this sport.</p>;
   const loading = data === null;
   const rowPx = club.slot_minutes <= 30 ? 34 : 48;
   const labelEvery = club.slot_minutes <= 30 ? 2 : 1;
-  // a hold counts only until it expires — checked now, not only when the week was read
-  const now = nowMs();
-  const taken = new Map<string, [number, number][]>();
-  for (const r of [...(data?.bookings ?? []).filter((b) => b.status !== "pending" || (b.hold_expires_at && Date.parse(b.hold_expires_at) > now)), ...(data?.blocks ?? [])]) {
-    const list = taken.get(r.court_id) ?? [];
-    list.push([Date.parse(r.start_at), Date.parse(r.end_at)]);
-    taken.set(r.court_id, list);
-  }
-  const freeAt = (d: string, t: string) => {
-    const s = clubLocalToUtc(d, t, tz).getTime(), e = s + club.slot_minutes * 60_000;
-    return courts.filter((c) => !(taken.get(c.id) ?? []).some(([a, b]) => a < e && b > s)).length;
-  };
   const total = courts.length;
   const ended = (d: string, i: number) => !!clock && (d < clock.today || (d === clock.today && toMin(times[i]) + club.slot_minutes <= clock.nowMin));
   const tone = (n: number) => n === total ? "bg-white text-turf" : n === 0 ? "bg-[#cfd4ce] font-semibold text-ink" : n / total >= 0.5 ? "bg-[#eef3ef] text-ink" : "bg-[#dde5df] text-ink";
@@ -1392,7 +1402,7 @@ function AllCourtsWeek({ club, courts, days, times, data, cellHref, dayHref, roo
           {days.map((d, di) => (
             <Link key={d} href={dayHref(d)} style={{ gridColumn: di + 2, gridRow: 1 }}
                   className={`sticky top-0 z-20 border-b border-grid px-2 pb-1 pt-1 text-left leading-tight ${d === today ? "bg-turf-soft" : "bg-paper"}`}>
-              <div className="text-[15px] font-semibold text-ink">{dayLabelOf(d, tz)}{d === today && <span className="ml-1.5 text-xs font-semibold text-turf">Today</span>}</div>
+              <div className="text-[15px] font-semibold text-ink">{dayLabels[di]}{d === today && <span className="ml-1.5 text-xs font-semibold text-turf">Today</span>}</div>
             </Link>
           ))}
           {times.map((t, i) => (
@@ -1401,11 +1411,11 @@ function AllCourtsWeek({ club, courts, days, times, data, cellHref, dayHref, roo
                 {i % labelEvery === 0 ? t : ""}
               </div>
               {days.map((d, di) => {
-                const n = freeAt(d, t);
+                const n = free[di][i];
                 const past = ended(d, i);
                 return (
                   <Link key={d + t} {...cellProps(d, t)} href={cellHref(d, t)} data-free={n} data-past={past ? "true" : undefined}
-                        aria-label={`${n} of ${total} courts free, ${dayLabelOf(d, tz)}, ${t}`}
+                        aria-label={`${n} of ${total} courts free, ${dayLabels[di]}, ${t}`}
                         style={{ gridColumn: di + 2, gridRow: i + 2, height: rowPx }}
                         className={`relative flex items-center justify-center border-b border-l border-grid/60 text-[13px] tabular-nums focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf ${past ? `${PAST_BG} text-muted` : tone(n)}`}>
                     {loading ? "" : n === 0 ? "Full" : `${n} free`}
