@@ -1022,6 +1022,21 @@ describe("Phase I-2b: full booking details on hover and keyboard focus", () => {
   });
 });
 
+describe("Phase I-2b: details of a long block appear beside the row in use, not off-screen", () => {
+  beforeEach(() => { handler = async () => ok([]); desktop(true); });
+  afterEach(() => { desktop(false); });
+  it("keyboard on an all-day block at 18:00: the details sit just below 18:00", async () => {
+    const DAY = "2099-01-12";
+    const z = (hhmm: string) => new Date(`${DAY}T${hhmm}:00+02:00`).toISOString();
+    view({ date: DAY, blocks: [{ id: "k-day", court_id: courtA.id, start_at: z("08:00"), end_at: z("23:00"), reason: "Tournament" }] });
+    const slot18 = screen.getByRole("button", { name: "Add booking Padel 2 18:00" });     // row 20
+    await act(async () => { slot18.focus(); });
+    await act(async () => { fireEvent.keyDown(slot18, { key: "ArrowLeft" }); });
+    expect((document.activeElement as HTMLElement).getAttribute("aria-label")).toBe("Tournament, Padel 1, 08:00–23:00, blocked");
+    expect(screen.getByTestId("peek").style.top).toBe(`${21 * 36 + 2}px`);                // 30-min grid rows are 36 px
+  });
+});
+
 describe("Phase I-2b: accessibility scan (axe-core)", () => {
   beforeEach(() => { handler = async () => ok([]); desktop(true); rpcImpl = async (fn) => ({ data: fn === "club_recent_guests" ? [{ name: "Rami Haddad", phone: null, last_at: "2026-11-01" }] : [], error: null }); });
   afterEach(() => { desktop(false); rpcImpl = async () => ({ data: [], error: null }); });

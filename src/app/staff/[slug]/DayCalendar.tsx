@@ -95,7 +95,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const [cell, setCell] = useState<{ c: number; r: number } | null>(null);
   const focusCellNext = useRef(false);
   const [find, setFind] = useState("");
-  const [peek, setPeek] = useState<string | null>(null);
+  // the booking or block whose details are shown, and the row they are shown beside (pointer or keyboard)
+  const [peek, setPeek] = useState<{ id: string; row: number } | null>(null);
   const closeSheet = useCallback(() => openSheet(null), [openSheet]);
   const dialogRef = useDialog<HTMLDivElement>(!!sheet, closeSheet, { canClose: !busy, modal: !isDesktop });
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
@@ -664,13 +665,22 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                   {gridItems[c.id].map((it) => {
                     const id = itemKey(it);
                     const range = it.kind === "booking" ? `${hhmm(it.b.start_at, club.timezone)}–${hhmm(it.b.end_at, club.timezone)}` : `${hhmm(it.k.start_at, club.timezone)}–${hhmm(it.k.end_at, club.timezone)}`;
+                    const pointAt = (e: React.MouseEvent<HTMLButtonElement>) => {
+                      const row = Math.min(it.end - 1, it.row + Math.max(0, Math.floor((e.clientY - e.currentTarget.getBoundingClientRect().top) / ROW_PX)));
+                      setPeek((p) => (p?.id === id && p.row === row ? p : { id, row }));
+                    };
                     const common = {
                       "data-item": id,
                       tabIndex: activeItem && itemKey(activeItem) === id ? 0 : -1,
-                      onFocus: () => { setPeek(id); if (!(active.c === ci && active.r >= it.row && active.r < it.end)) setCell({ c: ci, r: it.row }); },
-                      onBlur: () => setPeek((p) => (p === id ? null : p)),
-                      onMouseEnter: () => setPeek(id),
-                      onMouseLeave: () => setPeek((p) => (p === id ? null : p)),
+                      onFocus: () => {
+                        const inside = active.c === ci && active.r >= it.row && active.r < it.end;
+                        setPeek({ id, row: inside ? active.r : it.row });
+                        if (!inside) setCell({ c: ci, r: it.row });
+                      },
+                      onBlur: () => setPeek((p) => (p?.id === id ? null : p)),
+                      onMouseEnter: (e: React.MouseEvent<HTMLButtonElement>) => pointAt(e),
+                      onMouseMove: (e: React.MouseEvent<HTMLButtonElement>) => pointAt(e),
+                      onMouseLeave: () => setPeek((p) => (p?.id === id ? null : p)),
                       style: { top: it.row * ROW_PX + 2, height: (it.end - it.row) * ROW_PX - 4 },
                     };
                     if (it.kind === "block") {
@@ -703,10 +713,12 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                   })}
                   {/* full details of the booking or block under the pointer or keyboard focus (desktop; the label says it too) */}
                   {(() => {
-                    const it = gridItems[c.id].find((x) => itemKey(x) === peek);
-                    if (!it) return null;
-                    const below = it.end <= times.length - 3;
-                    const pos = below ? { top: it.end * ROW_PX + 2 } : { bottom: (times.length - it.row) * ROW_PX + 2 };
+                    const it = peek ? gridItems[c.id].find((x) => itemKey(x) === peek.id) : undefined;
+                    if (!it || !peek) return null;
+                    // beside the row being pointed at or focused (a long block can fill the whole day): below it, or
+                    // above it near the end of the day
+                    const row = Math.min(Math.max(peek.row, it.row), it.end - 1);
+                    const pos = row + 1 <= times.length - 3 ? { top: (row + 1) * ROW_PX + 2 } : { bottom: (times.length - row) * ROW_PX + 2 };
                     const range = it.kind === "booking" ? `${hhmm(it.b.start_at, club.timezone)}–${hhmm(it.b.end_at, club.timezone)}` : `${hhmm(it.k.start_at, club.timezone)}–${hhmm(it.k.end_at, club.timezone)}`;
                     return (
                       <div data-testid="peek" aria-hidden="true" style={pos}
