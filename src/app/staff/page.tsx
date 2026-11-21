@@ -20,7 +20,7 @@ export default async function StaffIndex() {
   }
   if (!slug) {
     return (
-      <main className="mx-auto max-w-md p-6">
+      <main className="mx-auto max-w-md p-6 md:max-w-2xl lg:max-w-[720px]">
         <p>Your account is not staff at any club.</p>
       </main>
     );

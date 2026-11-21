@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from "next/link";
@@ -5,6 +6,7 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/types";
 import { GROUP_LABEL, GUIDE, levelGroup } from "@/lib/levels";
+import { useDialog } from "@/components/useDialog";
 
 /**
  * Pick a level 1–10 for one sport. Ten cards with number, group and description; explicit Save; Clear for a saved level.
@@ -16,6 +18,7 @@ export default function LevelSheet({ sport, sportName, current, legacy, onClose,
   const [pick, setPick] = useState<number | null>(current);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useDialog<HTMLElement>(true, onClose, { canClose: !busy });
   const guide = GUIDE[sport];
 
   async function save(level: number | null) {
@@ -27,13 +30,13 @@ export default function LevelSheet({ sport, sportName, current, legacy, onClose,
   }
 
   return (
-    <div className="fixed inset-0 z-30 flex items-end bg-ink/45" onClick={onClose}>
-      <section className="sheet-enter flex max-h-[92vh] w-full flex-col rounded-t-3xl bg-paper shadow-2xl" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-30 flex items-end bg-ink/45 lg:items-center lg:justify-center lg:p-6" onClick={() => { if (!busy) onClose(); }}>
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-label={`${sportName} level`} className="sheet-enter flex max-h-[92vh] w-full flex-col rounded-t-3xl bg-paper shadow-2xl outline-none lg:max-h-[85vh] lg:max-w-lg lg:rounded-3xl" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 pt-3.5">
           <span className="mx-auto mb-3 block h-1 w-11 rounded-full bg-[#d5d8d4]" aria-hidden="true" />
           <div className="flex items-center justify-between">
             <h2 className="text-[22px] font-extrabold tracking-tight">{sportName} level</h2>
-            <button onClick={onClose} className="text-sm text-muted">Close</button>
+            <button disabled={busy} onClick={onClose} className="text-sm text-muted disabled:opacity-50">Close</button>
           </div>
           <p className="mt-1 text-sm text-muted">
             {legacy && current == null ? <>You chose <b className="text-ink">{legacy}</b> before — now pick your number. </> : null}
@@ -58,7 +61,7 @@ export default function LevelSheet({ sport, sportName, current, legacy, onClose,
           <button disabled={busy || pick == null || pick === current} onClick={() => save(pick)} className="btn btn-primary">{busy ? "Saving…" : "Save level"}</button>
           <div className="flex justify-between text-sm">
             <button disabled={busy} onClick={() => save(null)} className="py-2 text-muted">{current != null ? "Clear level" : "Not sure yet"}</button>
-            <button onClick={onClose} className="py-2 text-muted">Cancel</button>
+            <button disabled={busy} onClick={onClose} className="py-2 text-muted disabled:opacity-50">Cancel</button>
           </div>
         </div>
       </section>

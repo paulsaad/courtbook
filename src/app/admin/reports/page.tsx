@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import ReportsBoard, { type Report } from "./ReportsBoard";
+import WorkNav from "@/components/WorkNav";
 
 // M3-S moderation: reports from players, their evidence, and the three decisions (handled, dismissed,
 // suspend). Every read and write is an admin_* function that checks is_admin() itself; the role check
@@ -24,5 +25,5 @@ export default async function AdminReports({ searchParams }: { searchParams: Pro
   const ids = [...new Set(reports.map((r) => r.profile_id).filter((x): x is string => !!x))];
   const { data: blocks } = ids.length ? await supabase.rpc("admin_blocks_received", { p_profiles: ids }) : { data: null };
   const blocksReceived = Object.fromEntries(((blocks ?? []) as { profile_id: string; blocks_received: number }[]).map((b) => [b.profile_id, b.blocks_received]));
-  return <ReportsBoard status={status} reports={reports} blocksReceived={blocksReceived} unavailable={missing} failed={!!error && !missing} />;
+  return <><WorkNav area="admin" active="reports" /><ReportsBoard status={status} reports={reports} blocksReceived={blocksReceived} unavailable={missing} failed={!!error && !missing} /></>;
 }

@@ -9,7 +9,7 @@ export default async function LevelsGuide() {
   const names = new Map(((sportRows ?? []) as { code: string; name_en: string }[]).map((s) => [s.code, s.name_en]));
   const sports = ((sportRows ?? []) as { code: string }[]).map((s) => s.code).filter((c) => GUIDE[c]);
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5 pt-12">
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5 pt-12">
       <Link href="/profile" className="text-sm text-muted">‹ Profile</Link>
       <h1 className="text-[28px] font-extrabold tracking-tight">Find your playing level</h1>
       <p className="text-[15px] leading-relaxed">{INTRO}</p>

@@ -31,7 +31,7 @@ export default async function MatchPage({ params }: { params: Promise<{ id: stri
   const accepted = participants.filter((p) => p.status === "accepted");
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5 pb-24">
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5 pb-24">
       <div className="flex justify-between text-sm"><Link href="/play" className="text-muted">‹ Find a game</Link><Link href={`/club/${m.club_slug}/matches`} className="text-action">{m.club_name} board ›</Link></div>
       <MatchCard m={m} tz={tz} />
       <section className="rounded-2xl border border-grid bg-white p-4">

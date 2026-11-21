@@ -6,6 +6,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/types";
 import { newToken, reserve as reserveSlot } from "@/lib/reserve";
+import { useDialog } from "@/components/useDialog";
 
 export type SheetClub = { id: string; name: string; slug: string; slot_minutes: number; min_minutes: number; max_minutes: number; service_fee_usd: number; hold_minutes: number; cancel_cutoff_hours: number; timezone: string };
 
@@ -30,6 +31,7 @@ export default function BookSheet({ club, date, at, courts, initialCourtId, init
   const [quote, setQuote] = useState<{ key: string; q: Quote }>({ key: "", q: { state: "loading" } });
   const [retry, setRetry] = useState(0);
   const [busy, setBusy] = useState(false);
+  const dialogRef = useDialog<HTMLElement>(true, onClose, { canClose: !busy });
   const [error, setError] = useState<string | null>(null);
   const start = new Date(at);
   const end = new Date(start.getTime() + minutes * 60000);
@@ -79,12 +81,12 @@ export default function BookSheet({ club, date, at, courts, initialCourtId, init
   const atDesk = mode === "at_desk";
   const pill = (on: boolean) => `flex-1 rounded-2xl px-3 py-3 text-center text-[15px] ${on ? "bg-ink font-bold text-white" : "border border-grid bg-white font-semibold"}`;
   return (
-    <div className="fixed inset-0 z-30 flex items-end bg-ink/45" onClick={onClose}>
-      <section className="sheet-enter w-full rounded-t-3xl bg-white px-5 pt-3.5 shadow-2xl" style={{ paddingBottom: "calc(1.75rem + env(safe-area-inset-bottom))" }} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-30 flex items-end bg-ink/45 lg:items-center lg:justify-center lg:p-6" onClick={() => { if (!busy) onClose(); }}>
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-label={`Book ${club.name}, ${formatInTimeZone(start, club.timezone, "EEE d MMM HH:mm")}`} className="sheet-enter w-full rounded-t-3xl bg-white px-5 pt-3.5 shadow-2xl outline-none lg:max-h-[90vh] lg:max-w-lg lg:overflow-y-auto lg:rounded-3xl" style={{ paddingBottom: "calc(1.75rem + env(safe-area-inset-bottom))" }} onClick={(e) => e.stopPropagation()}>
         <span className="mx-auto mb-3 block h-1 w-11 rounded-full bg-[#d5d8d4]" aria-hidden="true" />
         <div className="flex items-center justify-between">
           <h2 className="text-[22px] font-extrabold tracking-tight">{formatInTimeZone(start, club.timezone, "EEE d MMM · HH:mm")}</h2>
-          <button onClick={onClose} className="text-sm text-muted">Close</button>
+          <button disabled={busy} onClick={onClose} className="text-sm text-muted disabled:opacity-50">Close</button>
         </div>
         <div className="mt-1 text-sm text-muted">{club.name}</div>
         {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}

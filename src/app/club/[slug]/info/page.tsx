@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { loadClubHead } from "@/lib/clubHead";
 import ClubHeader from "../ClubHeader";
-import { FACILITIES } from "@/components/ClubVenue";
+import { FACILITIES } from "@/components/facilities";
 import { feeSummary } from "@/lib/fees";
 
 const fmtDur = (m: number) => (m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`);

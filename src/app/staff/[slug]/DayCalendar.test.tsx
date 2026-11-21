@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { act } from "react";
 
@@ -244,3 +245,32 @@ describe("walk-in sheet: a block never takes the customer's name (review fix)", 
     expect(onSave).not.toHaveBeenCalled();
   });
 });
+
+describe("calendar header links (Phase I-1)", () => {
+  it("Payments and Settings are hidden from 1024 px, where the staff bar has them; shown on phones and tablets", () => {
+    const src = readFileSync("src/app/staff/[slug]/DayCalendar.tsx", "utf8");
+    expect(src).toMatch(/payments`\} className="text-muted lg:hidden">Payments</);
+    expect(src).toMatch(/settings`\} className="text-muted lg:hidden">Settings</);
+  });
+});
+
+describe("desktop side panel (Phase I-1)", () => {
+  it("is a labelled modal dialog with a visible Close; Close, Esc and outside click each close it", async () => {
+    for (const how of ["close", "esc", "outside"] as const) {
+      view();
+      await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
+      const dialog = screen.getByRole("dialog", { name: "Add a booking" });
+      expect(dialog.getAttribute("aria-modal")).toBe("true");
+      expect(screen.getByRole("heading", { name: "Add a booking" })).toBeDefined();
+      const overlay = dialog.parentElement!;
+      expect(overlay.className).toContain("lg:top-16");          // starts below the 64 px desktop bar
+      expect(dialog.className).toContain("lg:rounded-none");      // full-height side panel on desktop
+      if (how === "close") await act(async () => { screen.getByRole("button", { name: "Close" }).click(); });
+      if (how === "esc") await act(async () => { fireEvent.keyDown(document, { key: "Escape" }); });
+      if (how === "outside") await act(async () => { fireEvent.click(overlay); });
+      expect(screen.queryByRole("dialog")).toBeNull();
+      cleanup();
+    }
+  });
+});
+

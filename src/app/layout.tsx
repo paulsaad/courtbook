@@ -22,7 +22,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="min-h-screen antialiased">
-        <div className="pb-[calc(3.5rem+env(safe-area-inset-bottom))]">{children}</div>
+        {/* Desktop (≥ 1024 px): room for the fixed top bar instead of the bottom tab bar. */}
+        <div id="main" tabIndex={-1} className="pb-[calc(3.5rem+env(safe-area-inset-bottom))] outline-none lg:pb-0 lg:pt-16">{children}</div>
         <TabBar />
       </body>
     </html>

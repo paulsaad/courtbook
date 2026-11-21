@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Governorate } from "@/lib/geo";
+import { useDialog } from "@/components/useDialog";
 
 export type Area = { gov: string | null; district: string | null };
 
@@ -18,6 +19,7 @@ export default function AreaPicker({ areas, value, onChange, trigger }: { areas:
   const [gov, setGov] = useState<string | null>(value.gov);
   const g = areas.find((x) => x.code === gov);
   const pick = (a: Area) => { onChange(a); setOpen(false); };
+  const dialogRef = useDialog<HTMLDivElement>(open, () => setOpen(false));
   return (
     <>
       {trigger ? trigger(() => { setGov(value.gov); setOpen(true); }, areaLabel(areas, value)) : (
@@ -26,8 +28,8 @@ export default function AreaPicker({ areas, value, onChange, trigger }: { areas:
         </button>
       )}
       {open && (
-        <div className="fixed inset-0 z-30 flex items-end bg-ink/40" onClick={() => setOpen(false)}>
-          <div className="sheet-enter max-h-[80vh] w-full overflow-y-auto rounded-t-3xl bg-paper p-5 pb-8" style={{ paddingBottom: "calc(2rem + env(safe-area-inset-bottom))" }} onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-30 flex items-end bg-ink/40 lg:items-center lg:justify-center lg:p-6" onClick={() => setOpen(false)}>
+          <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Choose an area" className="sheet-enter max-h-[80vh] w-full overflow-y-auto rounded-t-3xl bg-paper p-5 pb-8 outline-none lg:max-w-lg lg:rounded-3xl" style={{ paddingBottom: "calc(2rem + env(safe-area-inset-bottom))" }} onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-lg font-semibold">{g ? g.name_en : "Where do you want to play?"}</h2>
               {g ? <button onClick={() => setGov(null)} className="text-sm text-action">‹ Governorates</button> : <button onClick={() => setOpen(false)} className="text-sm text-muted">Close</button>}

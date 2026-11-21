@@ -1,0 +1,52 @@
+name: Website layout check (Phase I)
+
+# Runs on every push to a phase-i-* branch. Builds the website twice against the STAGING database —
+# main (before) and this branch (after) — and compares public pages: identical at 390 px (phones),
+# screenshots at 768 / 1280 / 1440 px for review. Also runs the layout-only guard. Deploys nothing.
+on:
+  push:
+    branches: ["phase-i-*"]
+
+jobs:
+  layout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Layout only (no booking, payment, sign-in or database code changed)
+        run: bash scripts/check-layout-only.sh origin/main
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Staging database only
+        env:
+          URL: ${{ secrets.STAGING_SUPABASE_URL }}
+        run: |
+          case "$URL" in https://pwznauyioqykdwodwpvx.supabase.co*) echo "staging database";; *) echo "::error::STAGING_SUPABASE_URL is not the staging project"; exit 1;; esac
+      - name: Build before (main) and after (this branch)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.STAGING_ANON_KEY }}
+        run: |
+          git worktree add ../before origin/main
+          (cd ../before && npm ci --no-audit --no-fund && npx next build)
+          npm ci --no-audit --no-fund && npx next build
+      - name: Start both
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.STAGING_ANON_KEY }}
+        run: |
+          (cd ../before && nohup npx next start -p 3001 > /tmp/before.log 2>&1 &)
+          nohup npx next start -p 3002 > /tmp/after.log 2>&1 &
+          for p in 3001 3002; do for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:$p/login && break; sleep 1; done; done
+      - name: Screenshots and phone-width comparison
+        env: { BASE_URL: "http://localhost:3001", HEAD_URL: "http://localhost:3002" }
+        run: |
+          mkdir -p /tmp/tools && cd /tmp/tools && npm init -y >/dev/null && npm i --no-audit --no-fund puppeteer@23 pngjs@7 pixelmatch@6 >/dev/null
+          cp "$GITHUB_WORKSPACE/.github/scripts/web-layout-shots.mjs" /tmp/tools/ && node /tmp/tools/web-layout-shots.mjs "$GITHUB_WORKSPACE/shots"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: layout-shots, path: shots, retention-days: 14 }
+      - name: Server errors seen while taking the screenshots (both builds)
+        if: always()
+        run: |
+          for f in /tmp/before.log /tmp/after.log; do echo "== $f"; grep -iE -A6 "error|digest" "$f" | head -40 || true; done

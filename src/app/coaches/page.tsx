@@ -13,7 +13,7 @@ export default async function CoachesPage() {
   const names = new Map(((sportRows ?? []) as { code: string; name_en: string }[]).map((s) => [s.code, s.name_en]));
   const rows = (data ?? []) as Row[];
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 p-5 pt-12">
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-3xl flex-col gap-4 p-5 pt-12">
       <Link href="/" className="text-sm text-muted">‹ Home</Link>
       <h1 className="text-[26px] font-extrabold tracking-tight">Coaches</h1>
       {rows.length === 0 && <p className="card p-6 text-center text-sm text-muted">No coaches listed yet. Are you a coach? <Link href="/coach" className="font-semibold text-turf">Set up your profile</Link></p>}

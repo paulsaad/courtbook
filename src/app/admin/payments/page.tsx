@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import PaymentsDashboard, { type Balance, type PaymentRow, type RefundRow, type Summary } from "@/components/PaymentsDashboard";
+import WorkNav from "@/components/WorkNav";
 
 export default async function AdminPayments({ searchParams }: { searchParams: Promise<{ month?: string; club?: string }> }) {
   const { month: qMonth, club: qClub } = await searchParams;
@@ -20,6 +21,9 @@ export default async function AdminPayments({ searchParams }: { searchParams: Pr
   const { data: rows } = clubId ? await supabase.rpc("payments_list", { p_club: clubId, p_month: `${month}-01` }) : { data: null };
 
   return (
+    <>
+    <WorkNav area="admin" active="payments" />
     <PaymentsDashboard month={month} summary={(summary ?? []) as Summary[]} refunds={(refunds ?? []) as RefundRow[]} rows={rows as PaymentRow[] | null} clubId={clubId} balances={(balances ?? []) as Balance[]} isAdmin backHref="/admin" title="Payments" basePath="/admin/payments" />
+    </>
   );
 }

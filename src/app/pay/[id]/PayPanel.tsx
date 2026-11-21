@@ -53,7 +53,7 @@ export default function PayPanel(p: Props) {
   const day = formatInTimeZone(new Date(p.startAt), p.timezone, "EEEE d MMMM");
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5">
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5">
       <Link href={`/club/${p.clubSlug}`} className="text-sm text-muted">‹ {p.clubName}</Link>
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Confirm and pay</h1>

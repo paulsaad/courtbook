@@ -65,7 +65,7 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage, 
   const initials = (initial.name || manage.email || "?").split(/[\s@]+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 
   if (!editing) return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5 pt-12">
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5 pt-12">
       <div className="flex flex-col items-center gap-2">
         <span className="flex h-28 w-28 items-center justify-center rounded-full border-4 border-white bg-turf text-[40px] font-extrabold text-white shadow-[0_0_0_1px_#e6e8e5]" aria-hidden="true">{initials}</span>
         <div className="text-2xl font-extrabold tracking-tight">{initial.name}</div>
@@ -105,7 +105,7 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage, 
   );
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-5 p-5 pt-12">
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5 pt-12">
       <div>
         <h1 className="text-2xl font-extrabold tracking-tight">{firstTime ? "Welcome. Who are you?" : "Edit profile"}</h1>
         <p className="mt-1 text-sm text-muted">Clubs see your name on bookings. Your phone is only shown to club staff.</p>

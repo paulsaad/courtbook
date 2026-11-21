@@ -116,7 +116,7 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
   const chip = (on: boolean) => `chip ${on ? "chip-on" : ""}`;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col">
+    <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-3xl flex-col">
       <div className="flex items-center justify-between px-5 pt-12">
         <div className="text-[13px] font-bold uppercase tracking-wider text-muted">{formatInTimeZone(dayOf(date), TZ, "MMM yyyy")}</div>
         <AreaPicker areas={areas} value={{ gov: prefs.gov, district: prefs.district }} onChange={(a) => update({ ...prefs, gov: a.gov, district: a.district })} />

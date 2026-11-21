@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { bookingDate, clubLocalToUtc, dayBounds, hhmm, moveTarget, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
 import { friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
 import { blockSlotOptions, bookingSlotOptions, pickSlots } from "./durations";
+import { useDialog } from "@/components/useDialog";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string> };
 
@@ -24,6 +25,10 @@ type Sheet =
   | { kind: "block"; block: Block }
   | { kind: "close" }
   | null;
+/** The sheet's name: announced to screen readers, and shown as the desktop side panel's title. */
+function sheetTitle(s: NonNullable<Sheet>): string {
+  return s.kind === "add" ? "Add a booking" : s.kind === "booking" ? "Booking" : s.kind === "block" ? "Blocked time" : "Close courts";
+}
 
 
 /** Staff see who booked and how to reach them: the desk's whole job is ringing people.
@@ -54,6 +59,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const [sheet, setSheet] = useState<Sheet>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const dialogRef = useDialog<HTMLDivElement>(!!sheet, () => setSheet(null), { canClose: !busy });
   const [nowMin, setNowMin] = useState<number | null>(null);
   const [freeNow, setFreeNow] = useState<FreeNow[] | null>(null);
   const [showLater, setShowLater] = useState(false);
@@ -210,10 +216,10 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
 
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col">
-      <header className="sticky top-0 z-10 bg-paper/95 backdrop-blur">
+      <header className="sticky top-0 z-10 bg-paper/95 backdrop-blur lg:top-16">
         <div className="flex items-center justify-between px-4 pt-3 text-sm">
           <Link href="/" className="text-muted">‹ {club.name}</Link>
-          <div className="flex gap-4"><Link href={`/staff/${club.slug}/payments`} className="text-muted">Payments</Link><Link href={`/staff/${club.slug}/settings`} className="text-muted">Settings</Link><button onClick={() => setSheet({ kind: "close" })} className="text-danger">Close courts…</button></div>
+          <div className="flex gap-4">{/* on desktop these two are in the staff bar (WorkNav) */}<Link href={`/staff/${club.slug}/payments`} className="text-muted lg:hidden">Payments</Link><Link href={`/staff/${club.slug}/settings`} className="text-muted lg:hidden">Settings</Link><button onClick={() => setSheet({ kind: "close" })} className="text-danger">Close courts…</button></div>
         </div>
         <div className="flex items-end justify-between px-4 pb-3 pt-1">
           {view === "week" ? (
@@ -375,9 +381,15 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
       )}
 
       {sheet && (
-        <div className="fixed inset-0 z-20 flex items-end justify-center bg-ink/30" onClick={() => !busy && setSheet(null)}>
-          <div className="sheet-enter w-full max-w-lg rounded-t-2xl bg-white px-5 pb-8 pt-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-grid" />
+        <div className="fixed inset-0 z-20 flex items-end justify-center bg-ink/30 lg:top-16 lg:items-stretch lg:justify-end" onClick={() => !busy && setSheet(null)}>
+          <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={sheetTitle(sheet)} className="sheet-enter w-full max-w-lg rounded-t-2xl bg-white px-5 pb-8 pt-3 shadow-2xl outline-none lg:max-w-md lg:overflow-y-auto lg:rounded-none lg:pt-6" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-grid lg:hidden" />
+            {/* desktop side panel: a title and a visible Close; on phones the sheet keeps its handle */}
+            <div className="mb-4 hidden items-center justify-between lg:flex">
+              <h2 className="text-lg font-semibold">{sheetTitle(sheet)}</h2>
+              <button type="button" aria-label="Close" disabled={busy} onClick={() => setSheet(null)}
+                className="grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-xl leading-none text-muted hover:text-ink disabled:opacity-40">×</button>
+            </div>
             {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
 
             {sheet.kind === "add" && (

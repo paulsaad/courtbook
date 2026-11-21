@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { dayBounds, todayIn } from "@/lib/time";
 import type { Block, Booking, Club, Court } from "@/lib/types";
 import DayCalendar from "./DayCalendar";
+import WorkNav from "@/components/WorkNav";
 
 export default async function StaffClubPage({
   params,
@@ -36,7 +37,7 @@ export default async function StaffClubPage({
     .eq("profile_id", user.id);
   if (!isAdmin && !count) {
     return (
-      <main className="mx-auto max-w-md p-6">
+      <main className="mx-auto max-w-md p-6 md:max-w-2xl lg:max-w-[720px]">
         <p>You are not staff at {club.name}.</p>
         <Link href="/" className="underline">Home</Link>
       </main>
@@ -82,6 +83,8 @@ export default async function StaffClubPage({
   }));
 
   return (
+    <>
+    <WorkNav area="staff" slug={club.slug} clubName={club.name} active="calendar" />
     <DayCalendar
       key={date}
       club={club}
@@ -95,5 +98,6 @@ export default async function StaffClubPage({
       sport={sport && /^[a-z_]+$/.test(sport) ? sport : null}
       sportNames={sportNames}
     />
+    </>
   );
 }
