@@ -1,4 +1,4 @@
-# Code-only email sign-in (proposed 21 Nov 2026 — live not changed)
+# Code-only email sign-in (approved 21 Nov 2026 — templates final; live not yet changed)
 
 **Goal:** one experience on website, Android and iPhone: receive a code, type it, signed in. No links.
 
@@ -39,7 +39,7 @@ Google and Apple sign-in do not use these emails; `/auth/callback` stays for Goo
 Files: `docs/m3/email/magic-link.html`, `docs/m3/email/confirm-signup.html`. Variables used:
 `{{ .Token }}` and `{{ .Email }}` only — no `{{ .ConfirmationURL }}`, `{{ .TokenHash }}`,
 `{{ .SiteURL }}` or `{{ .RedirectTo }}`, not even in a comment (Supabase fills those in anywhere).
-`EXPIRY` is replaced by live's own code-expiry setting before pasting.
+Expiry "1 hour" = live's Email OTP Expiration (3600 s, confirmed by Paul 21 Nov; OTP length 8, custom SMTP on).
 
 | Template | Subject |
 | --- | --- |
