@@ -55,18 +55,27 @@ export function cancellation(startAt: string, cutoffHours: number, now = Date.no
  *   waiting   (amber)  — an upcoming game whose organiser has not accepted you yet
  *   cancelled (red)    — cancelled booking or game (danger red, not the brand red)
  *   past      (neutral)— finished, or marked a no-show by the club
+ *   unknown   (neutral)— any status or role this version does not know: "See details", never green
+ * Green is given only for exact known values, so a status added later can never read as confirmed.
  * Display only: it reads the status the database returns and changes nothing.
  */
 export type RowTone = "confirmed" | "waiting" | "cancelled" | "past";
+const UNKNOWN = { tone: "past", label: "See details" } as const;
+const GAME_STATUSES = new Set(["open", "closed"]);
 export function rowStatus(r: AgendaRow, now = Date.now()): { tone: RowTone; label: string } {
   if (r.status === "cancelled") return { tone: "cancelled", label: "Cancelled" };
-  if (r.status === "no_show") return { tone: "past", label: "No-show" };
-  if (Date.parse(r.end_at ?? r.start_at) <= now) return { tone: "past", label: r.kind === "match" ? "Played" : "Completed" };
-  if (r.kind === "match") {
-    if (r.role === "pending") return { tone: "waiting", label: "Waiting for the organiser" };
-    return { tone: "confirmed", label: r.role === "organizer" ? "You're organising" : "You're in" };
+  const ended = Date.parse(r.end_at ?? r.start_at) <= now;
+  if (r.kind === "booking") {
+    if (r.status === "no_show") return { tone: "past", label: "No-show" };
+    if (r.status !== "confirmed") return UNKNOWN;
+    return ended ? { tone: "past", label: "Completed" } : { tone: "confirmed", label: "Confirmed" };
   }
-  return { tone: "confirmed", label: "Confirmed" };
+  if (!GAME_STATUSES.has(r.status)) return UNKNOWN;
+  if (ended) return { tone: "past", label: "Played" };
+  if (r.role === "organizer") return { tone: "confirmed", label: "You're organising" };
+  if (r.role === "accepted") return { tone: "confirmed", label: "You're in" };
+  if (r.role === "pending") return { tone: "waiting", label: "Waiting for the organiser" };
+  return UNKNOWN;
 }
 
 export function splitAgenda(rows: AgendaRow[], now = Date.now()) {

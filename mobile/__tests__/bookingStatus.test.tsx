@@ -20,10 +20,10 @@ describe("rowStatus (display only)", () => {
     ["finished confirmed booking", { ...base, ...past }, "past", "Completed"],
     ["no-show", { ...base, ...past, status: "no_show" }, "past", "No-show"],
     ["game you are in", { ...base, kind: "match", status: "open", role: "accepted" }, "confirmed", "You're in"],
-    ["game you organise", { ...base, kind: "match", status: "full", role: "organizer" }, "confirmed", "You're organising"],
+    ["game you organise", { ...base, kind: "match", status: "closed", role: "organizer" }, "confirmed", "You're organising"],
     ["game request waiting", { ...base, kind: "match", status: "open", role: "pending" }, "waiting", "Waiting for the organiser"],
     ["cancelled game", { ...base, kind: "match", status: "cancelled", role: "accepted" }, "cancelled", "Cancelled"],
-    ["finished game", { ...base, ...past, kind: "match", status: "full", role: "accepted" }, "past", "Played"],
+    ["finished game", { ...base, ...past, kind: "match", status: "closed", role: "accepted" }, "past", "Played"],
   ] as const)("%s", (_n, r, tone, label) => {
     expect(rowStatus(r as AgendaRow, NOW)).toEqual({ tone, label });
   });
@@ -45,5 +45,24 @@ describe("Row shows colour and words", () => {
   it("cancelled uses the error red, never the brand red (design rule)", () => {
     expect(TONE.cancelled.edge).toBe(color.danger);
     expect(Object.values(TONE).flatMap((t) => Object.values(t))).not.toContain(color.red);
+  });
+});
+
+describe("unknown statuses and roles never show green (fallback: neutral \"See details\")", () => {
+  it.each([
+    ["booking held for payment (pending)", { ...base, status: "pending" }],
+    ["booking hold expired", { ...base, status: "expired" }],
+    ["booking with a status added later", { ...base, status: "rescheduled" }],
+    ["finished booking with an unknown status", { ...base, ...past, status: "rescheduled" }],
+    ["game with an unknown role", { ...base, kind: "match", status: "open", role: "declined" }],
+    ["game with no role", { ...base, kind: "match", status: "open", role: null }],
+    ["game with a status added later", { ...base, kind: "match", status: "paused", role: "accepted" }],
+    ["finished game with an unknown status", { ...base, ...past, kind: "match", status: "paused", role: "accepted" }],
+  ] as const)("%s", async (_n, r) => {
+    expect(rowStatus(r as AgendaRow, NOW)).toEqual({ tone: "past", label: "See details" });
+    await render(<Row r={r as AgendaRow} now={NOW} />);
+    expect(screen.getByText("See details")).toBeTruthy();
+    expect(flat(screen.getByTestId("row-edge").props.style).backgroundColor).not.toBe(color.cedar);
+    expect(screen.getByRole("button").props.accessibilityLabel).toContain("See details");
   });
 });
