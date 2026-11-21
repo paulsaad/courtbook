@@ -213,3 +213,17 @@ describe("a sheet cannot be dismissed while saving (level sheet)", () => {
     save.pending = null;
   });
 });
+
+describe("Home header: one Sign in and one bell per screen size (staging/production review, 21 Nov)", () => {
+  const src = readFileSync("src/app/page.tsx", "utf8");
+  const top = readFileSync("src/components/TabBar.tsx", "utf8");
+  it("signed out: the Sign in beside the heading is for phones and tablets; the desktop top bar has its own", () => {
+    expect(src).toMatch(/<Link href="\/login" className="[^"]*\blg:hidden\b[^"]*">Sign in<\/Link>/);
+    expect(src).toMatch(/<Link href="\/login" className="[^"]*focus-visible:outline-2[^"]*">Sign in<\/Link>/);   // keyboard focus visible
+    expect(top).toMatch(/hidden h-16 [^"]*lg:block/);                                        // the top bar exists only from 1024 px
+    expect(top).toMatch(/<Link href="\/login"[^>]*>Sign in<\/Link>/);
+  });
+  it("signed in: the bell beside the greeting is for phones and tablets", () => {
+    expect(src).toMatch(/<Link href="\/notifications" aria-label="Activity" className="[^"]*\blg:hidden\b[^"]*">/);
+  });
+});
