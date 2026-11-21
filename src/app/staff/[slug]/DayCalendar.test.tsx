@@ -4,6 +4,9 @@ import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { act } from "react";
 
+const nav = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: nav.push }) }));
+
 // next/link needs a router in tests and all we want is an anchor
 vi.mock("next/link", () => ({
   default: ({ children, href, ...rest }: { children: React.ReactNode; href: string }) => (
@@ -17,6 +20,8 @@ type Resp = { data: unknown[] | null; error: unknown };
 type Query = { table: string; filters: Record<string, unknown> };
 /** Each test programmes what a given query answers, and when. */
 let handler: (q: Query) => Promise<Resp>;
+/** Each test may programme the RPCs too (staff_book, club_recent_guests …); by default they answer nothing. */
+let rpcImpl: (fn: string, args: unknown) => Promise<{ data: unknown; error: { message: string } | null }> = async () => ({ data: [], error: null });
 
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
@@ -30,7 +35,7 @@ vi.mock("@/lib/supabase/client", () => ({
         handler({ table, filters }).then(res, rej);
       return b;
     },
-    rpc: async () => ({ data: [], error: null }),
+    rpc: (fn: string, args: unknown) => rpcImpl(fn, args),
     auth: { getUser: async () => ({ data: { user: { id: "staff-1" } } }) },
   }),
 }));
@@ -254,23 +259,147 @@ describe("calendar header links (Phase I-1)", () => {
   });
 });
 
-describe("desktop side panel (Phase I-1)", () => {
-  it("is a labelled modal dialog with a visible Close; Close, Esc and outside click each close it", async () => {
-    for (const how of ["close", "esc", "outside"] as const) {
-      view();
-      await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
-      const dialog = screen.getByRole("dialog", { name: "Add a booking" });
-      expect(dialog.getAttribute("aria-modal")).toBe("true");
-      expect(screen.getByRole("heading", { name: "Add a booking" })).toBeDefined();
-      const overlay = dialog.parentElement!;
-      expect(overlay.className).toContain("lg:top-16");          // starts below the 64 px desktop bar
-      expect(dialog.className).toContain("lg:rounded-none");      // full-height side panel on desktop
-      if (how === "close") await act(async () => { screen.getByRole("button", { name: "Close" }).click(); });
-      if (how === "esc") await act(async () => { fireEvent.keyDown(document, { key: "Escape" }); });
-      if (how === "outside") await act(async () => { fireEvent.click(overlay); });
-      expect(screen.queryByRole("dialog")).toBeNull();
-      cleanup();
-    }
+const desktop = (on: boolean) => {
+  window.matchMedia = ((q: string) => ({ matches: on && q.includes("1024"), media: q, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+};
+const typeName = (v: string) => fireEvent.change(screen.getByRole("textbox", { name: "Customer name" }), { target: { value: v } });
+
+describe("Phase I-2a: phone keeps the modal bottom sheet", () => {
+  beforeEach(() => { handler = async () => ok([]); desktop(false); });
+  it("labelled modal dialog; tapping outside closes it, as before (no question even with typed details)", async () => {
+    const { container } = view();
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
+    const dialog = screen.getByRole("dialog", { name: "Add a booking" });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(container.querySelector("aside")).toBeNull();
+    typeName("Rami");
+    const confirm = vi.spyOn(window, "confirm");
+    await act(async () => { fireEvent.click(dialog.parentElement!); });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(confirm).not.toHaveBeenCalled();
   });
 });
 
+describe("Phase I-2a: desktop side panel beside the calendar", () => {
+  beforeEach(() => { handler = async () => ok([]); desktop(true); nav.push.mockReset(); });
+  afterEach(() => { vi.restoreAllMocks(); desktop(false); });
+
+  it("is a non-modal panel with title and Close; the calendar stays usable while it is open", async () => {
+    view();
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
+    const panel = screen.getByRole("dialog", { name: "Add a booking" });
+    expect(panel.getAttribute("aria-modal")).toBe("false");
+    expect(panel.closest("aside")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Add a booking" })).toBeDefined();
+    // another slot can be clicked straight away (nothing typed yet)
+    expect((screen.getByRole("button", { name: "Add booking Padel 2 11:00" }) as HTMLButtonElement).disabled).toBe(false);
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 2 11:00" }).click(); });
+    expect(screen.getByRole("heading", { name: /Padel 2, 11:00/ })).toBeDefined();
+    await act(async () => { screen.getByRole("button", { name: "Close" }).click(); });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("switching slots with typed details asks first; Cancel keeps them, OK opens the new slot empty", async () => {
+    view();
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
+    typeName("Rami");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false);
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 2 11:00" }).click(); });
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole("textbox", { name: "Customer name" }) as HTMLInputElement).value).toBe("Rami");
+    expect(screen.getByRole("heading", { name: /Padel 1, 10:00/ })).toBeDefined();
+    confirm.mockReturnValueOnce(true);
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 2 11:00" }).click(); });
+    expect(screen.getByRole("heading", { name: /Padel 2, 11:00/ })).toBeDefined();
+    expect((screen.getByRole("textbox", { name: "Customer name" }) as HTMLInputElement).value).toBe("");
+  });
+
+  it("Close and Esc with typed details ask first too", async () => {
+    view();
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
+    typeName("Rami");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await act(async () => { screen.getByRole("button", { name: "Close" }).click(); });
+    await act(async () => { fireEvent.keyDown(document, { key: "Escape" }); });
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("dialog")).toBeDefined();
+  });
+
+  it("Enter in a text field never creates a booking; only the button does", async () => {
+    const calls: string[] = [];
+    rpcImpl = async (fn) => { calls.push(fn); return { data: [], error: null }; };
+    view();
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
+    typeName("Rami");
+    const nameField = screen.getByRole("textbox", { name: "Customer name" });
+    // a browser submits a form when Enter is pressed in a field unless the keydown is cancelled: it is
+    const ev = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    await act(async () => { nameField.dispatchEvent(ev); });
+    expect(ev.defaultPrevented).toBe(true);
+    const phoneField = screen.getByPlaceholderText("Phone (optional)");
+    const ev2 = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    await act(async () => { phoneField.dispatchEvent(ev2); });
+    expect(ev2.defaultPrevented).toBe(true);
+    expect(calls).not.toContain("staff_book");
+    // the button still saves
+    await act(async () => { screen.getByRole("button", { name: "Add booking" }).click(); });
+    await waitFor(() => expect(calls).toContain("staff_book"));
+    rpcImpl = async () => ({ data: [], error: null });
+  });
+
+  it("a conflict keeps the typed details, shows the error, and is not retried", async () => {
+    const calls: string[] = [];
+    rpcImpl = async (fn) => { if (fn === "staff_book") { calls.push(fn); return { data: null, error: { message: "slot_taken" } }; } return { data: [], error: null }; };
+    view();
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
+    typeName("Rami");
+    await act(async () => { screen.getByRole("button", { name: "Add booking" }).click(); });
+    await waitFor(() => expect(screen.getByRole("alert")).toBeDefined());
+    expect(calls).toEqual(["staff_book"]);
+    expect((screen.getByRole("textbox", { name: "Customer name" }) as HTMLInputElement).value).toBe("Rami");
+    expect(screen.getByRole("dialog", { name: "Add a booking" })).toBeDefined();
+    rpcImpl = async () => ({ data: [], error: null });
+  });
+
+  it("automatic refresh keeps the open panel and its typed details; a failed refresh marks the day as possibly outdated", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      view();
+      await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
+      typeName("Rami");
+      handler = async () => failed;
+      await act(async () => { await vi.advanceTimersByTimeAsync(61_000); });
+      expect(screen.getByText(/Couldn.t load the latest bookings/)).toBeDefined();
+      expect((screen.getByRole("textbox", { name: "Customer name" }) as HTMLInputElement).value).toBe("Rami");
+      expect(screen.getByRole("dialog", { name: "Add a booking" })).toBeDefined();
+      expect(nav.push).not.toHaveBeenCalled();                 // the date never changes by itself
+      // fail-safe kept: no new add form can be opened while the day may be out of date
+      expect((screen.getByRole("button", { name: "Add booking Padel 2 11:00" }) as HTMLButtonElement).disabled).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("keyboard: ← / → / T change the day; ignored while typing, inside the panel, or with a modifier", async () => {
+    view();
+    await act(async () => { fireEvent.keyDown(document.body, { key: "ArrowRight" }); });
+    expect(nav.push).toHaveBeenLastCalledWith(expect.stringContaining("date=2026-11-13"));
+    await act(async () => { fireEvent.keyDown(document.body, { key: "ArrowLeft" }); });
+    expect(nav.push).toHaveBeenLastCalledWith(expect.stringContaining("date=2026-11-11"));
+    nav.push.mockReset();
+    await act(async () => { fireEvent.keyDown(document.body, { key: "ArrowRight", ctrlKey: true }); });
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
+    const field = screen.getByRole("textbox", { name: "Customer name" });
+    await act(async () => { fireEvent.keyDown(field, { key: "ArrowRight" }); fireEvent.keyDown(field, { key: "t" }); });
+    await act(async () => { fireEvent.keyDown(screen.getByRole("heading", { name: "Add a booking" }), { key: "ArrowLeft" }); });
+    expect(nav.push).not.toHaveBeenCalled();
+  });
+
+  it("keyboard: changing day with typed details asks first", async () => {
+    view();
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
+    typeName("Rami");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await act(async () => { fireEvent.keyDown(document.body, { key: "ArrowRight" }); });
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(nav.push).not.toHaveBeenCalled();
+  });
+});
