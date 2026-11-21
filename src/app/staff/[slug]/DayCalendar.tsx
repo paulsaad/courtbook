@@ -2,24 +2,29 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { bookingDate, clubLocalToUtc, dayBounds, hhmm, moveTarget, nextDayStart, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
 import { blockErrorText, friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
 import { blockEndOptions, blockStartOptions, bookingSlotOptions, minToHhmm, pickSlots, type Busy } from "./durations";
-import { useDialog, useIsDesktop } from "@/components/useDialog";
+import { DESKTOP_QUERY, useDialog, useIsDesktop } from "@/components/useDialog";
 import { matchBookings, readPrefs, writePrefs } from "./findBooking";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string>;
   /** the address named a view or sport (then it is used as is, and remembered on desktop) */
-  explicit?: boolean };
+  explicit?: boolean;
+  /** Courts view: the time to show and focus on arrival (from the All courts week, Phase I-2c) */
+  focusTime?: string | null };
 
 export type StaffView = "now" | "grid" | "week" | "list";
 /** One active court's state at this moment: busy by a booking, an unexpired hold or a block.
  *  free_at follows the chain of back-to-back bookings and blocks to when the court is really free. */
 type FreeNow = { court_id: string; court_name: string; sport: string; busy: boolean; free_at: string | null };
+/** All courts week (Phase I-2c): only what decides whether a court is taken. No names, no phones. */
+type Taken = { court_id: string; start_at: string; end_at: string; status?: string; hold_expires_at?: string | null };
 /** A past customer of this club. Name and phone only — never a player account. */
 type Guest = { name: string; phone: string | null; last_at: string };
 
@@ -54,7 +59,7 @@ async function withContacts(
   })) as unknown as Booking[];
 }
 
-export default function DayCalendar({ club, courts: allCourts, bookings: initialBookings, blocks: initialBlocks, date, view, sport, court: courtParam, loadFailed, sportNames, explicit = false }: Props) {
+export default function DayCalendar({ club, courts: allCourts, bookings: initialBookings, blocks: initialBlocks, date, view, sport, court: courtParam, loadFailed, sportNames, explicit = false, focusTime = null }: Props) {
   // multi-sport clubs get a sport filter; single-sport clubs never see it
   const sports = [...new Set(allCourts.map((c) => c.sport))];
   const courts = sport && sports.includes(sport) ? allCourts.filter((c) => c.sport === sport) : allCourts;
@@ -92,7 +97,12 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const gridRef = useRef<HTMLDivElement>(null);
   const weekRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const [cell, setCell] = useState<{ c: number; r: number } | null>(null);
+  // arriving from the All courts week: start on that time (first court)
+  const [cell, setCell] = useState<{ c: number; r: number } | null>(() => {
+    if (view !== "grid" || !focusTime) return null;
+    const r = (toMin(focusTime) - toMin(club.open_time)) / club.slot_minutes;
+    return Number.isInteger(r) && r >= 0 ? { c: 0, r } : null;
+  });
   const focusCellNext = useRef(false);
   const [find, setFind] = useState("");
   // the booking or block whose details are shown, and the row they are shown beside (pointer or keyboard)
@@ -106,6 +116,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const [showLater, setShowLater] = useState(false);
   const [commonMins, setCommonMins] = useState<number | null>(null);
   const [week, setWeek] = useState<{ key: string; bookings: Booking[]; blocks: Block[] } | null>(null);
+  const [avail, setAvail] = useState<{ key: string; bookings: Taken[]; blocks: Taken[] } | null>(null);
   const [refresh, setRefresh] = useState(0);
   // A read that failed leaves the grid showing whatever it had, so occupied slots could look free.
   // The day and the week are verified separately: one succeeding says nothing about the other, and
@@ -119,14 +130,33 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   // in flight — so only the newest request may touch state.
   const dayReq = useRef(0);
 
-  // week view shows one court at a time: seven columns is all a phone has room for
-  const weekCourt = courts.find((c) => c.id === courtParam) ?? courts[0] ?? null;
+  // week view shows one court at a time: seven columns is all a phone has room for. Desktop also has
+  // "All courts" (Phase I-2c): how many courts of the shown sport are free at each time.
+  const weekAll = view === "week" && courtParam === "all" && isDesktop;
+  const weekCourt = weekAll ? null : courts.find((c) => c.id === courtParam) ?? courts[0] ?? null;
+  const courtKey = courts.map((c) => c.id).join(",");
   const wkStart = weekStart(date);
   const weekDays = Array.from({ length: 7 }, (_, i) => shiftDate(wkStart, i));
+  // Entering All courts, or another week or set of courts there, starts with nothing: counts kept from an earlier
+  // visit are dropped while rendering, so not even the first frame shows unverified counts (review). Only a read
+  // made for this visit fills them (a quiet automatic refresh within the visit keeps them, as the day view does).
+  const allKey = weekAll ? `${wkStart}|all|${courtKey}` : null;
+  const [allVisit, setAllVisit] = useState<string | null>(null);
+  if (allKey !== allVisit) {
+    setAllVisit(allKey);
+    if (allKey) setAvail(null);
+  }
 
   // the sport filter must narrow the bookings too, not just which courts are drawn
   const shownCourtIds = new Set(courts.map((c) => c.id));
   const shownBookings = bookings.filter((b) => b.court_id && shownCourtIds.has(b.court_id));
+  const shownBlocks = blocks.filter((k) => shownCourtIds.has(k.court_id));
+  // List and Print (Phase I-2c): bookings and blocks of the shown courts, in time order, then court order
+  const courtOrder = new Map(courts.map((c, i) => [c.id, i] as const));
+  const listRows = [
+    ...shownBookings.map((b) => ({ kind: "booking" as const, b, at: b.start_at, court: b.court_id! })),
+    ...shownBlocks.map((k) => ({ kind: "block" as const, k, at: k.start_at, court: k.court_id })),
+  ].sort((x, y) => Date.parse(x.at) - Date.parse(y.at) || (courtOrder.get(x.court) ?? 0) - (courtOrder.get(y.court) ?? 0));
 
   const times = slotTimes(club.open_time, club.close_time, club.slot_minutes);
   const openMin = toMin(club.open_time);
@@ -199,6 +229,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   // week view: one query for the whole week, keyed so a stale answer can never be shown
   useEffect(() => {
     if (view !== "week" || !weekCourt) return;
+    // an All courts address on a desktop: the first render does not know the width yet; skip the court read
+    if (courtParam === "all" && typeof window.matchMedia === "function" && window.matchMedia(DESKTOP_QUERY).matches) return;
     const key = `${wkStart}|${weekCourt.id}`;
     let alive = true;
     const quiet = weekQuiet.current;
@@ -226,7 +258,39 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
       setLastUpdated(formatInTimeZone(new Date(), club.timezone, "HH:mm"));
     })();
     return () => { alive = false; };
-  }, [view, club.id, club.timezone, wkStart, weekCourt, refresh]);
+  }, [view, club.id, club.timezone, wkStart, weekCourt, courtParam, refresh]);
+
+  // All courts week (Phase I-2c): one read of what is taken on the shown courts for the week — confirmed
+  // bookings, unexpired holds and blocks; start and end only, no names or phones. Keyed like the week above.
+  useEffect(() => {
+    if (!weekAll || !courtKey) return;
+    const key = `${wkStart}|all|${courtKey}`;
+    let alive = true;
+    const quiet = weekQuiet.current;
+    weekQuiet.current = false;
+    (async () => {
+      if (!quiet) setWeekLoading(true);
+      const supabase = createClient();
+      const from = dayBounds(wkStart, club.timezone).dayStart;
+      const to = dayBounds(shiftDate(wkStart, 6), club.timezone).dayEnd;
+      const ids = courtKey.split(",");
+      const [{ data: b, error: eb }, { data: k, error: ek }] = await Promise.all([
+        supabase.from("bookings").select("court_id, start_at, end_at, status, hold_expires_at")
+          .eq("club_id", club.id).in("court_id", ids)
+          .or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`)
+          .lt("start_at", to).gt("end_at", from),
+        supabase.from("blocks").select("court_id, start_at, end_at")
+          .eq("club_id", club.id).in("court_id", ids).lt("start_at", to).gt("end_at", from),
+      ]);
+      if (!alive) return;
+      if (eb || ek) { setWeekError(true); setWeekLoading(false); return; }
+      setAvail({ key, bookings: (b ?? []) as Taken[], blocks: (k ?? []) as Taken[] });
+      setWeekError(false);
+      setWeekLoading(false);
+      setLastUpdated(formatInTimeZone(new Date(), club.timezone, "HH:mm"));
+    })();
+    return () => { alive = false; };
+  }, [weekAll, courtKey, club.id, club.timezone, wkStart, refresh]);
 
   // the duration this club books most often, so the walk-in sheet opens on it
   useEffect(() => {
@@ -365,6 +429,28 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     el?.focus();
   }, [sheet]);   // eslint-disable-line react-hooks/exhaustive-deps -- only when the panel opens or closes
 
+  // Arriving from the All courts week (Phase I-2c): show that time and put the keyboard on it (first court). The
+  // calendar stays mounted when only the view changes (same day), so this follows the address: a new arrival is
+  // noticed while rendering (React's "adjust state when a prop changes"), then focused once after it is drawn.
+  const arrivalKey = view === "grid" && focusTime ? `${date}|${focusTime}` : null;
+  const arrivalRow = (t: string | null) => {
+    if (!t) return null;
+    const r = (toMin(t) - openMin) / club.slot_minutes;
+    return Number.isInteger(r) && r >= 0 && r < times.length ? r : null;
+  };
+  const [arrival, setArrival] = useState(() => ({ key: arrivalKey, row: arrivalKey ? arrivalRow(focusTime) : null }));
+  if (arrival.key !== arrivalKey) {
+    const r = arrivalKey ? arrivalRow(focusTime) : null;
+    setArrival({ key: arrivalKey, row: r });
+  }
+  const arrived = useRef<string | null>(null);
+  useEffect(() => {
+    if (arrival.row === null || !arrival.key || arrived.current === arrival.key || !courts[0]) return;
+    arrived.current = arrival.key;
+    gridRef.current?.querySelector<HTMLElement>(`[data-cell="${courts[0].id}:${arrival.row}"]`)?.scrollIntoView?.({ block: "center" });
+    (cellElement(courts[0].id, arrival.row) ?? gridRef.current)?.focus({ preventScroll: true });
+  }, [arrival]);   // eslint-disable-line react-hooks/exhaustive-deps -- once per arrival
+
   // Find a booking (Phase I-2b): only the bookings of this day already on screen; never a new read.
   const found = view === "grid" || view === "list" ? matchBookings(shownBookings, find) : [];
   const foundIds = new Set(found.map((b) => b.id));
@@ -377,7 +463,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
 
   const q = (d: string, v: string, sp: string | null, ct?: string | null) =>
     `/staff/${club.slug}?date=${d}&view=${v}${sp ? `&sport=${sp}` : ""}${ct ? `&court=${ct}` : ""}`;
-  const nav = (d: string) => q(d, view, sport, view === "week" ? weekCourt?.id : null);
+  const nav = (d: string) => q(d, view, sport, view === "week" ? (weekAll ? "all" : weekCourt?.id) : null);
 
   // Remembered view and sport filter (desktop only, this browser). An address that names a view or sport wins
   // and is remembered; a plain address opens on what was used last.
@@ -535,7 +621,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
           {view === "week" ? (
             <div className="leading-tight">
               <div className="text-2xl font-semibold tracking-tight">Week of {formatInTimeZone(clubLocalToUtc(wkStart, "12:00", club.timezone), club.timezone, "d MMM")}</div>
-              <div className="text-sm text-muted">{weekCourt?.name ?? "No courts"}</div>
+              <div className="text-sm text-muted">{weekAll ? `All ${sport ? `${sportNames[sport] ?? sport} ` : ""}courts` : weekCourt?.name ?? "No courts"}</div>
             </div>
           ) : (
             <div className="flex items-end gap-3">
@@ -572,9 +658,22 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                 onChange={(e) => { const d = e.target.value; if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d !== date && confirmDiscard()) { addDirty.current = false; router.push(nav(d)); } }}
                 className="h-9 rounded-lg border border-grid bg-white px-2 text-sm text-ink" />
             </label>
+            {(view === "grid" || view === "list") && (
+              <button type="button" onClick={() => window.print()}
+                className="hidden h-9 items-center rounded-lg border border-grid bg-white px-3 text-sm text-ink focus-visible:outline-2 focus-visible:outline-turf lg:inline-flex">Print day</button>
+            )}
             {lastUpdated && <span className="hidden lg:inline" aria-live="polite">Updated {lastUpdated}</span>}
-            <span className="flex items-center gap-1"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-turf" />app</span>
-            <span className="flex items-center gap-1"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-sand" />desk</span>
+            {/* the colour key; desktop explains every state drawn (Phase I-2c), phones keep the short key */}
+            {!weekAll && (
+              <span className="flex items-center gap-3 lg:text-[13px]">
+                <span className="flex items-center gap-1"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-turf" />app</span>
+                <span className="flex items-center gap-1"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-sand" />desk</span>
+                <span className="hidden items-center gap-1 lg:flex"><i className="inline-block h-2.5 w-2.5 rounded-sm border border-dashed border-turf bg-white" />being paid</span>
+                <span className="hidden items-center gap-1 lg:flex"><i className="hatch inline-block h-2.5 w-2.5 rounded-sm border border-grid bg-slate-soft" />blocked</span>
+                {view !== "list" && <span className="hidden items-center gap-1 lg:flex"><i className={`inline-block h-2.5 w-2.5 rounded-sm border border-grid ${PAST_BG}`} />past</span>}
+                {sheet?.kind === "add" && <span className="hidden items-center gap-1 lg:flex"><i className="inline-block h-2.5 w-2.5 rounded-sm border border-dashed border-draft bg-draft-soft" />not saved</span>}
+              </span>
+            )}
           </div>
         </div>
         {sports.length > 1 && (
@@ -587,6 +686,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         )}
         {view === "week" && courts.length > 1 && (
           <div className="flex gap-1.5 overflow-x-auto px-4 pb-3">
+            <Link href={q(date, "week", sport, "all")} className={`hidden min-h-9 shrink-0 rounded-full border px-3 text-xs leading-9 lg:block ${weekAll ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>All courts</Link>
             {courts.map((c) => (
               <Link key={c.id} href={q(date, "week", sport, c.id)} className={`min-h-9 shrink-0 rounded-full border px-3 text-xs leading-9 ${weekCourt?.id === c.id ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>{c.name}</Link>
             ))}
@@ -603,7 +703,16 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
       )}
 
       <div className="contents lg:block lg:min-h-0 lg:flex-1 lg:overflow-auto">
-      {view === "week" ? (
+      {view === "week" && weekAll ? (
+        <AllCourtsWeek
+          club={club} courts={courts} days={weekDays} times={times}
+          data={avail && avail.key === `${wkStart}|all|${courtKey}` && !weekError && !weekLoading ? avail : null}
+          failed={weekError}
+          cellHref={(d, t) => `${q(d, "grid", sport)}&time=${t}`}
+          dayHref={(d) => q(d, "grid", sport)}
+          rootRef={weekRef}
+        />
+      ) : view === "week" ? (
         <WeekGrid
           club={club} court={weekCourt} days={weekDays} times={times} today={todayIn(club.timezone)}
           data={week && week.key === `${wkStart}|${weekCourt?.id}` ? week : null}
@@ -656,7 +765,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                         aria-hidden={covered ? true : undefined}
                         tabIndex={!covered && active.c === ci && active.r === i ? 0 : -1}
                         aria-label={`Add booking ${c.name} ${t}`}
-                        className={`absolute inset-x-0 border-t first:border-t-0 active:bg-slate-soft focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf ${i % labelEvery === 0 ? "border-grid" : "border-grid/50 border-dashed"}`}
+                        data-past={isToday && nowMin !== null && openMin + (i + 1) * club.slot_minutes <= nowMin ? "true" : undefined}
+                        className={`absolute inset-x-0 border-t first:border-t-0 active:bg-slate-soft focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf ${i % labelEvery === 0 ? "border-grid" : "border-grid/50 border-dashed"} ${isToday && nowMin !== null && openMin + (i + 1) * club.slot_minutes <= nowMin ? PAST_BG_LG : ""}`}
                         style={{ top: i * ROW_PX, height: ROW_PX }}
                       />
                     );
@@ -763,24 +873,42 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
           </div>
         </div>
       ) : (
+        <>
+        {/* desktop (Phase I-2c): what the list holds, blocks included */}
+        <p data-testid="list-count" className="mx-4 mb-2 hidden text-sm text-muted lg:block">{dayCount(shownBookings.length, shownBlocks.length)}</p>
         <ul className="mx-4 mb-24 divide-y divide-grid rounded-xl border border-grid bg-white">
           {shownBookings.length === 0 && <li className="p-8 text-center text-muted">No bookings this day. Tap a court slot in Courts view to add one.</li>}
-          {shownBookings.map((b) => (
-            <li key={b.id}>
-              <button onClick={() => openSheet({ kind: "booking", booking: b })} className="flex w-full items-center gap-3 px-4 py-3 text-left">
-                <span className={`h-10 w-1 rounded ${b.source === "app" ? "bg-turf" : "bg-sand"}`} />
+          {listRows.map((r) => r.kind === "block" ? (
+            <li key={r.k.id} className="hidden lg:block">
+              <button onClick={() => openSheet({ kind: "block", block: r.k })} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+                <span className="hatch h-10 w-1 rounded bg-slate-soft" />
                 <div className="w-28 shrink-0">
-                  <div className="font-medium">{hhmm(b.start_at, club.timezone)}–{hhmm(b.end_at, club.timezone)}</div>
-                  <div className="text-sm text-muted">{courtName(b.court_id)}</div>
+                  <div className="font-medium">{hhmm(r.k.start_at, club.timezone)}–{hhmm(r.k.end_at, club.timezone)}</div>
+                  <div className="text-sm text-muted">{courtName(r.k.court_id)}</div>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium">{b.guest_name ?? b.player_name ?? "Player"}</div>
-                  {b.guest_phone && <div className="text-sm text-muted">{b.guest_phone}</div>}
+                  <div className="truncate font-medium">Blocked{r.k.reason ? `: ${r.k.reason}` : ""}</div>
                 </div>
+              </button>
+            </li>
+          ) : (
+            <li key={r.b.id}>
+              <button onClick={() => openSheet({ kind: "booking", booking: r.b })} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+                <span className={`h-10 w-1 rounded ${r.b.source === "app" ? "bg-turf" : "bg-sand"}`} />
+                <div className="w-28 shrink-0">
+                  <div className="font-medium">{hhmm(r.b.start_at, club.timezone)}–{hhmm(r.b.end_at, club.timezone)}</div>
+                  <div className="text-sm text-muted">{courtName(r.b.court_id)}</div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">{r.b.guest_name ?? r.b.player_name ?? "Player"}</div>
+                  {r.b.guest_phone && <div className="text-sm text-muted">{r.b.guest_phone}</div>}
+                </div>
+                <span className="hidden shrink-0 text-sm text-muted lg:inline">{bookingType(r.b)}</span>
               </button>
             </li>
           ))}
         </ul>
+        </>
       )}
       </div>
       </div>
@@ -823,9 +951,19 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
           )}
         </div>
       )}
+      {isDesktop && (view === "grid" || view === "list") && typeof document !== "undefined" && createPortal(
+        <PrintDay club={club} title={`${dayName} ${dayNum} ${monthName}`} sport={sport ? sportNames[sport] ?? sport : null}
+          rows={listRows} courtName={courtName} bookings={shownBookings.length} blocks={shownBlocks.length} />,
+        document.body,
+      )}
     </main>
   );
 }
+
+/** Times that have ended today (Phase I-2c, desktop): a subtle flat grey, unlike a block's hatching; bookings stay as
+ *  drawn. Earlier days and later times stay white (Paul, 21 Nov: a grey week looked disabled). */
+const PAST_BG = "bg-[#eef0ed]";
+const PAST_BG_LG = "lg:bg-[#eef0ed]";
 
 const input = "rounded-xl border border-grid bg-paper px-4 py-3 text-base outline-none focus:border-action focus:ring-2 focus:ring-action/20";
 /** Dropdowns: white with a clear border and a chevron when usable; a disabled one is grey with muted text (globals.css .select-field). */
@@ -838,6 +976,60 @@ const backLink = "py-2 text-sm text-muted";
 /** Enter in a text field never saves a booking or closes courts: only the button does (Phase I-2a). */
 function noEnterSubmit(e: React.KeyboardEvent<HTMLFormElement>) {
   if (e.key === "Enter" && e.target instanceof HTMLInputElement && e.target.type !== "submit") e.preventDefault();
+}
+
+/** The kind of booking, in words (never colour alone). */
+function bookingType(b: Booking) {
+  return b.status === "pending" ? "Being paid" : b.source === "app" ? "App" : "Desk";
+}
+function plural(n: number, one: string) {
+  return `${n} ${one}${n === 1 ? "" : "s"}`;
+}
+/** "3 bookings", "3 bookings, 1 block", "No bookings". */
+function dayCount(bookings: number, blocks: number) {
+  return `${bookings ? plural(bookings, "booking") : "No bookings"}${blocks ? `, ${plural(blocks, "block")}` : ""}`;
+}
+
+/** Print the day (Phase I-2c, desktop): the browser's own Print with a plain sheet of the day shown — time, court,
+ *  customer, type and blocks, and a column to tick arrivals. Never phone numbers. On screen it is not drawn. */
+function PrintDay({ club, title, sport, rows, courtName, bookings, blocks }: {
+  club: Club; title: string; sport: string | null; bookings: number; blocks: number;
+  rows: ({ kind: "booking"; b: Booking } | { kind: "block"; k: Block })[];
+  courtName: (id: string | null) => string;
+}) {
+  const range = (a: string, b: string) => `${hhmm(a, club.timezone)}–${hhmm(b, club.timezone)}`;
+  return (
+    <div id="print-day" data-testid="print-day" aria-hidden="true" className="hidden text-black print:block">
+      <h1 className="text-xl font-semibold">{club.name} — {title}</h1>
+      <p className="mb-3 text-sm">{sport ? `${sport} courts · ` : ""}{dayCount(bookings, blocks)} · printed {formatInTimeZone(new Date(), club.timezone, "d MMM HH:mm")}</p>
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr className="border-b-2 border-black text-left">
+            <th className="py-1 pr-3">Time</th><th className="py-1 pr-3">Court</th><th className="py-1 pr-3">Customer</th><th className="py-1 pr-3">Type</th><th className="w-12 py-1">Here</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && <tr><td colSpan={5} className="py-2">No bookings.</td></tr>}
+          {rows.map((r) => r.kind === "block" ? (
+            <tr key={r.k.id} className="border-b border-gray-400">
+              <td className="py-1 pr-3 tabular-nums">{range(r.k.start_at, r.k.end_at)}</td>
+              <td className="py-1 pr-3">{courtName(r.k.court_id)}</td>
+              <td className="py-1 pr-3 italic" colSpan={2}>Blocked{r.k.reason ? `: ${r.k.reason}` : ""}</td>
+              <td className="py-1" />
+            </tr>
+          ) : (
+            <tr key={r.b.id} className="border-b border-gray-400">
+              <td className="py-1 pr-3 tabular-nums">{range(r.b.start_at, r.b.end_at)}</td>
+              <td className="py-1 pr-3">{courtName(r.b.court_id)}</td>
+              <td className="py-1 pr-3">{r.b.guest_name ?? r.b.player_name ?? "Player"}</td>
+              <td className="py-1 pr-3">{bookingType(r.b)}</td>
+              <td className="py-1">☐</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function fmtDur(m: number) {
@@ -895,54 +1087,22 @@ function FindBooking({ inputRef, value, onChange, results, courtName, tz, onOpen
   );
 }
 
-/** One court, seven days. Days are columns because seven of them fit a phone and five courts do not.
- *  Time labels stay in a sticky gutter, a cell opens the usual sheets, and a column header opens that
- *  day in the Courts view, which is where names and controls are readable. */
-function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOpenBooking, onOpenBlock, onAdd, draft, rootRef }: {
-  club: Club; court: Court | null; days: string[]; times: string[]; today: string;
-  /** the grid element: focus comes back here when nothing better is available */
-  rootRef?: React.RefObject<HTMLDivElement | null>;
-  /** the open add form's choice on this court, not saved yet */
-  draft?: (Selection & { day: string }) | null;
-  data: { bookings: Booking[]; blocks: Block[] } | null;
-  canAdd: boolean;
-  dayHref: (d: string) => string;
-  onOpenBooking: (b: Booking, day: string, time: string) => void;
-  onOpenBlock: (b: Block, day: string, time: string) => void;
-  onAdd: (date: string, time: string) => void;
-}) {
-  // keyboard (Phase I-2b): one Tab stop; ↑/↓ times, ←/→ days, Home/End; Enter opens the cell
+/** Week keyboard (Phase I-2b): one Tab stop; ↑/↓ times, ←/→ days, Home/End; Enter is the focused cell's own key.
+ *  Shared by the one-court week and the All courts week (Phase I-2c). */
+function useWeekKeys(days: string[], times: string[], today: string, rootRef?: React.RefObject<HTMLDivElement | null>) {
   const [wc, setWc] = useState({ d: Math.max(0, days.indexOf(today)), r: 0 });
   const focusNext = useRef(false);
   useEffect(() => {
     if (!focusNext.current) return;
     focusNext.current = false;
-    rootRef?.current?.querySelector<HTMLButtonElement>(`[data-week-cell="${days[wc.d]}|${times[wc.r]}"]`)?.focus();
+    rootRef?.current?.querySelector<HTMLElement>(`[data-week-cell="${days[wc.d]}|${times[wc.r]}"]`)?.focus();
   });
-  if (!court) return <p className="px-4 py-10 text-center text-sm text-muted">No active courts for this sport.</p>;
-  const loading = data === null;
-  const rowPx = club.slot_minutes <= 30 ? 34 : 48;
-  const labelEvery = club.slot_minutes <= 30 ? 2 : 1;
-
-  // what sits on this court at this day and time, if anything
-  const at = (d: string, t: string) => {
-    if (!data) return null;
-    const ms = clubLocalToUtc(d, t, club.timezone).getTime();
-    const b = data.bookings.find((x) => Date.parse(x.start_at) <= ms && Date.parse(x.end_at) > ms);
-    if (b) return { kind: "booking" as const, b };
-    const k = data.blocks.find((x) => Date.parse(x.start_at) <= ms && Date.parse(x.end_at) > ms);
-    return k ? { kind: "block" as const, k } : null;
-  };
-  const isStart = (d: string, t: string, startAt: string) =>
-    Math.abs(clubLocalToUtc(d, t, club.timezone).getTime() - Date.parse(startAt)) < 60_000;
-  const busyCount = (d: string) => times.filter((t) => at(d, t) !== null).length;
   const isActive = (d: string, t: string) => days[wc.d] === d && times[wc.r] === t;
   const cellProps = (d: string, t: string) => ({
     "data-week-cell": `${d}|${t}`,
     tabIndex: isActive(d, t) ? 0 : -1,
     onFocus: () => { const n = { d: days.indexOf(d), r: times.indexOf(t) }; if (n.d !== wc.d || n.r !== wc.r) setWc(n); },
   });
-  const activeFree = !at(days[wc.d], times[wc.r]);
   function onKey(e: React.KeyboardEvent<HTMLDivElement>) {
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
@@ -959,60 +1119,177 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
     focusNext.current = true;
     setWc({ d, r });
   }
+  return { wc, isActive, cellProps, onKey };
+}
+
+/** The club's today and current minute, ticking every minute (Week views: past shading and the now line). */
+function useClubClock(tz: string) {
+  const [clock, setClock] = useState<{ today: string; nowMin: number } | null>(null);
+  useEffect(() => {
+    const tick = () => setClock({ today: todayIn(tz), nowMin: toMin(formatInTimeZone(new Date(nowMs()), tz, "HH:mm")) });
+    tick();
+    const id = setInterval(tick, 60_000);
+    return () => clearInterval(id);
+  }, [tz]);
+  return clock;
+}
+
+const dayLabelOf = (d: string, tz: string) => formatInTimeZone(clubLocalToUtc(d, "12:00", tz), tz, "EEE d MMM");
+
+/** The red now line over today's column (desktop). Above the drawn bookings, below a focused cell's outline. */
+function WeekNowLine({ clock, days, times, slot, rowPx }: { clock: { today: string; nowMin: number } | null; days: string[]; times: string[]; slot: number; rowPx: number }) {
+  const di = clock ? days.indexOf(clock.today) : -1;
+  if (!clock || di < 0) return null;
+  const open = toMin(times[0]);
+  if (clock.nowMin < open || clock.nowMin > open + times.length * slot) return null;
+  return (
+    <div aria-hidden="true" data-testid="week-now" style={{ gridColumn: di + 2, gridRow: `2 / ${times.length + 2}` }} className="pointer-events-none relative z-[4] hidden lg:block">
+      <div className="absolute inset-x-0 border-t-2 border-danger" style={{ top: ((clock.nowMin - open) / slot) * rowPx }} />
+    </div>
+  );
+}
+
+/** One court, seven days. Days are columns because seven of them fit a phone and five courts do not.
+ *  Time labels stay in a sticky gutter, a cell opens the usual sheets, and a column header opens that
+ *  day in the Courts view. Desktop (Phase I-2c): each booking or block is also drawn as one block over exactly
+ *  the cells it covers (computed from those cells), with name, time and type; the cells underneath stay the
+ *  keyboard and click targets, unchanged since I-2b. Every grid item is placed explicitly so the drawn blocks
+ *  can sit on top of the cells. */
+function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOpenBooking, onOpenBlock, onAdd, draft, rootRef }: {
+  club: Club; court: Court | null; days: string[]; times: string[]; today: string;
+  /** the grid element: focus comes back here when nothing better is available */
+  rootRef?: React.RefObject<HTMLDivElement | null>;
+  /** the open add form's choice on this court, not saved yet */
+  draft?: (Selection & { day: string }) | null;
+  data: { bookings: Booking[]; blocks: Block[] } | null;
+  canAdd: boolean;
+  dayHref: (d: string) => string;
+  onOpenBooking: (b: Booking, day: string, time: string) => void;
+  onOpenBlock: (b: Block, day: string, time: string) => void;
+  onAdd: (date: string, time: string) => void;
+}) {
+  const { wc, cellProps, onKey } = useWeekKeys(days, times, today, rootRef);
+  const clock = useClubClock(club.timezone);
+  // the booking or block whose details are shown, at the cell pointed at or focused (desktop)
+  const [peek, setPeek] = useState<{ d: number; r: number } | null>(null);
+  const tz = club.timezone;
+  // what sits on this court at each day and time, worked out once per week read (not on every draw). The parent
+  // rebuilds the day and time lists on every draw, so the memo keys on their contents.
+  const daysKey = days.join(","), timesKey = times.join(",");
+  const grid = useMemo(() => daysKey.split(",").map((d) => timesKey.split(",").map((t) => {
+    const ms = clubLocalToUtc(d, t, tz).getTime();
+    if (!data) return { ms, cell: null };
+    const b = data.bookings.find((x) => Date.parse(x.start_at) <= ms && Date.parse(x.end_at) > ms);
+    if (b) return { ms, cell: { kind: "booking" as const, b } };
+    const k = data.blocks.find((x) => Date.parse(x.start_at) <= ms && Date.parse(x.end_at) > ms);
+    return { ms, cell: k ? { kind: "block" as const, k } : null };
+  })), [data, daysKey, timesKey, tz]);
+  const dayLabels = useMemo(() => daysKey.split(",").map((d) => dayLabelOf(d, tz)), [daysKey, tz]);
+  if (!court) return <p className="px-4 py-10 text-center text-sm text-muted">No active courts for this sport.</p>;
+  const loading = data === null;
+  const rowPx = club.slot_minutes <= 30 ? 34 : 48;
+  const labelEvery = club.slot_minutes <= 30 ? 2 : 1;
+
+  const at = (d: string, t: string) => grid[days.indexOf(d)]?.[times.indexOf(t)]?.cell ?? null;
+  type Cell = NonNullable<ReturnType<typeof at>>;
+  const cellId = (c: Cell) => (c.kind === "booking" ? c.b.id : c.k.id);
+  const activeFree = !at(days[wc.d], times[wc.r]);
+  // only today's elapsed times are shaded; earlier days keep a white grid
+  const ended = (d: string, i: number) => !!clock && d === clock.today && toMin(times[i]) + club.slot_minutes <= clock.nowMin;
+  const range = (c: Cell) => c.kind === "booking" ? `${hhmm(c.b.start_at, tz)}–${hhmm(c.b.end_at, tz)}` : `${hhmm(c.k.start_at, tz)}–${hhmm(c.k.end_at, tz)}`;
+  const who = (b: Booking) => b.guest_name ?? b.player_name ?? "Player";
+  const kindWord = (b: Booking) => (b.status === "pending" ? "being paid" : b.source === "app" ? "app booking" : "desk booking");
+
+  // the drawn blocks: runs of consecutive cells of one day that belong to the same booking or block
+  type Seg = { di: number; r0: number; r1: number; c: Cell };
+  const segs: Seg[] = [];
+  for (let di = 0; di < days.length; di++) {
+    let cur: Seg | null = null;
+    for (let r = 0; r < times.length; r++) {
+      const c = grid[di][r].cell;
+      if (cur && c && cellId(cur.c) === cellId(c)) { cur.r1 = r + 1; continue; }
+      if (cur) segs.push(cur);
+      cur = c ? { di, r0: r, r1: r + 1, c } : null;
+    }
+    if (cur) segs.push(cur);
+  }
+  const bookingsOn = (di: number) => new Set(segs.filter((g) => g.di === di && g.c.kind === "booking").map((g) => cellId(g.c))).size;
+  const closedOn = (di: number) => segs.some((g) => g.di === di && g.c.kind === "block" && g.r0 === 0 && g.r1 === times.length);
+  const peekCell = peek ? at(days[peek.d], times[peek.r]) : null;
+  const peekProps = (di: number, r: number) => ({
+    onMouseEnter: () => setPeek({ d: di, r }),
+    onMouseLeave: () => setPeek((p) => (p?.d === di && p.r === r ? null : p)),
+    onBlur: () => setPeek((p) => (p?.d === di && p.r === r ? null : p)),
+  });
 
   return (
-    <div className={`mb-24 overflow-x-auto ${loading ? "pointer-events-none opacity-50" : ""}`}>
+    <div className={`mb-24 overflow-x-auto lg:overflow-visible ${loading ? "pointer-events-none opacity-50" : ""}`}>
       <div className="min-w-[340px] px-2">
         <span id="week-keys-hint" className="sr-only">Arrow keys move between times and days; Enter opens the free time, booking or block.</span>
         <div ref={rootRef} role="group" aria-label={`Week, ${court.name}`} aria-describedby="week-keys-hint" onKeyDown={onKey}
              tabIndex={activeFree && !canAdd ? 0 : -1}
              className="grid outline-none focus-visible:ring-2 focus-visible:ring-turf" style={{ gridTemplateColumns: `3rem repeat(7, minmax(2.5rem, 1fr))` }}>
-          <div className="sticky left-0 z-10 bg-paper" />
-          {days.map((d) => (
-            <Link key={d} href={dayHref(d)} className={`border-b border-grid pb-1 text-center text-xs leading-tight ${d === today ? "font-semibold text-turf" : "text-muted"}`}>
-              <div>{formatInTimeZone(clubLocalToUtc(d, "12:00", club.timezone), club.timezone, "EEE")}</div>
-              <div className="text-sm text-ink">{formatInTimeZone(clubLocalToUtc(d, "12:00", club.timezone), club.timezone, "d")}</div>
-              <div className="tabular-nums">{loading ? "·" : `${busyCount(d)}/${times.length}`}</div>
+          <div className="sticky left-0 z-10 bg-paper lg:top-0 lg:z-30" style={{ gridColumn: 1, gridRow: 1 }} />
+          {days.map((d, di) => (
+            <Link key={d} href={dayHref(d)} style={{ gridColumn: di + 2, gridRow: 1 }}
+                  className={`border-b border-grid pb-1 text-center text-xs leading-tight lg:sticky lg:top-0 lg:z-20 lg:px-2 lg:pt-1 lg:text-left ${d === today ? "font-semibold text-turf lg:bg-turf-soft" : "text-muted lg:bg-paper"}`}>
+              <div className="lg:hidden">
+                <div>{formatInTimeZone(clubLocalToUtc(d, "12:00", tz), tz, "EEE")}</div>
+                <div className="text-sm text-ink">{formatInTimeZone(clubLocalToUtc(d, "12:00", tz), tz, "d")}</div>
+                <div className="tabular-nums">{loading ? "·" : `${grid[di].filter((g) => g.cell !== null).length}/${times.length}`}</div>
+              </div>
+              <div className="hidden lg:block" data-testid="week-day-heading">
+                <div className="text-[15px] font-semibold text-ink">{dayLabels[di]}{d === today && <span className="ml-1.5 text-xs font-semibold text-turf">Today</span>}</div>
+                <div className="text-[13px] font-normal text-muted">{loading ? "·" : closedOn(di) ? "Closed" : dayCount(bookingsOn(di), 0)}</div>
+              </div>
             </Link>
           ))}
 
           {times.map((t, i) => (
             <div key={t} className="contents">
-              <div className="sticky left-0 z-10 bg-paper pr-1 text-right text-[11px] text-muted" style={{ height: rowPx }}>
+              <div className="sticky left-0 z-10 bg-paper pr-1 text-right text-[11px] text-muted lg:text-[13px]" style={{ height: rowPx, gridColumn: 1, gridRow: i + 2 }}>
                 {i % labelEvery === 0 ? t : ""}
               </div>
-              {days.map((d) => {
-                const cell = at(d, t);
+              {days.map((d, di) => {
+                const cell = grid[di][i].cell;
+                const place = { gridColumn: di + 2, gridRow: i + 2, height: rowPx };
                 if (!cell) {
                   // inside the open form's choice: drawn "not saved", still a free slot to tap
                   const m = toMin(t);
                   const inDraft = draft && draft.day === d && m >= draft.startMin && m < draft.endMin;
                   const head = inDraft && m === draft.startMin;
+                  const past = ended(d, i);
                   return (
                     <button key={d + t} {...cellProps(d, t)} onClick={() => onAdd(d, t)} disabled={!canAdd} aria-label={`Add a booking on ${d} at ${t}`}
-                            data-draft={inDraft ? "true" : undefined}
-                            className={`relative border-l focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf disabled:cursor-not-allowed ${inDraft ? "border-x-2 border-dashed border-draft bg-draft-soft" : "border-b border-grid/60 bg-white"} ${head ? "border-t-2" : ""} ${inDraft && m + club.slot_minutes === draft.endMin ? "border-b-2" : ""}`}
-                            style={{ height: rowPx }}>
+                            data-draft={inDraft ? "true" : undefined} data-past={past ? "true" : undefined}
+                            className={`relative border-l focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf disabled:cursor-not-allowed ${inDraft ? "border-x-2 border-dashed border-draft bg-draft-soft" : `border-b border-grid/60 bg-white ${past ? PAST_BG_LG : ""}`} ${head ? "border-t-2" : ""} ${inDraft && m + club.slot_minutes === draft.endMin ? "border-b-2" : ""}`}
+                            style={place}>
                       {head && <span aria-hidden="true" className="absolute inset-x-0 top-0.5 truncate px-0.5 text-[10px] font-semibold leading-tight text-draft">Not saved</span>}
                     </button>
                   );
                 }
                 if (cell.kind === "block") {
+                  const k = cell.k;
                   return (
-                    <button key={d + t} {...cellProps(d, t)} onClick={() => onOpenBlock(cell.k, d, t)} aria-label={`Blocked on ${d} at ${t}${cell.k.reason ? `: ${cell.k.reason}` : ""}`}
-                            className="border-b border-l border-grid/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf bg-[repeating-linear-gradient(45deg,#e7e5e4_0,#e7e5e4_3px,#fff_3px,#fff_6px)]" style={{ height: rowPx }} />
+                    <button key={d + t} {...cellProps(d, t)} {...peekProps(di, i)}
+                            onFocus={() => { cellProps(d, t).onFocus(); setPeek({ d: di, r: i }); }}
+                            onClick={() => onOpenBlock(k, d, t)}
+                            aria-label={`${k.reason ?? "Blocked"}, ${court.name}, ${dayLabels[di]}, ${range(cell)}, blocked`}
+                            className="relative border-b border-l border-grid/60 bg-[repeating-linear-gradient(45deg,#e7e5e4_0,#e7e5e4_3px,#fff_3px,#fff_6px)] focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf lg:bg-none" style={place} />
                   );
                 }
                 const b = cell.b;
-                const head = isStart(d, t, b.start_at);
+                const head = Math.abs(grid[di][i].ms - Date.parse(b.start_at)) < 60_000;
                 return (
-                  <button key={d + t} {...cellProps(d, t)} onClick={() => onOpenBooking(b, d, t)}
-                          aria-label={`${b.guest_name ?? b.player_name ?? "Player"} on ${d} at ${hhmm(b.start_at, club.timezone)}`}
-                          className={`relative border-l border-grid/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf ${head ? "border-t" : ""} ${b.status === "pending" ? "border-dashed bg-sand/40" : b.source === "app" ? "bg-turf-soft" : "bg-sand"}`}
-                          style={{ height: rowPx }}>
+                  <button key={d + t} {...cellProps(d, t)} {...peekProps(di, i)}
+                          onFocus={() => { cellProps(d, t).onFocus(); setPeek({ d: di, r: i }); }}
+                          onClick={() => onOpenBooking(b, d, t)}
+                          aria-label={`${who(b)}, ${court.name}, ${dayLabels[di]}, ${range(cell)}, ${kindWord(b)}`}
+                          className={`relative border-l border-grid/60 focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf lg:bg-transparent ${head ? "border-t" : ""} ${b.status === "pending" ? "border-dashed bg-sand/40" : b.source === "app" ? "bg-turf-soft" : "bg-sand"}`}
+                          style={place}>
                     {head && (
-                      <span className="absolute inset-x-0 top-0.5 truncate px-0.5 text-[10px] font-medium leading-tight">
-                        {b.status === "pending" ? "pay…" : (b.guest_name ?? b.player_name ?? "Player").split(" ")[0]}
+                      <span className="absolute inset-x-0 top-0.5 truncate px-0.5 text-[10px] font-medium leading-tight lg:hidden">
+                        {b.status === "pending" ? "pay…" : who(b).split(" ")[0]}
                       </span>
                     )}
                   </button>
@@ -1020,8 +1297,168 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
               })}
             </div>
           ))}
+
+          {/* desktop: each booking or block drawn once over exactly its cells; never takes clicks or focus */}
+          {segs.map((g) => {
+            const span = g.r1 - g.r0;
+            const c = g.c;
+            const tone = c.kind === "block" ? "hatch border border-grid bg-slate-soft text-muted"
+              : c.b.status === "pending" ? "border border-l-4 border-dashed border-turf bg-white"
+              : c.b.source === "app" ? "border-l-4 border-turf bg-turf-soft" : "border-l-4 border-sand bg-sand-soft";
+            const title = c.kind === "booking" ? who(c.b) : c.k.reason ?? "Blocked";
+            const type = c.kind === "booking" ? (c.b.status === "pending" ? "being paid" : c.b.source === "app" ? "app" : "desk") : "blocked";
+            return (
+              <div key={`${cellId(c)}|${g.di}`} aria-hidden="true" data-week-block={cellId(c)} data-rows={`${g.r0}-${g.r1}`}
+                   style={{ gridColumn: g.di + 2, gridRow: `${g.r0 + 2} / ${g.r1 + 2}` }}
+                   className={`pointer-events-none relative z-[3] mx-[3px] my-[2px] hidden overflow-hidden rounded-md px-1.5 py-0.5 text-left leading-tight lg:block ${tone}`}>
+                {span === 1 ? (
+                  <div className="truncate text-[13px]"><span className="font-medium text-ink">{title}</span> <span className="text-xs text-muted">{range(c)}</span></div>
+                ) : (
+                  <>
+                    {/* name, then time and type on lines of their own: a week column is narrow */}
+                    <div className={`text-[13px] font-medium text-ink ${span >= 3 ? "line-clamp-2" : "truncate"}`}>{title}</div>
+                    <div className="truncate text-xs text-muted tabular-nums">{range(c)}</div>
+                    <div className="truncate text-xs text-muted">{type}</div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+
+          <WeekNowLine clock={clock} days={days} times={times} slot={club.slot_minutes} rowPx={rowPx} />
+
+          {/* full details of the booking or block pointed at or focused (desktop; the label says it too) */}
+          {peek && peekCell && (
+            <div aria-hidden="true" style={{ gridColumn: peek.d + 2, gridRow: peek.r + 2 }} className="pointer-events-none relative z-30 hidden lg:block">
+              <div data-testid="week-peek" className={`absolute w-64 rounded-lg bg-ink px-3 py-2 text-sm text-white shadow-lg ${peek.r <= times.length - 4 ? "top-full mt-1" : "bottom-full mb-1"} ${peek.d >= 5 ? "right-0" : "left-0"}`}>
+                {peekCell.kind === "booking" ? (
+                  <>
+                    <div className="font-semibold">{who(peekCell.b)}</div>
+                    <div>{court.name} · {dayLabels[peek.d]} · {range(peekCell)}</div>
+                    <div>{peekCell.b.status === "pending" ? "Being paid" : peekCell.b.source === "app" ? "App booking" : "Desk booking"}</div>
+                    {(peekCell.b.contact_phone ?? peekCell.b.guest_phone) && <div>{peekCell.b.contact_phone ?? peekCell.b.guest_phone}</div>}
+                  </>
+                ) : (
+                  <>
+                    <div className="font-semibold">{peekCell.k.reason ?? "Blocked"}</div>
+                    <div>{court.name} · {dayLabels[peek.d]} · {range(peekCell)} · blocked</div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </div>
-        <p className="px-2 py-3 text-xs text-muted">Tap a booking for its details, or a day at the top to open that day court by court.</p>
+        <p className="px-2 py-3 text-xs text-muted">
+          <span className="lg:hidden">Tap a booking for its details, or a day at the top to open that day court by court.</span>
+          <span className="hidden lg:inline">Click a booking for its details (pointing at it shows them too), or a day heading to open that day court by court.</span>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** All courts week (Phase I-2c, desktop): for each time, how many courts of the shown sport are free — not taken by a
+ *  confirmed booking, an unexpired hold or a block. It says nothing about whether a longer booking fits, and the
+ *  database still decides when saving. A time opens that day in Courts at that time.
+ *  Fails safe (review): counts are shown only from a read that succeeded and is current — `data` is null while the
+ *  week is loading (a quiet automatic refresh excepted), after a failed read or refresh, and until a read succeeds.
+ *  Then no count is worked out or shown and no time can be followed; the keyboard still moves over the grid. */
+function AllCourtsWeek({ club, courts, days, times, data, failed = false, cellHref, dayHref, rootRef }: {
+  club: Club; courts: Court[]; days: string[]; times: string[];
+  /** a verified read for this week and these courts, else null */
+  data: { bookings: Taken[]; blocks: Taken[] } | null;
+  /** the last read failed (the page banner offers Retry) */
+  failed?: boolean;
+  cellHref: (d: string, t: string) => string;
+  dayHref: (d: string) => string;
+  rootRef?: React.RefObject<HTMLDivElement | null>;
+}) {
+  const tz = club.timezone;
+  const clock = useClubClock(tz);
+  const today = clock?.today ?? todayIn(tz);
+  const { cellProps, onKey } = useWeekKeys(days, times, today, rootRef);
+  // free courts at each day and time, worked out once per week read and minute (a hold counts only until it
+  // expires — checked against the clock, not only when the week was read)
+  const nowKey = clock ? `${clock.today}|${clock.nowMin}` : "";
+  const daysKey = days.join(","), timesKey = times.join(","), courtsKey = courts.map((c) => c.id).join(",");
+  const slot = club.slot_minutes;
+  const free = useMemo(() => {
+    if (!data) return null;                                  // nothing verified: no count, never "all free"
+    const now = nowMs();
+    const taken = new Map<string, [number, number][]>();
+    for (const r of [...data.bookings.filter((b) => b.status !== "pending" || (b.hold_expires_at && Date.parse(b.hold_expires_at) > now)), ...data.blocks]) {
+      const list = taken.get(r.court_id) ?? [];
+      list.push([Date.parse(r.start_at), Date.parse(r.end_at)]);
+      taken.set(r.court_id, list);
+    }
+    const ids = courtsKey.split(",");
+    return daysKey.split(",").map((d) => timesKey.split(",").map((t) => {
+      const s = clubLocalToUtc(d, t, tz).getTime(), e = s + slot * 60_000;
+      return ids.filter((id) => !(taken.get(id) ?? []).some(([a, b]) => a < e && b > s)).length;
+    }));
+  }, [data, daysKey, timesKey, courtsKey, tz, slot, nowKey]);   // eslint-disable-line react-hooks/exhaustive-deps -- nowKey: holds expire with the clock
+  const dayLabels = useMemo(() => daysKey.split(",").map((d) => dayLabelOf(d, tz)), [daysKey, tz]);
+  if (!courts.length) return <p className="px-4 py-10 text-center text-sm text-muted">No active courts for this sport.</p>;
+  const rowPx = club.slot_minutes <= 30 ? 34 : 48;
+  const labelEvery = club.slot_minutes <= 30 ? 2 : 1;
+  const total = courts.length;
+  // only today's elapsed times are shaded; earlier days keep a white grid
+  const ended = (d: string, i: number) => !!clock && d === clock.today && toMin(times[i]) + club.slot_minutes <= clock.nowMin;
+  const tone = (n: number) => n === total ? "bg-white text-turf" : n === 0 ? "bg-[#cfd4ce] font-semibold text-ink" : n / total >= 0.5 ? "bg-[#eef3ef] text-ink" : "bg-[#dde5df] text-ink";
+
+  return (
+    <div className="mb-24">
+      <div className="px-2">
+        <p id="all-week-hint" className="px-2 pb-2 text-[13px] text-muted">
+          Courts free in each {fmtDur(slot)} slot. A longer booking may not fit: open a time to see each court. Saving always checks again.
+        </p>
+        {!free && (
+          <p role="status" data-testid="all-week-status" className="mx-2 mb-2 rounded-lg border border-grid bg-white px-3 py-2 text-[13px] text-ink">
+            {failed ? "Availability could not be loaded, so no counts are shown. Use Retry above." : "Loading availability…"}
+          </p>
+        )}
+        <span id="week-keys-hint" className="sr-only">Arrow keys move between times and days; Enter opens that day in Courts at that time.</span>
+        <div ref={rootRef} role="group" aria-label="Week, all courts" aria-describedby="all-week-hint week-keys-hint" onKeyDown={onKey}
+             className="grid outline-none" style={{ gridTemplateColumns: `3rem repeat(7, minmax(2.5rem, 1fr))` }}>
+          <div className="sticky left-0 top-0 z-30 bg-paper" style={{ gridColumn: 1, gridRow: 1 }} />
+          {days.map((d, di) => (
+            <Link key={d} href={dayHref(d)} style={{ gridColumn: di + 2, gridRow: 1 }}
+                  className={`sticky top-0 z-20 border-b border-grid px-2 pb-1 pt-1 text-left leading-tight ${d === today ? "bg-turf-soft" : "bg-paper"}`}>
+              <div className="text-[15px] font-semibold text-ink">{dayLabels[di]}{d === today && <span className="ml-1.5 text-xs font-semibold text-turf">Today</span>}</div>
+            </Link>
+          ))}
+          {times.map((t, i) => (
+            <div key={t} className="contents">
+              <div className="sticky left-0 z-10 bg-paper pr-1 text-right text-[13px] text-muted" style={{ height: rowPx, gridColumn: 1, gridRow: i + 2 }}>
+                {i % labelEvery === 0 ? t : ""}
+              </div>
+              {days.map((d, di) => {
+                const past = ended(d, i);
+                const place = { gridColumn: di + 2, gridRow: i + 2, height: rowPx };
+                if (!free) {
+                  // not verified: no count and nothing to follow; still a stop for the arrow keys
+                  return (
+                    <button key={d + t} type="button" {...cellProps(d, t)} aria-disabled="true" data-unverified="true"
+                            aria-label={`${dayLabels[di]}, ${t}: ${failed ? "availability not loaded" : "loading"}`} style={place}
+                            className={`relative cursor-not-allowed border-b border-l border-grid/60 text-[13px] text-muted focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf ${past ? PAST_BG : "bg-white"}`}>
+                      <span aria-hidden="true">–</span>
+                    </button>
+                  );
+                }
+                const n = free[di][i];
+                return (
+                  <Link key={d + t} {...cellProps(d, t)} href={cellHref(d, t)} data-free={n} data-past={past ? "true" : undefined}
+                        aria-label={`${n} of ${total} courts free, ${dayLabels[di]}, ${t}`}
+                        style={place}
+                        className={`relative flex items-center justify-center border-b border-l border-grid/60 text-[13px] tabular-nums focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf ${past ? `${PAST_BG} text-muted` : tone(n)}`}>
+                    {n === 0 ? "Full" : `${n} free`}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
+          <WeekNowLine clock={clock} days={days} times={times} slot={club.slot_minutes} rowPx={rowPx} />
+        </div>
       </div>
     </div>
   );
