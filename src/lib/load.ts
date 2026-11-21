@@ -6,7 +6,11 @@
  * is and only look at its result: an error is thrown, and the app's error page says the page could not be loaded.
  *
  * One exception: `.single()` reports "no row" as error PGRST116. That is a successful read that found nothing, so it
- * is returned as `data: null` and the page can show its normal "not found".
+ * is returned as `data: null` and the page can show its normal "not found". The same code also means "more than one
+ * row" (and `.maybeSingle()` uses it only for that), which is a data problem, not "not found": only a PGRST116 whose
+ * details state exactly 0 rows counts as empty; several rows, or wording we do not recognise, is a failed read.
+ * Wording checked on staging (PostgREST: "The result contains 0 rows" / "… 8 rows") and in postgrest-js 2.119
+ * (`.maybeSingle()`: "Results contain 2 rows, …").
  */
 
 type Result = { data?: unknown; error: unknown; count?: number | null };
@@ -21,11 +25,19 @@ export class LoadError extends Error {
 }
 
 const NO_ROW = "PGRST116";
+const ROW_COUNT = /^(?:The result contains|Results contain) (\d+) rows?\b/;
+
+/** True only for "the single-row read found no row" — never for several rows or an unknown message. */
+export function isConfirmedNoRow(err: { code?: unknown; details?: unknown } | null | undefined): boolean {
+  if (!err || err.code !== NO_ROW || typeof err.details !== "string") return false;
+  const m = ROW_COUNT.exec(err.details);
+  return !!m && Number(m[1]) === 0;
+}
 
 function check<R extends Result>(res: R, what: string): R {
-  const err = res.error as { code?: string } | null | undefined;
+  const err = res.error as { code?: string; details?: string } | null | undefined;
   if (!err) return res;
-  if (err.code === NO_ROW) return { ...res, data: null, error: null };
+  if (isConfirmedNoRow(err)) return { ...res, data: null, error: null };
   throw new LoadError(what, err);
 }
 

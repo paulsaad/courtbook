@@ -17,11 +17,15 @@ const ROW = {
 /** Calls that write rather than read: never failed here (pages do not depend on them). */
 const WRITES = new Set(["mark_notifications_read"]);
 
-const state = vi.hoisted(() => ({ reads: [] as string[], failAt: -1 }));
+const state = vi.hoisted(() => ({ reads: [] as string[], failAt: -1, failWith: "outage" as "outage" | "manyRows", noRows: false }));
+/** The exact PGRST116 answers PostgREST gives on staging for a single-row read (W1 review). */
+const MANY_ROWS = { code: "PGRST116", details: "The result contains 2 rows", message: "Cannot coerce the result to a single JSON object" };
+const NO_ROWS = { code: "PGRST116", details: "The result contains 0 rows", message: "Cannot coerce the result to a single JSON object" };
 function answer(name: string, single: boolean) {
   const n = state.reads.length;
   state.reads.push(name);
-  if (n === state.failAt) return { data: null, error: { message: "connection lost", code: "08006" }, count: null };
+  if (n === state.failAt) return { data: null, error: state.failWith === "manyRows" ? MANY_ROWS : { message: "connection lost", code: "08006" }, count: null };
+  if (single && state.noRows) return { data: null, error: NO_ROWS, count: null };
   return { data: single ? ROW : [], error: null, count: 0 };
 }
 function query(name: string, isWrite = false) {
@@ -81,7 +85,7 @@ async function run(load: () => Promise<{ default: unknown }>, params: Record<str
   catch (e) { return e; }
 }
 
-beforeEach(() => { state.reads = []; state.failAt = -1; });
+beforeEach(() => { state.reads = []; state.failAt = -1; state.failWith = "outage"; state.noRows = false; });
 
 describe("failed reads never look like empty data (W1, audit B2)", () => {
   for (const [label, load, params, inPage = []] of PAGES) {
@@ -103,6 +107,22 @@ describe("failed reads never look like empty data (W1, audit B2)", () => {
           expect(err instanceof LoadError, `${label}: failing read #${k + 1} (${reads[k]}) did not stop the page`).toBe(true);
         }
       }
+    });
+
+    it(`${label}: several rows from a single-row read is a failed load, never "not found"`, async () => {
+      const reads = (state.failAt = -1, await run(load, params), [...state.reads]);
+      for (let k = 0; k < reads.length; k++) {
+        if (inPage.includes(reads[k])) continue;
+        state.reads = []; state.failAt = k; state.failWith = "manyRows";
+        expect(await run(load, params) instanceof LoadError, `${label}: several rows at read #${k + 1} (${reads[k]}) did not stop the page`).toBe(true);
+      }
+    });
+
+    it(`${label}: a stated zero-row answer is "not found" or empty, never a failed load`, async () => {
+      state.noRows = true;
+      const err = await run(load, params);
+      expect(err instanceof LoadError, `${label} treated zero rows as a failed load`).toBe(false);
+      if (err && !(String((err as { digest?: string }).digest ?? "").startsWith("NEXT_"))) throw err;
     });
   }
 });
