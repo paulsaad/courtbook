@@ -10,8 +10,11 @@ import { bookingDate, clubLocalToUtc, dayBounds, hhmm, moveTarget, nextDayStart,
 import { blockErrorText, friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
 import { blockEndOptions, blockStartOptions, bookingSlotOptions, minToHhmm, pickSlots, type Busy } from "./durations";
 import { useDialog, useIsDesktop } from "@/components/useDialog";
+import { matchBookings, readPrefs, writePrefs } from "./findBooking";
 
-type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string> };
+type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string>;
+  /** the address named a view or sport (then it is used as is, and remembered on desktop) */
+  explicit?: boolean };
 
 export type StaffView = "now" | "grid" | "week" | "list";
 /** One active court's state at this moment: busy by a booking, an unexpired hold or a block.
@@ -51,7 +54,7 @@ async function withContacts(
   })) as unknown as Booking[];
 }
 
-export default function DayCalendar({ club, courts: allCourts, bookings: initialBookings, blocks: initialBlocks, date, view, sport, court: courtParam, loadFailed, sportNames }: Props) {
+export default function DayCalendar({ club, courts: allCourts, bookings: initialBookings, blocks: initialBlocks, date, view, sport, court: courtParam, loadFailed, sportNames, explicit = false }: Props) {
   // multi-sport clubs get a sport filter; single-sport clubs never see it
   const sports = [...new Set(allCourts.map((c) => c.sport))];
   const courts = sport && sports.includes(sport) ? allCourts.filter((c) => c.sport === sport) : allCourts;
@@ -74,14 +77,26 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const [savedUnseen, setSavedUnseen] = useState(false);
   const viewRef = useRef(view);
   useEffect(() => { viewRef.current = view; }, [view]);
-  /** Opens a sheet, unless saving is in progress or the desk keeps its unsaved details. */
+  /** Opens a sheet, unless saving is in progress or the desk keeps its unsaved details. True if it opened. */
   const openSheet = useCallback((next: Sheet) => {
-    if (busy) return;
-    if (!confirmDiscard()) return;
+    if (busy) return false;
+    if (!confirmDiscard()) return false;
     addDirty.current = false;
     setError(null);
     setSheet(next);
+    return true;
   }, [busy, confirmDiscard]);
+  // Keyboard and focus (Phase I-2b): where focus goes back to when the panel closes, and the item just saved.
+  const returnTo = useRef<{ kind: "cell"; courtId: string; row: number } | { kind: "week"; day: string; time: string } | { kind: "search" } | null>(null);
+  const savedFocus = useRef<{ courtId: string; day: string; time: string } | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const weekRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [cell, setCell] = useState<{ c: number; r: number } | null>(null);
+  const focusCellNext = useRef(false);
+  const [find, setFind] = useState("");
+  // the booking or block whose details are shown, and the row they are shown beside (pointer or keyboard)
+  const [peek, setPeek] = useState<{ id: string; row: number } | null>(null);
   const closeSheet = useCallback(() => openSheet(null), [openSheet]);
   const dialogRef = useDialog<HTMLDivElement>(!!sheet, closeSheet, { canClose: !busy, modal: !isDesktop });
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
@@ -228,6 +243,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     const { error } = await fn();
     if (error) {
       setBusy(false);
+      savedFocus.current = null;
       setError(explain(error.message));
       return;
     }
@@ -272,6 +288,88 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const draftOn = (courtId: string, day: string) =>
     sheet?.kind === "add" && draft && sheet.courtId === courtId && (sheet.date ?? date) === day ? draft : null;
 
+  // ---- Keyboard grid (Phase I-2b) ------------------------------------------------------------------------
+  // The Courts grid is one Tab stop. Inside it ↑/↓ move between times, ←/→ between courts, Home/End to opening
+  // and closing; Enter (the button's own key) opens the free slot, booking or block. A time covered by a
+  // booking or block is that booking or block: its "Add booking" button underneath is disabled and hidden from
+  // the keyboard and screen readers (the database refused a booking there anyway).
+  type GridItem = { kind: "booking"; b: Booking; row: number; end: number } | { kind: "block"; k: Block; row: number; end: number };
+  const gridItems: Record<string, GridItem[]> = {};
+  for (const c of courts) gridItems[c.id] = [];
+  for (const k of blocks) if (gridItems[k.court_id]) { const p = place(k.start_at, k.end_at); gridItems[k.court_id].push({ kind: "block", k, row: p.row, end: p.row + p.span }); }
+  for (const b of bookings) if (b.court_id && gridItems[b.court_id]) { const p = place(b.start_at, b.end_at); gridItems[b.court_id].push({ kind: "booking", b, row: p.row, end: p.row + p.span }); }
+  const itemAt = (courtId: string, row: number) => gridItems[courtId]?.find((it) => it.row <= row && it.end > row) ?? null;
+  const itemKey = (it: GridItem) => (it.kind === "booking" ? it.b.id : it.k.id);
+  const firstRow = isToday && nowMin !== null ? Math.min(times.length - 1, Math.max(0, Math.floor((nowMin - openMin) / club.slot_minutes))) : 0;
+  const active = { c: Math.min(cell?.c ?? 0, Math.max(0, courts.length - 1)), r: Math.min(cell?.r ?? firstRow, Math.max(0, times.length - 1)) };
+  const activeItem = courts[active.c] ? itemAt(courts[active.c].id, active.r) : null;
+  /** The element that stands for a cell: its booking or block, else its free slot (null if disabled). */
+  function cellElement(courtId: string, row: number): HTMLElement | null {
+    const root = gridRef.current;
+    if (!root) return null;
+    const it = itemAt(courtId, row);
+    const el = root.querySelector<HTMLButtonElement>(it ? `[data-item="${itemKey(it)}"]` : `[data-cell="${courtId}:${row}"]`);
+    return el && !el.disabled ? el : null;
+  }
+  function onGridKey(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+    const t = e.target as HTMLElement;
+    if (t !== e.currentTarget && !t.closest("[data-cell],[data-item]")) return;
+    e.preventDefault();
+    let { c, r } = active;
+    const cur = courts[c] ? itemAt(courts[c].id, r) : null;
+    if (e.key === "ArrowLeft") c = Math.max(0, c - 1);
+    else if (e.key === "ArrowRight") c = Math.min(courts.length - 1, c + 1);
+    else if (e.key === "ArrowDown") r = Math.min(times.length - 1, cur ? cur.end : r + 1);
+    else if (e.key === "ArrowUp") r = Math.max(0, cur ? cur.row - 1 : r - 1);
+    else if (e.key === "Home") r = 0;
+    else r = times.length - 1;
+    focusCellNext.current = true;
+    setCell({ c, r });
+  }
+  useEffect(() => {
+    if (!focusCellNext.current) return;
+    focusCellNext.current = false;
+    const c = courts[active.c];
+    if (c) cellElement(c.id, active.r)?.focus();
+  });
+
+  // Where focus goes when the panel closes: the booking or block just saved (once the calendar has re-read it),
+  // else the cell or search box it was opened from, else the calendar itself. Never somewhere unrelated.
+  const prevSheet = useRef<Sheet>(null);
+  useEffect(() => {
+    const was = prevSheet.current;
+    prevSheet.current = sheet;
+    if (!was || sheet) return;
+    const saved = savedFocus.current, ret = returnTo.current;
+    savedFocus.current = null;
+    returnTo.current = null;
+    if (!saved && !ret) return;
+    let el: HTMLElement | null = null;
+    if (view === "week") {
+      const at = saved ?? (ret?.kind === "week" ? { day: ret.day, time: ret.time } : null);
+      if (at) el = weekRef.current?.querySelector<HTMLButtonElement>(`[data-week-cell="${at.day}|${at.time}"]:not([disabled])`) ?? null;
+      if (!el && ret?.kind === "week") el = weekRef.current;
+    } else {
+      const target = saved && saved.day === date ? { courtId: saved.courtId, row: (toMin(saved.time) - openMin) / club.slot_minutes }
+        : ret?.kind === "cell" ? ret : null;
+      if (target) {
+        el = cellElement(target.courtId, target.row);
+        const ci = courts.findIndex((c) => c.id === target.courtId);
+        if (ci >= 0) setCell({ c: ci, r: target.row });
+      }
+      if (!el && ret?.kind === "search") el = searchRef.current;
+      if (!el && (target || ret)) el = gridRef.current;
+    }
+    el?.focus();
+  }, [sheet]);   // eslint-disable-line react-hooks/exhaustive-deps -- only when the panel opens or closes
+
+  // Find a booking (Phase I-2b): only the bookings of this day already on screen; never a new read.
+  const found = view === "grid" || view === "list" ? matchBookings(shownBookings, find) : [];
+  const foundIds = new Set(found.map((b) => b.id));
+
+
   // only the view being looked at decides whether its rows can be trusted
   const viewError = view === "week" ? weekError : dayError;
   const viewLoading = view === "week" ? weekLoading : dayLoading;
@@ -280,6 +378,18 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const q = (d: string, v: string, sp: string | null, ct?: string | null) =>
     `/staff/${club.slug}?date=${d}&view=${v}${sp ? `&sport=${sp}` : ""}${ct ? `&court=${ct}` : ""}`;
   const nav = (d: string) => q(d, view, sport, view === "week" ? weekCourt?.id : null);
+
+  // Remembered view and sport filter (desktop only, this browser). An address that names a view or sport wins
+  // and is remembered; a plain address opens on what was used last.
+  useEffect(() => {
+    if (!isDesktop) return;
+    if (explicit) { writePrefs(club.slug, { view, sport }); return; }
+    const p = readPrefs(club.slug);
+    if (!p) return;
+    const v = p.view === "now" && !isToday ? "grid" : p.view;
+    const sp = p.sport && sports.includes(p.sport) ? p.sport : null;
+    if (v !== view || sp !== sport) router.replace(q(v === "now" ? todayIn(club.timezone) : date, v, sp, v === "week" ? courtParam : null));
+  }, [isDesktop, explicit, view, sport]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Leaving the day (any link: ‹ ›, Today, a view, a sport, the staff bar) with typed booking details
   // asks first, like switching slots.
@@ -337,8 +447,10 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                 taken={takenOn(sheet.courtId, sheet.date ?? date)}
                 endedBefore={endedBefore(sheet.date ?? date)}
                 onSelection={setDraft}
-                onSave={(name, phone, slots, asBlock, blockStart, blockEnd) =>
-                  run(async () => {
+                onSave={(name, phone, slots, asBlock, blockStart, blockEnd) => {
+                  // after the save, focus goes to what was saved (where it starts), once it is on the grid
+                  savedFocus.current = { courtId: sheet.courtId, day: sheet.date ?? date, time: asBlock && blockStart ? blockStart : sheet.time };
+                  return run(async () => {
                     const supabase = createClient();
                     // in the week view the slot belongs to the column's day, not the page's date
                     const day = sheet.date ?? date;
@@ -361,8 +473,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                       p_start: start.toISOString(), p_end: end.toISOString(),
                       p_name: name, p_phone: phone || null,
                     });
-                  }, asBlock ? (m) => blockErrorText(m, club) : undefined)
-                }
+                  }, asBlock ? (m) => blockErrorText(m, club) : undefined);
+                }}
               />
             )}
 
@@ -448,6 +560,12 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
             <Link href={q(date, "list", sport)} className={`rounded-full px-4 py-1.5 ${view === "list" ? "bg-ink text-white" : ""}`}>List</Link>
           </div>
           <div className="flex items-center gap-3 text-xs text-muted">
+            {(view === "grid" || view === "list") && (
+              <FindBooking
+                inputRef={searchRef} value={find} onChange={setFind} results={found} courtName={courtName} tz={club.timezone}
+                onOpen={(b) => { if (openSheet({ kind: "booking", booking: b })) returnTo.current = { kind: "search" }; }}
+              />
+            )}
             <label className="hidden items-center gap-1.5 lg:flex">
               <span className="sr-only">Go to date</span>
               <input type="date" value={date} aria-label="Go to date"
@@ -491,9 +609,10 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
           data={week && week.key === `${wkStart}|${weekCourt?.id}` ? week : null}
           canAdd={canAdd}
           dayHref={(d) => q(d, "grid", sport)}
-          onOpenBooking={(b) => openSheet({ kind: "booking", booking: b })}
-          onOpenBlock={(bl) => openSheet({ kind: "block", block: bl })}
-          onAdd={(d, t) => { if (weekCourt) openSheet({ kind: "add", courtId: weekCourt.id, time: t, date: d }); }}
+          rootRef={weekRef}
+          onOpenBooking={(b, d, t) => { if (openSheet({ kind: "booking", booking: b })) returnTo.current = { kind: "week", day: d, time: t }; }}
+          onOpenBlock={(bl, d, t) => { if (openSheet({ kind: "block", block: bl })) returnTo.current = { kind: "week", day: d, time: t }; }}
+          onAdd={(d, t) => { if (weekCourt && openSheet({ kind: "add", courtId: weekCourt.id, time: t, date: d })) returnTo.current = { kind: "week", day: d, time: t }; }}
           draft={weekCourt && sheet?.kind === "add" && sheet.date ? (draftOn(weekCourt.id, sheet.date) ? { day: sheet.date, ...draft! } : null) : null}
         />
       ) : view === "now" ? (
@@ -511,54 +630,115 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                 <div key={t} className="absolute right-2 -translate-y-1/2 text-xs text-muted lg:text-[13px]" style={{ top: i * ROW_PX }}>{t}</div>
               ))}
             </div>
-            {/* courts */}
-            <div className="grid flex-1 gap-x-1.5 [--col-min:7rem] lg:[--col-min:9rem]" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(var(--col-min), 1fr))` }}>
+            {/* courts: one Tab stop; arrows move inside (see onGridKey) */}
+            <span id="grid-keys-hint" className="sr-only">Arrow keys move between times and courts; Enter opens the free time, booking or block.</span>
+            <div ref={gridRef} role="group" aria-label={`Courts, ${dayName} ${dayNum} ${monthName}`} aria-describedby="grid-keys-hint"
+                 tabIndex={activeItem || canAdd ? -1 : 0} onKeyDown={onGridKey}
+                 className="grid flex-1 gap-x-1.5 outline-none [--col-min:7rem] focus-visible:ring-2 focus-visible:ring-turf lg:[--col-min:9rem]" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(var(--col-min), 1fr))` }}>
               {courts.map((c) => (
                 <div key={c.id} className={`h-9 px-1 text-center text-sm lg:sticky lg:top-0 lg:z-10 ${draftOn(c.id, date) ? "rounded-t-lg bg-draft-soft lg:bg-draft-soft" : "lg:bg-paper"}`}>
                   <div className={`font-medium leading-tight lg:text-[15px] ${draftOn(c.id, date) ? "text-draft" : ""}`}>{c.name}</div>
                   <div className="text-xs text-muted">{sportNames[c.sport] ?? c.sport}</div>
                 </div>
               ))}
-              {courts.map((c) => (
+              {courts.map((c, ci) => (
                 <div key={c.id} className="relative rounded-lg border border-grid bg-white" style={{ height: times.length * ROW_PX }}>
-                  {/* empty slots */}
-                  {times.map((t, i) => (
-                    <button
-                      key={t}
-                      onClick={() => openSheet({ kind: "add", courtId: c.id, time: t })}
-                      disabled={!canAdd}
-                      aria-label={`Add booking ${c.name} ${t}`}
-                      className={`absolute inset-x-0 border-t first:border-t-0 active:bg-slate-soft ${i % labelEvery === 0 ? "border-grid" : "border-grid/50 border-dashed"}`}
-                      style={{ top: i * ROW_PX, height: ROW_PX }}
-                    />
-                  ))}
-                  {/* blocks */}
-                  {blocks.filter((k) => k.court_id === c.id).map((k) => {
-                    const p = place(k.start_at, k.end_at);
+                  {/* free slots; a slot under a booking or block is not a slot (disabled, hidden from keyboard and screen readers) */}
+                  {times.map((t, i) => {
+                    const covered = itemAt(c.id, i) !== null;
                     return (
-                      <button key={k.id} onClick={() => openSheet({ kind: "block", block: k })}
-                        className="hatch absolute inset-x-1 rounded-md border border-grid bg-slate-soft px-2 py-1 text-left text-xs text-muted lg:text-sm"
-                        style={{ top: p.row * ROW_PX + 2, height: p.span * ROW_PX - 4 }}>
-                        {k.reason ?? "Blocked"}
-                      </button>
+                      <button
+                        key={t}
+                        data-cell={`${c.id}:${i}`}
+                        onClick={() => { if (openSheet({ kind: "add", courtId: c.id, time: t })) returnTo.current = { kind: "cell", courtId: c.id, row: i }; }}
+                        onFocus={() => { if (active.c !== ci || active.r !== i) setCell({ c: ci, r: i }); }}
+                        disabled={!canAdd || covered}
+                        aria-hidden={covered ? true : undefined}
+                        tabIndex={!covered && active.c === ci && active.r === i ? 0 : -1}
+                        aria-label={`Add booking ${c.name} ${t}`}
+                        className={`absolute inset-x-0 border-t first:border-t-0 active:bg-slate-soft focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf ${i % labelEvery === 0 ? "border-grid" : "border-grid/50 border-dashed"}`}
+                        style={{ top: i * ROW_PX, height: ROW_PX }}
+                      />
                     );
                   })}
-                  {/* bookings */}
-                  {bookings.filter((b) => b.court_id === c.id).map((b) => {
-                    const p = place(b.start_at, b.end_at);
+                  {/* blocks and bookings: each one Tab stop's worth when the active cell is inside it */}
+                  {gridItems[c.id].map((it) => {
+                    const id = itemKey(it);
+                    const range = it.kind === "booking" ? `${hhmm(it.b.start_at, club.timezone)}–${hhmm(it.b.end_at, club.timezone)}` : `${hhmm(it.k.start_at, club.timezone)}–${hhmm(it.k.end_at, club.timezone)}`;
+                    const pointAt = (e: React.MouseEvent<HTMLButtonElement>) => {
+                      const row = Math.min(it.end - 1, it.row + Math.max(0, Math.floor((e.clientY - e.currentTarget.getBoundingClientRect().top) / ROW_PX)));
+                      setPeek((p) => (p?.id === id && p.row === row ? p : { id, row }));
+                    };
+                    const common = {
+                      "data-item": id,
+                      tabIndex: activeItem && itemKey(activeItem) === id ? 0 : -1,
+                      onFocus: () => {
+                        const inside = active.c === ci && active.r >= it.row && active.r < it.end;
+                        setPeek({ id, row: inside ? active.r : it.row });
+                        if (!inside) setCell({ c: ci, r: it.row });
+                      },
+                      onBlur: () => setPeek((p) => (p?.id === id ? null : p)),
+                      onMouseEnter: (e: React.MouseEvent<HTMLButtonElement>) => pointAt(e),
+                      onMouseMove: (e: React.MouseEvent<HTMLButtonElement>) => pointAt(e),
+                      onMouseLeave: () => setPeek((p) => (p?.id === id ? null : p)),
+                      style: { top: it.row * ROW_PX + 2, height: (it.end - it.row) * ROW_PX - 4 },
+                    };
+                    if (it.kind === "block") {
+                      const k = it.k;
+                      return (
+                        <button key={id} {...common}
+                          onClick={() => { if (openSheet({ kind: "block", block: k })) returnTo.current = { kind: "cell", courtId: c.id, row: it.row }; }}
+                          aria-label={`${k.reason ?? "Blocked"}, ${c.name}, ${range}, blocked`}
+                          className="hatch absolute inset-x-1 rounded-md border border-grid bg-slate-soft px-2 py-1 text-left text-xs text-muted focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-turf lg:text-sm">
+                          {k.reason ?? "Blocked"}
+                        </button>
+                      );
+                    }
+                    const b = it.b;
                     const app = b.source === "app";
                     const pending = b.status === "pending";
+                    const who = b.guest_name ?? b.player_name ?? "Player";
+                    const phone = b.contact_phone ?? b.guest_phone;
                     return (
-                      <button key={b.id} onClick={() => openSheet({ kind: "booking", booking: b })}
+                      <button key={id} {...common}
+                        onClick={() => { if (openSheet({ kind: "booking", booking: b })) returnTo.current = { kind: "cell", courtId: c.id, row: it.row }; }}
+                        aria-label={`${who}, ${c.name}, ${range}, ${pending ? "being paid" : app ? "app booking" : "desk booking"}${phone ? `, ${phone}` : ""}`}
                         aria-current={sheet?.kind === "booking" && sheet.booking.id === b.id ? "true" : undefined}
-                        className={`absolute inset-x-1 overflow-hidden rounded-md border-l-4 px-2 py-1 text-left text-xs lg:text-sm ${sheet?.kind === "booking" && sheet.booking.id === b.id ? "ring-2 ring-ink" : ""} ${pending ? "border-dashed border-turf bg-white" : app ? "border-turf bg-turf-soft" : "border-sand bg-sand-soft"}`}
-                        style={{ top: p.row * ROW_PX + 2, height: p.span * ROW_PX - 4 }}>
-                        <div className="truncate text-sm font-medium lg:text-[15px]">{pending ? "Paying…" : b.guest_name ?? b.player_name ?? "Player"}</div>
-                        <div className="text-muted">{hhmm(b.start_at, club.timezone)}–{hhmm(b.end_at, club.timezone)}<span className="hidden lg:inline"> · {pending ? "being paid" : app ? "app" : "desk"}</span></div>
-                        {(b.contact_phone ?? b.guest_phone) && <div className="hidden truncate text-muted lg:block">{b.contact_phone ?? b.guest_phone}</div>}
+                        className={`absolute inset-x-1 overflow-hidden rounded-md border-l-4 px-2 py-1 text-left text-xs focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-turf lg:text-sm ${sheet?.kind === "booking" && sheet.booking.id === b.id ? "ring-2 ring-ink" : foundIds.has(b.id) ? "ring-2 ring-turf" : ""} ${pending ? "border-dashed border-turf bg-white" : app ? "border-turf bg-turf-soft" : "border-sand bg-sand-soft"}`}>
+                        <div className="truncate text-sm font-medium lg:text-[15px]">{pending ? "Paying…" : who}</div>
+                        <div className="text-muted">{range}<span className="hidden lg:inline"> · {pending ? "being paid" : app ? "app" : "desk"}</span></div>
+                        {phone && <div className="hidden truncate text-muted lg:block">{phone}</div>}
                       </button>
                     );
                   })}
+                  {/* full details of the booking or block under the pointer or keyboard focus (desktop; the label says it too) */}
+                  {(() => {
+                    const it = peek ? gridItems[c.id].find((x) => itemKey(x) === peek.id) : undefined;
+                    if (!it || !peek) return null;
+                    // beside the row being pointed at or focused (a long block can fill the whole day): below it, or
+                    // above it near the end of the day
+                    const row = Math.min(Math.max(peek.row, it.row), it.end - 1);
+                    const pos = row + 1 <= times.length - 3 ? { top: (row + 1) * ROW_PX + 2 } : { bottom: (times.length - row) * ROW_PX + 2 };
+                    const range = it.kind === "booking" ? `${hhmm(it.b.start_at, club.timezone)}–${hhmm(it.b.end_at, club.timezone)}` : `${hhmm(it.k.start_at, club.timezone)}–${hhmm(it.k.end_at, club.timezone)}`;
+                    return (
+                      <div data-testid="peek" aria-hidden="true" style={pos}
+                           className="pointer-events-none absolute left-1 z-30 hidden w-64 rounded-lg bg-ink px-3 py-2 text-sm text-white shadow-lg lg:block">
+                        {it.kind === "booking" ? (
+                          <>
+                            <div className="font-semibold">{it.b.guest_name ?? it.b.player_name ?? "Player"}</div>
+                            <div>{c.name} · {range}</div>
+                            <div>{it.b.status === "pending" ? "Being paid" : it.b.source === "app" ? "App booking" : "Desk booking"}</div>
+                            {(it.b.contact_phone ?? it.b.guest_phone) && <div>{it.b.contact_phone ?? it.b.guest_phone}</div>}
+                          </>
+                        ) : (
+                          <>
+                            <div className="font-semibold">{it.k.reason ?? "Blocked"}</div>
+                            <div>{c.name} · {range} · blocked</div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {/* the open form's choice, not saved yet: above the free slots, never catching their taps */}
                   {(() => {
                     const d = draftOn(c.id, date);
@@ -668,20 +848,77 @@ function closeMinutes(club: Club) {
   return club.close_time.startsWith("24:") ? 1440 : toMin(club.close_time);
 }
 
+/** Find a booking on this day (desktop): name or phone, among the bookings already on screen. ↓ moves into the
+ *  results, ↑/↓ between them, Enter or a click opens one, Esc clears. Enter in the box itself does nothing. */
+function FindBooking({ inputRef, value, onChange, results, courtName, tz, onOpen }: {
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  value: string; onChange: (v: string) => void; results: Booking[];
+  courtName: (id: string | null) => string; tz: string; onOpen: (b: Booking) => void;
+}) {
+  const listRef = useRef<HTMLUListElement>(null);
+  const items = () => Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+  const shown = value.trim().length > 0;
+  return (
+    <div className="relative hidden lg:block">
+      <input ref={inputRef} type="search" value={value} aria-label="Find a booking on this day (name or phone)" placeholder="Find booking: name or phone"
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.preventDefault();
+          else if (e.key === "Escape" && value) { e.preventDefault(); e.stopPropagation(); onChange(""); }
+          else if (e.key === "ArrowDown" && results.length) { e.preventDefault(); items()[0]?.focus(); }
+        }}
+        className="h-9 w-56 rounded-lg border border-[#8a918e] bg-white px-2 text-sm text-ink focus-visible:outline-2 focus-visible:outline-turf" />
+      {shown && <span className="sr-only" aria-live="polite">{results.length === 1 ? "1 booking found" : `${results.length} bookings found`}</span>}
+      {shown && (
+        <ul ref={listRef} aria-label="Matching bookings" className="absolute right-0 top-10 z-40 w-80 divide-y divide-grid rounded-xl border border-grid bg-white text-sm text-ink shadow-lg">
+          {results.length === 0 && <li className="px-3 py-2 text-muted">No booking on this day matches.</li>}
+          {results.map((b, i) => (
+            <li key={b.id}>
+              <button type="button" onClick={() => onOpen(b)}
+                onKeyDown={(e) => {
+                  const all = items();
+                  if (e.key === "ArrowDown") { e.preventDefault(); all[Math.min(all.length - 1, i + 1)]?.focus(); }
+                  else if (e.key === "ArrowUp") { e.preventDefault(); (i === 0 ? inputRef.current : all[i - 1])?.focus(); }
+                  else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); inputRef.current?.focus(); }
+                }}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-paper focus-visible:bg-paper focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf">
+                <span className="w-24 shrink-0 tabular-nums">{hhmm(b.start_at, tz)}–{hhmm(b.end_at, tz)}</span>
+                <span className="w-16 shrink-0 text-muted">{courtName(b.court_id)}</span>
+                <span className="min-w-0 flex-1 truncate">{b.guest_name ?? b.player_name ?? "Player"}</span>
+                {(b.contact_phone ?? b.guest_phone) && <span className="shrink-0 text-muted">{b.contact_phone ?? b.guest_phone}</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /** One court, seven days. Days are columns because seven of them fit a phone and five courts do not.
  *  Time labels stay in a sticky gutter, a cell opens the usual sheets, and a column header opens that
  *  day in the Courts view, which is where names and controls are readable. */
-function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOpenBooking, onOpenBlock, onAdd, draft }: {
+function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOpenBooking, onOpenBlock, onAdd, draft, rootRef }: {
   club: Club; court: Court | null; days: string[]; times: string[]; today: string;
+  /** the grid element: focus comes back here when nothing better is available */
+  rootRef?: React.RefObject<HTMLDivElement | null>;
   /** the open add form's choice on this court, not saved yet */
   draft?: (Selection & { day: string }) | null;
   data: { bookings: Booking[]; blocks: Block[] } | null;
   canAdd: boolean;
   dayHref: (d: string) => string;
-  onOpenBooking: (b: Booking) => void;
-  onOpenBlock: (b: Block) => void;
+  onOpenBooking: (b: Booking, day: string, time: string) => void;
+  onOpenBlock: (b: Block, day: string, time: string) => void;
   onAdd: (date: string, time: string) => void;
 }) {
+  // keyboard (Phase I-2b): one Tab stop; ↑/↓ times, ←/→ days, Home/End; Enter opens the cell
+  const [wc, setWc] = useState({ d: Math.max(0, days.indexOf(today)), r: 0 });
+  const focusNext = useRef(false);
+  useEffect(() => {
+    if (!focusNext.current) return;
+    focusNext.current = false;
+    rootRef?.current?.querySelector<HTMLButtonElement>(`[data-week-cell="${days[wc.d]}|${times[wc.r]}"]`)?.focus();
+  });
   if (!court) return <p className="px-4 py-10 text-center text-sm text-muted">No active courts for this sport.</p>;
   const loading = data === null;
   const rowPx = club.slot_minutes <= 30 ? 34 : 48;
@@ -699,11 +936,37 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
   const isStart = (d: string, t: string, startAt: string) =>
     Math.abs(clubLocalToUtc(d, t, club.timezone).getTime() - Date.parse(startAt)) < 60_000;
   const busyCount = (d: string) => times.filter((t) => at(d, t) !== null).length;
+  const isActive = (d: string, t: string) => days[wc.d] === d && times[wc.r] === t;
+  const cellProps = (d: string, t: string) => ({
+    "data-week-cell": `${d}|${t}`,
+    tabIndex: isActive(d, t) ? 0 : -1,
+    onFocus: () => { const n = { d: days.indexOf(d), r: times.indexOf(t) }; if (n.d !== wc.d || n.r !== wc.r) setWc(n); },
+  });
+  const activeFree = !at(days[wc.d], times[wc.r]);
+  function onKey(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+    const t = e.target as HTMLElement;
+    if (t !== e.currentTarget && !t.closest("[data-week-cell]")) return;
+    e.preventDefault();
+    let { d, r } = wc;
+    if (e.key === "ArrowLeft") d = Math.max(0, d - 1);
+    else if (e.key === "ArrowRight") d = Math.min(days.length - 1, d + 1);
+    else if (e.key === "ArrowUp") r = Math.max(0, r - 1);
+    else if (e.key === "ArrowDown") r = Math.min(times.length - 1, r + 1);
+    else if (e.key === "Home") r = 0;
+    else r = times.length - 1;
+    focusNext.current = true;
+    setWc({ d, r });
+  }
 
   return (
     <div className={`mb-24 overflow-x-auto ${loading ? "pointer-events-none opacity-50" : ""}`}>
       <div className="min-w-[340px] px-2">
-        <div className="grid" style={{ gridTemplateColumns: `3rem repeat(7, minmax(2.5rem, 1fr))` }}>
+        <span id="week-keys-hint" className="sr-only">Arrow keys move between times and days; Enter opens the free time, booking or block.</span>
+        <div ref={rootRef} role="group" aria-label={`Week, ${court.name}`} aria-describedby="week-keys-hint" onKeyDown={onKey}
+             tabIndex={activeFree && !canAdd ? 0 : -1}
+             className="grid outline-none focus-visible:ring-2 focus-visible:ring-turf" style={{ gridTemplateColumns: `3rem repeat(7, minmax(2.5rem, 1fr))` }}>
           <div className="sticky left-0 z-10 bg-paper" />
           {days.map((d) => (
             <Link key={d} href={dayHref(d)} className={`border-b border-grid pb-1 text-center text-xs leading-tight ${d === today ? "font-semibold text-turf" : "text-muted"}`}>
@@ -726,9 +989,9 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
                   const inDraft = draft && draft.day === d && m >= draft.startMin && m < draft.endMin;
                   const head = inDraft && m === draft.startMin;
                   return (
-                    <button key={d + t} onClick={() => onAdd(d, t)} disabled={!canAdd} aria-label={`Add a booking on ${d} at ${t}`}
+                    <button key={d + t} {...cellProps(d, t)} onClick={() => onAdd(d, t)} disabled={!canAdd} aria-label={`Add a booking on ${d} at ${t}`}
                             data-draft={inDraft ? "true" : undefined}
-                            className={`relative border-l disabled:cursor-not-allowed ${inDraft ? "border-x-2 border-dashed border-draft bg-draft-soft" : "border-b border-grid/60 bg-white"} ${head ? "border-t-2" : ""} ${inDraft && m + club.slot_minutes === draft.endMin ? "border-b-2" : ""}`}
+                            className={`relative border-l focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf disabled:cursor-not-allowed ${inDraft ? "border-x-2 border-dashed border-draft bg-draft-soft" : "border-b border-grid/60 bg-white"} ${head ? "border-t-2" : ""} ${inDraft && m + club.slot_minutes === draft.endMin ? "border-b-2" : ""}`}
                             style={{ height: rowPx }}>
                       {head && <span aria-hidden="true" className="absolute inset-x-0 top-0.5 truncate px-0.5 text-[10px] font-semibold leading-tight text-draft">Not saved</span>}
                     </button>
@@ -736,16 +999,16 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
                 }
                 if (cell.kind === "block") {
                   return (
-                    <button key={d + t} onClick={() => onOpenBlock(cell.k)} aria-label={`Blocked on ${d} at ${t}`}
-                            className="border-b border-l border-grid/60 bg-[repeating-linear-gradient(45deg,#e7e5e4_0,#e7e5e4_3px,#fff_3px,#fff_6px)]" style={{ height: rowPx }} />
+                    <button key={d + t} {...cellProps(d, t)} onClick={() => onOpenBlock(cell.k, d, t)} aria-label={`Blocked on ${d} at ${t}${cell.k.reason ? `: ${cell.k.reason}` : ""}`}
+                            className="border-b border-l border-grid/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf bg-[repeating-linear-gradient(45deg,#e7e5e4_0,#e7e5e4_3px,#fff_3px,#fff_6px)]" style={{ height: rowPx }} />
                   );
                 }
                 const b = cell.b;
                 const head = isStart(d, t, b.start_at);
                 return (
-                  <button key={d + t} onClick={() => onOpenBooking(b)}
+                  <button key={d + t} {...cellProps(d, t)} onClick={() => onOpenBooking(b, d, t)}
                           aria-label={`${b.guest_name ?? b.player_name ?? "Player"} on ${d} at ${hhmm(b.start_at, club.timezone)}`}
-                          className={`relative border-l border-grid/60 ${head ? "border-t" : ""} ${b.status === "pending" ? "border-dashed bg-sand/40" : b.source === "app" ? "bg-turf-soft" : "bg-sand"}`}
+                          className={`relative border-l border-grid/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf ${head ? "border-t" : ""} ${b.status === "pending" ? "border-dashed bg-sand/40" : b.source === "app" ? "bg-turf-soft" : "bg-sand"}`}
                           style={{ height: rowPx }}>
                     {head && (
                       <span className="absolute inset-x-0 top-0.5 truncate px-0.5 text-[10px] font-medium leading-tight">
@@ -873,6 +1136,16 @@ export function AddSheet({ club, court, time, busy, defaultMinutes, onSave, onDi
   const [reason, setReason] = useState("");
   const [picked, setPicked] = useState(false);
   const [hints, setHints] = useState<Guest[]>([]);
+  // keyboard choice among the suggestions (Phase I-2b): ↓/↑ highlight, Enter picks (never saves), Esc closes
+  const [hi, setHi] = useState(-1);
+  const showHints = (h: Guest[]) => { setHints(h); setHi(-1); };
+  const lengthRef = useRef<HTMLDivElement>(null);
+  const phoneRef = useRef<HTMLInputElement>(null);
+  function pickGuest(g: Guest) {
+    setName(g.name); setPhone(g.phone ?? ""); setPicked(true); showHints([]);
+    // then on to the booking length (or the phone when no length fits)
+    setTimeout(() => (lengthRef.current?.querySelector<HTMLElement>('[aria-checked="true"]') ?? phoneRef.current)?.focus(), 0);
+  }
   // a length, start or end the desk chose: switching slots asks first, like typed text
   const [touched, setTouched] = useState(false);
   // bookings get the club's minimum to maximum; a block has its own start and end (see durations.ts)
@@ -906,9 +1179,9 @@ export function AddSheet({ club, court, time, busy, defaultMinutes, onSave, onDi
   useEffect(() => {
     let alive = true;
     const t = setTimeout(async () => {
-      if (picked || name.trim().length < 2) { if (alive) setHints([]); return; }
+      if (picked || name.trim().length < 2) { if (alive) showHints([]); return; }
       const { data } = await createClient().rpc("club_recent_guests", { p_club: club.id, p_query: name.trim() });
-      if (alive) setHints(((data as Guest[] | null) ?? []).slice(0, 5));
+      if (alive) showHints(((data as Guest[] | null) ?? []).slice(0, 5));
     }, 200);
     return () => { alive = false; clearTimeout(t); };
   }, [name, picked, club.id]);
@@ -930,23 +1203,33 @@ export function AddSheet({ club, court, time, busy, defaultMinutes, onSave, onDi
                onChange={(e) => setReason(e.target.value)} />
       ) : (
         <input key="name" className={input} placeholder="Name" aria-label="Customer name" required value={name} autoFocus
-               onChange={(e) => { setName(e.target.value); setPicked(false); }} />
+               role="combobox" aria-autocomplete="list" aria-expanded={hints.length > 0} aria-controls="guest-hints"
+               aria-activedescendant={hi >= 0 && hints[hi] ? `guest-hint-${hi}` : undefined}
+               onChange={(e) => { setName(e.target.value); setPicked(false); }}
+               onKeyDown={(e) => {
+                 if (!hints.length) return;
+                 if (e.key === "ArrowDown") { e.preventDefault(); setHi((i) => (i + 1) % hints.length); }
+                 else if (e.key === "ArrowUp") { e.preventDefault(); setHi((i) => (i <= 0 ? hints.length - 1 : i - 1)); }
+                 // Enter picks the highlighted customer; it never saves (the form's Enter guard also stops it)
+                 else if (e.key === "Enter" && hi >= 0 && hints[hi]) { e.preventDefault(); pickGuest(hints[hi]); }
+                 // Esc closes the list only, not the panel
+                 else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); showHints([]); }
+               }} />
       )}
       {!asBlock && hints.length > 0 && (
-        <ul className="-mt-1 divide-y divide-grid rounded-xl border border-grid bg-paper text-sm">
-          {hints.map((g) => (
-            <li key={`${g.name}|${g.phone ?? ""}`}>
-              {/* a suggestion fills this customer's own phone, or clears it when they have none */}
-              <button type="button" className="flex w-full items-center justify-between px-3 py-2 text-left"
-                      onClick={() => { setName(g.name); setPhone(g.phone ?? ""); setPicked(true); setHints([]); }}>
-                <span className="truncate">{g.name}</span>
-                <span className="ml-3 shrink-0 text-muted">{g.phone ?? "no phone"}</span>
-              </button>
+        <ul id="guest-hints" role="listbox" aria-label="Recent customers" className="-mt-1 divide-y divide-grid rounded-xl border border-grid bg-paper text-sm">
+          {hints.map((g, i) => (
+            // a suggestion fills this customer's own phone, or clears it when they have none
+            <li key={`${g.name}|${g.phone ?? ""}`} id={`guest-hint-${i}`} role="option" aria-selected={i === hi}
+                onMouseDown={(e) => e.preventDefault()} onClick={() => pickGuest(g)}
+                className={`flex cursor-pointer items-center justify-between px-3 py-2 text-left ${i === hi ? "bg-turf-soft" : ""}`}>
+              <span className="truncate">{g.name}</span>
+              <span className="ml-3 shrink-0 text-muted">{g.phone ?? "no phone"}</span>
             </li>
           ))}
         </ul>
       )}
-      {!asBlock && <input className={input} placeholder="Phone (optional)" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />}
+      {!asBlock && <input ref={phoneRef} className={input} placeholder="Phone (optional)" aria-label="Phone (optional)" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />}
       {asBlock ? (
         bStart !== null && bEnd !== null ? (
           <>
@@ -970,7 +1253,7 @@ export function AddSheet({ club, court, time, busy, defaultMinutes, onSave, onDi
           <p className="text-sm text-muted">Not enough time before closing for a block.</p>
         )
       ) : bookOpts.length > 0 ? (
-        <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="Booking length">
+        <div ref={lengthRef} className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="Booking length">
           {bookOpts.map((n) => (
             <button type="button" key={n} role="radio" aria-checked={slots === n} onClick={() => { setWish(n); if (n !== slots) setTouched(true); }}
                     className={`rounded-xl border py-2 text-sm ${slots === n ? "border-ink bg-ink text-white" : "border-grid"}`}>
