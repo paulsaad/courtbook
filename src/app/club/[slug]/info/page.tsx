@@ -1,28 +1,31 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { allLoaded, loaded } from "@/lib/load";
 import { loadClubHead } from "@/lib/clubHead";
 import ClubHeader from "../ClubHeader";
 import { FACILITIES } from "@/components/facilities";
 import { feeSummary } from "@/lib/fees";
+import { cancellationLine } from "./cancellation";
 
 const fmtDur = (m: number) => (m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`);
 
 export default async function ClubInfo({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const supabase = await createClient();
-  const { data: club } = await supabase.from("clubs")
+  const { data: club } = loaded(await supabase.from("clubs")
     .select("id, name, slug, open_time, close_time, location_url, town_id, slot_minutes, min_booking_minutes, max_booking_minutes, cancel_cutoff_hours, hold_minutes, booking_window_days, service_fee_usd, payment_mode, lat, lng, description, arrival_notes, address, has_parking, has_changing_rooms, has_showers, has_equipment_rental, has_cafe, has_floodlights, has_drinking_water, is_demo")
-    .eq("slug", slug).eq("active", true).single();
+    .eq("slug", slug).eq("active", true).single(), "this club");
   if (!club) notFound();
-  const [head, { data: courts }, { data: rules }] = await Promise.all([
+  const [head, { data: courts }, { data: rules }] = allLoaded(await Promise.all([
     loadClubHead(supabase, club),
     supabase.from("courts").select("name, sport, surface").eq("club_id", club.id).eq("active", true).order("sort"),
     supabase.from("price_rules").select("start_time, end_time, price_usd, label, court_id").eq("club_id", club.id).order("start_time"),
-  ]);
+  ]), "this club");
   const maps = club.lat != null && club.lng != null ? `https://www.google.com/maps?q=${club.lat},${club.lng}` : club.location_url;
   const row = "flex justify-between gap-4 py-2 text-sm";
   // A club that takes payment at its desk charges no booking fee; the page must not promise one.
   const fees = feeSummary(club.payment_mode, club.service_fee_usd);
+  const cancel = cancellationLine(club.payment_mode, club.cancel_cutoff_hours);
   // Three states, and only two of them are worth a player's attention. A facility nobody has
   // answered is left out entirely — showing it as a no would be inventing an answer the club
   // never gave, and showing it as "unknown" is a row of noise on a small screen.
@@ -68,7 +71,7 @@ export default async function ClubInfo({ params }: { params: Promise<{ slug: str
           <div className={row}><span className="text-muted">Open</span><span>{club.open_time.slice(0, 5)}–{club.close_time.slice(0, 5)}, every day</span></div>
           <div className={row}><span className="text-muted">Booking length</span><span>{fmtDur(club.min_booking_minutes)} to {fmtDur(club.max_booking_minutes)}, {club.slot_minutes}-min steps</span></div>
           <div className={row}><span className="text-muted">Book ahead</span><span>up to {club.booking_window_days} days</span></div>
-          <div className={row}><span className="text-muted">Free cancellation</span><span>until {club.cancel_cutoff_hours} h before; no refund after</span></div>
+          <div className={row}><span className="text-muted">{cancel.label}</span><span>{cancel.text}</span></div>
           <div className={row}><span className="text-muted">Booking fee</span><span>{fees.fee}</span></div>
           {fees.payment && <div className={row}><span className="text-muted">Payment</span><span className="text-right">{fees.payment}</span></div>}
         </section>
