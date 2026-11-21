@@ -1367,6 +1367,123 @@ describe("Phase I-2c: All courts week (desktop)", () => {
     expect(document.activeElement?.getAttribute("aria-label")).toBe("Add booking Padel 2 09:00");
   });
 
+  // ---- review: fail safe while loading and after a failed read or refresh ----
+  const allCells = () => Array.from(document.querySelectorAll<HTMLElement>("[data-week-cell]"));
+  /** nothing on screen claims a court is free, and no time can be followed */
+  const expectUnverified = () => {
+    const cells = allCells();
+    expect(cells.length).toBe(7 * 30);
+    for (const c of cells) {
+      expect(c.tagName).toBe("BUTTON");
+      expect(c.getAttribute("href")).toBeNull();
+      expect(c.dataset.free).toBeUndefined();
+      expect(c.textContent).not.toMatch(/free|Full/);
+      expect(c.getAttribute("aria-label")).not.toMatch(/free/);
+    }
+    expect(document.querySelectorAll("[role=group] a[href*='time=']").length).toBe(0);
+  };
+  const isAllRead = (q: Query) => Array.isArray(q.filters.court_id);
+  const answer = (q: Query) => ok(q.table === "bookings" ? takenRows : q.table === "blocks" ? blockRows : []);
+
+  it("while the first read is in flight: 'Loading availability…', no counts, nothing to follow; the arrows still move", async () => {
+    const pending = deferred<Resp>();
+    handler = async (q) => (isAllRead(q) ? pending.promise : ok([]));
+    view({ date: DAY, view: "week", court: "all" });
+    await screen.findByRole("group", { name: "Week, all courts" });
+    await waitFor(() => expect(allCells().length).toBe(210));
+    expect(screen.getByTestId("all-week-status").textContent).toBe("Loading availability…");
+    expectUnverified();
+    expect(cell("18:00").getAttribute("aria-label")).toBe("Mon 12 Jan, 18:00: loading");
+    // keyboard: still one Tab stop and the arrows move; Enter and click go nowhere
+    await act(async () => { cell("08:00").focus(); });
+    await act(async () => { fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" }); });
+    expect(document.activeElement).toBe(cell("08:30"));
+    await act(async () => { fireEvent.keyDown(document.activeElement!, { key: "Enter" }); fireEvent.click(document.activeElement!); });
+    expect(nav.push).not.toHaveBeenCalled();
+    // the read arrives: counts and links appear
+    await act(async () => { pending.settle(answer({ table: "bookings", filters: {} })); });
+    await waitFor(() => expect(cell("18:00").textContent).toBe("Full"));
+    expect(screen.queryByTestId("all-week-status")).toBeNull();
+    expect(cell("18:30").getAttribute("href")).toMatch(/time=18:30$/);
+  });
+
+  it("a failed first read: says so, shows no counts and nothing to follow", async () => {
+    handler = async (q) => (isAllRead(q) ? failed : ok([]));
+    view({ date: DAY, view: "week", court: "all" });
+    await waitFor(() => expect(screen.getByText(/Couldn't load the latest week/)).toBeDefined());
+    expect(screen.getByTestId("all-week-status").textContent).toMatch(/could not be loaded, so no counts are shown/);
+    expectUnverified();
+    expect(cell("18:00").getAttribute("aria-label")).toBe("Mon 12 Jan, 18:00: availability not loaded");
+  });
+
+  it("a failed refresh hides the earlier counts; Retry in flight keeps them hidden; a successful read brings them back", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let mode: "ok" | "fail" | "hold" = "ok";
+    const retryRead = deferred<Resp>();
+    handler = async (q) => (!isAllRead(q) ? ok([]) : mode === "ok" ? answer(q) : mode === "fail" ? failed : retryRead.promise);
+    view({ date: DAY, view: "week", court: "all" });
+    await waitFor(() => expect(cell("18:00").textContent).toBe("Full"));
+    expect(cell("18:30").getAttribute("href")).not.toBeNull();
+    // the automatic refresh (60 s) fails: no stale counts stay on screen or clickable
+    mode = "fail";
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    await waitFor(() => expect(screen.getByText(/Couldn't load the latest week/)).toBeDefined());
+    expectUnverified();
+    // Retry: still hidden while it runs
+    mode = "hold";
+    await act(async () => { retry().click(); });
+    expectUnverified();
+    await act(async () => { retryRead.settle(failed); });
+    expectUnverified();
+    // a successful read: counts and links are back
+    mode = "ok";
+    await act(async () => { retry().click(); });
+    await waitFor(() => expect(cell("18:00").textContent).toBe("Full"));
+    expect(screen.queryByText(/Couldn't load the latest week/)).toBeNull();
+    expect(cell("19:00").textContent).toBe("2 free");
+    expect(cell("18:30").getAttribute("href")).toMatch(/time=18:30$/);
+  });
+
+  it("returning to All courts: counts kept from an earlier visit stay hidden until the new read arrives", async () => {
+    let gate: ReturnType<typeof deferred<Resp>> | null = null;
+    handler = async (q) => (!isAllRead(q) ? ok([]) : gate ? gate.promise.then(() => answer(q)) : answer(q));
+    const props = { club, courts: [courtA, courtB], bookings: [], blocks: [] as Block[], date: DAY, sport: null, sportNames: { padel: "Padel" } };
+    const { rerender } = render(<DayCalendar {...props} view="week" court="all" />);
+    await waitFor(() => expect(cell("18:00").textContent).toBe("Full"));
+    rerender(<DayCalendar {...props} view="week" court={courtA.id} />);
+    await screen.findByRole("group", { name: "Week, Padel 1" });
+    gate = deferred<Resp>();
+    rerender(<DayCalendar {...props} view="week" court="all" />);
+    await screen.findByRole("group", { name: "Week, all courts" });
+    expectUnverified();
+    expect(screen.getByTestId("all-week-status").textContent).toBe("Loading availability…");
+    await act(async () => { gate!.settle(ok([])); });
+    await waitFor(() => expect(cell("18:00").textContent).toBe("Full"));
+  });
+
+  it("a successful quiet refresh keeps the counts on screen while it runs (they were verified a moment ago)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let gate: ReturnType<typeof deferred<Resp>> | null = null;
+    handler = async (q) => (!isAllRead(q) ? ok([]) : gate ? gate.promise.then(() => answer(q)) : answer(q));
+    view({ date: DAY, view: "week", court: "all" });
+    await waitFor(() => expect(cell("18:00").textContent).toBe("Full"));
+    gate = deferred<Resp>();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(cell("18:00").textContent).toBe("Full");
+    expect(cell("18:30").getAttribute("href")).not.toBeNull();
+    await act(async () => { gate!.settle(ok([])); });
+    await waitFor(() => expect(cell("18:00").textContent).toBe("Full"));
+  });
+
+  it("the note names the club's own slot length", async () => {
+    render(<DayCalendar club={{ ...club, slot_minutes: 60 }} courts={[courtA, courtB]} bookings={[]} blocks={[]} date={DAY} view="week"
+      sport={null} court="all" sportNames={{ padel: "Padel" }} />);
+    expect((await screen.findByText(/Courts free in each/)).textContent).toMatch(/^Courts free in each 1 h slot\./);
+    cleanup();
+    view({ date: DAY, view: "week", court: "all" });
+    expect((await screen.findByText(/Courts free in each/)).textContent).toMatch(/^Courts free in each 30 min slot\./);
+  });
+
   it("phones never get All courts: an All courts address shows the first court as before", async () => {
     desktop(false);
     view({ date: DAY, view: "week", court: "all" });

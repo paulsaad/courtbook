@@ -697,7 +697,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
       {view === "week" && weekAll ? (
         <AllCourtsWeek
           club={club} courts={courts} days={weekDays} times={times}
-          data={avail && avail.key === `${wkStart}|all|${courtKey}` ? avail : null}
+          data={avail && avail.key === `${wkStart}|all|${courtKey}` && !weekError && !weekLoading ? avail : null}
+          failed={weekError}
           cellHref={(d, t) => `${q(d, "grid", sport)}&time=${t}`}
           dayHref={(d) => q(d, "grid", sport)}
           rootRef={weekRef}
@@ -1349,10 +1350,16 @@ function WeekGrid({ club, court, days, times, today, data, canAdd, dayHref, onOp
 
 /** All courts week (Phase I-2c, desktop): for each time, how many courts of the shown sport are free — not taken by a
  *  confirmed booking, an unexpired hold or a block. It says nothing about whether a longer booking fits, and the
- *  database still decides when saving. A time opens that day in Courts at that time. */
-function AllCourtsWeek({ club, courts, days, times, data, cellHref, dayHref, rootRef }: {
+ *  database still decides when saving. A time opens that day in Courts at that time.
+ *  Fails safe (review): counts are shown only from a read that succeeded and is current — `data` is null while the
+ *  week is loading (a quiet automatic refresh excepted), after a failed read or refresh, and until a read succeeds.
+ *  Then no count is worked out or shown and no time can be followed; the keyboard still moves over the grid. */
+function AllCourtsWeek({ club, courts, days, times, data, failed = false, cellHref, dayHref, rootRef }: {
   club: Club; courts: Court[]; days: string[]; times: string[];
+  /** a verified read for this week and these courts, else null */
   data: { bookings: Taken[]; blocks: Taken[] } | null;
+  /** the last read failed (the page banner offers Retry) */
+  failed?: boolean;
   cellHref: (d: string, t: string) => string;
   dayHref: (d: string) => string;
   rootRef?: React.RefObject<HTMLDivElement | null>;
@@ -1367,9 +1374,10 @@ function AllCourtsWeek({ club, courts, days, times, data, cellHref, dayHref, roo
   const daysKey = days.join(","), timesKey = times.join(","), courtsKey = courts.map((c) => c.id).join(",");
   const slot = club.slot_minutes;
   const free = useMemo(() => {
+    if (!data) return null;                                  // nothing verified: no count, never "all free"
     const now = nowMs();
     const taken = new Map<string, [number, number][]>();
-    for (const r of [...(data?.bookings ?? []).filter((b) => b.status !== "pending" || (b.hold_expires_at && Date.parse(b.hold_expires_at) > now)), ...(data?.blocks ?? [])]) {
+    for (const r of [...data.bookings.filter((b) => b.status !== "pending" || (b.hold_expires_at && Date.parse(b.hold_expires_at) > now)), ...data.blocks]) {
       const list = taken.get(r.court_id) ?? [];
       list.push([Date.parse(r.start_at), Date.parse(r.end_at)]);
       taken.set(r.court_id, list);
@@ -1382,7 +1390,6 @@ function AllCourtsWeek({ club, courts, days, times, data, cellHref, dayHref, roo
   }, [data, daysKey, timesKey, courtsKey, tz, slot, nowKey]);   // eslint-disable-line react-hooks/exhaustive-deps -- nowKey: holds expire with the clock
   const dayLabels = useMemo(() => daysKey.split(",").map((d) => dayLabelOf(d, tz)), [daysKey, tz]);
   if (!courts.length) return <p className="px-4 py-10 text-center text-sm text-muted">No active courts for this sport.</p>;
-  const loading = data === null;
   const rowPx = club.slot_minutes <= 30 ? 34 : 48;
   const labelEvery = club.slot_minutes <= 30 ? 2 : 1;
   const total = courts.length;
@@ -1390,11 +1397,16 @@ function AllCourtsWeek({ club, courts, days, times, data, cellHref, dayHref, roo
   const tone = (n: number) => n === total ? "bg-white text-turf" : n === 0 ? "bg-[#cfd4ce] font-semibold text-ink" : n / total >= 0.5 ? "bg-[#eef3ef] text-ink" : "bg-[#dde5df] text-ink";
 
   return (
-    <div className={`mb-24 ${loading ? "pointer-events-none opacity-50" : ""}`}>
+    <div className="mb-24">
       <div className="px-2">
         <p id="all-week-hint" className="px-2 pb-2 text-[13px] text-muted">
-          Courts free in each half-hour. A longer booking may not fit: open a time to see each court. Saving always checks again.
+          Courts free in each {fmtDur(slot)} slot. A longer booking may not fit: open a time to see each court. Saving always checks again.
         </p>
+        {!free && (
+          <p role="status" data-testid="all-week-status" className="mx-2 mb-2 rounded-lg border border-grid bg-white px-3 py-2 text-[13px] text-ink">
+            {failed ? "Availability could not be loaded, so no counts are shown. Use Retry above." : "Loading availability…"}
+          </p>
+        )}
         <span id="week-keys-hint" className="sr-only">Arrow keys move between times and days; Enter opens that day in Courts at that time.</span>
         <div ref={rootRef} role="group" aria-label="Week, all courts" aria-describedby="all-week-hint week-keys-hint" onKeyDown={onKey}
              className="grid outline-none" style={{ gridTemplateColumns: `3rem repeat(7, minmax(2.5rem, 1fr))` }}>
@@ -1411,14 +1423,25 @@ function AllCourtsWeek({ club, courts, days, times, data, cellHref, dayHref, roo
                 {i % labelEvery === 0 ? t : ""}
               </div>
               {days.map((d, di) => {
-                const n = free[di][i];
                 const past = ended(d, i);
+                const place = { gridColumn: di + 2, gridRow: i + 2, height: rowPx };
+                if (!free) {
+                  // not verified: no count and nothing to follow; still a stop for the arrow keys
+                  return (
+                    <button key={d + t} type="button" {...cellProps(d, t)} aria-disabled="true" data-unverified="true"
+                            aria-label={`${dayLabels[di]}, ${t}: ${failed ? "availability not loaded" : "loading"}`} style={place}
+                            className={`relative cursor-not-allowed border-b border-l border-grid/60 text-[13px] text-muted focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf ${past ? PAST_BG : "bg-white"}`}>
+                      <span aria-hidden="true">–</span>
+                    </button>
+                  );
+                }
+                const n = free[di][i];
                 return (
                   <Link key={d + t} {...cellProps(d, t)} href={cellHref(d, t)} data-free={n} data-past={past ? "true" : undefined}
                         aria-label={`${n} of ${total} courts free, ${dayLabels[di]}, ${t}`}
-                        style={{ gridColumn: di + 2, gridRow: i + 2, height: rowPx }}
+                        style={place}
                         className={`relative flex items-center justify-center border-b border-l border-grid/60 text-[13px] tabular-nums focus-visible:z-[6] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-turf ${past ? `${PAST_BG} text-muted` : tone(n)}`}>
-                    {loading ? "" : n === 0 ? "Full" : `${n} free`}
+                    {n === 0 ? "Full" : `${n} free`}
                   </Link>
                 );
               })}
