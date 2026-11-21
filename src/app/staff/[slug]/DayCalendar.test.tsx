@@ -29,8 +29,10 @@ vi.mock("@/lib/supabase/client", () => ({
     from: (table: string) => {
       const filters: Record<string, unknown> = {};
       const b: Record<string, unknown> = {};
-      for (const m of ["select", "or", "not", "lt", "gt", "order", "insert", "delete"]) b[m] = () => b;
+      for (const m of ["or", "not", "lt", "gt", "order", "insert", "delete"]) b[m] = () => b;
+      b.select = (cols: string) => { filters.select = cols; return b; };
       b.eq = (col: string, val: unknown) => { filters[col] = val; return b; };
+      b.in = (col: string, vals: unknown[]) => { filters[col] = vals; return b; };
       b.then = (res: (v: Resp) => unknown, rej?: (e: unknown) => unknown) =>
         handler({ table, filters }).then(res, rej);
       return b;
@@ -925,9 +927,9 @@ describe("Phase I-2b review: keyboard at the edges of the day (booking/block end
     await waitFor(() => expect((lastFree as HTMLButtonElement).disabled).toBe(false));
     await act(async () => { lastFree.focus(); });
     await key("ArrowDown");
-    expect(label()).toBe("Late Game on 2099-01-12 at 21:30");
+    expect(label()).toBe("Late Game, Padel 1, Mon 12 Jan, 21:30–23:00, desk booking");
     await key("End"); await key("ArrowDown"); await key("ArrowDown");
-    expect(label()).toBe("Late Game on 2099-01-12 at 21:30");                       // the 22:30 cell of the same booking
+    expect(label()).toBe("Late Game, Padel 1, Mon 12 Jan, 21:30–23:00, desk booking");  // the 22:30 cell of the same booking
     expect(focused().getAttribute("data-week-cell")).toBe("2099-01-12|22:30");
     await key("ArrowUp"); await key("ArrowUp"); await key("ArrowUp");
     expect(label()).toBe("Add a booking on 2099-01-12 at 21:00");
@@ -1136,5 +1138,304 @@ describe("Phase I-2b: accessibility scan (axe-core)", () => {
     view({ date: "2099-01-12", view: "week", court: courtA.id });
     await screen.findByRole("group", { name: /^Week,/ });
     expect(await scan()).toEqual([]);
+  });
+});
+
+
+// ---- Phase I-2c ---------------------------------------------------------------------------------------------
+describe("Phase I-2c: Week readable at a glance (desktop)", () => {
+  const DAY = "2099-01-12";                                   // a Monday: the week runs 12–18 Jan
+  const z = (d: string, hhmm: string) => new Date(`${d}T${hhmm}:00+02:00`).toISOString();
+  const rami: Booking = { ...booking("w-rami", "Rami Haddad"), start_at: z(DAY, "18:00"), end_at: z(DAY, "19:30"), guest_phone: "+961 70 111 222" };
+  const maya: Booking = { ...booking("w-maya", "Maya Khoury"), start_at: z(DAY, "19:30"), end_at: z(DAY, "20:30"), source: "app" };   // back to back
+  const net: Block = { id: "w-net", court_id: courtA.id, start_at: z(DAY, "10:00"), end_at: z(DAY, "12:00"), reason: "Net repair" };
+  const closed: Block = { id: "w-closed", court_id: courtA.id, start_at: z("2099-01-14", "08:00"), end_at: z("2099-01-14", "23:00"), reason: "Tournament" };
+  const weekRows = (q: Query) => ok(q.table === "bookings" ? [rami, maya] : q.table === "blocks" ? [net, closed] : []);
+  const cellAt = (d: string, t: string) => document.querySelector<HTMLElement>(`[data-week-cell="${d}|${t}"]`)!;
+  const times = Array.from({ length: 30 }, (_, i) => `${String(8 + Math.floor(i / 2)).padStart(2, "0")}:${i % 2 ? "30" : "00"}`);
+  beforeEach(() => { handler = async (q) => weekRows(q); desktop(true); });
+  afterEach(() => { desktop(false); vi.useRealTimers(); });
+
+  it("each booking and block is drawn once over exactly the cells that open it; back-to-back bookings stay two", async () => {
+    view({ date: DAY, view: "week", court: courtA.id });
+    await waitFor(() => expect(document.querySelectorAll("[data-week-block]").length).toBe(4));
+    for (const el of document.querySelectorAll<HTMLElement>("[data-week-block]")) {
+      const [r0, r1] = el.dataset.rows!.split("-").map(Number);
+      const col = Number(el.style.gridColumn) - 2;
+      const day = shiftDay(DAY, col);
+      expect(el.style.gridRow.replace(/\s/g, "")).toBe(`${r0 + 2}/${r1 + 2}`);
+      const label = cellAt(day, times[r0]).getAttribute("aria-label")!;
+      for (let r = r0; r < r1; r++) expect(cellAt(day, times[r]).getAttribute("aria-label")).toBe(label);   // same item all the way
+      if (r0 > 0) expect(cellAt(day, times[r0 - 1]).getAttribute("aria-label")).not.toBe(label);             // and not one more
+      if (r1 < times.length) expect(cellAt(day, times[r1]).getAttribute("aria-label")).not.toBe(label);
+      expect(el.getAttribute("aria-hidden")).toBe("true");
+      expect(el.className).toContain("pointer-events-none");
+    }
+    const drawn = (id: string) => document.querySelector<HTMLElement>(`[data-week-block="${id}"]`)!;
+    expect(drawn("w-rami").dataset.rows).toBe("20-23");
+    expect(drawn("w-maya").dataset.rows).toBe("23-25");
+    expect(drawn("w-rami").textContent).toBe("Rami Haddad18:00–19:30 · desk");
+    expect(drawn("w-maya").textContent).toBe("Maya Khoury19:30–20:30 · app");
+    expect(drawn("w-net").textContent).toBe("Net repair10:00–12:00 · blocked");
+    // no Add booking action anywhere under a booking or block
+    for (let r = 20; r < 25; r++) expect(cellAt(DAY, times[r]).getAttribute("aria-label")).not.toMatch(/^Add/);
+    expect(cellAt(DAY, "18:30").getAttribute("aria-label")).toBe("Rami Haddad, Padel 1, Mon 12 Jan, 18:00–19:30, desk booking");
+    expect(cellAt(DAY, "10:30").getAttribute("aria-label")).toBe("Net repair, Padel 1, Mon 12 Jan, 10:00–12:00, blocked");
+  });
+
+  it("day headings in words and sticky; the phone's short count is kept for phones", async () => {
+    view({ date: DAY, view: "week", court: courtA.id });
+    await waitFor(() => expect(document.querySelectorAll("[data-week-block]").length).toBe(4));
+    const headings = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="week-day-heading"]')).map((h) => h.textContent);
+    expect(headings[0]).toBe("Mon 12 Jan2 bookings");
+    expect(headings[1]).toBe("Tue 13 JanNo bookings");
+    expect(headings[2]).toBe("Wed 14 JanClosed");
+    const link = screen.getByRole("link", { name: /Mon 12 Jan/ });
+    expect(link.className).toMatch(/lg:sticky/);
+    expect(link.textContent).toContain("9/30");                    // phones: unchanged (shown below 1024 px only)
+  });
+
+  it("details on hover and keyboard focus, beside the cell; the keyboard still moves as in I-2b", async () => {
+    view({ date: DAY, view: "week", court: courtA.id });
+    await waitFor(() => expect(cellAt(DAY, "18:00").getAttribute("aria-label")).toMatch(/^Rami/));
+    await act(async () => { cellAt(DAY, "17:30").focus(); });
+    await act(async () => { fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" }); });
+    expect(document.activeElement).toBe(cellAt(DAY, "18:00"));
+    expect(screen.getByTestId("week-peek").textContent).toBe("Rami HaddadPadel 1 · Mon 12 Jan · 18:00–19:30Desk booking+961 70 111 222");
+    await act(async () => { fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" }); });
+    expect(screen.queryByTestId("week-peek")).toBeNull();          // a free cell has no details
+    await act(async () => { fireEvent.mouseEnter(cellAt(DAY, "10:30")); });
+    expect(screen.getByTestId("week-peek").textContent).toBe("Net repairPadel 1 · Mon 12 Jan · 10:00–12:00 · blocked");
+    await act(async () => { fireEvent.mouseLeave(cellAt(DAY, "10:30")); });
+    expect(screen.queryByTestId("week-peek")).toBeNull();
+  });
+
+  it("past times are shaded and the now line is on today, without hiding bookings or the keyboard", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2099-01-12T12:10:00.000Z"));       // 14:10 in Beirut, Monday
+    const early: Booking = { ...booking("w-early", "Early Bird"), start_at: z(DAY, "09:00"), end_at: z(DAY, "10:00") };
+    handler = async (q) => ok(q.table === "bookings" ? [early] : []);
+    view({ date: DAY, view: "week", court: courtA.id });
+    await waitFor(() => expect(document.querySelector('[data-week-block="w-early"]')).not.toBeNull());
+    expect(cellAt(DAY, "13:30").dataset.past).toBe("true");        // ended 14:00
+    expect(cellAt(DAY, "14:00").dataset.past).toBeUndefined();     // still running
+    expect(cellAt("2099-01-13", "08:00").dataset.past).toBeUndefined();
+    expect(cellAt(DAY, "13:30").className).toMatch(/lg:bg-\[#e4e7e3\]/);
+    // a past booking is still drawn and still opens; it is not greyed out
+    expect(cellAt(DAY, "09:00").getAttribute("aria-label")).toMatch(/^Early Bird/);
+    expect(cellAt(DAY, "09:00").className).not.toMatch(/#e4e7e3/);
+    const line = screen.getByTestId("week-now");
+    expect(line.style.gridColumn).toBe("2");
+    expect(parseFloat((line.firstElementChild as HTMLElement).style.top)).toBeCloseTo(((14 * 60 + 10 - 480) / 30) * 34, 2);
+    expect(line.className).toMatch(/z-\[4\]/);                     // below a focused cell's outline (z-6)
+    expect(cellAt(DAY, "14:00").className).toMatch(/focus-visible:z-\[6\]/);
+  });
+
+  it("Courts view: today's ended times are shaded too; the time in progress is not", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2099-01-12T12:10:00.000Z"));
+    handler = async () => ok([]);
+    view({ date: DAY });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add booking Padel 1 13:30" }).dataset.past).toBe("true"));
+    expect(screen.getByRole("button", { name: "Add booking Padel 1 14:00" }).dataset.past).toBeUndefined();
+  });
+
+  it("phones: no drawn blocks, the short first-name label as before", async () => {
+    desktop(false);
+    view({ date: DAY, view: "week", court: courtA.id });
+    await waitFor(() => expect(cellAt(DAY, "18:00").getAttribute("aria-label")).toMatch(/^Rami/));
+    for (const el of document.querySelectorAll("[data-week-block]")) expect(el.className).toMatch(/(^|\s)hidden(\s|$)/);
+    expect(cellAt(DAY, "18:00").textContent).toBe("Rami");
+    expect(screen.queryByRole("link", { name: "All courts" })?.className ?? "hidden").toMatch(/(^|\s)hidden(\s|$)/);
+  });
+
+  it("Week view with bookings, blocks and details shown: no accessibility violations", async () => {
+    const axe = (await import("axe-core")).default;
+    view({ date: DAY, view: "week", court: courtA.id });
+    await waitFor(() => expect(document.querySelectorAll("[data-week-block]").length).toBe(4));
+    await act(async () => { cellAt(DAY, "18:00").focus(); });
+    const r = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
+    expect(r.violations.map((v) => `${v.id}: ${v.nodes.length}`)).toEqual([]);
+  });
+});
+
+/** yyyy-mm-dd plus n days (test helper) */
+function shiftDay(d: string, n: number) {
+  const t = new Date(`${d}T12:00:00Z`); t.setUTCDate(t.getUTCDate() + n);
+  return t.toISOString().slice(0, 10);
+}
+
+describe("Phase I-2c: All courts week (desktop)", () => {
+  const DAY = "2099-01-12";
+  const z = (hhmm: string) => new Date(`${DAY}T${hhmm}:00+02:00`).toISOString();
+  const future = "2099-12-31T00:00:00.000Z", gone = "2000-01-01T00:00:00.000Z";
+  const takenRows = [
+    { court_id: courtA.id, start_at: z("18:00"), end_at: z("19:00"), status: "confirmed", hold_expires_at: null },
+    { court_id: courtB.id, start_at: z("18:00"), end_at: z("18:30"), status: "pending", hold_expires_at: future },   // being paid now
+    { court_id: courtB.id, start_at: z("19:00"), end_at: z("19:30"), status: "pending", hold_expires_at: gone },     // hold expired: free
+  ];
+  const blockRows = [{ court_id: courtA.id, start_at: z("20:00"), end_at: z("21:00") }];
+  let seen: Query[] = [];
+  beforeEach(() => {
+    seen = [];
+    handler = async (q) => { seen.push(q); return ok(Array.isArray(q.filters.court_id) ? (q.table === "bookings" ? takenRows : q.table === "blocks" ? blockRows : []) : []); };
+    desktop(true);
+  });
+  afterEach(() => { desktop(false); rpcImpl = async () => ({ data: [], error: null }); });
+  const cell = (t: string) => document.querySelector<HTMLElement>(`[data-week-cell="${DAY}|${t}"]`)!;
+
+  it("counts free courts at each time: confirmed bookings, unexpired holds and blocks take a court; an expired hold does not", async () => {
+    view({ date: DAY, view: "week", court: "all" });
+    const grid = await screen.findByRole("group", { name: "Week, all courts" });
+    await waitFor(() => expect(cell("18:00").textContent).toBe("Full"));
+    expect(cell("18:00").getAttribute("aria-label")).toBe("0 of 2 courts free, Mon 12 Jan, 18:00");
+    expect(cell("18:30").textContent).toBe("1 free");
+    expect(cell("19:00").textContent).toBe("2 free");
+    expect(cell("20:30").textContent).toBe("1 free");
+    expect(cell("10:00").textContent).toBe("2 free");
+    expect(grid.querySelectorAll("[tabindex='0']").length).toBe(1);             // one Tab stop, as in I-2b
+    expect(screen.getByText(/A longer booking may not fit/)).toBeDefined();
+  });
+
+  it("reads start and end only — no names, no phones — for exactly the shown courts", async () => {
+    const rpc = vi.fn(async () => ({ data: [], error: null }));
+    rpcImpl = rpc;
+    view({ date: DAY, view: "week", court: "all" });
+    await waitFor(() => expect(cell("18:00").textContent).toBe("Full"));
+    const all = seen.filter((q) => Array.isArray(q.filters.court_id));
+    expect(all.map((q) => q.table).sort()).toEqual(["blocks", "bookings"]);
+    for (const q of all) {
+      expect(q.filters.court_id).toEqual([courtA.id, courtB.id]);
+      expect(q.filters.club_id).toBe(club.id);
+      expect(String(q.filters.select)).not.toMatch(/guest|player|phone|price|reason/);
+    }
+    expect(rpc.mock.calls.map((c) => (c as unknown[])[0])).not.toContain("club_booking_contacts");
+    // and no single-court week read was made for the first court on the way
+    expect(seen.some((q) => q.filters.court_id === courtA.id)).toBe(false);
+  });
+
+  it("a time opens that day in Courts at that time; Enter does the same (it is a link)", async () => {
+    view({ date: DAY, view: "week", court: "all", sport: "padel" });
+    await waitFor(() => expect(cell("18:30").textContent).toBe("1 free"));
+    expect(cell("18:30").tagName).toBe("A");
+    expect(cell("18:30").getAttribute("href")).toBe("/staff/batroun?date=2099-01-12&view=grid&sport=padel&time=18:30");
+    expect(screen.getByRole("link", { name: "All courts" }).className).toMatch(/bg-ink/);
+  });
+
+  it("each count equals what the Courts view shows for that day and time", async () => {
+    view({ date: DAY, view: "week", court: "all" });
+    await waitFor(() => expect(cell("18:00").textContent).toBe("Full"));
+    const counts = Object.fromEntries(["18:00", "18:30", "19:00", "20:00", "20:30", "21:00"].map((t) => [t, Number(cell(t).dataset.free)]));
+    cleanup();
+    // the Courts view of that day, as the server would load it (an expired hold is not loaded)
+    const dayBookings: Booking[] = [
+      { ...booking("c1", "A"), court_id: courtA.id, start_at: z("18:00"), end_at: z("19:00") },
+      { ...booking("c2", "B"), court_id: courtB.id, start_at: z("18:00"), end_at: z("18:30"), status: "pending" },
+    ];
+    view({ date: DAY, bookings: dayBookings, blocks: [{ id: "c3", court_id: courtA.id, start_at: z("20:00"), end_at: z("21:00"), reason: null }] });
+    for (const [t, n] of Object.entries(counts)) {
+      const row = (Number(t.slice(0, 2)) * 60 + Number(t.slice(3)) - 480) / 30;
+      const open = [courtA, courtB].filter((c) => !document.querySelector<HTMLButtonElement>(`[data-cell="${c.id}:${row}"]`)!.disabled);
+      expect(open.length, t).toBe(n);
+    }
+  });
+
+  it("arriving in Courts with a time: that time is shown and has the keyboard (first court), or the booking covering it", async () => {
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    view({ date: DAY, focusTime: "18:30" });
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Add booking Padel 1 18:30");
+    expect(scrolled).toHaveBeenCalledWith({ block: "center" });
+    cleanup();
+    view({ date: DAY, focusTime: "18:30", bookings: [{ ...booking("c1", "Covering"), start_at: z("18:00"), end_at: z("19:00") }] });
+    expect(document.activeElement?.getAttribute("aria-label")).toMatch(/^Covering, Padel 1, 18:00–19:00/);
+  });
+
+  it("phones never get All courts: an All courts address shows the first court as before", async () => {
+    desktop(false);
+    view({ date: DAY, view: "week", court: "all" });
+    expect(await screen.findByRole("group", { name: "Week, Padel 1" })).toBeDefined();
+    await waitFor(() => expect(seen.some((q) => q.filters.court_id === courtA.id)).toBe(true));
+    expect(seen.some((q) => Array.isArray(q.filters.court_id))).toBe(false);
+  });
+
+  it("no accessibility violations", async () => {
+    const axe = (await import("axe-core")).default;
+    view({ date: DAY, view: "week", court: "all" });
+    await waitFor(() => expect(cell("18:00").textContent).toBe("Full"));
+    const r = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
+    expect(r.violations.map((v) => `${v.id}: ${v.nodes.length}`)).toEqual([]);
+  });
+});
+
+describe("Phase I-2c: List, colour key and Print the day (desktop)", () => {
+  const DAY = "2099-01-12";
+  const z = (hhmm: string) => new Date(`${DAY}T${hhmm}:00+02:00`).toISOString();
+  const rows: Booking[] = [
+    { ...booking("l1", "Rami Haddad"), start_at: z("18:00"), end_at: z("19:00"), guest_phone: "+961 70 123 456" },
+    { ...booking("l2", "Maya Khoury"), court_id: courtB.id, start_at: z("09:00"), end_at: z("10:00"), source: "app", contact_phone: "+961 3 987 654" } as Booking,
+    { ...booking("l3", "Sami Paying"), start_at: z("12:00"), end_at: z("13:00"), status: "pending" },
+  ];
+  const blocks: Block[] = [{ id: "lb", court_id: courtB.id, start_at: z("10:00"), end_at: z("12:00"), reason: "Net repair" }];
+  beforeEach(() => { handler = async (q) => ok(q.table === "bookings" ? rows : q.table === "blocks" ? blocks : []); desktop(true); });
+  afterEach(() => { desktop(false); vi.restoreAllMocks(); });
+
+  it("List shows blocks in time order with the bookings, each booking's type in words, and a count", async () => {
+    view({ date: DAY, view: "list", bookings: rows, blocks });
+    expect(screen.getByTestId("list-count").textContent).toBe("3 bookings, 1 block");
+    const items = Array.from(document.querySelectorAll("main ul > li")).map((li) => li.textContent);
+    expect(items).toEqual([
+      "09:00–10:00Padel 2Maya KhouryApp",
+      "10:00–12:00Padel 2Blocked: Net repair",
+      "12:00–13:00Padel 1Sami PayingBeing paid",
+      "18:00–19:00Padel 1Rami Haddad+961 70 123 456Desk",
+    ]);
+    await act(async () => { screen.getByRole("button", { name: /Blocked: Net repair/ }).click(); });
+    expect(screen.getByRole("dialog", { name: "Blocked time" })).toBeDefined();
+  });
+
+  it("the colour key names every state on desktop; 'not saved' only while a form is open", async () => {
+    view({ date: DAY, bookings: rows, blocks });
+    const key = () => screen.getByText("app").closest("span")!.parentElement!.textContent;
+    expect(key()).toBe("appdeskbeing paidblockedpast");
+    await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 15:00" }).click(); });
+    expect(key()).toBe("appdeskbeing paidblockedpastnot saved");
+  });
+
+  it("Print day: the browser's Print with the day's sheet — names, types and blocks, never a phone number", async () => {
+    const print = vi.fn();
+    window.print = print;
+    view({ date: DAY, bookings: rows, blocks });
+    await act(async () => { screen.getByRole("button", { name: "Print day" }).click(); });
+    expect(print).toHaveBeenCalledTimes(1);
+    const sheet = screen.getByTestId("print-day");
+    expect(sheet.parentElement).toBe(document.body);               // printed on its own; the page is hidden in print
+    const lines = Array.from(sheet.querySelectorAll("tbody tr")).map((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent));
+    expect(lines).toEqual([
+      ["09:00–10:00", "Padel 2", "Maya Khoury", "App", "☐"],
+      ["10:00–12:00", "Padel 2", "Blocked: Net repair", ""],
+      ["12:00–13:00", "Padel 1", "Sami Paying", "Being paid", "☐"],
+      ["18:00–19:00", "Padel 1", "Rami Haddad", "Desk", "☐"],
+    ]);
+    expect(sheet.textContent).toMatch(/^Batroun — Monday 12 January 2099/);
+    expect(sheet.textContent).not.toMatch(/\+961|70 123|987 654|\d{3} \d{3}/);
+  });
+
+  it("Print day follows the sport filter and is offered only for a day (Courts or List) on desktop", async () => {
+    const tennis: Court = { id: "court-t", name: "Tennis 1", sport: "tennis", surface: null, sort: 3, active: true };
+    render(<DayCalendar club={club} courts={[courtA, courtB, tennis]} bookings={[...rows, { ...booking("t1", "Tennis Tom"), court_id: tennis.id, start_at: z("11:00"), end_at: z("12:00") }]}
+      blocks={blocks} date={DAY} view="grid" sport="tennis" court={null} sportNames={{ padel: "Padel", tennis: "Tennis" }} />);
+    const sheet = screen.getByTestId("print-day");
+    expect(sheet.querySelectorAll("tbody tr").length).toBe(1);
+    expect(sheet.textContent).toContain("Tennis Tom");
+    expect(sheet.textContent).toContain("Tennis courts · 1 booking");
+    cleanup();
+    view({ date: DAY, view: "week", court: courtA.id });
+    expect(screen.queryByRole("button", { name: "Print day" })).toBeNull();
+    expect(screen.queryByTestId("print-day")).toBeNull();
+    cleanup();
+    desktop(false);
+    view({ date: DAY });
+    expect(screen.queryByTestId("print-day")).toBeNull();
   });
 });

@@ -11,10 +11,10 @@ export default async function StaffClubPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ date?: string; view?: string; sport?: string; court?: string }>;
+  searchParams: Promise<{ date?: string; view?: string; sport?: string; court?: string; time?: string }>;
 }) {
   const { slug } = await params;
-  const { date: qDate, view, sport, court } = await searchParams;
+  const { date: qDate, view, sport, court, time } = await searchParams;
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -98,6 +98,7 @@ export default async function StaffClubPage({
       sport={sport && /^[a-z_]+$/.test(sport) ? sport : null}
       sportNames={sportNames}
       explicit={Boolean(view || sport)}
+      focusTime={time && /^\d{2}:\d{2}$/.test(time) ? time : null}
     />
     </>
   );

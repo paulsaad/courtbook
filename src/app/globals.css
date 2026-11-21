@@ -69,3 +69,9 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   color: var(--color-muted);
   cursor: not-allowed;
 }
+
+/* Print the day (staff calendar, Phase I-2c): only the printed sheet, nothing else on the page. */
+@media print {
+  body:has(> #print-day) > :not(#print-day) { display: none !important; }
+  @page { size: A4; margin: 14mm; }
+}
