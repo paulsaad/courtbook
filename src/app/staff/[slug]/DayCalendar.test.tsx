@@ -183,22 +183,27 @@ describe("staff calendar lengths follow the club's limits (Phase 9 / 0066)", () 
   const labels = (group: string) => Array.from(radios(group)).map((r) => r.textContent);
 
   it("a walk-in offers 1 h to 3 h, a block offers its own lengths", async () => {
-    view();
+    view({ date: "2099-01-12" });                                  // a future day: no slot has ended
     await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 10:00" }).click(); });
     expect(labels("Booking length")).toEqual(["1 h", "1 h 30", "2 h", "2 h 30", "3 h"]);
     expect(screen.getByRole("button", { name: "Add booking" })).toBeDefined();
     await act(async () => { screen.getByRole("button", { name: "Block this time instead" }).click(); });
-    expect(labels("Block length")).toEqual(["30 min", "1 h", "1 h 30", "2 h", "2 h 30", "3 h", "3 h 30", "4 h"]);
+    // a block: start and end selectors, any end on the grid up to closing (no 4 h limit any more)
+    const end = screen.getByLabelText("Block end") as HTMLSelectElement;
+    const ends = Array.from(end.options).map((o) => o.textContent);
+    expect(ends[0]).toBe("10:30");
+    expect(ends[ends.length - 1]).toBe("23:00");
+    expect((screen.getByLabelText("Block start") as HTMLSelectElement).value).toBe(String(10 * 60));
     expect(screen.getByRole("button", { name: "Block this time" })).toBeDefined();
   });
 
   it("near closing: no booking length fits, but a 30 min block does", async () => {
-    view();
+    view({ date: "2099-01-12" });
     await act(async () => { screen.getByRole("button", { name: "Add booking Padel 1 22:30" }).click(); });
     expect(screen.getByText(/Not enough time before closing for a booking/)).toBeDefined();
     expect((screen.getByRole("button", { name: "Add booking" }) as HTMLButtonElement).disabled).toBe(true);
     await act(async () => { screen.getByRole("button", { name: "Block this time instead" }).click(); });
-    expect(labels("Block length")).toEqual(["30 min"]);
+    expect(Array.from((screen.getByLabelText("Block end") as HTMLSelectElement).options).map((o) => o.textContent)).toEqual(["23:00"]);
     expect((screen.getByRole("button", { name: "Block this time" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -224,7 +229,7 @@ describe("walk-in sheet: a block never takes the customer's name (review fix)", 
     await act(async () => { screen.getByRole("button", { name: "Block this time instead" }).click(); });
     expect((screen.getByLabelText("Block reason") as HTMLInputElement).value).toBe("");
     await act(async () => { screen.getByRole("button", { name: "Block this time" }).click(); });
-    expect(onSave).toHaveBeenCalledWith("", "", 2, true);       // reason empty, not "Ali Haddad"
+    expect(onSave).toHaveBeenCalledWith("", "", 2, true, "10:00");       // reason empty, not "Ali Haddad"
     await act(async () => { screen.getByRole("button", { name: "Back to booking" }).click(); });
     expect((screen.getByLabelText("Customer name") as HTMLInputElement).value).toBe("Ali Haddad");
   });
@@ -237,7 +242,7 @@ describe("walk-in sheet: a block never takes the customer's name (review fix)", 
     expect((screen.getByLabelText("Customer name") as HTMLInputElement).value).toBe("");
     await act(async () => { screen.getByRole("button", { name: "Block this time instead" }).click(); });
     await act(async () => { screen.getByRole("button", { name: "Block this time" }).click(); });
-    expect(onSave).toHaveBeenCalledWith("Net repair", "", 2, true);
+    expect(onSave).toHaveBeenCalledWith("Net repair", "", 2, true, "10:00");
   });
 
   it("when no block length fits before closing, it says so for a block and cannot save", async () => {
@@ -449,3 +454,162 @@ describe("Phase I-2a review: crossing 1024 px and focused controls", () => {
   });
 });
 
+
+describe("Calendar blocks (0076): longer blocks, start/end selectors and the 'Not saved' highlight", () => {
+  const DAY = "2099-01-12";                                          // a future day (Beirut UTC+2 in January)
+  const z = (hhmm: string) => new Date(`${DAY}T${hhmm}:00+02:00`).toISOString();
+  const open = async (label = "Add booking Padel 1 10:00") => { await act(async () => { screen.getByRole("button", { name: label }).click(); }); };
+  const toBlock = async () => { await act(async () => { screen.getByRole("button", { name: "Block this time instead" }).click(); }); };
+  const pick = (label: string, hhmm: string) => fireEvent.change(screen.getByLabelText(label), { target: { value: String(Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3))) } });
+  const draft = () => screen.queryByTestId("draft");
+  const column = (el: HTMLElement) => el.parentElement!;
+  let calls: { fn: string; args: Record<string, unknown> }[];
+  beforeEach(() => {
+    handler = async () => ok([]); desktop(true); calls = [];
+    rpcImpl = async (fn, args) => { calls.push({ fn, args: args as Record<string, unknown> }); return { data: fn === "staff_block" ? "blk-1" : [], error: null }; };
+  });
+  afterEach(() => { vi.restoreAllMocks(); desktop(false); rpcImpl = async () => ({ data: [], error: null }); });
+
+  it("a 10-hour block is saved once, through staff_block, with the exact start and end", async () => {
+    view({ date: DAY });
+    await open(); await toBlock();
+    pick("Block end", "20:00");
+    fireEvent.change(screen.getByLabelText("Block reason"), { target: { value: "Tournament" } });
+    expect(screen.getByRole("heading", { name: "Padel 1, 10:00–20:00 · block" })).toBeDefined();
+    await act(async () => { screen.getByRole("button", { name: "Block this time" }).click(); });
+    await waitFor(() => expect(calls.filter((c) => c.fn === "staff_block")).toHaveLength(1));
+    expect(calls.find((c) => c.fn === "staff_block")!.args).toEqual({
+      p_club: "club-1", p_court: "court-a", p_start: z("10:00"), p_end: z("20:00"), p_reason: "Tournament",
+    });
+  });
+
+  it("the start can be moved earlier or later; the save uses it", async () => {
+    view({ date: DAY });
+    await open(); await toBlock();
+    pick("Block start", "09:00");
+    pick("Block end", "12:00");
+    expect(screen.getByRole("heading", { name: "Padel 1, 09:00–12:00 · block" })).toBeDefined();
+    await act(async () => { screen.getByRole("button", { name: "Block this time" }).click(); });
+    await waitFor(() => expect(calls.find((c) => c.fn === "staff_block")?.args).toMatchObject({ p_start: z("09:00"), p_end: z("12:00"), p_reason: null }));
+  });
+
+  it("the end stops at the next booking on that court; another court is not limited by it", async () => {
+    const later: Booking = { ...booking("b-later", "Later Game"), start_at: z("12:00"), end_at: z("13:00") };
+    view({ date: DAY, bookings: [later] });
+    await open(); await toBlock();
+    const ends = () => Array.from((screen.getByLabelText("Block end") as HTMLSelectElement).options).map((o) => o.textContent);
+    expect(ends()).toEqual(["10:30", "11:00", "11:30", "12:00"]);
+    await act(async () => { screen.getByRole("button", { name: "Close" }).click(); });
+    await open("Add booking Padel 2 10:00"); await toBlock();
+    expect(ends()[ends().length - 1]).toBe("23:00");
+  });
+
+  it("highlights the selected court and the whole interval at once, and follows every change", async () => {
+    view({ date: DAY });
+    expect(draft()).toBeNull();
+    await open();
+    expect(draft()!.textContent).toBe("Not saved10:00–11:00");                      // a booking, default length
+    expect(column(draft()!).querySelector('[aria-label="Add booking Padel 1 10:00"]')).not.toBeNull();
+    expect(column(draft()!).querySelector('[aria-label="Add booking Padel 2 10:00"]')).toBeNull();
+    await act(async () => { screen.getByRole("radio", { name: "2 h" }).click(); });
+    expect(draft()!.textContent).toBe("Not saved10:00–12:00");
+    await toBlock();
+    pick("Block end", "16:00");
+    expect(draft()!.textContent).toBe("Not saved10:00–16:00 · block");
+    pick("Block start", "08:00");
+    expect(draft()!.textContent).toBe("Not saved08:00–16:00 · block");
+    expect(draft()!.className).toContain("border-dashed");
+    expect(draft()!.className).toContain("pointer-events-none");                    // the slots under it stay tappable
+    expect(draft()!.getAttribute("aria-hidden")).toBe("true");                       // the panel heading says it in words
+  });
+
+  it("disappears when the panel closes and moves with a new selection", async () => {
+    view({ date: DAY });
+    await open();
+    await act(async () => { screen.getByRole("button", { name: "Close" }).click(); });
+    expect(draft()).toBeNull();
+    await open();
+    await open("Add booking Padel 2 11:00");                                        // nothing chosen or typed: no question
+    expect(column(draft()!).querySelector('[aria-label="Add booking Padel 2 11:00"]')).not.toBeNull();
+    expect(screen.getAllByTestId("draft")).toHaveLength(1);
+  });
+
+  it("is never shown as a saved block: the hatched block appears only from the database's answer", async () => {
+    const answer = deferred<{ data: unknown; error: { message: string } | null }>();
+    rpcImpl = async (fn) => (fn === "staff_block" ? answer.promise : { data: [], error: null });
+    view({ date: DAY });
+    await open(); await toBlock();
+    pick("Block end", "14:00");
+    fireEvent.change(screen.getByLabelText("Block reason"), { target: { value: "Net repair" } });
+    await act(async () => { screen.getByRole("button", { name: "Block this time" }).click(); });
+    expect(draft()).not.toBeNull();                                                  // saving: still "Not saved"
+    expect(screen.queryByRole("button", { name: "Net repair" })).toBeNull();
+    const saved: Block = { id: "blk-1", court_id: courtA.id, start_at: z("10:00"), end_at: z("14:00"), reason: "Net repair" };
+    handler = async (q) => ok(q.table === "blocks" ? [saved] : []);
+    await act(async () => { answer.settle({ data: "blk-1", error: null }); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Net repair" })).toBeDefined());
+    expect(draft()).toBeNull();
+  });
+
+  it("a conflict keeps the selection, the highlight and the reason, says why, and is not retried", async () => {
+    rpcImpl = async (fn, args) => {
+      calls.push({ fn, args: args as Record<string, unknown> });
+      return fn === "staff_block" ? { data: null, error: { message: 'conflicting key value violates exclusion constraint "no_overlapping_blocks"' } } : { data: [], error: null };
+    };
+    view({ date: DAY });
+    await open(); await toBlock();
+    pick("Block end", "18:00");
+    fireEvent.change(screen.getByLabelText("Block reason"), { target: { value: "Event" } });
+    await act(async () => { screen.getByRole("button", { name: "Block this time" }).click(); });
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("That range is already blocked."));
+    expect(calls.filter((c) => c.fn === "staff_block")).toHaveLength(1);
+    expect((screen.getByLabelText("Block end") as HTMLSelectElement).value).toBe(String(18 * 60));
+    expect((screen.getByLabelText("Block reason") as HTMLInputElement).value).toBe("Event");
+    expect(draft()!.textContent).toBe("Not saved10:00–18:00 · block");
+  });
+
+  it("a changed end or length counts as unsaved: switching slots asks first, and Cancel keeps it", async () => {
+    view({ date: DAY });
+    await open(); await toBlock();
+    pick("Block end", "15:00");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false);
+    await open("Add booking Padel 2 11:00");
+    expect(confirm).toHaveBeenCalledWith("Discard the details you have entered?");
+    expect((screen.getByLabelText("Block end") as HTMLSelectElement).value).toBe(String(15 * 60));
+    expect(draft()!.textContent).toBe("Not saved10:00–15:00 · block");
+    await act(async () => { screen.getByRole("button", { name: "Close" }).click(); });  // asks again; OK this time
+    confirm.mockReturnValueOnce(true);
+    await act(async () => { screen.getByRole("button", { name: "Close" }).click(); });
+    await open();
+    await act(async () => { screen.getByRole("radio", { name: "2 h" }).click(); });  // a booking length the desk chose
+    confirm.mockReturnValueOnce(false);
+    await open("Add booking Padel 2 11:00");
+    expect(screen.getByRole("heading", { name: /Padel 1, 10:00–12:00/ })).toBeDefined();
+  });
+
+  it("week view: the chosen cells of that day are highlighted, and only those", async () => {
+    view({ date: DAY, view: "week", court: courtA.id });
+    const cell = await screen.findByRole("button", { name: "Add a booking on 2099-01-13 at 10:00" });
+    await waitFor(() => expect((cell as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => { cell.click(); });
+    const marked = () => Array.from(document.querySelectorAll('[data-draft="true"]')).map((e) => e.getAttribute("aria-label"));
+    expect(marked()).toEqual(["Add a booking on 2099-01-13 at 10:00", "Add a booking on 2099-01-13 at 10:30"]);
+    await toBlock();
+    pick("Block end", "12:00");
+    expect(marked()).toHaveLength(4);
+    expect(screen.getByText("Not saved")).toBeDefined();
+  });
+
+  it("today: a block cannot start in a slot that has already ended; the running slot is offered", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2099-01-12T12:10:00.000Z"));          // 14:10 in Beirut
+    try {
+      view({ date: DAY });
+      await open();                                                   // 10:00 is over
+      await toBlock();
+      const start = screen.getByLabelText("Block start") as HTMLSelectElement;
+      expect(start.value).toBe(String(14 * 60));
+      expect(Array.from(start.options)[0].textContent).toBe("14:00");
+    } finally { vi.useRealTimers(); }
+  });
+});

@@ -46,6 +46,7 @@ export const ERRORS: Record<string, string> = {
   slot_taken: "That slot was just taken.",
   block_overlaps_booking: "There is a booking in that range. Cancel or move it first.",
   overlaps_existing_block: "That range is already blocked.",
+  no_overlapping_blocks: "That range is already blocked.",
   outside_opening_hours: "Outside opening hours.",
   not_on_grid: "Start time must be on the slot grid.",
   bad_duration: "Duration must be whole slots, within what the club allows.",

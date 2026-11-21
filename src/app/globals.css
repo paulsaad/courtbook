@@ -17,6 +17,8 @@
   --color-slate-soft: #e9ebe8;
   --color-action: #0f7a47;
   --color-danger: #b42318;      /* errors: always with wording, never bare colour */
+  --color-draft: #b45309;       /* staff calendar: a chosen time not saved yet (dashed amber, "Not saved") */
+  --color-draft-soft: #fef3c7;
   --font-sans: "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --radius-card: 20px;
 }
