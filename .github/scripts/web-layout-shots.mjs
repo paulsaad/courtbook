@@ -57,7 +57,13 @@ for (const p of paths) {
   const a2 = PNG.sync.read(await shot(BASE + p, 390, 844));
   const r = compare(a, b, `${out}/DIFF-390-${name(p)}.png`);
   const noise = compare(a, a2);
-  const sameText = (await text(BASE + p)) === (await text(HEAD + p));
+  const tb = await text(BASE + p), th = await text(HEAD + p);
+  const sameText = tb === th;
+  if (!sameText) {
+    const lb = tb.split("\n"), lh = th.split("\n");
+    const gone = lb.filter((l) => !lh.includes(l)).slice(0, 5), added = lh.filter((l) => !lb.includes(l)).slice(0, 5);
+    console.log(`      text only before: ${JSON.stringify(gone)} · only after: ${JSON.stringify(added)}`);
+  }
   // identical, or the only differences are ones main also shows against itself, with the same visible text
   const ok = r.n === 0 || (r.n > 0 && noise.n > 0 && sameText && r.box === noise.box);
   if (!ok) { failures++; writeFileSync(`${out}/before-390-${name(p)}.png`, PNG.sync.write(a)); writeFileSync(`${out}/after-390-${name(p)}.png`, PNG.sync.write(b)); }
