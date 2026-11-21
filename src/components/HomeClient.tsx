@@ -18,6 +18,9 @@ export default function HomeClient({ areas, sports, initialMatches, signedIn }: 
   const [prefs, setPrefs] = useState<Prefs>(EMPTY);
   const [loaded, setLoaded] = useState(false);
   const [matches, setMatches] = useState(initialMatches);
+  // a failed area read is said as such, never shown as another area's games or "no open matches" (W1, audit B2)
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [q, setQ] = useState("");
   const sportName = (code: string) => sports.find((s) => s.code === code)?.name_en ?? code;
 
@@ -25,10 +28,14 @@ export default function HomeClient({ areas, sports, initialMatches, signedIn }: 
   useEffect(() => {
     if (!loaded || !signedIn) return;
     let alive = true;
-    if (!prefs.gov && !prefs.district) { Promise.resolve().then(() => { if (alive) setMatches(initialMatches); }); return () => { alive = false; }; }
-    createClient().rpc("open_matches", { p_governorate: prefs.gov, p_district: prefs.district, p_limit: 6 }).then(({ data }) => { if (alive && data) setMatches(data as OpenMatch[]); });
+    if (!prefs.gov && !prefs.district) { Promise.resolve().then(() => { if (alive) { setFailed(false); setMatches(initialMatches); } }); return () => { alive = false; }; }
+    createClient().rpc("open_matches", { p_governorate: prefs.gov, p_district: prefs.district, p_limit: 6 }).then(({ data, error }) => {
+      if (!alive) return;
+      if (error) { setFailed(true); return; }
+      setFailed(false); setMatches((data ?? []) as OpenMatch[]);
+    });
     return () => { alive = false; };
-  }, [prefs, loaded, signedIn, initialMatches]);
+  }, [prefs, loaded, signedIn, initialMatches, attempt]);
   const update = (p: Prefs) => { setPrefs(p); writePrefs(p); };
 
   const action = "flex flex-col items-center gap-2 text-[13px] font-bold text-ink";
@@ -58,7 +65,12 @@ export default function HomeClient({ areas, sports, initialMatches, signedIn }: 
       {signedIn && (
         <section className="flex flex-col gap-3">
           <div className="flex items-baseline justify-between"><h2 className="text-xl font-bold">Matches for you</h2><Link href="/play" className="text-sm font-semibold text-turf">See all</Link></div>
-          {matches.length === 0 ? (
+          {failed ? (
+            <p role="alert" className="card p-5 text-center text-sm text-danger">
+              Couldn&apos;t load open matches for this area.{" "}
+              <button type="button" onClick={() => setAttempt((n) => n + 1)} className="min-h-11 font-semibold underline">Try again</button>
+            </p>
+          ) : matches.length === 0 ? (
             <p className="card p-5 text-center text-sm text-muted">No open matches in this area yet. <Link href="/play" className="font-semibold text-turf">Post one</Link></p>
           ) : (
             <div className="-mx-5 flex gap-3 overflow-x-auto px-5 pb-1">

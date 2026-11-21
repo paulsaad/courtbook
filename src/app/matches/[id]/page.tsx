@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { allLoaded, loaded } from "@/lib/load";
 import { nowMs } from "@/lib/time";
 import MatchActions from "./MatchActions";
 import MatchChat from "./MatchChat";
@@ -15,17 +16,17 @@ export default async function MatchPage({ params }: { params: Promise<{ id: stri
   if (!found) notFound();
   const m = found.m;
   const tz: string = found.tz
-    ?? (await supabase.from("clubs").select("timezone").eq("id", m.club_id).single()).data?.timezone
+    ?? loaded(await supabase.from("clubs").select("timezone").eq("id", m.club_id).single(), "this game").data?.timezone
     ?? "Asia/Beirut";
   const member = m.i_organize || m.my_status === "accepted";
   // finished means the match has ended, not merely started (same rule as hide_match)
   const endsAt = m.end_at ? new Date(m.end_at).getTime() : new Date(m.start_at).getTime() + 3 * 60 * 60 * 1000;
   const finished = endsAt < nowMs();
-  const [{ data: people }, { data: msgs }, { data: hidden }] = await Promise.all([
+  const [{ data: people }, { data: msgs }, { data: hidden }] = allLoaded(await Promise.all([
     supabase.rpc("match_participants", { p_match: id }),
     member ? supabase.rpc("match_messages_list", { p_match: id, p_after: null }) : Promise.resolve({ data: [] }),
       supabase.rpc("match_is_hidden", { p_match: id }),
-  ]);
+  ]), "this game");
   await supabase.rpc("mark_notifications_read", { p_ids: null }).then(() => {}, () => {});   // opening a match clears its notices (simple v0.1 rule)
   const participants = (people ?? []) as { profile_id: string; name: string | null; level: number | null; level_legacy: string | null; is_organizer: boolean; status: string }[];
   const accepted = participants.filter((p) => p.status === "accepted");
@@ -69,8 +70,8 @@ async function loadMatch(supabase: Supa, id: string): Promise<{ m: MatchRow; tz:
     if (!d) return null;
     return { m: { ...d, pending: d.pending ?? 0, organizer_id: d.organizer_id ?? "" }, tz: d.club_timezone };
   }
-  if (detail.error.code !== "PGRST202") throw new Error(detail.error.message);
-  const { data: rows } = await supabase.rpc("match_board", { p_club: null, p_days: 60 });
+  if (detail.error.code !== "PGRST202") loaded(detail, "this game");   // throws: a failed read, not "no game"
+  const { data: rows } = loaded(await supabase.rpc("match_board", { p_club: null, p_days: 60 }), "this game");
   const m = ((rows ?? []) as MatchRow[]).find((x) => x.match_id === id);
   return m ? { m, tz: null } : null;
 }

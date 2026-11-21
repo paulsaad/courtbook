@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
+import { loaded } from "@/lib/load";
 import { todayIn } from "@/lib/time";
 import { normalizePhone, waNumber } from "@/lib/phone";
 
@@ -14,15 +15,15 @@ export default async function CoachPage({ params, searchParams }: { params: Prom
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?next=/coaches/${id}`);
-  const { data } = await supabase.rpc("coach_card", { p_coach: id });
+  const { data } = loaded(await supabase.rpc("coach_card", { p_coach: id }), "this coach");
   const card = ((data ?? []) as Card[])[0];
   if (!card) notFound();
   const club = card.clubs.find((c) => c.slug === qClub) ?? card.clubs[0];
   const from = club ? todayIn(club.timezone) : new Date().toISOString().slice(0, 10);
-  const { data: win } = club ? await supabase.rpc("coach_availability", { p_coach: id, p_club: club.id, p_from: from, p_days: 7 }) : { data: [] };
+  const { data: win } = club ? loaded(await supabase.rpc("coach_availability", { p_coach: id, p_club: club.id, p_from: from, p_days: 7 }), "this coach") : { data: [] };
   const windows = (win ?? []) as Win[];
   const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(`${from}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + i); return d.toISOString().slice(0, 10); });
-  const { data: me } = await supabase.from("profiles").select("name").eq("id", user.id).single();
+  const { data: me } = loaded(await supabase.from("profiles").select("name").eq("id", user.id).single(), "this coach");
   const e164 = card.whatsapp ? normalizePhone(card.whatsapp) : null;
   const waNum = e164 ? waNumber(e164) : null;
   const waText = encodeURIComponent(`Hi ${card.name ?? ""}, I found you on CourtBook${club ? ` (${club.name})` : ""}. I'd like to book a session. — ${me?.name ?? ""}`);

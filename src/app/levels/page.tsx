@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { loaded } from "@/lib/load";
 import { GROUP_LABEL, GROUP_RANGE, GUIDE, HOW_TO_CHOOSE, INTRO, levelGroup } from "@/lib/levels";
 
 /** "Find your playing level" — the article and the per-sport tables. Public. */
 export default async function LevelsGuide() {
   const supabase = await createClient();
-  const { data: sportRows } = await supabase.from("sports").select("code, name_en").eq("active", true).order("sort_order");
+  const { data: sportRows } = loaded(await supabase.from("sports").select("code, name_en").eq("active", true).order("sort_order"), "the sports");
   const names = new Map(((sportRows ?? []) as { code: string; name_en: string }[]).map((s) => [s.code, s.name_en]));
   const sports = ((sportRows ?? []) as { code: string }[]).map((s) => s.code).filter((c) => GUIDE[c]);
   return (

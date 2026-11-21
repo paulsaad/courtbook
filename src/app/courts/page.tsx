@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { loadRefData } from "@/lib/geo";
+import { loadRefDataChecked as loadRefData } from "@/lib/refData";
 import { todayIn } from "@/lib/time";
 import CourtsDay, { type DaySlot } from "./CourtsDay";
 

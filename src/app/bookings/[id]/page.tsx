@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
+import { allLoaded, loaded } from "@/lib/load";
 import { hhmm, nowMs } from "@/lib/time";
 import CancelButton from "./CancelButton";
 import OpenToPlayers, { type BookingMatch } from "./OpenToPlayers";
@@ -13,20 +14,20 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: b } = await supabase
+  const { data: b } = loaded(await supabase
     .from("bookings")
     .select("id, status, start_at, end_at, price_usd, fee_usd, cancelled_at, clubs(name, slug, timezone, cancel_cutoff_hours, location_url, payment_mode), courts!bookings_court_id_fkey(name, sport)")
     .eq("id", id)
     .eq("player_id", user.id)
-    .single();
+    .single(), "this booking");
   if (!b) notFound();
   if (b.status === "pending") redirect(`/pay/${id}`);
 
-  const [{ data: pay }, { data: bm }, { data: sportRows }] = await Promise.all([
+  const [{ data: pay }, { data: bm }, { data: sportRows }] = allLoaded(await Promise.all([
     supabase.from("payments").select("status, total_usd").eq("booking_id", id).maybeSingle(),
     supabase.rpc("booking_match", { p_booking: id }),
     supabase.from("sports").select("code, name_en"),
-  ]);
+  ]), "this booking");
   const match = ((bm ?? []) as NonNullable<BookingMatch>[])[0] ?? null;
   const sportLabel = new Map(((sportRows ?? []) as { code: string; name_en: string }[]).map((x) => [x.code, x.name_en]));
   const club = b.clubs as unknown as { name: string; slug: string; timezone: string; cancel_cutoff_hours: number; location_url: string | null; payment_mode: string | null };

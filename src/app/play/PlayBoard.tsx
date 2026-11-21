@@ -20,6 +20,9 @@ export default function PlayBoard({ areas, sports, initial, clubs }: { areas: Go
   const [when, setWhen] = useState<"today" | "week" | "any">("any");
   const [rows, setRows] = useState(initial);
   const [busy, setBusy] = useState(false);
+  // a failed read is said as such, never shown as "no open matches" (W1, audit B2); Try again re-runs it
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const sportName = (code: string) => sports.find((s) => s.code === code)?.name_en ?? code;
 
   // restore remembered filters after hydration (deferred so server and first client render match)
@@ -31,11 +34,13 @@ export default function PlayBoard({ areas, sports, initial, clubs }: { areas: Go
       setBusy(true);
       const now = new Date();
       const to = when === "today" ? new Date(now.getTime() + 24 * 3600e3) : when === "week" ? new Date(now.getTime() + 7 * 24 * 3600e3) : null;
-      const { data } = await createClient().rpc("open_matches", { p_sport: prefs.sport, p_fit: fit, p_to: to?.toISOString() ?? null, p_governorate: prefs.gov, p_district: prefs.district, p_limit: 50 });
-      if (alive) { setRows((data ?? []) as OpenMatch[]); setBusy(false); }
+      const { data, error } = await createClient().rpc("open_matches", { p_sport: prefs.sport, p_fit: fit, p_to: to?.toISOString() ?? null, p_governorate: prefs.gov, p_district: prefs.district, p_limit: 50 });
+      if (!alive) return;
+      if (error) { setFailed(true); setBusy(false); return; }
+      setFailed(false); setRows((data ?? []) as OpenMatch[]); setBusy(false);
     })();
     return () => { alive = false; };
-  }, [prefs, fit, when, loaded]);
+  }, [prefs, fit, when, loaded, attempt]);
   const update = (p: Prefs) => { setPrefs(p); writePrefs(p); };
 
   return (
@@ -55,8 +60,13 @@ export default function PlayBoard({ areas, sports, initial, clubs }: { areas: Go
       </div>
 
       <section className={`flex flex-col gap-3 ${busy ? "opacity-60" : ""}`}>
-        {rows.length === 0 && <p className="rounded-2xl border border-dashed border-grid p-6 text-center text-sm text-muted">No open matches here. Widen the area or day, or post one below.</p>}
-        {rows.map((m) => {
+        {failed ? (
+          <p role="alert" className="rounded-2xl border border-danger/40 bg-red-50 p-6 text-center text-sm text-danger">
+            Couldn&apos;t load the games for these filters.{" "}
+            <button type="button" onClick={() => setAttempt((n) => n + 1)} className="min-h-11 font-semibold underline">Try again</button>
+          </p>
+        ) : rows.length === 0 && <p className="rounded-2xl border border-dashed border-grid p-6 text-center text-sm text-muted">No open matches here. Widen the area or day, or post one below.</p>}
+        {!failed && rows.map((m) => {
           const spots = m.players_needed - m.joined;
           return (
             <Link key={m.match_id} href={`/matches/${m.match_id}`} className="block rounded-2xl border border-grid bg-white p-4 active:bg-paper">
