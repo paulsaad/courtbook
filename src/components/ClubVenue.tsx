@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/types";
+import { FACILITIES } from "./facilities";
 
 /**
  * What a player wants to know before deciding to come, and what to expect when they arrive.
@@ -28,15 +29,7 @@ export type VenueRow = {
   facilities_confirmed_at: string | null;
 };
 
-export const FACILITIES = [
-  ["has_parking", "Parking"],
-  ["has_changing_rooms", "Changing rooms"],
-  ["has_showers", "Showers"],
-  ["has_equipment_rental", "Equipment rental"],
-  ["has_cafe", "Café"],
-  ["has_floodlights", "Floodlights"],
-  ["has_drinking_water", "Drinking water"],
-] as const;
+export { FACILITIES };
 
 type Key = (typeof FACILITIES)[number][0];
 
