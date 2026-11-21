@@ -638,7 +638,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
             <Link href={nav(shiftDate(date, view === "week" ? 7 : 1))} aria-label={view === "week" ? "Next week" : "Next day"} className="grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-lg">›</Link>
           </div>
         </div>
-        <div className="flex items-center justify-between px-4 pb-2">
+        {/* wraps only when the switcher and the key do not fit side by side (360-px phones; W1) */}
+        <div className="flex flex-wrap items-center justify-between gap-y-2 px-4 pb-2">
           <div className="flex rounded-full border border-grid bg-white p-0.5 text-sm">
             <Link href={q(todayIn(club.timezone), "now", sport)} className={`rounded-full px-4 py-1.5 ${view === "now" ? "bg-ink text-white" : ""}`}>Now</Link>
             <Link href={q(date, "grid", sport)} className={`rounded-full px-4 py-1.5 ${view === "grid" ? "bg-ink text-white" : ""}`}>Courts</Link>
