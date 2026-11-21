@@ -40,6 +40,22 @@ row-level security refuses it even without that trigger. Existing blocks are nev
 
 Close courts (`close_club`) is unchanged by design, including that it accepts any range it is sent.
 
+## Review 2 (21 Nov 2026)
+
+- A block's end is the wall-clock end chosen; 24:00 is the real first instant of the next day
+  (`nextDayStart`). Night the clocks go back: 22:00–24:00 = 3 real hours, saved as chosen.
+- **Known limitation, unchanged and shared with bookings:** on the night the clocks go forward (last Saturday of
+  March), local midnight does not exist; the database's slot check (`assert_valid_court_slot`) sees an end at
+  24:00 as 01:00 and refuses it as outside opening hours — for blocks and desk bookings alike. Only clubs that
+  close at 24:00 are affected, for that one hour, once a year. A fix belongs in the shared check and needs its own
+  review. Related, also pre-existing: on that night the calendar's day read (`dayBounds`) ends an hour early, so a
+  23:00–24:00 booking would not be drawn on that day (the database still refuses an overlap).
+- Saved but the calendar refresh failed: the banner starts "Saved.", adding stays off until a read works, and the
+  write is never repeated.
+- Refused blocks are explained in block terms ("A block must start and end on the club's 30-minute time grid.",
+  "A block must be within opening hours (08:00–23:00), on one day.", "That time has already passed. A block must
+  end later than now."); bookings keep their wording.
+
 ## Order
 
 1. Staging: `blocks_0076_preflight` → apply `0076` → `blocks_0076_postcheck` → `blocks_functional`.
@@ -53,10 +69,11 @@ exactly (checked) and changes no block.
 
 ## Tests
 
-- `supabase/tests/blocks.sh` — 83 checks: permissions, court ownership, grid/hours in two time zones, past,
+- `supabase/tests/blocks.sh` — 97 checks: permissions, court ownership, grid/hours in two time zones, past,
   overlap with bookings, holds and blocks, expired-hold sweep, six same-moment races, old-page behaviour at each
   stage, Close courts, delete, rights, re-application, rollbacks, saved blocks byte-identical throughout.
 - `supabase/tests/live_blocks.sh` — 28 checks of the deployment files on copies of an origin/main build.
 - `supabase/tests/run.sh` — the full suite (381) with 0076/0077 applied.
 - Website: `durations.test.ts`, `DayCalendar.test.tsx` (selectors, highlight, conflict, unsaved choices, week
-  view, today's ended slots).
+  view, today's ended slots, closing time and midnight on ordinary and clock-change nights, refresh failure after
+  a save, block wording).
