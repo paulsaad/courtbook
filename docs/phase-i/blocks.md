@@ -1,6 +1,10 @@
 # Calendar blocks — longer blocks, start/end selectors, "Not saved" highlight (0076/0077)
 
-Approved 21 Nov 2026 (Paul, after ChatGPT review). Branch `blocks-0076`. Nothing applied to any database.
+Approved 21 Nov 2026 (Paul, after ChatGPT review). Branch `blocks-0076`.
+
+**Released and closed 21 Nov 2026:** staging and live at 0001–0077; production website `main` `91cde8c` (tree identical
+to the reviewed `5cebc72`). Live postchecks: 0076 14/14 (11 blocks, fingerprint unchanged), 0077 16/16 (12 blocks,
+fingerprint `da30a5a3…` unchanged).
 
 ## What changes for the desk
 

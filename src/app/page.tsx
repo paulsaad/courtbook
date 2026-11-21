@@ -22,7 +22,8 @@ export default async function Home() {
       <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-3xl flex-col gap-4 p-5 pt-12">
         <header className="flex items-center justify-between">
           <h1 className="flex items-center gap-2 text-[30px] font-extrabold tracking-tight"><Cedar size={24} />CourtBook</h1>
-          <Link href="/login" className="rounded-full bg-turf px-4 py-2 text-sm font-semibold text-white">Sign in</Link>
+          {/* phones and tablets only: from 1024 px the top bar has the Sign in button */}
+          <Link href="/login" className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full bg-turf px-5 text-sm font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-turf lg:hidden">Sign in</Link>
         </header>
         <p className="text-sm text-muted">Courts, games and coaches across Lebanon. Browse freely; sign in when you reserve.</p>
         <InstallHint />
