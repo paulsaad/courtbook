@@ -41,10 +41,9 @@ export default function LoginForm() {
   async function send(e?: React.FormEvent) {
     e?.preventDefault();
     setState("sending"); setError(null);
-    const { error } = await createClient().auth.signInWithOtp({
-      email: email.trim(),
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeNext)}` },
-    });
+    // Code only: the email carries a code and no sign-in link (live and staging templates), so no
+    // emailRedirectTo. /auth/callback stays for Google.
+    const { error } = await createClient().auth.signInWithOtp({ email: email.trim() });
     if (error) { setState("idle"); setError(error.message.includes("rate") ? "Too many requests. Wait a minute and try again." : error.message); return; }
     setState("sent"); setCooldown(COOLDOWN_S); setCode("");
   }
@@ -79,7 +78,7 @@ export default function LoginForm() {
         <div className="flex flex-col gap-4">
           <div className="rounded-2xl border border-grid bg-white p-4 text-sm">
             <p className="font-medium">Email sent to {email.trim()}</p>
-            <p className="mt-1 text-muted">Tap the link <b>in the same browser you are using now</b>, or type the code from the email here.</p>
+            <p className="mt-1 text-muted">Type the code from the email here.</p>
           </div>
           <form onSubmit={verify} className="flex gap-2">
             <input className={`${input} flex-1 tracking-widest`} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6,10}" placeholder="12345678" value={code} onChange={(e) => setCode(e.target.value)} />
@@ -94,7 +93,7 @@ export default function LoginForm() {
         <form onSubmit={send} className="flex flex-col gap-3">
           <input type="email" required autoComplete="email" inputMode="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} className={input} />
           <button type="submit" disabled={state === "sending"} className={primary}>{state === "sending" ? "Sending…" : "Send sign-in email"}</button>
-          <p className="text-center text-xs text-muted">No password. We email you a link and a code. Once per phone — you stay signed in.</p>
+          <p className="text-center text-xs text-muted">No password. We email you a code. Once per phone — you stay signed in.</p>
         </form>
       )}
     </main>
