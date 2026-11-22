@@ -9,7 +9,7 @@ import { friendlyError } from "@/lib/types";
 
 export type Report = {
   id: string; created_at: string; target_kind: "message" | "player" | "game" | "feedback"; reason: string; note: string | null; snapshot: string | null;
-  status: "open" | "actioned" | "dismissed"; reporter_id: string; reporter_name: string | null; profile_id: string | null; reported_name: string | null;
+  status: "open" | "actioned" | "dismissed"; reporter_id: string | null; reporter_name: string | null; profile_id: string | null; reported_name: string | null;
   reported_suspended: boolean; reports_against: number; match_id: string | null; message_id: string | null; message_deleted: boolean;
   handled_at: string | null; action: string | null;
 };

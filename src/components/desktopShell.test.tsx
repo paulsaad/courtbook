@@ -93,10 +93,10 @@ describe("staff and admin desktop bar", () => {
     expect(hrefs).toEqual(["/", "/staff/batroun", "/staff/batroun/payments", "/staff/batroun/settings", "/me", "/profile"]);
     expect(screen.getByText("Payments").getAttribute("aria-current")).toBe("page");
   });
-  it("admin: clubs, payments, reports, the staff calendar, and the player side", () => {
+  it("admin: clubs, payments, reports, deletions, the staff calendar, and the player side", () => {
     const { container } = render(<WorkNav area="admin" active="reports" />);
     const hrefs = [...container.querySelectorAll("a")].map((a) => a.getAttribute("href"));
-    expect(hrefs).toEqual(["/", "/admin", "/admin/payments", "/admin/reports", "/staff", "/me", "/profile"]);
+    expect(hrefs).toEqual(["/", "/admin", "/admin/payments", "/admin/reports", "/admin/deletions", "/staff", "/me", "/profile"]);
   });
   it("admin: Reports shows the open count when there is one, and no count when unknown or zero", () => {
     render(<WorkNav area="admin" active="clubs" openReports={4} />);
