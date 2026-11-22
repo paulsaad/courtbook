@@ -30,7 +30,7 @@ Shared mobile files (`fees`, `geo`, `levels`, `time`, `types`) are unchanged; `f
 | --- | --- |
 | message | one of `SAFE_MESSAGES`, otherwise `[withheld]` |
 | exception | type if it is an error class name (`TypeError`, `LoadError`, `DOMException`), else `Error`; value only if fixed (ours; a `LoadError`'s "Couldn't load …"; React's error number); mechanism type (lower-case name) and handled flag |
-| stack frames | file (see below), function name if identifier-shaped (else `?`), line and column (whole numbers), in-app flag (boolean); no module, source lines or variables |
+| stack frames | file (see below), function name only in JavaScript name format — an identifier or a dotted path of up to 6 identifiers, `<anonymous>` allowed as a part, optional `async `/`new ` prefix, no other spaces or punctuation (else `?`), line and column (whole numbers), in-app flag (boolean); no module, source lines or variables |
 | our URLs and paths | **route template only** (`/club/:slug/info`, from the list of the site's routes, `ROUTES`); a path matching no route → `/[unmatched]`; build files under `/_next/` kept if hash-shaped; no query or fragment anywhere |
 | Supabase URLs | `/rest/v1/<table>`, `/rest/v1/rpc/<function>`, `/auth/v1/<endpoint>` (one identifier); everything else, including all storage paths, `[redacted]` |
 | other URLs | listed hosts (Google fonts, Sentry) as host only; any other or spoofed host → `[redacted]` |
@@ -39,7 +39,7 @@ Shared mobile files (`fees`, `geo`, `levels`, `time`, `types`) are unchanged; `f
 | transaction | known HTTP method and the route template |
 | breadcrumbs | navigation (from/to) and network (method, URL as above, status) only; level and timestamp checked |
 | tags | one shape each: `area` (fixed list), `code` (code-shaped), `status` (HTTP status), `runtime` (node/edge/browser) |
-| contexts | browser, OS, runtime (name and version, plain characters); trace ids (hex) |
+| contexts | browser, OS, runtime: name only from a fixed list of known names (else the context is dropped); version only if version-shaped (`131.0.6778.135`, `v22.11.0`); trace ids (hex) |
 | kept for reading the error | environment (fixed list), release (commit SHA only), SDK name and version, source-map ids (`debug_meta`: type `sourcemap`, debug id, build file only) |
 | never | user, IP, server name, extra, modules, fingerprint, dist, SDK integrations and packages, other contexts |
 
@@ -75,6 +75,15 @@ serverless function frozen after its response cannot lose them. This affects onl
 
 Kept as approved: sessions disabled; the browser SDK loaded as a separate file.
 
+## Review round 3 (ChatGPT on `d1432f1`) — accepted
+
+**Medium — free text in function names and contexts.** Correct: the character-class checks accepted "Jana Probe".
+Function names now must have JavaScript name format (see the table); context names come from a fixed list of known
+browsers, systems and runtimes, and versions must be version-shaped. Regression tests with fake personal data: unit
+tests on both validators, and on the wire with the real server SDK (hostile names and contexts set on the scope →
+`?` and dropped). Source-map matching confirmed with the real browser SDK: with a build-style debug id registered for
+a `/_next/` chunk, the sent event carries `debug_meta` whose `code_file` equals every frame's `abs_path`.
+
 ## Deviations from the plan
 
 - `pay/[id]/PayPanel.tsx` is not instrumented: it shows the raw `detail` from `/api/pay/simulate` (tracked as F-PAY-1,
@@ -97,8 +106,8 @@ Kept as approved: sessions disabled; the browser SDK loaded as a separate file.
 | `lib/monitoring.routes.test.ts` | `ROUTES` equals the pages and routes under `src/app` |
 | `lib/monitoringTest.test.ts`, `api/monitoring/test/route.test.ts`, `admin/monitoring/page.test.tsx` | allowed only on a preview connected to staging; 404 on production, local, unknown, and a preview on the live database, even for an admin; 404 for non-admins; the test errors otherwise |
 
-Full suite **440 tests** (26 files), passing on three consecutive full runs; `tsc` clean; production build without any
-Sentry variable succeeds; shared first-load JavaScript **135.7 KB gzip** (main: 131.7 KB; +4.0 KB in total, the route
+Full suite **443 tests** (26 files), passing on three consecutive full runs; `tsc` clean; production build without any
+Sentry variable succeeds; shared first-load JavaScript **136.0 KB gzip** (main: 131.7 KB; +4.3 KB in total, the route
 list and checks included);
 no `.map` file in `.next/static`; `mobile/scripts/check-shared.sh` passes; lint adds no finding (the 4 on `main` remain).
 
