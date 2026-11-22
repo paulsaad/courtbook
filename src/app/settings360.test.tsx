@@ -5,7 +5,8 @@
  *
  * jsdom has no layout, so this renders the real pages with realistic data (database mocked), applies the site's real
  * stylesheet (compiled here by Tailwind, as the build does), and measures the result in headless Chrome emulating a
- * phone (as the staging check did). It needs a Chrome binary (CHROME, or /usr/bin/google-chrome); without one it is skipped, and says so.
+ * phone (as the staging check did). It needs a Chrome binary (CHROME, or /usr/bin/google-chrome); without one it is skipped
+ * and says so, except with REQUIRE_CHROME=1 (GitHub), where a missing Chrome fails.
  */
 import { describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -13,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderToReadableStream } from "react-dom/server";
 
-const CHROME = process.env.CHROME ?? ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium"].find(existsSync);
+const CHROME = [process.env.CHROME, "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium"].find((p): p is string => !!p && existsSync(p));
 const ROOT = join(__dirname, "..", "..");
 
 process.env.NEXT_PUBLIC_SUPABASE_URL ??= "https://example.supabase.co";
@@ -151,6 +152,11 @@ const PAGES: [string, () => Promise<unknown>][] = [
   ["staff settings", async () => (await import("./staff/[slug]/settings/page")).default({ params: Promise.resolve({ slug: "batroun" }) })],
   ["admin club settings", async () => (await import("./admin/clubs/[slug]/page")).default({ params: Promise.resolve({ slug: "batroun" }) })],
 ];
+
+// On GitHub (REQUIRE_CHROME=1) a missing Chrome is a failure, never a silent skip.
+it.runIf(!!process.env.REQUIRE_CHROME)("Chrome is available for the 360 px check", () => {
+  expect(CHROME, "no Chrome binary found (set CHROME)").toBeTruthy();
+});
 
 describe.skipIf(!CHROME)("club settings at 360 px (W1)", () => {
   for (const [label, page] of PAGES) {
