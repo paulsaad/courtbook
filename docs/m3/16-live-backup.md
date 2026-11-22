@@ -30,7 +30,7 @@ more access than the source. `security.sql` now restores the exact permissions.
 
 | Requirement | How it is met |
 | --- | --- |
-| Live credentials only for authorised runs | The repository is **public** (checked 20 Nov), so environments with required reviewers work on GitHub Free (they would not on a private repository). `LIVE_DB_URL` and `BACKUP_PASSPHRASE` are secrets of the environment `live-backup`, not repository secrets: GitHub releases them only to a job that names that environment, only on `main`, and only after you approve that run. A staging run refuses to start if a live secret is readable as a repository secret. |
+| Live credentials only for authorised runs | The repository is **public** (checked 20 Nov), so environments with required reviewers work on GitHub Free (they would not on a private repository). `LIVE_DB_URL` (present only for the duration of a backup, see the B9 rule below) and `BACKUP_PASSPHRASE` are secrets of the environment `live-backup`, not repository secrets: GitHub releases them only to a job that names that environment, only on `main`, and only after you approve that run. A staging run refuses to start if a live secret is readable as a repository secret. |
 | No leak into logs or unencrypted files | Secrets are given only to the steps that use them, never passed between steps; the connection string and its password are both masked; the passphrase goes to gpg on standard input; restore errors print no values; only the encrypted file is uploaded; unencrypted files are deleted and the runner is discarded. |
 | Restore verifies more than counts | Data hashes (public tables, accounts, storage records), row-level security, policies, all grants, function code and security settings, triggers, constraints, columns, sequences — see step 2. Tested locally that a changed account, row or policy is detected. |
 | Compatible version | Source and restore both Postgres 17; the dump is Supabase's own plain-SQL format; a restore side that is newer is accepted only where it adds empty internal tables or a newer Postgres. |
@@ -48,16 +48,18 @@ restore guide describes. Club photo files are not in the database backup (their 
 
 1. **Passphrase.** Make a long one (for example six random words) and save it in your password manager.
    Without it the backup cannot be opened; nobody can recover it.
-2. **Live connection string.** Supabase → the **live** project → **Connect** → Session pooler → copy.
-   Replace `[YOUR-PASSWORD]` with the live database password (if unknown: Project Settings → Database →
-   Reset database password; the website and apps use API keys, which don't change).
+2. **Live connection string (how to build it; not stored).** Supabase → the **live** project →
+   **Connect** → Session pooler → copy. Replace `[YOUR-PASSWORD]` with the live database password from
+   your password manager (if unknown: Database → Settings → Database password → Reset password; the
+   website and apps use API keys, which don't change). You build it each time you take a live backup
+   and paste it straight into GitHub; don't save the finished string anywhere.
 3. **GitHub environment.** Repository → Settings → Environments → **New environment** → name
    `live-backup` → Configure:
    - **Required reviewers:** tick it, add yourself (`paulsaad`). Leave "Prevent self-review" off.
    - **Deployment branches and tags:** Selected branches and tags → add `main` only.
-   - **Environment secrets:** only **after** the gate proof below — add `LIVE_DB_URL` (step 2) and
-     `BACKUP_PASSPHRASE` (step 1). Do **not** add them under Secrets and variables → Actions
-     (repository secrets).
+   - **Environment secrets:** only **after** the gate proof below — add `BACKUP_PASSPHRASE` (step 1).
+     `LIVE_DB_URL` is **not** added here; it is added for each backup and removed after (B9 rule
+     below). Never add either under Secrets and variables → Actions (repository secrets).
 4. Tell me it's done. I never see either value.
 
 **Prerequisite — the workflow on `main`.** GitHub shows "Run workflow" only for a workflow that exists on
@@ -68,11 +70,12 @@ production website from `main` on every commit; the site's code is unchanged.
 **Prove the gate before adding the secrets:** create `live-backup` with the reviewer and the branch rule
 but **no secrets**, then start a live run by hand. Expected: the run shows **Waiting** for your review;
 after you approve, it stops at once with "The LIVE_DB_URL secret is not set". That proves nothing live
-runs without your approval. Then add the two secrets.
+runs without your approval. Then add `BACKUP_PASSPHRASE` only.
 
 ## Taking the backup
 
-You start it: GitHub → Actions → **Database backup (verified)** → **Run workflow** → branch `main`,
+First add `LIVE_DB_URL` to `live-backup` (B9 rule below, step 1); without it the run stops at once
+with "The LIVE_DB_URL secret is not set". Then you start it: GitHub → Actions → **Database backup (verified)** → **Run workflow** → branch `main`,
 source **live** → Run. GitHub then shows **Review deployments** on the run — approve it there; until you
 do, nothing runs and no secret is released. About 10 minutes. On the run page you should see:
 
@@ -82,9 +85,9 @@ do, nothing runs and no secret is released. About 10 minutes. On the run page yo
   games, cancelled ones too);
 - `Kept: courtbook-live-<date>.tar.gpg · sha256 …`.
 
-Then: run page → Summary → Artifacts → download it, and keep it in two places (your PC and your Google
-Drive). Keep it until the M3 release is finished and checked. Take a fresh backup immediately before the
-live migration session as well.
+Then: run page → Summary → Artifacts → download it, keep it in two places (your PC and your Google
+Drive), check both copies, and remove the artifact and `LIVE_DB_URL` from GitHub the same day (B9 rule
+below, steps 3–4). Take a fresh backup immediately before any live migration session.
 
 ## Restoring (only if needed)
 
@@ -97,6 +100,26 @@ live migration session as well.
 - **Not in the backup:** the club photo files themselves (their records are included; the M3 migrations
   don't touch them) and project settings such as API keys and sign-in settings (unchanged by migrations).
 
-## After the release
+## Rule since 22 Nov 2026 (B9): no live credential or live data stays on GitHub
 
-Delete the `LIVE_DB_URL` secret (or reset the database password), so no live credential stays stored.
+Between backups, `live-backup` holds only `BACKUP_PASSPHRASE`. The live database password lives only in
+your password manager (it was reset on 22 Nov; the old one is dead). For each live backup:
+
+1. **Before:** add `LIVE_DB_URL` to `live-backup` (connection string as in setup step 2, with the
+   current password from your password manager).
+2. **Run and approve** the backup as above.
+3. **Keep two copies:** download the artifact (a `.zip`) to two places. Check them:
+   - the `.tar.gpg` inside: its SHA-256 (`Get-FileHash` in PowerShell) must equal the **Kept:** line
+     on the run's Summary page;
+   - the `.zip` itself: ask me for GitHub's fingerprint of the artifact and compare both copies;
+   - open one `.tar.gpg` in **Command Prompt** (not PowerShell) with
+     `gpg --decrypt --output - "FULL_PATH_TO_FILE.tar.gpg" > NUL` and paste the passphrase when asked.
+     The decrypted output goes to `NUL` and is discarded; nothing readable is written. Success: gpg
+     reports AES256 and returns to the prompt with no error.
+4. **Then remove from GitHub, the same day:** delete the artifact from the run (or ask me to delete it
+   by its id), and delete `LIVE_DB_URL`. The repository is public: any signed-in GitHub user can
+   download a run's artifacts while they exist.
+
+Never reset the database password to an old value. If you suspect the password was seen, reset it in
+Supabase → the **live** project → Database → Settings → Database password → Reset password; nothing in
+the website or apps uses it.
