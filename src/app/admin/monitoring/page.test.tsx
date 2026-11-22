@@ -10,19 +10,25 @@ async function render(admin: boolean) {
   }));
   return (await import("./page")).default();
 }
+const STAGING = "https://pwznauyioqykdwodwpvx.supabase.co";
+const env = (vercel: string, supabase = STAGING) => { vi.stubEnv("VERCEL_ENV", vercel); vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", supabase); };
 afterEach(() => { vi.unstubAllEnvs(); });
 
 describe("monitoring test page", () => {
   it("is not found on production, even for an admin", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
+    env("production");
+    await expect(render(true)).rejects.toThrow("NOT_FOUND");
+  });
+  it("is not found on a preview connected to the live database, even for an admin", async () => {
+    env("preview", "https://lgujfbwunokobjxlvpuf.supabase.co");
     await expect(render(true)).rejects.toThrow("NOT_FOUND");
   });
   it("is not found on staging for anyone but an admin", async () => {
-    vi.stubEnv("VERCEL_ENV", "preview");
+    env("preview");
     await expect(render(false)).rejects.toThrow("NOT_FOUND");
   });
   it("renders for an admin on staging", async () => {
-    vi.stubEnv("VERCEL_ENV", "preview");
+    env("preview");
     expect(await render(true)).toBeTruthy();
   });
 });
