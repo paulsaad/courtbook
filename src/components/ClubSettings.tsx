@@ -23,7 +23,8 @@ type StaffRow = { profile_id: string; name: string | null; email: string };
 type CoachReq = { coach_id: string; name: string | null; sports: string[]; price_usd: number; status: string };
 
 const DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
-const input = "min-w-0 rounded-xl border border-grid bg-white px-3 py-2.5 text-base outline-none focus:border-action";
+// min-h-11 on phones: a select's height comes from the font, and Linux Chrome renders these at 43 px (GitHub, W1).
+const input = "min-h-11 min-w-0 rounded-xl border border-grid bg-white px-3 py-2.5 text-base outline-none focus:border-action sm:min-h-0";
 /** Text buttons in lists: a 44 px tap height on phones (W1), unchanged from 640 px. */
 const textBtn = "inline-flex min-h-11 items-center px-1 underline sm:min-h-0 sm:px-0";
 const primary = "rounded-xl bg-action px-4 py-2.5 font-medium text-white disabled:opacity-50";
