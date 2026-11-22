@@ -73,7 +73,8 @@ serverless function frozen after its response cannot lose them. This affects onl
    `VERCEL_ENV=preview` **and** a Supabase URL of exactly `https://<staging project>.supabase.co`. Production, local,
    unknown environments and a preview connected to any other database answer 404.
 
-Kept as approved: sessions disabled; the browser SDK loaded as a separate file.
+Kept as approved: sessions disabled; the browser SDK loaded as a separate file. SDK collection (`dataCollection`) all
+off and no location for Sentry to add: see the staging results below.
 
 ## Review round 3 (ChatGPT on `d1432f1`) — accepted
 
@@ -125,6 +126,40 @@ On the branch preview (environment `preview`), signed in as an admin, `/admin/mo
 | S6 | `/api/health` | `{"ok":true}` |
 | S7 | `/admin/monitoring` signed out or as a non-admin | not found |
 | S8 | in S1–S2 JSON: request URL, transaction, breadcrumbs | route templates only (`/admin/monitoring`, `/api/monitoring/test`); no query string |
+
+### Staging results (22 Nov): all eight pass on `24e20d8`
+
+Setup done by Paul: Sentry project `courtbook-web` (Data Scrubber, default scrubbers, Prevent Storing of IP Addresses
+on); four Vercel variables, Preview only (verified by name and scope, values not read; Production entries unchanged);
+staging Supabase redirect URL `https://courtbook-git-w2-monitoring-paul-bc50.vercel.app/**` added (exact address only,
+Site URL unchanged) so Google sign-in works on this preview.
+
+| # | Result |
+| --- | --- |
+| S1 | 4 events per round, environment `preview`, release = the commit; fixed messages as written, probes `[withheld]` |
+| S2 | full stored JSON of every event scanned: none of the fake data, no IP, cookies, headers or query strings; **no user data at all** from `24e20d8` (see fixes 3–4) |
+| S3 | source maps applied by debug id: browser `src/app/admin/monitoring/MonitoringTest.tsx:10`, server `src/app/api/monitoring/test/route.ts:13–14`, with functions and source lines (from `2eef572`) |
+| S4 | "That slot was just taken." shown; no event for the refusal or the cancellation (none after 16:42:18 UTC, checked 17:05) |
+| S5 | every `.js.map` 404, no `sourceMappingURL`, no token in page code; build log: maps uploaded |
+| S6 | `200 {"ok":true}`, no-store (from `934d6e2`) |
+| S7 | `/admin/monitoring` signed out shows "Not found"; `/api/monitoring/test` 404 |
+| S8 | request URL and transaction are route templates; breadcrumbs routes, `/[unmatched]` or Supabase table names; no query strings |
+
+**Defects found on staging and fixed (each with a test that fails on the old code):**
+
+1. `934d6e2` — the health check read `sports.id`, which does not exist (`code`): `/api/health` always 503.
+2. `2057594` — left unset, `@sentry/nextjs` generates a public `/sentry-tunnel` route on Vercel builds only;
+   now `tunnelRoute: false`, and CI builds as Vercel does and fails if the route appears.
+3. `2eef572` — (a) `@sentry/nextjs` renames build files to `app:///_next/…` before `beforeSend`; the scrubber redacted
+   them, so no source maps (S3 failed). Now accepted. (b) SDK 11 removed `sendDefaultPii` (silently ignored);
+   `dataCollection` defaults to collecting everything and asked Sentry to infer the IP. All collection now off.
+4. `24e20d8` — Sentry still added the sender's city (`user.geo`) from the connection, whatever `infer_ip` and the IP
+   setting say. Every event now carries `user: { ip_address: null, geo: {} }`; tested against Sentry directly
+   (without it the city is stored; with it, no user data).
+
+**Not done / follow-ups:** delete the preview test issues in Sentry (COURTBOOK-WEB-1 to -8; six events carry the
+tester's city, from before fix 4) — Paul's approval; the staging redirect URL can be removed after W2a closes; alerts
+A1–A4 and Production variables at release.
 
 ## Paul's setup (account actions; nothing for production yet)
 
