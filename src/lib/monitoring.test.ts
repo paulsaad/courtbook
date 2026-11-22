@@ -239,10 +239,12 @@ describe("scrubEvent: every metadata field has a strict format (review correctio
     bad({ exception: { values: [{ type: "Error", value: "x", stacktrace: { frames: [{ filename: "/_next/static/chunks/a.js", ...f }] } }] } })
       .exception!.values![0].stacktrace!.frames![0];
 
-  it("function names: identifiers only, else '?'", () => {
-    expect(frameWith({ function: "Object.<anonymous>" }).function).toBe("Object.<anonymous>");
-    expect(frameWith({ function: "async Promise.all" }).function).toBe("async Promise.all");
-    for (const f of ["probe@example.invalid", "eval at x (https://courtbook-three.vercel.app/x?code=482913)", "Jana Probe: 70 123 456", "x".repeat(200)])
+  it("function names: JavaScript name formats only, else '?'", () => {
+    for (const f of ["reserve", "Object.<anonymous>", "<anonymous>", "async Promise.all", "new LoadError", "Array.prototype.map", "_$x1"])
+      expect(frameWith({ function: f }).function).toBe(f);
+    for (const f of ["Jana Probe", "async Jana Probe", "new Jana Probe", "Object.Jana Probe", "Jana Probe <probe@example.invalid>",
+      "probe@example.invalid", "70 123 456", "+96170123456", "Jana-Probe", "Jana/Probe", "[Jana]", "eval at x (https://courtbook-three.vercel.app/x?code=482913)",
+      "Jana Probe: 70 123 456", "async  x", " x", "x ", "x".repeat(200), "a.b.c.d.e.f.g"])
       expect(frameWith({ function: f }).function).toBe("?");
   });
   it("line and column: whole numbers only; in_app: boolean only", () => {
@@ -290,7 +292,20 @@ describe("scrubEvent: every metadata field has a strict format (review correctio
       level: "Jana", platform: "Jana Probe", timestamp: "482913", contexts: { trace: { trace_id: "jana", span_id: SPAN }, browser: { name: "probe@example.invalid", version: "131" } },
     });
     for (const k of ["environment", "release", "sdk", "event_id", "level", "platform", "timestamp"]) expect(o[k as keyof ErrorEvent]).toBeUndefined();
-    expect(o.contexts).toEqual({ browser: { name: undefined, version: "131" } });
+    expect(o.contexts).toEqual({});
+  });
+  it("contexts: known browser, OS and runtime names only; versions version-shaped only", () => {
+    const ctx = (contexts: Record<string, unknown>) => bad({ contexts }).contexts;
+    expect(ctx({ browser: { name: "Chrome Mobile", version: "131.0.6778.135" }, os: { name: "Android", version: "15" }, runtime: { name: "node", version: "v22.11.0" } }))
+      .toEqual({ browser: { name: "Chrome Mobile", version: "131.0.6778.135" }, os: { name: "Android", version: "15" }, runtime: { name: "node", version: "v22.11.0" } });
+    expect(ctx({ os: { name: "Amazon Linux", version: "5.10.234-226.919.amzn2.x86_64" } })).toEqual({ os: { name: "Amazon Linux", version: "5.10.234-226.919.amzn2.x86_64" } });
+    expect(ctx({
+      browser: { name: "Jana Probe", version: "131" },
+      os: { name: "Android", version: "Jana 70 123 456" },
+      runtime: { name: "probe@example.invalid", version: "482913 Jana" },
+    })).toEqual({ os: { name: "Android", version: undefined } });
+    for (const version of ["Jana", "probe@example.invalid", "70 123 456", "1.2.3 Jana", "1.2.3-Jana Probe", "+961 70 123 456"])
+      expect(ctx({ browser: { name: "Chrome", version } })).toEqual({ browser: { name: "Chrome", version: undefined } });
   });
   it("request method and transaction: known methods only", () => {
     expect(bad({ request: { method: "JANA", url: "/play" }, transaction: "JANA /play" })).toMatchObject({ request: { method: undefined, url: "/play" }, transaction: undefined });
@@ -301,6 +316,7 @@ describe("scrubEvent: every metadata field has a strict format (review correctio
   });
   it("whatever the input, no fake data survives", () => {
     const o = bad({
+      contexts: { browser: { name: "Jana Probe", version: "probe@example.invalid" }, os: { name: "jana", version: "70 123 456" }, runtime: { name: "node", version: "482913 Jana" } },
       environment: "jana", release: "Jana", tags: { area: "jana" }, fingerprint: ["Jana"],
       exception: { values: [{ type: "Jana", value: "Jana", mechanism: { type: "Jana" }, stacktrace: { frames: [{ filename: "/var/task/Jana/x.js", abs_path: "https://evil.example/jana", function: "probe@example.invalid", module: "jana" }] } }] },
       debug_meta: { images: [{ type: "sourcemap", code_file: "/jana", debug_id: DEBUG_ID }] },

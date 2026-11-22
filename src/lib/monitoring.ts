@@ -171,7 +171,11 @@ function isBuildFile(file: string): boolean {
  * is dropped or replaced, never forwarded as is.
  * ------------------------------------------------------------------------------------------------------------- */
 
-const FUNCTION_NAME = /^[A-Za-z0-9_$.<>\[\] /-]{1,120}$/;    // "reserve", "Object.<anonymous>", "async Promise.all"
+/** A JavaScript function name as stack traces print it: an identifier or a dotted path of identifiers
+ *  ("reserve", "Object.reserve", "Array.prototype.map"), "<anonymous>" as a part, and at most one "async " or "new "
+ *  in front. No other spaces, no punctuation: "Jana Probe", an email or a phone number cannot match. */
+const IDENTIFIER = "(?:<anonymous>|[A-Za-z_$][A-Za-z0-9_$]{0,79})";
+const FUNCTION_NAME = new RegExp(`^(?:(?:async|new) )?${IDENTIFIER}(?:\\.${IDENTIFIER}){0,5}$`);
 const EXCEPTION_TYPE = /^(?:Error|[A-Z][A-Za-z0-9_]{0,60}(?:Error|Exception))$/;   // TypeError, LoadError, DOMException
 const MECHANISM_TYPE = /^[a-z][a-z0-9_.]{0,59}$/;
 const LEVELS = new Set(["fatal", "error", "warning", "log", "info", "debug"]);
@@ -184,7 +188,16 @@ const SPAN_ID = /^[0-9a-f]{16}$/;
 const DEBUG_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SDK_NAME = /^sentry\.[a-z.]{1,60}$/;
 const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:[-.][A-Za-z0-9.]{1,30})?$/;
-const CONTEXT_VALUE = /^[A-Za-z0-9 ._()+\-/]{1,64}$/;
+/** Context names: known values only. Versions: version-shaped only ("131.0.6778.135", "v22.11.0", "15"). */
+const CONTEXT_NAMES: Record<"browser" | "os" | "runtime", Set<string>> = {
+  browser: new Set(["Chrome", "Chrome Mobile", "Chrome Mobile iOS", "Chrome Mobile WebView", "Chromium", "Safari",
+    "Mobile Safari", "Firefox", "Firefox Mobile", "Firefox iOS", "Edge", "Edge Mobile", "Opera", "Opera Mobile",
+    "Samsung Internet", "Brave", "WebKit", "Facebook", "Instagram"]),
+  os: new Set(["Android", "iOS", "iPadOS", "macOS", "Mac OS X", "Windows", "Linux", "Chrome OS", "ChromeOS", "Ubuntu",
+    "Debian", "Amazon Linux", "Darwin"]),
+  runtime: new Set(["node", "edge", "vercel-edge", "browser"]),
+};
+const CONTEXT_VERSION = /^v?\d{1,6}(?:\.\d{1,6}){0,3}(?:[-+][A-Za-z0-9._]{1,40})?$/;
 const AREAS = new Set<string>(["booking", "auth", "media", "payment", "page", "test"]);
 
 const ok = <T>(v: unknown, test: (x: string) => boolean): T | undefined =>
@@ -244,11 +257,12 @@ function scrubDebugMeta(d: ErrorEvent["debug_meta"]): ErrorEvent["debug_meta"] |
   return images.length ? { images: images.slice(0, 200) } : undefined;
 }
 
-function scrubContext(c: unknown): { name?: string; version?: string } | undefined {
+function scrubContext(kind: keyof typeof CONTEXT_NAMES, c: unknown): { name: string; version?: string } | undefined {
   if (!c || typeof c !== "object") return undefined;
   const o = c as Record<string, unknown>;
-  const out = { name: ok<string>(o.name, re(CONTEXT_VALUE)), version: ok<string>(o.version, re(CONTEXT_VALUE)) };
-  return out.name || out.version ? out : undefined;
+  const name = ok<string>(o.name, (x) => CONTEXT_NAMES[kind].has(x));
+  if (!name) return undefined;   // a version means nothing without a known name
+  return { name, version: ok<string>(o.version, re(CONTEXT_VERSION)) };
 }
 
 /** Network and navigation breadcrumbs only, reduced to method, normalised URL and status. */
@@ -277,7 +291,7 @@ export function scrubEvent(e: ErrorEvent): ErrorEvent | null {
 
   const contexts: NonNullable<ErrorEvent["contexts"]> = {};
   for (const k of ["browser", "os", "runtime"] as const) {
-    const c = scrubContext(e.contexts?.[k]);
+    const c = scrubContext(k, e.contexts?.[k]);
     if (c) contexts[k] = c;
   }
   const t = e.contexts?.trace;

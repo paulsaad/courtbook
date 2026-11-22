@@ -47,4 +47,26 @@ describe("what actually leaves the browser", () => {
     expect(probe.request).toEqual({ url: "http://localhost:3000/bookings/:id" });
     expect((probe.breadcrumbs ?? []).every((b: { category: string }) => ["navigation", "fetch", "xhr"].includes(b.category))).toBe(true);
   });
+
+  it("source maps still match: the SDK's debug id lands on the same file name the frames carry", { timeout: 20000 }, async () => {
+    const from = wire.length;
+    const file = "https://courtbook-three.vercel.app/_next/static/chunks/0abc-1def.js";
+    const debugId = "0f4e2d1c-9b8a-4c7d-8e6f-5a4b3c2d1e0f";
+    // what the build injects into each chunk: a stack string pointing at the chunk, mapped to its debug id
+    (globalThis as { _sentryDebugIds?: Record<string, string> })._sentryDebugIds = { [`Error\n    at x (${file}:1:1)`]: debugId };
+    Sentry.captureEvent({
+      exception: { values: [{ type: "TypeError", value: "Jana Probe", stacktrace: { frames: [
+        { filename: file, abs_path: file, function: "Jana Probe", lineno: 1, colno: 99, in_app: true },
+        { filename: file, abs_path: file, function: "reserve", lineno: 1, colno: 120, in_app: true },
+      ] } }] },
+    });
+    expect(await Sentry.flush(10000)).toBe(true);
+    const sent = wire.slice(from).join("\n");
+    expect(SECRETS.filter((x) => sent.includes(x))).toEqual([]);
+    const event = sent.split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((x) => x && x.exception);
+    const frames = event.exception.values[0].stacktrace.frames;
+    expect(frames.map((f: { function: string }) => f.function)).toEqual(["?", "reserve"]);
+    expect(event.debug_meta).toEqual({ images: [{ type: "sourcemap", code_file: file, debug_id: debugId }] });
+    expect(frames.every((f: { abs_path: string }) => f.abs_path === event.debug_meta.images[0].code_file)).toBe(true);
+  });
 });

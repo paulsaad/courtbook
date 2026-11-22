@@ -70,4 +70,27 @@ describe("what actually leaves the server", () => {
       expect(Object.keys(e.tags as object).every((k) => ["area", "code", "status", "runtime"].includes(k))).toBe(true);
     }
   });
+
+  it("hostile function names and contexts set on the scope do not reach the wire", { timeout: 20000 }, async () => {
+    const from = wire.length;
+    Sentry.setContext("browser", { name: "Jana Probe", version: "probe@example.invalid" });
+    Sentry.setContext("os", { name: "Android", version: "70 123 456" });
+    Sentry.setContext("runtime", { name: "probe@example.invalid", version: "482913" });
+    Sentry.captureEvent({
+      exception: { values: [{ type: "Error", value: "x", stacktrace: { frames: [
+        { filename: "/var/task/.next/server/chunks/ssr/app.js", function: "Jana Probe", lineno: 1, colno: 1, in_app: true },
+        { filename: "/var/task/.next/server/chunks/ssr/app.js", function: "async probe@example.invalid", lineno: 2, colno: 1, in_app: true },
+        { filename: "/var/task/.next/server/chunks/ssr/app.js", function: "Object.reserve", lineno: 3, colno: 1, in_app: true },
+      ] } }] },
+    });
+    expect(await Sentry.flush(10000)).toBe(true);
+    const sent = wire.slice(from).join("\n");
+    expect(SECRETS.filter((x) => sent.includes(x))).toEqual([]);
+    const event = sent.split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((x) => x && x.exception);
+    expect(event.exception.values[0].stacktrace.frames.map((f: { function: string }) => f.function)).toEqual(["?", "?", "Object.reserve"]);
+    expect(event.contexts.browser).toBeUndefined();
+    // the server SDK replaces the runtime context with its own; only a known name and a version-shaped value remain
+    if (event.contexts.runtime) expect(event.contexts.runtime).toEqual({ name: "node", version: expect.stringMatching(/^v\d+\.\d+\.\d+$/) });
+    expect(event.contexts.os).toEqual({ name: "Android" });
+  });
 });
