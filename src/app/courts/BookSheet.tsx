@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
-import { friendlyError } from "@/lib/types";
+import { explainBookingError } from "@/lib/report";
 import { newToken, reserve as reserveSlot } from "@/lib/reserve";
 import { useDialog } from "@/components/useDialog";
 
@@ -74,7 +74,7 @@ export default function BookSheet({ club, date, at, courts, initialCourtId, init
     setBusy(true); setError(null);
     const token = tokenRef.current ?? (tokenRef.current = newToken());   // a retry must not take a second court
     const r = await reserveSlot({ mode, clubId: club.id, courtId: court.id, start, end, token });
-    if (!r.ok) { setBusy(false); setError(friendlyError(r.message)); router.refresh(); return; }
+    if (!r.ok) { setBusy(false); setError(explainBookingError(r.message, r.code)); router.refresh(); return; }
     router.push(r.value.href);
   }
 

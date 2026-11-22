@@ -6,7 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { clubLocalToUtc, dayBounds, hhmm, shiftDate, slotTimes, todayIn, toMin } from "@/lib/time";
-import { friendlyError, type Club, type Court } from "@/lib/types";
+import { explainBookingError } from "@/lib/report";
+import { type Club, type Court } from "@/lib/types";
 import { readPrefs } from "@/lib/prefs";
 import { newToken, reserve as reserveSlot } from "@/lib/reserve";
 import { useDialog } from "@/components/useDialog";
@@ -142,7 +143,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
     const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
     const token = tokenRef.current ?? (tokenRef.current = newToken());   // a retry must not take a second court
     const r = await reserveSlot({ mode: club.payment_mode, clubId: club.id, courtId: pick.courtId, start, end, token });
-    if (!r.ok) { setBusy(false); setError(friendlyError(r.message)); router.refresh(); return; }
+    if (!r.ok) { setBusy(false); setError(explainBookingError(r.message, r.code)); router.refresh(); return; }
     router.push(r.value.href);
   }
 

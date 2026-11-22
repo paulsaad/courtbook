@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { friendlyError } from "@/lib/types";
+import { explainBookingError } from "@/lib/report";
 
 export default function CancelButton({ bookingId, freeCancel, cutoffHours, cutoffLabel, nothingPaid }: { bookingId: string; freeCancel: boolean; cutoffHours: number; cutoffLabel: string; nothingPaid?: boolean }) {
   const router = useRouter();
@@ -14,7 +14,7 @@ export default function CancelButton({ bookingId, freeCancel, cutoffHours, cutof
   async function cancel() {
     setBusy(true); setError(null);
     const { error } = await createClient().rpc("cancel_booking", { p_booking: bookingId, p_club_caused: false });
-    if (error) { setBusy(false); setError(friendlyError(error.message)); return; }
+    if (error) { setBusy(false); setError(explainBookingError(error.message, error.code)); return; }
     router.replace("/bookings");
     router.refresh();
   }
