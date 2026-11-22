@@ -65,8 +65,9 @@ insert into r select 'CAT4 anonymous visitors cannot write any public table',
 insert into r select 'CAT4b ... nor hold table-level write, truncate or trigger privileges',
   count(*) = 0, 'pass', string_agg(table_name || ':' || privilege_type, ',') from information_schema.table_privileges
   where grantee = 'anon' and table_schema = 'public' and privilege_type <> 'SELECT';
+-- 0078 (M7): club_readable_by_me added (RLS helper on clubs, returns a boolean); clubs admin FOR ALL split into INSERT/UPDATE/DELETE
 insert into r select 'CAT5 anonymous visitors can run exactly the public-browse functions',
-  string_agg(p.proname, ',' order by p.proname) = 'areas,club_day_slots,club_discovery,club_sports,next_free_slot,quote_price', 'pass',
+  string_agg(p.proname, ',' order by p.proname) = 'areas,club_day_slots,club_discovery,club_readable_by_me,club_sports,next_free_slot,quote_price', 'pass',
   string_agg(p.proname, ',' order by p.proname) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and p.prosecdef and has_function_privilege('anon', p.oid, 'execute');
 insert into r select 'CAT6 anonymous visitors can read nothing from personal or money tables',
@@ -77,7 +78,7 @@ insert into r select 'CAT6 anonymous visitors can read nothing from personal or 
 -- Any new client write path must be reviewed: the exact set of write policies is pinned here.
 insert into r select 'CAT7 write policies are exactly the reviewed set (a new one must be reviewed and added here)',
   string_agg(tablename || '.' || cmd, ',' order by tablename, cmd, policyname) =
-  'availability_exceptions.ALL,availability_rules.ALL,blocks.DELETE,bookings.DELETE,club_staff.ALL,clubs.ALL,coach_clubs.DELETE,coach_clubs.INSERT,coaches.DELETE,coaches.INSERT,coaches.UPDATE,courts.ALL,credit_packs.ALL,credit_transactions.INSERT,districts.ALL,governorates.ALL,match_messages.INSERT,${MATCHES_DELETE}notifications.UPDATE,price_rules.ALL,profiles.UPDATE,sports.ALL,towns.ALL',
+  'availability_exceptions.ALL,availability_rules.ALL,blocks.DELETE,bookings.DELETE,club_staff.ALL,clubs.DELETE,clubs.INSERT,clubs.UPDATE,coach_clubs.DELETE,coach_clubs.INSERT,coaches.DELETE,coaches.INSERT,coaches.UPDATE,courts.ALL,credit_packs.ALL,credit_transactions.INSERT,districts.ALL,governorates.ALL,match_messages.INSERT,${MATCHES_DELETE}notifications.UPDATE,price_rules.ALL,profiles.UPDATE,sports.ALL,towns.ALL',
   'pass', string_agg(tablename || '.' || cmd, ',' order by tablename, cmd, policyname)
   from pg_policies where schemaname = 'public' and cmd in ('INSERT','UPDATE','DELETE','ALL');
 insert into r select 'CAT8 bookings and payments have no client write policy (all writes go through checked functions)',

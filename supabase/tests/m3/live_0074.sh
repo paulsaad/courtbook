@@ -9,7 +9,7 @@ P() { $PSQL -X -q -At -F'|' -d $DB "$@"; }
 fails=0; n=0; rep() { n=$((n+1)); if [ "$2" = true ]; then echo "ok    $1"; else echo "FAIL  $1  [$3]"; fails=$((fails+1)); fi; }
 $PSQL -q -d postgres -c "drop database if exists $DB" -c "create database $DB" >/dev/null 2>&1
 P -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql >/dev/null
-for f in $(ls supabase/migrations/*.sql | sort | grep -v 0074_); do P -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || { echo "cannot build: $f"; exit 2; }; done
+for f in $(ls supabase/migrations/*.sql | sort | awk -F/ '$NF < "0074"'); do P -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || { echo "cannot build: $f"; exit 2; }; done
 false1() { P -f supabase/live/0074_preflight.sql | awk -F'|' '$1==1 && $3!="t"' | wc -l; }
 rep "L1 preflight on the 0073 state: all part-1 true" "$([ "$(false1)" = 0 ] && echo true)" "$(false1) false"
 P -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0074_safety.sql >/dev/null 2>&1; rep "L2 0074 applies" "$([ $? = 0 ] && echo true)"

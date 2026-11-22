@@ -6,7 +6,7 @@ set -u
 cd "$(dirname "$0")/../../.."
 PSQL=${PSQL:-psql}
 OLD=courtbook_m67_old; NEW=courtbook_m67_new; AP=courtbook_m67_ap; X=courtbook_m67_x
-BASE=${BASE:-origin/main}
+BASE=${BASE:-cd5eb3a}  # origin/main at 0001-0071 when this pack was rehearsed; main has moved on
 oks=0; fails=0
 rep() { if [ "$2" = true ]; then echo "ok    $1"; oks=$((oks+1)); else echo "FAIL  $1  [$3]"; fails=$((fails+1)); fi; }
 copy() { $PSQL -q -d postgres -c "drop database if exists $2" -c "create database $2 template $1" >/dev/null; }
