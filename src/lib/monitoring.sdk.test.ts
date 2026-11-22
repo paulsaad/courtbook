@@ -64,7 +64,7 @@ describe("what actually leaves the server", () => {
     const ex = events.find((e) => !e.message)!.exception as { values: { type: string; value: string }[] };
     expect(ex.values.map((v) => v.value)).toEqual([WITHHELD, WITHHELD]);   // the error and its cause
     for (const e of events) {
-      expect(e).not.toHaveProperty("user");
+      expect(e.user).toEqual({ ip_address: null, geo: {} });   // nothing for Sentry to fill in
       expect(e).not.toHaveProperty("extra");
       expect(e).not.toHaveProperty("server_name");
       expect(Object.keys(e.tags as object).every((k) => ["area", "code", "status", "runtime"].includes(k))).toBe(true);

@@ -211,8 +211,14 @@ describe("scrubEvent: the event is rebuilt from an allowlist", () => {
     expect(out.request).toEqual({ method: "POST", url: `${SITE}/bookings/:id` });
     expect(out.transaction).toBe("GET /bookings/:id");
   });
-  it("drops user, server name, extra, modules, fingerprint and dist", () => {
-    for (const k of ["user", "server_name", "extra", "modules", "fingerprint", "dist"]) expect(out).not.toHaveProperty(k);
+  it("drops server name, extra, modules, fingerprint and dist", () => {
+    for (const k of ["server_name", "extra", "modules", "fingerprint", "dist"]) expect(out).not.toHaveProperty(k);
+  });
+  it("replaces the user with no IP and an empty location, so Sentry adds none (city stored on staging, 22 Nov)", () => {
+    expect(out.user).toEqual({ ip_address: null, geo: {} });
+    expect(scrubEvent({ ...dirtyEvent(), user: { geo: { city: "Halmstad", country_code: "SE" }, ip_address: "{{auto}}" } } as ErrorEvent)!.user)
+      .toEqual({ ip_address: null, geo: {} });
+    expect(scrubEvent({ ...dirtyEvent(), user: undefined } as ErrorEvent)!.user).toEqual({ ip_address: null, geo: {} });
   });
   it("keeps only allowlisted tags and contexts", () => {
     expect(out.tags).toEqual({ area: "booking", code: "23P01" });

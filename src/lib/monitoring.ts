@@ -322,7 +322,11 @@ export function scrubEvent(e: ErrorEvent): ErrorEvent | null {
     transaction: normalizeTransaction(e.transaction),
     tags,
     contexts,
-    // fingerprint, dist, user, server_name, extra, modules and every other field: never sent
+    // No user data, and none for Sentry to add: Sentry fills in user.geo (city, region, country) from the sender's
+    // connection whenever the event has none, even with infer_ip "never" and IP storage off. An empty geo stops it
+    // (tested against Sentry on staging, 22 Nov: without it the tester's city was stored; with it, no user data).
+    user: { ip_address: null, geo: {} },
+    // fingerprint, dist, server_name, extra, modules and every other field: never sent
   };
   if (e.message !== undefined) out.message = safeText(e.message);
   if (e.logentry) out.logentry = { message: safeText(e.logentry.message) };

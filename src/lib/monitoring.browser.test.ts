@@ -43,6 +43,7 @@ describe("what actually leaves the browser", () => {
     // Sentry must not infer the sender's IP (and from it a city): found on the staging events, 22 Nov
     expect(all).toContain('"infer_ip":"never"');
     expect(all).not.toContain('"infer_ip":"auto"');
+    for (const e of events()) expect(e.user).toEqual({ ip_address: null, geo: {} });
 
     const [probe, fixed] = events();
     expect(probe.exception.values[0].value).toBe(WITHHELD);
