@@ -57,73 +57,211 @@ export function safeText(text: unknown, exceptionType?: string): string {
   return WITHHELD;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/* ---------------------------------------------------------------------------------------------------------------
+ * URLs and paths (review correction, 22 Nov: no arbitrary segment survives).
+ * A path on our site is sent only as its route template ("/club/:slug/info"); a path that matches no route becomes
+ * "/[unmatched]". Supabase URLs keep only the API, table or function name. Any other site keeps only its host, and
+ * only if the host is on the list. No query string or fragment, anywhere.
+ * ------------------------------------------------------------------------------------------------------------- */
 
-/** Path only: no origin change, no query, no fragment; IDs, numbers and token-like segments replaced. */
-export function normalizePath(input: unknown): string | undefined {
-  if (typeof input !== "string" || !input) return undefined;
-  let s = input.split("#")[0].split("?")[0];
-  let origin = "";
-  const m = /^([a-z][a-z0-9+.-]*:\/\/[^/]+)(.*)$/i.exec(s);
-  if (m) { origin = m[1]; s = m[2] || "/"; }
-  const path = s.split("/").map((seg) => {
-    if (!seg) return seg;
-    if (UUID.test(seg)) return ":id";
-    if (/^\d+$/.test(seg)) return ":n";
-    if (seg.length >= 20 && /^[A-Za-z0-9_\-.%=]+$/.test(seg) && !/^[a-z-]+$/.test(seg)) return ":token";
-    if (seg.includes("@")) return ":value";
-    return seg;
-  }).join("/");
-  return origin + path;
+/** Every page and route of the website (src/app). Kept in step with the folders by monitoring.routes.test.ts. */
+export const ROUTES = [
+  "/", "/admin", "/admin/clubs/[slug]", "/admin/monitoring", "/admin/payments", "/admin/reports",
+  "/api/club-media", "/api/health", "/api/monitoring/test", "/api/notify/email", "/api/pay/simulate", "/api/payments.csv",
+  "/auth/callback", "/auth/signout", "/bookings", "/bookings/[id]", "/club/[slug]", "/club/[slug]/coaches",
+  "/club/[slug]/info", "/club/[slug]/matches", "/coach", "/coaches", "/coaches/[id]", "/courts", "/levels", "/login",
+  "/matches/[id]", "/me", "/notifications", "/pay/[id]", "/play", "/profile", "/staff", "/staff/[slug]",
+  "/staff/[slug]/payments", "/staff/[slug]/settings",
+  // files served by the app itself
+  "/favicon.ico", "/icon.png", "/manifest.webmanifest",
+] as const;
+
+export const UNMATCHED = "/[unmatched]";
+export const REDACTED = "[redacted]";
+
+const TEMPLATES = ROUTES.map((r) => (r === "/" ? [] : r.slice(1).split("/")));
+const isDynamic = (seg: string) => seg.startsWith("[") && seg.endsWith("]");
+
+/** "/club/tripoli-tennis/info" → "/club/:slug/info"; anything that is not one of our routes → "/[unmatched]". */
+export function routeTemplate(path: string): string {
+  const segs = path.split("/").filter(Boolean);
+  let best: string[] | null = null;
+  let bestStatic = -1;
+  for (const t of TEMPLATES) {
+    if (t.length !== segs.length) continue;
+    if (!t.every((ts, i) => (isDynamic(ts) ? segs[i].length > 0 : ts === segs[i]))) continue;
+    const statics = t.filter((ts) => !isDynamic(ts)).length;
+    if (statics > bestStatic) { best = t; bestStatic = statics; }
+  }
+  if (!best) return UNMATCHED;
+  return "/" + best.map((ts) => (isDynamic(ts) ? `:${ts.slice(1, -1)}` : ts)).join("/");
 }
+
+/** Hosts whose name may be sent: our own deployments, local development and Supabase. */
+const OUR_HOST = /^(?:courtbook[a-z0-9-]{0,60}\.vercel\.app|localhost(?::\d{1,5})?|127\.0\.0\.1(?::\d{1,5})?)$/;
+const SUPABASE_HOST = /^[a-z0-9]{20}\.supabase\.co$/;
+const KNOWN_HOST = /^(?:[a-z0-9-]{1,63}\.)*(?:googleapis\.com|gstatic\.com|google\.com|sentry\.io)$/;
+const IDENT = /^[a-z_][a-z0-9_]{0,62}$/;
+/** Build files under /_next/: hashed names only (letters, digits, - _ . and the folders). */
+const NEXT_FILE = /^\/_next\/[A-Za-z0-9_\-./]{1,200}$/;
+
+function supabasePath(path: string): string {
+  const s = path.split("/").filter(Boolean);
+  if (s[0] === "rest" && s[1] === "v1") {
+    if (s.length === 3 && IDENT.test(s[2])) return `/rest/v1/${s[2]}`;
+    if (s.length === 4 && s[2] === "rpc" && IDENT.test(s[3])) return `/rest/v1/rpc/${s[3]}`;
+    return `/rest/v1/${REDACTED}`;
+  }
+  if ((s[0] === "auth" || s[0] === "functions") && s[1] === "v1") {
+    return s.length === 3 && IDENT.test(s[2]) ? `/${s[0]}/v1/${s[2]}` : `/${s[0]}/v1/${REDACTED}`;
+  }
+  if (s[0] === "storage" && s[1] === "v1") return `/storage/v1/${REDACTED}`;   // object paths name clubs and files
+  return `/${REDACTED}`;
+}
+
+function ourPath(path: string): string {
+  if (path.startsWith("/_next/")) return NEXT_FILE.test(path) ? path : `/_next/${REDACTED}`;
+  return routeTemplate(path);
+}
+
+/**
+ * Any URL or path, made safe to send. Our site: route template (or a build file under /_next/). Supabase: API and
+ * name only. A listed third-party host: host only. Anything else: "[redacted]".
+ */
+export function normalizeUrl(input: unknown): string | undefined {
+  if (typeof input !== "string" || !input) return undefined;
+  const s = input.split("#")[0].split("?")[0];
+  if (s.startsWith("/") && !s.startsWith("//")) return ourPath(s);
+  const m = /^(https?):\/\/([^/]+)(\/.*)?$/i.exec(s);
+  if (!m) return REDACTED;
+  const scheme = m[1].toLowerCase();
+  const host = m[2].toLowerCase();
+  const path = m[3] ?? "/";
+  if (OUR_HOST.test(host)) return `${scheme}://${host}${ourPath(path)}`;
+  if (SUPABASE_HOST.test(host)) return `${scheme}://${host}${supabasePath(path)}`;
+  if (KNOWN_HOST.test(host)) return `${scheme}://${host}/${REDACTED}`;
+  return REDACTED;
+}
+
+/** Server build paths ("/var/task/.next/server/chunks/ssr/…", "…/node_modules/…", "node:internal/…"): file-name
+ *  characters only, and only inside the build output, the installed packages or Node itself. */
+const SERVER_FILE = /^(?:app:\/\/\/|file:\/\/\/?)?[A-Za-z0-9_\-./\[\]()@~+]{1,300}$/;
+const SERVER_PLACE = /(?:^|\/)(?:\.next|node_modules)\//;
+const NODE_INTERNAL = /^node:[a-z_/]{1,100}$/;
+const EMAIL_LIKE = /[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9-]+\.[A-Za-z]{2,}/;
+
+/** A stack frame's file, in a form that still lets Sentry apply the right source map. */
+export function safeFile(input: unknown): string | undefined {
+  if (typeof input !== "string" || !input) return undefined;
+  if (input === "<anonymous>" || input === "[native code]") return input;
+  if (/^https?:\/\//i.test(input) || (input.startsWith("/_next/"))) return normalizeUrl(input);
+  const s = input.split("#")[0].split("?")[0];
+  if (NODE_INTERNAL.test(s)) return s;
+  return SERVER_FILE.test(s) && SERVER_PLACE.test(s) && !EMAIL_LIKE.test(s) ? s : REDACTED;
+}
+
+/** A file a source map can belong to: a browser build file under /_next/ or a server build file. */
+function isBuildFile(file: string): boolean {
+  if (file.includes(REDACTED) || file.includes(UNMATCHED)) return false;
+  return /^(?:https?:\/\/[^/]+)?\/_next\//.test(file) || SERVER_PLACE.test(file);
+}
+
+/* ---------------------------------------------------------------------------------------------------------------
+ * Strict formats for every other field (review correction, 22 Nov): a value that does not have the expected shape
+ * is dropped or replaced, never forwarded as is.
+ * ------------------------------------------------------------------------------------------------------------- */
+
+const FUNCTION_NAME = /^[A-Za-z0-9_$.<>\[\] /-]{1,120}$/;    // "reserve", "Object.<anonymous>", "async Promise.all"
+const EXCEPTION_TYPE = /^(?:Error|[A-Z][A-Za-z0-9_]{0,60}(?:Error|Exception))$/;   // TypeError, LoadError, DOMException
+const MECHANISM_TYPE = /^[a-z][a-z0-9_.]{0,59}$/;
+const LEVELS = new Set(["fatal", "error", "warning", "log", "info", "debug"]);
+const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
+const ENVIRONMENTS = new Set(["production", "staging", "preview", "development", "test"]);
+const RELEASE = /^[0-9a-f]{7,40}$/;   // the commit SHA (Vercel); nothing else is a release here
+const EVENT_ID = /^[0-9a-f]{32}$/;
+const TRACE_ID = /^[0-9a-f]{32}$/;
+const SPAN_ID = /^[0-9a-f]{16}$/;
+const DEBUG_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SDK_NAME = /^sentry\.[a-z.]{1,60}$/;
+const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:[-.][A-Za-z0-9.]{1,30})?$/;
+const CONTEXT_VALUE = /^[A-Za-z0-9 ._()+\-/]{1,64}$/;
+const AREAS = new Set<string>(["booking", "auth", "media", "payment", "page", "test"]);
+
+const ok = <T>(v: unknown, test: (x: string) => boolean): T | undefined =>
+  typeof v === "string" && test(v) ? (v as T) : undefined;
+const re = (r: RegExp) => (x: string) => r.test(x);
+const count = (v: unknown, max = 1e8): number | undefined => (Number.isInteger(v) && (v as number) >= 0 && (v as number) < max ? (v as number) : undefined);
+const time = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined);
+
+/** Tag values have one fixed shape per tag; anything else drops the tag. */
+const TAG_VALUE: Record<string, (v: string) => boolean> = {
+  area: (v) => AREAS.has(v),
+  code: re(/^[A-Za-z0-9_]{1,24}$/),
+  status: re(/^[1-5]\d{2}$/),
+  runtime: re(/^(?:node|edge|browser)$/),
+};
 
 /** A transaction name is "METHOD /path" or a path; normalised the same way. */
 function normalizeTransaction(t: unknown): string | undefined {
   if (typeof t !== "string") return undefined;
   const m = /^([A-Z]+) (.*)$/.exec(t);
-  return m ? `${m[1]} ${normalizePath(m[2])}` : normalizePath(t);
+  if (m) return METHODS.has(m[1]) ? `${m[1]} ${normalizeUrl(m[2])}` : undefined;
+  return normalizeUrl(t);
 }
 
 function scrubFrame(f: StackFrame): StackFrame {
   return {
-    filename: normalizePath(f.filename),
-    abs_path: normalizePath(f.abs_path), // kept (no query) so source maps resolve; a file URL, never data
-    function: f.function,
-    module: f.module,
-    lineno: f.lineno,
-    colno: f.colno,
-    in_app: f.in_app,
+    filename: safeFile(f.filename),
+    abs_path: safeFile(f.abs_path), // matched against debug_meta's code_file: both normalised the same way
+    function: typeof f.function === "string" ? (FUNCTION_NAME.test(f.function) ? f.function : "?") : undefined,
+    lineno: count(f.lineno),
+    colno: count(f.colno),
+    in_app: typeof f.in_app === "boolean" ? f.in_app : undefined,
   };
 }
 
 function scrubException(x: Exception): Exception {
+  const type = typeof x.type === "string" && EXCEPTION_TYPE.test(x.type) ? x.type : "Error";
   return {
-    type: typeof x.type === "string" ? x.type.slice(0, 80) : undefined,
-    value: safeText(x.value, x.type),
-    mechanism: x.mechanism ? { type: x.mechanism.type, handled: x.mechanism.handled } : undefined,
-    stacktrace: x.stacktrace?.frames ? { frames: x.stacktrace.frames.map(scrubFrame) } : undefined,
+    type,
+    value: safeText(x.value, type),
+    mechanism: x.mechanism
+      ? { type: ok<string>(x.mechanism.type, re(MECHANISM_TYPE)) ?? "generic", handled: typeof x.mechanism.handled === "boolean" ? x.mechanism.handled : undefined }
+      : undefined,
+    stacktrace: Array.isArray(x.stacktrace?.frames) ? { frames: x.stacktrace!.frames!.slice(-100).map(scrubFrame) } : undefined,
   };
 }
 
-const TAGS = new Set(["area", "code", "status", "runtime"]);
+/** Source-map ids: type, file (normalised as frames are) and debug id; nothing else. */
+function scrubDebugMeta(d: ErrorEvent["debug_meta"]): ErrorEvent["debug_meta"] | undefined {
+  if (!d || !Array.isArray(d.images)) return undefined;
+  const images = d.images.flatMap((img) => {
+    const i = img as { type?: unknown; code_file?: unknown; debug_id?: unknown };
+    const file = safeFile(i.code_file);
+    if (i.type !== "sourcemap" || !file || !isBuildFile(file) || typeof i.debug_id !== "string" || !DEBUG_ID.test(i.debug_id)) return [];
+    return [{ type: "sourcemap" as const, code_file: file, debug_id: i.debug_id }];
+  });
+  return images.length ? { images: images.slice(0, 200) } : undefined;
+}
 
-function pick<T extends object>(o: T | undefined, keys: string[]): Partial<T> | undefined {
-  if (!o) return undefined;
-  const out: Record<string, unknown> = {};
-  for (const k of keys) if ((o as Record<string, unknown>)[k] !== undefined) out[k] = (o as Record<string, unknown>)[k];
-  return out as Partial<T>;
+function scrubContext(c: unknown): { name?: string; version?: string } | undefined {
+  if (!c || typeof c !== "object") return undefined;
+  const o = c as Record<string, unknown>;
+  const out = { name: ok<string>(o.name, re(CONTEXT_VALUE)), version: ok<string>(o.version, re(CONTEXT_VALUE)) };
+  return out.name || out.version ? out : undefined;
 }
 
 /** Network and navigation breadcrumbs only, reduced to method, normalised URL and status. */
 export function scrubBreadcrumb(b: Breadcrumb): Breadcrumb | null {
   const d = (b.data ?? {}) as Record<string, unknown>;
+  const level = ok<Breadcrumb["level"]>(b.level, (x) => LEVELS.has(x));
   if (b.category === "navigation") {
-    return { category: "navigation", timestamp: b.timestamp, data: { from: normalizePath(d.from), to: normalizePath(d.to) } };
+    return { category: "navigation", timestamp: time(b.timestamp), data: { from: normalizeUrl(d.from), to: normalizeUrl(d.to) } };
   }
   if (b.category === "fetch" || b.category === "xhr" || b.type === "http") {
     return {
-      type: "http", category: b.category, timestamp: b.timestamp, level: b.level,
-      data: { method: d.method, url: normalizePath(d.url), status_code: d.status_code },
+      type: "http", category: b.category === "xhr" ? "xhr" : "fetch", timestamp: time(b.timestamp), level,
+      data: { method: ok<string>(d.method, (x) => METHODS.has(x)), url: normalizeUrl(d.url), status_code: count(d.status_code, 600) },
     };
   }
   return null;
@@ -132,37 +270,42 @@ export function scrubBreadcrumb(b: Breadcrumb): Breadcrumb | null {
 /** Rebuilds an event from the allowlist. Returns null to drop it. */
 export function scrubEvent(e: ErrorEvent): ErrorEvent | null {
   const tags: Record<string, string> = {};
-  for (const [k, v] of Object.entries(e.tags ?? {})) if (TAGS.has(k) && v != null) tags[k] = String(v).slice(0, 64);
+  for (const [k, v] of Object.entries(e.tags ?? {})) {
+    const valid = TAG_VALUE[k];
+    if (valid && (typeof v === "string" || typeof v === "number") && valid(String(v))) tags[k] = String(v);
+  }
 
   const contexts: NonNullable<ErrorEvent["contexts"]> = {};
   for (const k of ["browser", "os", "runtime"] as const) {
-    const c = pick(e.contexts?.[k] as Record<string, unknown> | undefined, ["name", "version"]);
-    if (c && Object.keys(c).length) contexts[k] = c;
+    const c = scrubContext(e.contexts?.[k]);
+    if (c) contexts[k] = c;
   }
   const t = e.contexts?.trace;
-  if (t?.trace_id && t.span_id) contexts.trace = { trace_id: t.trace_id, span_id: t.span_id };
+  if (t && TRACE_ID.test(String(t.trace_id)) && SPAN_ID.test(String(t.span_id))) contexts.trace = { trace_id: t.trace_id, span_id: t.span_id };
+
+  const sdk = e.sdk && SDK_NAME.test(String(e.sdk.name)) && VERSION.test(String(e.sdk.version))
+    ? { name: e.sdk.name, version: e.sdk.version } : undefined;
 
   const out: ErrorEvent = {
     type: undefined,
-    event_id: e.event_id,
-    timestamp: e.timestamp,
-    platform: e.platform,
-    level: e.level,
-    environment: e.environment,
-    release: e.release,
-    dist: e.dist,
-    sdk: e.sdk,
-    debug_meta: e.debug_meta, // source-map ids, needed for readable stacks
-    fingerprint: e.fingerprint,
+    event_id: ok<string>(e.event_id, re(EVENT_ID)),
+    timestamp: time(e.timestamp),
+    platform: ok<string>(e.platform, re(/^[a-z]{1,20}$/)),
+    level: ok<ErrorEvent["level"]>(e.level, (x) => LEVELS.has(x)),
+    environment: ok<string>(e.environment, (x) => ENVIRONMENTS.has(x)),
+    release: ok<string>(e.release, re(RELEASE)),
+    sdk,
+    debug_meta: scrubDebugMeta(e.debug_meta),
     transaction: normalizeTransaction(e.transaction),
     tags,
     contexts,
+    // fingerprint, dist, user, server_name, extra, modules and every other field: never sent
   };
   if (e.message !== undefined) out.message = safeText(e.message);
   if (e.logentry) out.logentry = { message: safeText(e.logentry.message) };
-  if (e.exception?.values) out.exception = { values: e.exception.values.map(scrubException) };
-  if (e.request) out.request = { method: e.request.method, url: normalizePath(e.request.url) };
-  if (e.breadcrumbs) out.breadcrumbs = e.breadcrumbs.map(scrubBreadcrumb).filter((b): b is Breadcrumb => b !== null);
+  if (Array.isArray(e.exception?.values)) out.exception = { values: e.exception!.values!.slice(0, 10).map(scrubException) };
+  if (e.request) out.request = { method: ok<string>(e.request.method, (x) => METHODS.has(x)), url: normalizeUrl(e.request.url) };
+  if (Array.isArray(e.breadcrumbs)) out.breadcrumbs = e.breadcrumbs.map(scrubBreadcrumb).filter((b): b is Breadcrumb => b !== null);
   return out;
 }
 

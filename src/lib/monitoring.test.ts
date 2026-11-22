@@ -1,14 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type { ErrorEvent } from "@sentry/nextjs";
 import {
-  IGNORE_ERRORS, PRIVACY_PROBE, SAFE_MESSAGES, WITHHELD, baseOptions, monitoringEnvironment, normalizePath,
-  safeText, scrubBreadcrumb, scrubEvent,
+  IGNORE_ERRORS, PRIVACY_PROBE, REDACTED, SAFE_MESSAGES, UNMATCHED, WITHHELD, baseOptions, monitoringEnvironment,
+  normalizeUrl, routeTemplate, safeFile, safeText, scrubBreadcrumb, scrubEvent,
 } from "./monitoring";
 
-/** Every piece of fake personal data the probe and these tests use; none may survive scrubbing. */
-const SECRETS = ["Jana", "probe@example.invalid", "70 123 456", "482913", "a1b2c3d4-0000-4000-8000-123456789abc",
-  "eyJhbGciOiJIUzI1NiJ9.payload.sig", "sb-access-token=xyz", "10.1.2.3", "secret-var-value", "const pin = 4321"];
+/** Every piece of fake personal data these tests use; none may survive scrubbing. */
+const SECRETS = ["Jana", "jana", "probe@example.invalid", "70 123 456", "70123456", "482913",
+  "a1b2c3d4-0000-4000-8000-123456789abc", "eyJhbGciOiJIUzI1NiJ9.payload.sig", "sb-access-token=xyz", "10.1.2.3",
+  "secret-var-value", "const pin = 4321", "tripoli-tennis"];
 const leaks = (x: unknown) => SECRETS.filter((s) => JSON.stringify(x).includes(s));
+
+const SITE = "https://courtbook-three.vercel.app";
+const SUPA = "https://pwznauyioqykdwodwpvx.supabase.co";
+const UUID = "a1b2c3d4-0000-4000-8000-123456789abc";
+const DEBUG_ID = "0f4e2d1c-9b8a-4c7d-8e6f-5a4b3c2d1e0f";
+const TRACE = "0123456789abcdef0123456789abcdef";
+const SPAN = "0123456789abcdef";
 
 describe("safeText: messages are withheld unless fixed", () => {
   it("keeps our own fixed messages", () => {
@@ -25,7 +33,7 @@ describe("safeText: messages are withheld unless fixed", () => {
       .toBe("Minified React error #418");
   });
   it("withholds everything else, however harmless it looks", () => {
-    for (const m of [PRIVACY_PROBE, "duplicate key value violates unique constraint",  "booking: unexpected error " + "x", "", "TypeError: x is undefined"])
+    for (const m of [PRIVACY_PROBE, "duplicate key value violates unique constraint", "booking: unexpected error x", "", "TypeError: x is undefined"])
       expect(safeText(m)).toBe(WITHHELD);
     for (const m of ["Couldn't load Jana's 482913 bookings now", "Couldn't load your bookings: probe@example.invalid"])
       expect(safeText(m, "LoadError")).toBe(WITHHELD);
@@ -34,25 +42,76 @@ describe("safeText: messages are withheld unless fixed", () => {
   });
 });
 
-describe("normalizePath: paths only, IDs replaced", () => {
-  it("drops query strings and fragments (sign-in codes, emails)", () => {
-    expect(normalizePath("https://courtbook-three.vercel.app/auth/callback?code=482913&next=/x#t=1")).toBe("https://courtbook-three.vercel.app/auth/callback");
-    expect(normalizePath("/login?email=probe@example.invalid")).toBe("/login");
+describe("routeTemplate: our paths are sent only as route templates (review correction 1)", () => {
+  it("replaces every dynamic segment, whatever it contains", () => {
+    expect(routeTemplate(`/bookings/${UUID}`)).toBe("/bookings/:id");
+    expect(routeTemplate("/bookings/jana")).toBe("/bookings/:id");
+    expect(routeTemplate("/club/tripoli-tennis/info")).toBe("/club/:slug/info");
+    expect(routeTemplate("/club/x")).toBe("/club/:slug");
+    expect(routeTemplate("/staff/jana/settings")).toBe("/staff/:slug/settings");
+    expect(routeTemplate("/admin/clubs/jana")).toBe("/admin/clubs/:slug");
   });
-  it("replaces UUIDs, numbers, token-like and email-like segments", () => {
-    expect(normalizePath("/bookings/a1b2c3d4-0000-4000-8000-123456789abc")).toBe("/bookings/:id");
-    expect(normalizePath("/pay/A1B2C3D4-0000-4000-8000-123456789ABC/x")).toBe("/pay/:id/x");
-    expect(normalizePath("/u/70123456")).toBe("/u/:n");
-    expect(normalizePath("/t/eyJhbGciOiJIUzI1NiJ9.payload.sig")).toBe("/t/:token");
-    expect(normalizePath("/p/probe@example.invalid")).toBe("/p/:value");
+  it("keeps static routes, preferring them over dynamic ones", () => {
+    expect(routeTemplate("/")).toBe("/");
+    expect(routeTemplate("/play")).toBe("/play");
+    expect(routeTemplate("/admin/monitoring")).toBe("/admin/monitoring");
+    expect(routeTemplate("/bookings/")).toBe("/bookings");
+    expect(routeTemplate("/club/[slug]")).toBe("/club/:slug");   // Next's own transaction names
   });
-  it("keeps readable route names, including long club slugs", () => {
-    expect(normalizePath("/club/tripoli-tennis-and-padel-academy/info")).toBe("/club/tripoli-tennis-and-padel-academy/info");
-    expect(normalizePath("/_next/static/chunks/app-page-5f3a.js")).toBe("/_next/static/chunks/app-page-5f3a.js");
+  it("sends any path that is not one of our routes as /[unmatched], including short segments", () => {
+    for (const p of ["/jana", "/me/jana", "/p/70123456", "/u/482913", `/pay/${UUID}/x`, "/login/probe@example.invalid",
+      "/club/tripoli-tennis/jana", "/bookings/a/b", "/t/eyJhbGciOiJIUzI1NiJ9.payload.sig", "/x"])
+      expect(routeTemplate(p)).toBe(UNMATCHED);
+  });
+});
+
+describe("normalizeUrl: any URL made safe", () => {
+  it("drops query strings and fragments everywhere", () => {
+    expect(normalizeUrl(`${SITE}/auth/callback?code=482913&next=/x#t=1`)).toBe(`${SITE}/auth/callback`);
+    expect(normalizeUrl("/login?email=probe@example.invalid")).toBe("/login");
+  });
+  it("our site: route template, or a hashed build file under /_next/", () => {
+    expect(normalizeUrl(`${SITE}/club/tripoli-tennis/info`)).toBe(`${SITE}/club/:slug/info`);
+    expect(normalizeUrl(`${SITE}/jana`)).toBe(`${SITE}${UNMATCHED}`);
+    expect(normalizeUrl("/_next/static/chunks/0y3k-9a_b.js")).toBe("/_next/static/chunks/0y3k-9a_b.js");
+    expect(normalizeUrl("/_next/static/probe@example.invalid.js")).toBe(`/_next/${REDACTED}`);
+    expect(normalizeUrl("http://localhost:3000/me")).toBe("http://localhost:3000/me");
+  });
+  it("Supabase: API and table or function name only", () => {
+    expect(normalizeUrl(`${SUPA}/rest/v1/profiles?email=eq.probe@example.invalid`)).toBe(`${SUPA}/rest/v1/profiles`);
+    expect(normalizeUrl(`${SUPA}/rest/v1/rpc/hold_slot`)).toBe(`${SUPA}/rest/v1/rpc/hold_slot`);
+    expect(normalizeUrl(`${SUPA}/auth/v1/otp`)).toBe(`${SUPA}/auth/v1/otp`);
+    expect(normalizeUrl(`${SUPA}/auth/v1/admin/users/${UUID}`)).toBe(`${SUPA}/auth/v1/${REDACTED}`);
+    expect(normalizeUrl(`${SUPA}/storage/v1/object/public/club-media/jana.jpg`)).toBe(`${SUPA}/storage/v1/${REDACTED}`);
+    expect(normalizeUrl(`${SUPA}/rest/v1/Jana Probe`)).toBe(`${SUPA}/rest/v1/${REDACTED}`);
+  });
+  it("other sites: a listed host only; an unlisted or spoofed host is redacted whole", () => {
+    expect(normalizeUrl("https://fonts.googleapis.com/css2?family=Inter")).toBe(`https://fonts.googleapis.com/${REDACTED}`);
+    expect(normalizeUrl("https://jana.example.com/x")).toBe(REDACTED);
+    expect(normalizeUrl("https://courtbook-three.vercel.app.jana.example/x")).toBe(REDACTED);
+    expect(normalizeUrl("chrome-extension://abc/x.js")).toBe(REDACTED);
+    expect(normalizeUrl("//jana.example.com/x")).toBe(REDACTED);
+    expect(normalizeUrl("jana")).toBe(REDACTED);
   });
   it("ignores non-strings", () => {
-    expect(normalizePath(undefined)).toBeUndefined();
-    expect(normalizePath(5)).toBeUndefined();
+    expect(normalizeUrl(undefined)).toBeUndefined();
+    expect(normalizeUrl(5)).toBeUndefined();
+  });
+});
+
+describe("safeFile: stack-frame files keep what source maps need, nothing else (review correction 2)", () => {
+  it("keeps browser build files (as normalised in debug_meta) and server build paths", () => {
+    expect(safeFile(`${SITE}/_next/static/chunks/0y3k-9a_b.js?v=482913`)).toBe(`${SITE}/_next/static/chunks/0y3k-9a_b.js`);
+    expect(safeFile("/var/task/.next/server/chunks/ssr/node_modules_@sentry_nextjs_1ugx._.js")).toBe("/var/task/.next/server/chunks/ssr/node_modules_@sentry_nextjs_1ugx._.js");
+    expect(safeFile("app:///.next/server/app/club/[slug]/page.js")).toBe("app:///.next/server/app/club/[slug]/page.js");
+    expect(safeFile("node:internal/process/task_queues")).toBe("node:internal/process/task_queues");
+    expect(safeFile("<anonymous>")).toBe("<anonymous>");
+  });
+  it("an inline script's page URL becomes its route template; anything odd is redacted", () => {
+    expect(safeFile(`${SITE}/bookings/${UUID}?email=probe@example.invalid`)).toBe(`${SITE}/bookings/:id`);
+    expect(safeFile("/var/task/probe@example.invalid/x.js")).toBe(REDACTED);
+    expect(safeFile("/var/task/Jana Probe/x.js")).toBe(REDACTED);
+    expect(safeFile("https://evil.example/jana.js")).toBe(REDACTED);
   });
 });
 
@@ -60,30 +119,33 @@ describe("normalizePath: paths only, IDs replaced", () => {
 function dirtyEvent(): ErrorEvent {
   return {
     type: undefined,
-    event_id: "e1",
-    timestamp: 1,
+    event_id: "0123456789abcdef0123456789abcdef",
+    timestamp: 1763812800.5,
     platform: "javascript",
     level: "error",
     environment: "staging",
-    release: "abc123",
+    release: "26d6244abc",
+    dist: "jana",
     message: PRIVACY_PROBE,
     logentry: { message: PRIVACY_PROBE, params: ["Jana"] },
-    transaction: "GET /bookings/a1b2c3d4-0000-4000-8000-123456789abc",
+    transaction: `GET /bookings/${UUID}`,
     server_name: "10.1.2.3",
-    user: { id: "a1b2c3d4-0000-4000-8000-123456789abc", email: "probe@example.invalid", ip_address: "10.1.2.3" },
+    fingerprint: ["{{ default }}", "probe@example.invalid"],
+    user: { id: UUID, email: "probe@example.invalid", ip_address: "10.1.2.3" },
     extra: { note: "Jana" },
     modules: { "secret-var-value": "1" },
+    sdk: { name: "sentry.javascript.nextjs", version: "11.16.0", integrations: ["Jana"], packages: [{ name: "npm:@sentry/nextjs", version: "11.16.0" }], settings: { infer_ip: "auto" } },
     tags: { area: "booking", code: "23P01", email: "probe@example.invalid", url: "/x?code=482913" },
     contexts: {
       browser: { name: "Chrome", version: "131", extra: "Jana" },
       os: { name: "Android", version: "15" },
-      trace: { trace_id: "t", span_id: "s", data: { q: "482913" } },
-      nextjs: { route: "/bookings/a1b2c3d4-0000-4000-8000-123456789abc" },
+      trace: { trace_id: TRACE, span_id: SPAN, data: { q: "482913" } },
+      nextjs: { route: `/bookings/${UUID}` },
       state: { form: { phone: "70 123 456" } },
     },
     request: {
       method: "POST",
-      url: "https://courtbook-three.vercel.app/bookings/a1b2c3d4-0000-4000-8000-123456789abc?email=probe@example.invalid",
+      url: `${SITE}/bookings/${UUID}?email=probe@example.invalid`,
       query_string: "code=482913",
       headers: { cookie: "sb-access-token=xyz", authorization: "Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig" },
       cookies: { "sb-access-token": "xyz" },
@@ -94,12 +156,13 @@ function dirtyEvent(): ErrorEvent {
       values: [{
         type: "Error",
         value: PRIVACY_PROBE,
+        module: "jana",
         mechanism: { type: "onerror", handled: false, data: { x: "Jana" } },
         stacktrace: {
           frames: [{
-            filename: "https://courtbook-three.vercel.app/_next/static/chunks/page.js?token=482913",
-            abs_path: "https://courtbook-three.vercel.app/_next/static/chunks/page.js?token=482913",
-            function: "reserve", lineno: 10, colno: 5, in_app: true,
+            filename: `${SITE}/_next/static/chunks/page.js?token=482913`,
+            abs_path: `${SITE}/_next/static/chunks/page.js?token=482913`,
+            function: "reserve", module: "jana", lineno: 10, colno: 5, in_app: true,
             pre_context: ["const pin = 4321"], context_line: "throw new Error(name)", post_context: ["}"],
             vars: { name: "Jana", email: "probe@example.invalid" },
           }],
@@ -110,10 +173,10 @@ function dirtyEvent(): ErrorEvent {
       { category: "console", message: "Jana probe@example.invalid", timestamp: 1 },
       { category: "ui.click", message: "button#book[aria-label=Jana]", timestamp: 1 },
       { category: "ui.input", message: "input[name=phone]", timestamp: 1 },
-      { category: "navigation", data: { from: "/login?email=probe@example.invalid", to: "/bookings/a1b2c3d4-0000-4000-8000-123456789abc" }, timestamp: 2 },
-      { category: "fetch", type: "http", data: { method: "POST", url: "https://x.supabase.co/rest/v1/rpc/hold_slot?p=482913", status_code: 500, request_body_size: 10, body: "Jana" }, timestamp: 3 },
+      { category: "navigation", data: { from: "/login?email=probe@example.invalid", to: `/bookings/${UUID}` }, timestamp: 2 },
+      { category: "fetch", type: "http", data: { method: "POST", url: `${SUPA}/rest/v1/rpc/hold_slot?p=482913`, status_code: 500, request_body_size: 10, body: "Jana" }, timestamp: 3 },
     ],
-    debug_meta: { images: [{ type: "sourcemap", code_file: "https://courtbook-three.vercel.app/_next/static/chunks/page.js", debug_id: "d1" }] },
+    debug_meta: { images: [{ type: "sourcemap", code_file: `${SITE}/_next/static/chunks/page.js?token=482913`, debug_id: DEBUG_ID, extra: "Jana" }] },
   } as unknown as ErrorEvent;
 }
 
@@ -129,41 +192,120 @@ describe("scrubEvent: the event is rebuilt from an allowlist", () => {
     expect(out.exception!.values![0].value).toBe(WITHHELD);
     expect(out.exception!.values![0].type).toBe("Error");
   });
-  it("keeps file, function, line and column; no source lines, no variables", () => {
+  it("keeps file, function, line and column; no module, source lines or variables", () => {
     expect(out.exception!.values![0].stacktrace!.frames![0]).toEqual({
-      filename: "https://courtbook-three.vercel.app/_next/static/chunks/page.js",
-      abs_path: "https://courtbook-three.vercel.app/_next/static/chunks/page.js",
-      function: "reserve", module: undefined, lineno: 10, colno: 5, in_app: true,
+      filename: `${SITE}/_next/static/chunks/page.js`,
+      abs_path: `${SITE}/_next/static/chunks/page.js`,
+      function: "reserve", lineno: 10, colno: 5, in_app: true,
     });
     expect(out.exception!.values![0].mechanism).toEqual({ type: "onerror", handled: false });
   });
-  it("keeps the request's method and normalised path only", () => {
-    expect(out.request).toEqual({ method: "POST", url: "https://courtbook-three.vercel.app/bookings/:id" });
+  it("keeps the request's method and route template only", () => {
+    expect(out.request).toEqual({ method: "POST", url: `${SITE}/bookings/:id` });
     expect(out.transaction).toBe("GET /bookings/:id");
   });
-  it("drops user, server name, extra and modules", () => {
-    for (const k of ["user", "server_name", "extra", "modules"]) expect(out).not.toHaveProperty(k);
+  it("drops user, server name, extra, modules, fingerprint and dist", () => {
+    for (const k of ["user", "server_name", "extra", "modules", "fingerprint", "dist"]) expect(out).not.toHaveProperty(k);
   });
   it("keeps only allowlisted tags and contexts", () => {
     expect(out.tags).toEqual({ area: "booking", code: "23P01" });
     expect(out.contexts).toEqual({
-      browser: { name: "Chrome", version: "131" }, os: { name: "Android", version: "15" }, trace: { trace_id: "t", span_id: "s" },
+      browser: { name: "Chrome", version: "131" }, os: { name: "Android", version: "15" }, trace: { trace_id: TRACE, span_id: SPAN },
     });
   });
   it("keeps navigation and network breadcrumbs, reduced; drops console, clicks and input", () => {
     expect(out.breadcrumbs).toEqual([
       { category: "navigation", timestamp: 2, data: { from: "/login", to: "/bookings/:id" } },
-      { type: "http", category: "fetch", timestamp: 3, level: undefined, data: { method: "POST", url: "https://x.supabase.co/rest/v1/rpc/hold_slot", status_code: 500 } },
+      { type: "http", category: "fetch", timestamp: 3, level: undefined, data: { method: "POST", url: `${SUPA}/rest/v1/rpc/hold_slot`, status_code: 500 } },
     ]);
   });
-  it("keeps what is needed to read the error: release, environment, source-map ids", () => {
-    expect(out.release).toBe("abc123");
+  it("keeps what is needed to read the error: release, environment, SDK, source-map id matching the frame file", () => {
+    expect(out.release).toBe("26d6244abc");
     expect(out.environment).toBe("staging");
-    expect(out.debug_meta).toEqual(dirtyEvent().debug_meta);
+    expect(out.sdk).toEqual({ name: "sentry.javascript.nextjs", version: "11.16.0" });
+    expect(out.debug_meta).toEqual({ images: [{ type: "sourcemap", code_file: `${SITE}/_next/static/chunks/page.js`, debug_id: DEBUG_ID }] });
+    expect(out.debug_meta!.images![0]).toHaveProperty("code_file", out.exception!.values![0].stacktrace!.frames![0].abs_path);
   });
   it("keeps a fixed message as is", () => {
     const e = { ...dirtyEvent(), message: SAFE_MESSAGES.bookingUnexpected, exception: undefined };
     expect(scrubEvent(e)!.message).toBe("booking: unexpected error");
+  });
+});
+
+describe("scrubEvent: every metadata field has a strict format (review correction 2)", () => {
+  /** The dirty event with some fields replaced by values carrying fake data or the wrong shape. */
+  const bad = (patch: Record<string, unknown>) => scrubEvent({ ...dirtyEvent(), ...patch } as ErrorEvent)!;
+  const frameWith = (f: Record<string, unknown>) =>
+    bad({ exception: { values: [{ type: "Error", value: "x", stacktrace: { frames: [{ filename: "/_next/static/chunks/a.js", ...f }] } }] } })
+      .exception!.values![0].stacktrace!.frames![0];
+
+  it("function names: identifiers only, else '?'", () => {
+    expect(frameWith({ function: "Object.<anonymous>" }).function).toBe("Object.<anonymous>");
+    expect(frameWith({ function: "async Promise.all" }).function).toBe("async Promise.all");
+    for (const f of ["probe@example.invalid", "eval at x (https://courtbook-three.vercel.app/x?code=482913)", "Jana Probe: 70 123 456", "x".repeat(200)])
+      expect(frameWith({ function: f }).function).toBe("?");
+  });
+  it("line and column: whole numbers only; in_app: boolean only", () => {
+    expect(frameWith({ lineno: "482913", colno: -1, in_app: "Jana" })).toEqual({ filename: "/_next/static/chunks/a.js", abs_path: undefined, function: undefined, lineno: undefined, colno: undefined, in_app: undefined });
+  });
+  it("exception type and mechanism: fixed shapes", () => {
+    const x = bad({ exception: { values: [{ type: "Error: Jana probe@example.invalid", value: "x", mechanism: { type: "Jana 482913", handled: "yes", data: { a: 1 } } }] } }).exception!.values![0];
+    expect(x.type).toBe("Error");
+    expect(x.mechanism).toEqual({ type: "generic", handled: undefined });
+  });
+  it("exception types: error class names only", () => {
+    const typeOf = (type: string) => bad({ exception: { values: [{ type, value: "x" }] } }).exception!.values![0].type;
+    for (const t of ["Error", "TypeError", "LoadError", "ChunkLoadError", "AuthApiError", "DOMException"]) expect(typeOf(t)).toBe(t);
+    for (const t of ["Jana", "jana", "Probe482913", "Error Jana", "x".repeat(70) + "Error"]) expect(typeOf(t)).toBe("Error");
+  });
+  it("release: a commit SHA only", () => {
+    expect(bad({ release: "26d6244" }).release).toBe("26d6244");
+    for (const r of ["Jana", "test-release", "v1.0.0", "26d6244 jana"]) expect(bad({ release: r }).release).toBeUndefined();
+  });
+  it("server files: inside the build output, the packages or Node only", () => {
+    expect(safeFile("/var/task/Jana/x.js")).toBe(REDACTED);
+    expect(safeFile("/home/jana/project/src/x.ts")).toBe(REDACTED);
+    expect(safeFile("node:Jana")).toBe(REDACTED);
+    expect(safeFile("/var/task/node_modules/next/dist/server/base-server.js")).toBe("/var/task/node_modules/next/dist/server/base-server.js");
+  });
+  it("debug_meta: only sourcemap images with a debug id and a build file", () => {
+    expect(bad({ debug_meta: { images: [{ type: "sourcemap", code_file: "/jana", debug_id: DEBUG_ID }] } }).debug_meta).toBeUndefined();
+    expect(bad({ debug_meta: { images: [{ type: "sourcemap", code_file: `${SITE}/club/jana`, debug_id: DEBUG_ID }] } }).debug_meta).toBeUndefined();
+    const d = bad({ debug_meta: { images: [
+      { type: "sourcemap", code_file: "https://evil.example/jana.js", debug_id: DEBUG_ID },
+      { type: "sourcemap", code_file: "/_next/static/chunks/a.js", debug_id: "probe@example.invalid" },
+      { type: "macho", code_file: "/_next/static/chunks/a.js", debug_id: DEBUG_ID },
+      { type: "sourcemap", code_file: "/_next/static/chunks/a.js", debug_id: DEBUG_ID, code_id: "Jana" },
+    ] } }).debug_meta;
+    expect(d).toEqual({ images: [{ type: "sourcemap", code_file: "/_next/static/chunks/a.js", debug_id: DEBUG_ID }] });
+    expect(bad({ debug_meta: { images: [{ type: "sourcemap", code_file: "https://evil.example/x.js", debug_id: DEBUG_ID }] } }).debug_meta).toBeUndefined();
+  });
+  it("tags: one shape per tag; anything else drops the tag", () => {
+    expect(bad({ tags: { area: "jana", code: "probe@example.invalid", status: "70 123 456", runtime: "Jana" } }).tags).toEqual({});
+    expect(bad({ tags: { area: "auth", code: "otp_expired", status: 503, runtime: "node" } }).tags).toEqual({ area: "auth", code: "otp_expired", status: "503", runtime: "node" });
+  });
+  it("environment, release, SDK, event id, level, platform, timestamp, trace: dropped unless well-formed", () => {
+    const o = bad({
+      environment: "jana", release: "probe@example.invalid", sdk: { name: "Jana", version: "1" }, event_id: "jana",
+      level: "Jana", platform: "Jana Probe", timestamp: "482913", contexts: { trace: { trace_id: "jana", span_id: SPAN }, browser: { name: "probe@example.invalid", version: "131" } },
+    });
+    for (const k of ["environment", "release", "sdk", "event_id", "level", "platform", "timestamp"]) expect(o[k as keyof ErrorEvent]).toBeUndefined();
+    expect(o.contexts).toEqual({ browser: { name: undefined, version: "131" } });
+  });
+  it("request method and transaction: known methods only", () => {
+    expect(bad({ request: { method: "JANA", url: "/play" }, transaction: "JANA /play" })).toMatchObject({ request: { method: undefined, url: "/play" }, transaction: undefined });
+  });
+  it("breadcrumb fields: method, status, level and timestamp checked", () => {
+    expect(scrubBreadcrumb({ category: "xhr", level: "jana" as never, timestamp: "1" as never, data: { method: "Jana", url: "/play", status_code: "482913" } }))
+      .toEqual({ type: "http", category: "xhr", timestamp: undefined, level: undefined, data: { method: undefined, url: "/play", status_code: undefined } });
+  });
+  it("whatever the input, no fake data survives", () => {
+    const o = bad({
+      environment: "jana", release: "Jana", tags: { area: "jana" }, fingerprint: ["Jana"],
+      exception: { values: [{ type: "Jana", value: "Jana", mechanism: { type: "Jana" }, stacktrace: { frames: [{ filename: "/var/task/Jana/x.js", abs_path: "https://evil.example/jana", function: "probe@example.invalid", module: "jana" }] } }] },
+      debug_meta: { images: [{ type: "sourcemap", code_file: "/jana", debug_id: DEBUG_ID }] },
+    });
+    expect(leaks(o)).toEqual([]);
   });
 });
 
