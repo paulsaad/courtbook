@@ -377,6 +377,23 @@ describe("Phase I-2a: desktop side panel beside the calendar", () => {
     rpcImpl = async () => ({ data: [], error: null });
   });
 
+  it("a refresh whose names read fails keeps the names on screen and marks the day as possibly outdated (W1)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const player: Booking = { ...booking("b-1", "x"), guest_name: null, player_id: "p-1", source: "app", player_name: "Nadia", contact_phone: null };
+      const { guest_name: _g, player_name: _n, contact_phone: _c, ...row } = player;
+      void _g; void _n; void _c;
+      view({ bookings: [player] });
+      expect(screen.getAllByText("Nadia").length).toBeGreaterThan(0);
+      handler = async (q) => ok(q.table === "bookings" ? [{ ...row, guest_name: null }] : []);
+      rpcImpl = async (fn) => (fn === "club_booking_contacts" ? { data: null, error: { message: "network" } } : { data: [], error: null });
+      await act(async () => { await vi.advanceTimersByTimeAsync(61_000); });
+      expect(screen.getByText(/Couldn.t load the latest bookings/)).toBeDefined();
+      expect(screen.getAllByText("Nadia").length).toBeGreaterThan(0);   // not replaced by "Player"
+      expect(screen.queryByText("Player")).toBeNull();
+    } finally { vi.useRealTimers(); rpcImpl = async () => ({ data: [], error: null }); }
+  });
+
   it("automatic refresh keeps the open panel and its typed details; a failed refresh marks the day as possibly outdated", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {

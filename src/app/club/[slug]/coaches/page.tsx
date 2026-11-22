@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { allLoaded, loaded } from "@/lib/load";
 import { loadClubHead } from "@/lib/clubHead";
 import ClubHeader from "../ClubHeader";
 
@@ -11,9 +12,9 @@ export default async function ClubCoaches({ params }: { params: Promise<{ slug: 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?next=/club/${slug}/coaches`);
-  const { data: club } = await supabase.from("clubs").select("id, name, slug, open_time, close_time, location_url, town_id, is_demo").eq("slug", slug).single();
+  const { data: club } = loaded(await supabase.from("clubs").select("id, name, slug, open_time, close_time, location_url, town_id, is_demo").eq("slug", slug).single(), "this club");
   if (!club) notFound();
-  const [{ data }, head] = await Promise.all([supabase.rpc("coaches_at_club", { p_club: club.id }), loadClubHead(supabase, club)]);
+  const [{ data }, head] = allLoaded(await Promise.all([supabase.rpc("coaches_at_club", { p_club: club.id }), loadClubHead(supabase, club)]), "this club's coaches");
   const coaches = (data ?? []) as CoachRow[];
 
   return (

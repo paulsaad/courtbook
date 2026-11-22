@@ -106,14 +106,14 @@ export default function ClubPhotos({ clubId, initial }: { clubId: string; initia
               <img src={mediaUrl(m)} alt={m.caption ?? "Venue photo"} width={m.width ?? 120} height={m.height ?? 90}
                    className="h-16 w-20 shrink-0 rounded-lg object-cover" />
               <input
-                className="min-w-0 flex-1 rounded-lg border border-grid bg-paper px-2 py-1.5 text-sm"
+                className="min-h-11 min-w-0 flex-1 rounded-lg border border-grid bg-paper px-2 py-1.5 text-sm sm:min-h-0"
                 defaultValue={m.caption ?? ""} maxLength={80} placeholder="Caption (optional)"
                 onBlur={(e) => e.target.value !== (m.caption ?? "") && caption(m, e.target.value)} />
               <div className="flex shrink-0 flex-col">
-                <button disabled={i === 0 || busy === m.id} onClick={() => move(m, -1)} aria-label="Move up" className="px-2 text-sm disabled:opacity-30">▲</button>
-                <button disabled={i === gallery.length - 1 || busy === m.id} onClick={() => move(m, 1)} aria-label="Move down" className="px-2 text-sm disabled:opacity-30">▼</button>
+                <button disabled={i === 0 || busy === m.id} onClick={() => move(m, -1)} aria-label="Move up" className="min-h-11 min-w-11 px-2 text-sm disabled:opacity-30 sm:min-h-0 sm:min-w-0">▲</button>
+                <button disabled={i === gallery.length - 1 || busy === m.id} onClick={() => move(m, 1)} aria-label="Move down" className="min-h-11 min-w-11 px-2 text-sm disabled:opacity-30 sm:min-h-0 sm:min-w-0">▼</button>
               </div>
-              <button disabled={busy === m.id} onClick={() => remove(m)} className="shrink-0 px-2 text-sm text-danger">Remove</button>
+              <button disabled={busy === m.id} onClick={() => remove(m)} className="min-h-11 shrink-0 px-2 text-sm text-danger sm:min-h-0">Remove</button>
             </li>
           ))}
           {gallery.length === 0 && <li className="rounded-xl border border-dashed border-grid px-3 py-6 text-center text-sm text-muted">No venue photos yet.</li>}
@@ -144,7 +144,7 @@ function Slot({ label, hint, aspect, item, busy, onPick, onRemove }: {
                /* min-w-0: a flex item will not shrink below its intrinsic width by default, and a
                   1600px cover pushed the Remove button off the side of a phone screen. */
                className={`${aspect} min-w-0 flex-1 rounded-xl border border-grid object-cover`} />
-          <button disabled={busy} onClick={onRemove} className="shrink-0 px-2 py-1 text-sm text-danger">Remove</button>
+          <button disabled={busy} onClick={onRemove} className="min-h-11 shrink-0 px-2 py-1 text-sm text-danger sm:min-h-0">Remove</button>
         </div>
       ) : (
         <div className={`${aspect} mt-2 grid place-items-center rounded-xl border border-dashed border-grid text-sm text-muted`}>None yet</div>
@@ -162,7 +162,7 @@ function PickButton({ label, disabled, onPick }: { label: string; disabled: bool
       <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
              onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(f); e.target.value = ""; }} />
       <button disabled={disabled} onClick={() => ref.current?.click()}
-              className="mt-2 w-full rounded-xl border border-grid py-2.5 text-sm disabled:opacity-50">{label}</button>
+              className="mt-2 min-h-11 w-full rounded-xl border border-grid py-2.5 text-sm disabled:opacity-50 sm:min-h-0">{label}</button>
     </>
   );
 }

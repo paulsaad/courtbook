@@ -41,15 +41,17 @@ function sheetTitle(s: NonNullable<Sheet>): string {
 
 
 /** Staff see who booked and how to reach them: the desk's whole job is ringing people.
- *  Scoped in the database to staff of this club and bookings at this club. */
+ *  Scoped in the database to staff of this club and bookings at this club. A failed read returns null, so the
+ *  caller treats the refresh as failed and keeps what it had, rather than showing bookings without names (W1). */
 async function withContacts(
   supabase: ReturnType<typeof createClient>,
   clubId: string,
   rows: Record<string, unknown>[],
-): Promise<Booking[]> {
+): Promise<Booking[] | null> {
   const ids = rows.map((r) => r.id as string);
   if (!ids.length) return [] as Booking[];
-  const { data } = await supabase.rpc("club_booking_contacts", { p_club: clubId, p_bookings: ids });
+  const { data, error } = await supabase.rpc("club_booking_contacts", { p_club: clubId, p_bookings: ids });
+  if (error) return null;
   const by = new Map((data as { booking_id: string; name: string | null; phone: string | null }[] | null ?? [])
     .map((c) => [c.booking_id, c] as const));
   return rows.map((r) => ({
@@ -190,6 +192,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     if (eb || ek) { setDayError(true); setDayLoading(false); return; }   // keep what we had rather than showing free slots
     const rows = await withContacts(supabase, club.id, b ?? []);
     if (seq !== dayReq.current) return;                                  // and again, after the second await
+    if (!rows) { setDayError(true); setDayLoading(false); return; }
     setBookings(rows);
     setBlocks((k ?? []) as Block[]);
     setDayError(false);
@@ -251,6 +254,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
       if (eb || ek) { if (alive) { setWeekError(true); setWeekLoading(false); } return; }
       const rows = await withContacts(supabase, club.id, b ?? []);
       if (!alive) return;
+      if (!rows) { setWeekError(true); setWeekLoading(false); return; }
       setWeek({ key, bookings: rows, blocks: (k ?? []) as Block[] });
       setWeekError(false);
       setWeekLoading(false);
@@ -638,7 +642,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
             <Link href={nav(shiftDate(date, view === "week" ? 7 : 1))} aria-label={view === "week" ? "Next week" : "Next day"} className="grid h-10 w-10 place-items-center rounded-full border border-grid bg-white text-lg">›</Link>
           </div>
         </div>
-        <div className="flex items-center justify-between px-4 pb-2">
+        {/* wraps only when the switcher and the key do not fit side by side (360-px phones; W1) */}
+        <div className="flex flex-wrap items-center justify-between gap-y-2 px-4 pb-2">
           <div className="flex rounded-full border border-grid bg-white p-0.5 text-sm">
             <Link href={q(todayIn(club.timezone), "now", sport)} className={`rounded-full px-4 py-1.5 ${view === "now" ? "bg-ink text-white" : ""}`}>Now</Link>
             <Link href={q(date, "grid", sport)} className={`rounded-full px-4 py-1.5 ${view === "grid" ? "bg-ink text-white" : ""}`}>Courts</Link>

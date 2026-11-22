@@ -112,6 +112,20 @@ export const ERRORS: Record<string, string> = {
   clubs_slot_minutes_check: "Grid step must be 30, 60 or 90.",
   clubs_booking_window_days_check: "Booking window must be 1–365 days.",
   clubs_hold_minutes_check: "Hold must be 2–30 minutes.",
+  // W1 (audit B2): codes a user can trigger that used to show as raw text
+  hold_already_active: "You already have a booking waiting to be paid. Finish or cancel it first.",
+  hold_conflict: "You already have a booking waiting to be paid. Finish or cancel it first.",
+  slot_blocked: "That time is blocked by the club.",
+  gallery_full: "The gallery is full (6 photos). Remove one first.",
+  caption_too_long: "A caption can be up to 80 characters.",
+  note_too_long: "A note can be up to 300 characters.",
+  cannot_reopen: "A cancelled game can't be reopened.",
+  match_not_finished: "You can do this once the game has finished.",
+  changed_elsewhere: "The photos were changed elsewhere. Refresh and try again.",
+  bad_players_needed: "Choose between 1 and 30 players.",
+  bad_range: "The end must be after the start.",
+  // 0077: the database's own sentence for an outdated page, shown as written
+  "CourtBook has been updated": "CourtBook has been updated. Reload the page, then block the time again.",
 };
 
 // Longest first, so a code that contains another wins (`rules_not_accepted` over `not_accepted`,
@@ -121,7 +135,8 @@ const ERROR_KEYS = Object.keys(ERRORS).sort((a, b) => b.length - a.length);
 export function friendlyError(message: string | undefined): string {
   if (!message) return "Something went wrong.";
   for (const key of ERROR_KEYS) if (message.includes(key)) return ERRORS[key];
-  return message;
+  // anything else is internal (a database or network message): never shown as is (W1, audit B2)
+  return "Something went wrong. Refresh and try again.";
 }
 
 /** A refused block, in words about blocks: the database reuses the booking check's error names

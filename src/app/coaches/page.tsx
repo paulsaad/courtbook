@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { allLoaded } from "@/lib/load";
 
 type Row = { coach_id: string; name: string | null; sports: string[]; levels: string[]; price_usd: number; whatsapp: string | null; club_id: string; club_name: string; club_slug: string; town: string | null };
 
@@ -9,7 +10,7 @@ export default async function CoachesPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login?next=/coaches");
-  const [{ data }, { data: sportRows }] = await Promise.all([supabase.rpc("coaches_directory"), supabase.from("sports").select("code, name_en")]);
+  const [{ data }, { data: sportRows }] = allLoaded(await Promise.all([supabase.rpc("coaches_directory"), supabase.from("sports").select("code, name_en")]), "the coaches");
   const names = new Map(((sportRows ?? []) as { code: string; name_en: string }[]).map((s) => [s.code, s.name_en]));
   const rows = (data ?? []) as Row[];
   return (

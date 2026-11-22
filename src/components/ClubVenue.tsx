@@ -87,7 +87,7 @@ export default function ClubVenue({ club }: { club: VenueRow }) {
 
         <label className="flex flex-col gap-1 text-sm">
           Address
-          <input className={field} maxLength={200} value={address}
+          <input className={`${field} min-h-11 sm:min-h-0`} maxLength={200} value={address}
             onChange={(e) => setAddress(e.target.value)}
             placeholder="Street, building, town — what someone would read out to a driver." />
         </label>
@@ -124,7 +124,7 @@ export default function ClubVenue({ club }: { club: VenueRow }) {
         </fieldset>
 
         <div className="flex items-center gap-3">
-          <button disabled={busy} className="rounded-lg bg-action px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+          <button disabled={busy} className="min-h-11 rounded-lg bg-action px-4 py-2 text-sm font-medium text-white disabled:opacity-50 sm:min-h-0">
             {busy ? "Saving…" : "Save venue information"}
           </button>
           {club.facilities_confirmed_at && (

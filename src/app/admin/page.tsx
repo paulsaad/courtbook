@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { loaded } from "@/lib/load";
 import NewClubForm from "./NewClubForm";
 import WorkNav from "@/components/WorkNav";
 
@@ -8,13 +9,13 @@ export default async function AdminHome() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login?next=/admin");
-  const { data: me } = await supabase.from("profiles").select("roles").eq("id", user.id).single();
+  const { data: me } = loaded(await supabase.from("profiles").select("roles").eq("id", user.id).single(), "your profile");
   if (!me?.roles?.includes("admin")) return <main className="p-6">Admins only.</main>;
 
   // open reports and feedback (0074); before 0074 the function is missing and no count is shown
-  const { data: open } = await supabase.rpc("admin_reports", { p_status: "open" });
+  const { data: open } = loaded(await supabase.rpc("admin_reports", { p_status: "open" }), "the reports");
   const openCount = Array.isArray(open) ? open.length : null;
-  const { data: clubs } = await supabase.from("clubs").select("id, name, slug, active, service_fee_usd, courts(count)").order("name");
+  const { data: clubs } = loaded(await supabase.from("clubs").select("id, name, slug, active, service_fee_usd, courts(count)").order("name"), "the clubs");
 
   return (
     <>

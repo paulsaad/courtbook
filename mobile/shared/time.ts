@@ -7,6 +7,17 @@ export function clubLocalToUtc(date: string, time: string, tz: string): Date {
   return fromZonedTime(`${date}T${time.length === 5 ? time + ":00" : time}`, tz);
 }
 
+/** The first instant of the day after `date` in the club's time zone. Where the clocks jump forward at
+ *  midnight (Beirut, last Saturday night of March) local 00:00 does not exist and the day starts at 01:00;
+ *  plain conversion of "00:00" lands an hour early, inside the previous day. Used for blocks that end at
+ *  closing time 24:00. (clubLocalToUtc keeps its existing behaviour for everything else.) */
+export function nextDayStart(date: string, tz: string): Date {
+  const next = shiftDate(date, 1);
+  let t = fromZonedTime(`${next}T00:00:00`, tz);
+  for (let i = 0; i < 12 && formatInTimeZone(t, tz, "yyyy-MM-dd") !== next; i++) t = new Date(t.getTime() + 15 * 60_000);
+  return t;
+}
+
 /** [start, end) of a local calendar day as UTC ISO strings; end is the next local midnight (DST-safe). */
 export function dayBounds(date: string, tz: string): { dayStart: string; dayEnd: string } {
   return {

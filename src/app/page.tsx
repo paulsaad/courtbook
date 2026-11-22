@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
-import { loadRefData } from "@/lib/geo";
+import { allLoaded } from "@/lib/load";
+import { loadRefDataChecked as loadRefData } from "@/lib/refData";
 import { nowMs } from "@/lib/time";
 import InstallHint from "@/components/InstallHint";
 import HomeClient from "@/components/HomeClient";
@@ -32,12 +33,12 @@ export default async function Home() {
     );
   }
 
-  const [{ data: me }, { data: matches }, { data: agenda }, { count: unread }] = await Promise.all([
+  const [{ data: me }, { data: matches }, { data: agenda }, { count: unread }] = allLoaded(await Promise.all([
     supabase.from("profiles").select("name").eq("id", user.id).single(),
     supabase.rpc("open_matches", { p_limit: 6 }),
     supabase.rpc("my_agenda"),
     supabase.from("notifications").select("*", { count: "exact", head: true }).eq("profile_id", user.id).is("read_at", null),
-  ]);
+  ]), "your home page");
   const firstName = me?.name?.split(" ")[0];
   const now = nowMs();
   const nx = ((agenda ?? []) as AgendaRow[])

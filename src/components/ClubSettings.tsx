@@ -23,7 +23,10 @@ type StaffRow = { profile_id: string; name: string | null; email: string };
 type CoachReq = { coach_id: string; name: string | null; sports: string[]; price_usd: number; status: string };
 
 const DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
-const input = "rounded-xl border border-grid bg-white px-3 py-2.5 text-base outline-none focus:border-action";
+// min-h-11 on phones: a select's height comes from the font, and Linux Chrome renders these at 43 px (GitHub, W1).
+const input = "min-h-11 min-w-0 rounded-xl border border-grid bg-white px-3 py-2.5 text-base outline-none focus:border-action sm:min-h-0";
+/** Text buttons in lists: a 44 px tap height on phones (W1), unchanged from 640 px. */
+const textBtn = "inline-flex min-h-11 items-center px-1 underline sm:min-h-0 sm:px-0";
 const primary = "rounded-xl bg-action px-4 py-2.5 font-medium text-white disabled:opacity-50";
 const hhmm = (t: string) => t.slice(0, 5);
 const section = "flex flex-col gap-3 rounded-2xl border border-grid bg-white p-4";
@@ -57,7 +60,7 @@ export default function ClubSettings({ club, courts, rules, staff, coaches, isAd
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5 pb-16">
-      <Link href={backHref} className="text-sm text-muted">‹ Back</Link>
+      <Link href={backHref} className="inline-flex min-h-11 items-center text-sm text-muted sm:min-h-0">‹ Back</Link>
       <h1 className="text-2xl font-semibold tracking-tight">{club.name}</h1>
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
 
@@ -89,7 +92,7 @@ function AdminBasics({ club, busy, run }: { club: ClubRow; busy: boolean; run: R
       <h2 className="font-medium">Club (admin)</h2>
       <label className="flex flex-col gap-1 text-sm">Name<input className={input} value={name} onChange={(e) => setName(e.target.value)} /></label>
       <label className="flex flex-col gap-1 text-sm">CourtBook fee per booking ($)<input className={input} inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} /></label>
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Visible to players</label>
+      <label className="flex min-h-11 items-center gap-2 text-sm sm:min-h-0"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Visible to players</label>
       <button disabled={busy} onClick={() => run(() => createClient().from("clubs").update({ name: name.trim(), service_fee_usd: Number(fee), active }).eq("id", club.id))} className={primary}>Save</button>
 
       <div className="mt-2 border-t border-grid pt-3">
@@ -199,8 +202,8 @@ function Location({ f, setF, areas, town, busy, save }: { f: Settings; setF: Set
       )}
       {addError && <p className="text-xs text-danger">{addError}</p>}
       <div className="flex gap-3">
-        <label className="flex flex-1 flex-col gap-1 text-sm">Latitude<input className={input} inputMode="decimal" placeholder="34.2553" value={f.lat} onChange={(e) => setF({ ...f, lat: e.target.value })} /></label>
-        <label className="flex flex-1 flex-col gap-1 text-sm">Longitude<input className={input} inputMode="decimal" placeholder="35.6586" value={f.lng} onChange={(e) => setF({ ...f, lng: e.target.value })} /></label>
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">Latitude<input className={input} inputMode="decimal" placeholder="34.2553" value={f.lat} onChange={(e) => setF({ ...f, lat: e.target.value })} /></label>
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">Longitude<input className={input} inputMode="decimal" placeholder="35.6586" value={f.lng} onChange={(e) => setF({ ...f, lng: e.target.value })} /></label>
       </div>
       <label className="flex flex-col gap-1 text-sm">Map link<input className={input} placeholder="https://maps.google.com/…" value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} /></label>
       <p className="text-xs text-muted">Players find the club by area and town. Coordinates are optional (used for distance later).</p>
@@ -221,12 +224,12 @@ function Courts({ clubId, courts, sports, busy, run }: { clubId: string; courts:
         {courts.map((c) => (
           <li key={c.id} className="flex items-center justify-between py-2 text-sm">
             <div><span className={c.active ? "" : "text-muted line-through"}>{c.name}</span> <span className="text-muted">· {sportName(c.sport)}{c.surface ? ` · ${c.surface}` : ""}</span></div>
-            <button disabled={busy} onClick={() => run(() => createClient().from("courts").update({ active: !c.active }).eq("id", c.id))} className="text-action underline">{c.active ? "Deactivate" : "Activate"}</button>
+            <button disabled={busy} onClick={() => run(() => createClient().from("courts").update({ active: !c.active }).eq("id", c.id))} className={`${textBtn} text-action`}>{c.active ? "Deactivate" : "Activate"}</button>
           </li>
         ))}
       </ul>
       <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); run(() => createClient().from("courts").insert({ club_id: clubId, name: name.trim(), sport, surface: surface.trim() || null, sort: courts.length + 1 }), () => { setName(""); setSurface(""); }); }}>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <input className={`${input} flex-1`} placeholder="Court name" required value={name} onChange={(e) => setName(e.target.value)} />
           <select className={input} value={sport} onChange={(e) => setSport(e.target.value)}>{sports.map((s) => <option key={s.code} value={s.code}>{s.name_en}</option>)}</select>
         </div>
@@ -252,20 +255,20 @@ function Prices({ clubId, courts, rules, busy, run }: { clubId: string; courts: 
               <div>{hhmm(r.start_time)}–{hhmm(r.end_time)} · <b>${Number(r.price_usd).toFixed(2)}</b>/h {r.label && <span className="text-muted">· {r.label}</span>}</div>
               <div className="text-xs text-muted">{daysOf(r.weekday_mask)} · {r.court_id ? courts.find((c) => c.id === r.court_id)?.name : "all courts"}</div>
             </div>
-            <button disabled={busy} onClick={() => run(() => createClient().from("price_rules").delete().eq("id", r.id))} className="text-danger underline">Delete</button>
+            <button disabled={busy} onClick={() => run(() => createClient().from("price_rules").delete().eq("id", r.id))} className={`${textBtn} text-danger`}>Delete</button>
           </li>
         ))}
       </ul>
       <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); run(() => createClient().from("price_rules").insert({ club_id: clubId, court_id: f.court || null, weekday_mask: f.mask, start_time: f.start, end_time: f.end, price_usd: Number(f.price), label: f.label.trim() || null }), () => setF({ ...f, price: "", label: "" })); }}>
-        <div className="flex gap-2">
-          <input className={`${input} flex-1`} type="time" step={1800} value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} />
-          <input className={`${input} flex-1`} type="time" step={1800} value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} />
+        <div className="flex flex-wrap gap-2">
+          <input className={`${input} min-w-[8rem] flex-1`} type="time" step={1800} value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} />
+          <input className={`${input} min-w-[8rem] flex-1`} type="time" step={1800} value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} />
           <input className={`${input} w-24`} inputMode="decimal" placeholder="$/h" required value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} />
         </div>
         <div className="flex gap-1">
-          {DAYS.map((d, i) => <button type="button" key={d} onClick={() => toggleDay(i)} className={`flex-1 rounded-lg border py-1.5 text-xs ${f.mask & (1 << i) ? "border-ink bg-ink text-white" : "border-grid"}`}>{d}</button>)}
+          {DAYS.map((d, i) => <button type="button" key={d} onClick={() => toggleDay(i)} className={`min-h-11 flex-1 rounded-lg border py-1.5 text-xs sm:min-h-0 ${f.mask & (1 << i) ? "border-ink bg-ink text-white" : "border-grid"}`}>{d}</button>)}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <select className={`${input} flex-1`} value={f.court} onChange={(e) => setF({ ...f, court: e.target.value })}><option value="">All courts</option>{courts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
           <input className={`${input} flex-1`} placeholder="Label (peak…)" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
         </div>
@@ -284,7 +287,7 @@ function Staff({ clubId, staff, busy, run }: { clubId: string; staff: StaffRow[]
         {staff.map((s) => (
           <li key={s.profile_id} className="flex items-center justify-between py-2 text-sm">
             <div>{s.name ?? "—"} <span className="text-muted">· {s.email}</span></div>
-            <button disabled={busy} onClick={() => run(() => createClient().rpc("remove_club_staff", { p_club: clubId, p_profile: s.profile_id }))} className="text-danger underline">Remove</button>
+            <button disabled={busy} onClick={() => run(() => createClient().rpc("remove_club_staff", { p_club: clubId, p_profile: s.profile_id }))} className={`${textBtn} text-danger`}>Remove</button>
           </li>
         ))}
         {staff.length === 0 && <li className="py-2 text-sm text-muted">No staff yet. They must sign in once before you can add them.</li>}
@@ -309,7 +312,7 @@ function Coaches({ clubId, coaches, busy, run }: { clubId: string; coaches: Coac
           {pending.map((c) => (
             <li key={c.coach_id} className="flex items-center justify-between py-2 text-sm">
               <div>{c.name ?? "Coach"} <span className="text-muted">· {c.sports.join(", ")} · ${Number(c.price_usd).toFixed(0)}/h</span><span className="ml-2 rounded-full bg-sand-soft px-2 py-0.5 text-xs">wants to be listed</span></div>
-              <div className="flex gap-3"><button disabled={busy} onClick={() => decide(c.coach_id, true)} className="text-action underline">Approve</button><button disabled={busy} onClick={() => decide(c.coach_id, false)} className="text-muted underline">Decline</button></div>
+              <div className="flex gap-3"><button disabled={busy} onClick={() => decide(c.coach_id, true)} className={`${textBtn} text-action`}>Approve</button><button disabled={busy} onClick={() => decide(c.coach_id, false)} className={`${textBtn} text-muted`}>Decline</button></div>
             </li>
           ))}
         </ul>
@@ -319,7 +322,7 @@ function Coaches({ clubId, coaches, busy, run }: { clubId: string; coaches: Coac
         {approved.map((c) => (
           <li key={c.coach_id} className="flex items-center justify-between py-2 text-sm">
             <div>{c.name ?? "Coach"} <span className="text-muted">· {c.sports.join(", ")} · ${Number(c.price_usd).toFixed(0)}/h</span></div>
-            <button disabled={busy} onClick={() => decide(c.coach_id, false)} className="text-danger underline">Remove</button>
+            <button disabled={busy} onClick={() => decide(c.coach_id, false)} className={`${textBtn} text-danger`}>Remove</button>
           </li>
         ))}
       </ul>

@@ -1,0 +1,34 @@
+name: Website checks
+
+# The website's own tests, type check and production build, on every push and pull request (W1). Until now GitHub ran
+# only the mobile checks. Uses no secrets and no database: the tests mock Supabase, and the build needs no Supabase
+# values (nothing is fetched at build time). Deploys nothing. Lint is not a gate yet: `main` has 4 known findings.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci --no-audit --no-fund
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Tests (including the 360 px club settings check in Chrome)
+        env:
+          CHROME: /usr/bin/google-chrome
+          REQUIRE_CHROME: "1"
+        run: npx vitest run
+      - name: Production build
+        run: npx next build

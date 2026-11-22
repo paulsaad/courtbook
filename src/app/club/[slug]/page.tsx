@@ -3,6 +3,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
 import { dayBounds, todayIn } from "@/lib/time";
 import { loadClubHead } from "@/lib/clubHead";
+import { loaded } from "@/lib/load";
 import type { Club, Court } from "@/lib/types";
 import ClubHeader from "./ClubHeader";
 import PlayerGrid, { type Occ } from "./PlayerGrid";
@@ -15,17 +16,17 @@ export default async function ClubPage({ params, searchParams }: { params: Promi
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (user) {
-    const { data: me } = await supabase.from("profiles").select("name").eq("id", user.id).single();
+    const { data: me } = loaded(await supabase.from("profiles").select("name").eq("id", user.id).single(), "this club");
     if (!me?.name) {
       const q = new URLSearchParams(); if (at) q.set("at", at); if (court) q.set("court", court); if (dur) q.set("dur", dur);
       redirect(`/profile?next=${encodeURIComponent(`/club/${slug}${q.size ? `?${q}` : ""}`)}`);
     }
   }
 
-  const { data: club } = await supabase
+  const { data: club } = loaded(await supabase
     .from("clubs")
     .select("id, name, slug, timezone, slot_minutes, cancel_cutoff_hours, open_time, close_time, min_booking_minutes, max_booking_minutes, booking_window_days, service_fee_usd, location_url, hold_minutes, town_id, payment_mode, is_demo")
-    .eq("slug", slug).eq("active", true).single<ClubRow>();
+    .eq("slug", slug).eq("active", true).single<ClubRow>(), "this club");
   if (!club) notFound();
 
   // ?at=<ISO>&court=<id> (from Home's next-free pill) opens that day with the slot selected
@@ -35,7 +36,8 @@ export default async function ClubPage({ params, searchParams }: { params: Promi
   const date = qDate && /^\d{4}-\d{2}-\d{2}$/.test(qDate) ? qDate : preselect?.date ?? todayIn(club.timezone);
   const { dayStart, dayEnd } = dayBounds(date, club.timezone);
 
-  const [{ data: courts }, { data: occ, error: occError }, { data: holdRows }, head, { data: sportRows }] = await Promise.all([
+  // occupancy keeps its own in-page message (occError: booking is disabled); every other read must succeed
+  const [courtsRes, { data: occ, error: occError }, holdRes, head, sportRes] = await Promise.all([
     supabase.from("courts").select("id, name, sport, surface, sort, active").eq("club_id", club.id).eq("active", true).order("sort"),
     user
       ? supabase.from("occupancy").select("id, court_id, start_at, end_at, status, mine, kind").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart)
@@ -44,6 +46,9 @@ export default async function ClubPage({ params, searchParams }: { params: Promi
     loadClubHead(supabase, club),
     supabase.from("sports").select("code, name_en"),
   ]);
+  const { data: courts } = loaded(courtsRes, "this club");
+  const { data: holdRows } = "error" in holdRes ? loaded(holdRes, "this club") : holdRes;
+  const { data: sportRows } = loaded(sportRes, "this club");
   const hold = ((holdRows ?? []) as { booking_id: string; court_name: string; start_at: string; end_at: string; hold_expires_at: string }[])[0] ?? null;
   const sportNames = Object.fromEntries(((sportRows ?? []) as { code: string; name_en: string }[]).map((s) => [s.code, s.name_en]));
 

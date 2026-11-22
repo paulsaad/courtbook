@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { loaded } from "@/lib/load";
 import PayPanel from "./PayPanel";
 
 export default async function PayPage({ params }: { params: Promise<{ id: string }> }) {
@@ -8,16 +9,16 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: b } = await supabase
+  const { data: b } = loaded(await supabase
     .from("bookings")
     .select("id, status, start_at, end_at, hold_expires_at, price_usd, fee_usd, clubs(name, slug, timezone), courts!bookings_court_id_fkey(name)")
     .eq("id", id)
     .eq("player_id", user.id)
-    .single();
+    .single(), "this booking");
   if (!b) notFound();
   if (b.status === "confirmed") redirect(`/bookings/${id}`);
 
-  const { data: p } = await supabase.from("payments").select("id, status, total_usd, provider").eq("booking_id", id).single();
+  const { data: p } = loaded(await supabase.from("payments").select("id, status, total_usd, provider").eq("booking_id", id).single(), "this payment");
   if (!p) notFound();
 
   const club = b.clubs as unknown as { name: string; slug: string; timezone: string };

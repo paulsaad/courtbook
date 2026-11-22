@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { loaded } from "@/lib/load";
 import { nowMs } from "@/lib/time";
 import BookingsTabs from "./BookingsTabs";
 import type { AgendaRow } from "@/lib/agenda";
@@ -10,7 +11,7 @@ export default async function MyCourtBook() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login?next=/me");
-  const { data } = await supabase.rpc("my_agenda");
+  const { data } = loaded(await supabase.rpc("my_agenda"), "your bookings");
   const rows = (data ?? []) as AgendaRow[];
   const now = nowMs();
   const live = (r: AgendaRow) => r.status !== "cancelled" && r.status !== "no_show" && new Date(r.end_at ?? r.start_at).getTime() > now;
