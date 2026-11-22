@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { databaseReachable } from "@/lib/health";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { HEALTH_COLUMN, databaseReachable } from "@/lib/health";
 
 /** A fake Supabase client whose read resolves, fails or never answers. */
 const fake = (outcome: "ok" | "error" | "hang" | "throw") => () => ({
@@ -20,6 +22,25 @@ describe("databaseReachable", () => {
     const t = Date.now();
     expect(await databaseReachable(50, fake("hang"))).toBe(false);
     expect(Date.now() - t).toBeLessThan(1000);
+  });
+});
+
+describe("the health read matches the real database", () => {
+  it("reads sports, a column that exists in the migrations, and nothing else", async () => {
+    const calls: string[] = [];
+    const recording = () => ({
+      from: (t: string) => { calls.push(`from:${t}`); return { select: (c: string) => { calls.push(`select:${c}`); return { limit: () => ({ abortSignal: () => Promise.resolve({ error: null }) }) }; } }; },
+    }) as never;
+    expect(await databaseReachable(100, recording)).toBe(true);
+    expect(calls).toEqual(["from:sports", `select:${HEALTH_COLUMN}`]);
+    // the column is in the table definition (a fake client cannot catch a wrong column: found on the preview, 22 Nov)
+    const dir = join(process.cwd(), "supabase/migrations");
+    const sql = readdirSync(dir).filter((f) => f.endsWith(".sql")).map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
+    const table = /create table sports \(([\s\S]*?)\);/i.exec(sql);
+    expect(table, "sports table definition").not.toBeNull();
+    expect(table![1]).toMatch(new RegExp(`^\\s*${HEALTH_COLUMN}\\s`, "m"));
+    // and anonymous visitors may read it (0032)
+    expect(sql).toMatch(/grant select on sports[^;]*to anon/i);
   });
 });
 
