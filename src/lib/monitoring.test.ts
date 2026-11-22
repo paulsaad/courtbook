@@ -107,6 +107,13 @@ describe("safeFile: stack-frame files keep what source maps need, nothing else (
     expect(safeFile("node:internal/process/task_queues")).toBe("node:internal/process/task_queues");
     expect(safeFile("<anonymous>")).toBe("<anonymous>");
   });
+  it("keeps build files as @sentry/nextjs renames them (app:///_next/…, as received on staging)", () => {
+    expect(safeFile("app:///_next/static/immutable/chunks/1n2d-u5ejz8sl.js")).toBe("app:///_next/static/immutable/chunks/1n2d-u5ejz8sl.js");
+    expect(safeFile("app:///_next/server/chunks/ssr/[root-of-the-server]__0ab1._.js")).toBe("app:///_next/server/chunks/ssr/[root-of-the-server]__0ab1._.js");
+    expect(safeFile("app:///_next/server/app/api/monitoring/test/route.js?x=482913")).toBe("app:///_next/server/app/api/monitoring/test/route.js");
+    for (const f of ["app:///_next/static/probe@example.invalid.js", "app:///_next/static/Jana Probe.js", "app:///Jana/x.js", "app:///_nextjana"])
+      expect(safeFile(f)).toBe(REDACTED);
+  });
   it("an inline script's page URL becomes its route template; anything odd is redacted", () => {
     expect(safeFile(`${SITE}/bookings/${UUID}?email=probe@example.invalid`)).toBe(`${SITE}/bookings/:id`);
     expect(safeFile("/var/task/probe@example.invalid/x.js")).toBe(REDACTED);
@@ -270,6 +277,15 @@ describe("scrubEvent: every metadata field has a strict format (review correctio
     expect(safeFile("node:Jana")).toBe(REDACTED);
     expect(safeFile("/var/task/node_modules/next/dist/server/base-server.js")).toBe("/var/task/node_modules/next/dist/server/base-server.js");
   });
+  it("debug_meta: an app:///_next/ build file keeps its id, matching the frame file (source maps on staging)", () => {
+    const file = "app:///_next/static/immutable/chunks/1n2d-u5ejz8sl.js";
+    const o = bad({
+      exception: { values: [{ type: "Error", value: "x", stacktrace: { frames: [{ filename: file, abs_path: file, function: "n", lineno: 4, colno: 39388, in_app: true }] } }] },
+      debug_meta: { images: [{ type: "sourcemap", code_file: file, debug_id: DEBUG_ID }] },
+    });
+    expect(o.debug_meta).toEqual({ images: [{ type: "sourcemap", code_file: file, debug_id: DEBUG_ID }] });
+    expect(o.exception!.values![0].stacktrace!.frames![0]).toMatchObject({ filename: file, abs_path: file });
+  });
   it("debug_meta: only sourcemap images with a debug id and a build file", () => {
     expect(bad({ debug_meta: { images: [{ type: "sourcemap", code_file: "/jana", debug_id: DEBUG_ID }] } }).debug_meta).toBeUndefined();
     expect(bad({ debug_meta: { images: [{ type: "sourcemap", code_file: `${SITE}/club/jana`, debug_id: DEBUG_ID }] } }).debug_meta).toBeUndefined();
@@ -342,10 +358,15 @@ describe("monitoringEnvironment", () => {
 });
 
 describe("baseOptions", () => {
-  it("is off without a DSN, never sends default personal data, never traces", () => {
+  it("is off without a DSN, collects nothing on its own, never traces", () => {
     const o = baseOptions(undefined, "development");
     expect(o.enabled).toBe(false);
-    expect(o.sendDefaultPii).toBe(false);
+    expect(o).not.toHaveProperty("sendDefaultPii");   // removed in SDK 11; dataCollection replaces it
+    expect(o.dataCollection).toEqual({
+      userInfo: false, cookies: false, httpHeaders: false, httpBodies: [], urlQueryParams: false,
+      graphQL: { document: false, variables: false }, genAI: { inputs: false, outputs: false }, mcp: { inputs: false, outputs: false },
+      databaseQueryData: false, queues: false, stackFrameVariables: false, frameContextLines: 0,
+    });
     expect(o.tracesSampleRate).toBe(0);
     expect(baseOptions("https://k@o1.ingest.sentry.io/1", "staging").enabled).toBe(true);
   });

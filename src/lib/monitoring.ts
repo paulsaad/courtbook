@@ -16,6 +16,7 @@
  * instrumentation.ts, instrumentation-client.ts and report.ts.
  */
 import type { Breadcrumb, ErrorEvent, Exception, StackFrame } from "@sentry/nextjs";
+import type { DataCollection } from "@sentry/core";
 
 /** The only messages our own reporting may send. Fixed text; details travel as allowlisted tags (codes). */
 export const SAFE_MESSAGES = {
@@ -151,9 +152,17 @@ const NODE_INTERNAL = /^node:[a-z_/]{1,100}$/;
 const EMAIL_LIKE = /[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9-]+\.[A-Za-z]{2,}/;
 
 /** A stack frame's file, in a form that still lets Sentry apply the right source map. */
+/** Build files as @sentry/nextjs renames them before beforeSend runs: browser chunks and server chunks become
+ *  "app:///_next/static/…" and "app:///_next/server/…" (seen in the staging events, 22 Nov). */
+const APP_NEXT_FILE = /^app:\/\/\/_next\/[A-Za-z0-9_\-./\[\]()@~+]{1,300}$/;
+
 export function safeFile(input: unknown): string | undefined {
   if (typeof input !== "string" || !input) return undefined;
   if (input === "<anonymous>" || input === "[native code]") return input;
+  if (input.startsWith("app:///_next/")) {
+    const s = input.split("#")[0].split("?")[0];
+    return APP_NEXT_FILE.test(s) && !EMAIL_LIKE.test(s) ? s : REDACTED;
+  }
   if (/^https?:\/\//i.test(input) || (input.startsWith("/_next/"))) return normalizeUrl(input);
   const s = input.split("#")[0].split("?")[0];
   if (NODE_INTERNAL.test(s)) return s;
@@ -163,7 +172,7 @@ export function safeFile(input: unknown): string | undefined {
 /** A file a source map can belong to: a browser build file under /_next/ or a server build file. */
 function isBuildFile(file: string): boolean {
   if (file.includes(REDACTED) || file.includes(UNMATCHED)) return false;
-  return /^(?:https?:\/\/[^/]+)?\/_next\//.test(file) || SERVER_PLACE.test(file);
+  return /^(?:https?:\/\/[^/]+|app:\/\/)?\/_next\//.test(file) || SERVER_PLACE.test(file);
 }
 
 /* ---------------------------------------------------------------------------------------------------------------
@@ -346,12 +355,33 @@ export function monitoringEnvironment(vercelEnv: string | undefined, gitRef: str
 export const DROPPED_INTEGRATIONS = new Set(["BrowserSession", "ProcessSession"]);
 
 /** Options shared by the browser and the server. The SDK stays off without a DSN. */
+/**
+ * What the SDK itself collects (SDK 11 `dataCollection`; the older `sendDefaultPii` no longer exists and was ignored).
+ * Everything off. Most of it never reached Sentry anyway (beforeSend drops it), but `userInfo` also decides whether
+ * Sentry is asked to infer the sender's IP address ("infer_ip"), outside beforeSend: left on, Sentry stored the
+ * tester's city on the staging browser events (22 Nov). Off, the browser sends `infer_ip: "never"`.
+ */
+export const DATA_COLLECTION = {
+  userInfo: false,
+  cookies: false,
+  httpHeaders: false,
+  httpBodies: [],
+  urlQueryParams: false,
+  graphQL: { document: false, variables: false },
+  genAI: { inputs: false, outputs: false },
+  mcp: { inputs: false, outputs: false },
+  databaseQueryData: false,
+  queues: false,
+  stackFrameVariables: false,
+  frameContextLines: 0,
+} satisfies DataCollection;
+
 export function baseOptions(dsn: string | undefined, environment: string) {
   return {
     dsn,
     enabled: !!dsn,
     environment,
-    sendDefaultPii: false,
+    dataCollection: DATA_COLLECTION,
     tracesSampleRate: 0,
     maxBreadcrumbs: 30,
     ignoreErrors: IGNORE_ERRORS,
