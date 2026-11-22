@@ -8,6 +8,7 @@ import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { bookingDate, clubLocalToUtc, dayBounds, hhmm, moveTarget, nextDayStart, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
+import { explainBookingError } from "@/lib/report";
 import { blockErrorText, friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
 import { blockEndOptions, blockStartOptions, bookingSlotOptions, minToHhmm, pickSlots, type Busy } from "./durations";
 import { DESKTOP_QUERY, useDialog, useIsDesktop } from "@/components/useDialog";
@@ -305,14 +306,14 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     return () => { alive = false; };
   }, [club.id]);
 
-  async function run(fn: () => PromiseLike<{ error: { message: string } | null }>, explain: (m: string) => string = friendlyError) {
+  async function run(fn: () => PromiseLike<{ error: { message: string; code?: string } | null }>, explain: (m: string) => string = friendlyError) {
     setBusy(true);
     setError(null);
     const { error } = await fn();
     if (error) {
       setBusy(false);
       savedFocus.current = null;
-      setError(explain(error.message));
+      setError(explainBookingError(error.message, error.code, explain(error.message)));   // reports only the unexpected
       return;
     }
     // Saved. The write is never repeated: if the reads below fail, the banner says the calendar may be

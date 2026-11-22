@@ -17,20 +17,20 @@ export async function reserve(opts: {
   start: Date;
   end: Date;
   token: string;
-}): Promise<{ ok: true; value: Reserved } | { ok: false; message: string }> {
+}): Promise<{ ok: true; value: Reserved } | { ok: false; message: string; code?: string }> {
   const supabase = createClient();
   if (opts.mode === "at_desk") {
     const { data, error } = await supabase.rpc("book_at_desk", {
       p_court: opts.courtId, p_start: opts.start.toISOString(), p_end: opts.end.toISOString(), p_token: opts.token,
     });
-    if (error) return { ok: false, message: error.message };
+    if (error) return { ok: false, message: error.message, code: error.code };
     const row = (Array.isArray(data) ? data[0] : data) as { booking_id: string };
     return { ok: true, value: { bookingId: row.booking_id, href: `/bookings/${row.booking_id}?new=1` } };
   }
   const { data, error } = await supabase.rpc("hold_slot", {
     p_club: opts.clubId, p_court: opts.courtId, p_start: opts.start.toISOString(), p_end: opts.end.toISOString(),
   });
-  if (error) return { ok: false, message: error.message };
+  if (error) return { ok: false, message: error.message, code: error.code };
   const row = (Array.isArray(data) ? data[0] : data) as { booking_id: string };
   return { ok: true, value: { bookingId: row.booking_id, href: `/pay/${row.booking_id}` } };
 }

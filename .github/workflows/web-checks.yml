@@ -32,3 +32,17 @@ jobs:
         run: npx vitest run
       - name: Production build
         run: npx next build
+      - name: Vercel-style build adds no Sentry tunnel route (W2a)
+        # @sentry/nextjs writes app/sentry-tunnel only when it sees a Vercel build; build once as Vercel does
+        env:
+          VERCEL: "1"
+          VERCEL_ENV: preview
+        run: |
+          npx next build > vercel-build.log 2>&1 || { cat vercel-build.log; exit 1; }
+          if [ -e src/app/sentry-tunnel ] || grep -q 'sentry-tunnel' vercel-build.log; then echo "a /sentry-tunnel route was generated"; exit 1; fi
+          echo "ok: no tunnel route"
+      - name: Build output serves no source maps and no Sentry token (W2a)
+        run: |
+          if find .next/static -name '*.map' | grep -q .; then echo "source maps in .next/static"; exit 1; fi
+          if grep -rlq 'sntrys_' .next; then echo "a Sentry token is in the build output"; exit 1; fi
+          echo "ok: no source maps served, no Sentry token in the build"

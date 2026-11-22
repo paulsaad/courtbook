@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import sharp from "sharp";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { report } from "@/lib/report";
 
 /**
  * The only writer to the club-media bucket, and the only caller of the functions that publish an
@@ -88,6 +89,7 @@ async function editorOf(clubId: string) {
     // for a problem that is not there. It cost an evening once; it should not cost another.
     if (error.code !== "P0001") {
       console.error(`club-media: the permission check could not run for club ${clubId} (${error.code}: ${error.message})`);
+      await report("mediaPermission", "media", { code: error.code });
       return { error: NextResponse.json({
         error: "Images cannot be changed right now because of a problem on our side, not with your account.",
       }, { status: 500 }) };
@@ -120,6 +122,7 @@ async function recordOrphan(
   });
   if (error) {
     console.error(`club-media: ${path} is unused, could not be deleted, and could not be recorded for cleanup (${error.message}). It must be removed by hand.`);
+    await report("mediaOrphan", "media", { code: error.code });
   }
 }
 
@@ -145,6 +148,7 @@ async function afterFailedPublish(
   // Still no proof. The transaction may be running right now and about to reference this file, so it
   // stays; a later sweep will see the settled outcome. This is also the path a failed read takes.
   console.error(`club-media: could not establish whether ${path} was published (${err.message}). The object is kept for reconciliation.`);
+  await report("mediaPublishUnknown", "media");
   await recordOrphan(admin, actor, clubId, path, "publication outcome unknown: establish it before deleting", false);
   return refused;
 }
@@ -302,6 +306,7 @@ export async function DELETE(request: Request) {
     const { data: still, error: checkErr } = await admin.from("club_media").select("id").eq("id", mediaId).maybeSingle();
     if (checkErr || still) {
       console.error(`club-media: could not establish whether ${mediaId} was removed (${error.message}). Nothing was deleted.`);
+      await report("mediaRemoveUnknown", "media", { code: error.code });
       return NextResponse.json({ error: "Could not remove that image. Try again in a moment." }, { status: 502 });
     }
     doomed = (before?.path as string | undefined) ?? null;

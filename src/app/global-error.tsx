@@ -1,7 +1,11 @@
 "use client";
 
+import { useEffect } from "react";
+import { reportBoundary } from "@/lib/report";
+
 /** Last resort when even the page frame could not load (W1, audit B2). Plain markup: the app's styles may be missing. */
-export default function GlobalError({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
+export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  useEffect(() => reportBoundary(error), [error]);
   return (
     <html lang="en">
       <body style={{ fontFamily: "system-ui, sans-serif", margin: 0, padding: "64px 24px", textAlign: "center", color: "#121614", background: "#f6f6f4" }}>

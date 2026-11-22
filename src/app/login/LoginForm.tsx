@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Cedar } from "@/components/Brand";
+import { reportAuthError } from "@/lib/report";
 
 const ERRORS: Record<string, string> = {
   link: "That sign-in link expired, was already used, or was opened in a different browser than the one you asked from. Request a new one below.",
@@ -35,7 +36,7 @@ export default function LoginForm() {
       provider: "google",
       options: { redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeNext)}`, queryParams: { prompt: "select_account" } },
     });
-    if (error) { setGBusy(false); setError("Google sign-in is not available right now. Use your email below."); }
+    if (error) { void reportAuthError("authGoogleStart", error); setGBusy(false); setError("Google sign-in is not available right now. Use your email below."); }
   }
 
   async function send(e?: React.FormEvent) {
@@ -44,7 +45,7 @@ export default function LoginForm() {
     // Code only: the email carries a code and no sign-in link (live and staging templates), so no
     // emailRedirectTo. /auth/callback stays for Google.
     const { error } = await createClient().auth.signInWithOtp({ email: email.trim() });
-    if (error) { setState("idle"); setError(error.message.includes("rate") ? "Too many requests. Wait a minute and try again." : error.message); return; }
+    if (error) { void reportAuthError("authCodeSend", error); setState("idle"); setError(error.message.includes("rate") ? "Too many requests. Wait a minute and try again." : error.message); return; }
     setState("sent"); setCooldown(COOLDOWN_S); setCode("");
   }
 
@@ -53,7 +54,7 @@ export default function LoginForm() {
     setVerifying(true); setError(null);
     const { error } = await createClient().auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email" });
     setVerifying(false);
-    if (error) { setError("That code is wrong or expired. Check the latest email, or request a new one."); return; }
+    if (error) { void reportAuthError("authCodeCheck", error); setError("That code is wrong or expired. Check the latest email, or request a new one."); return; }
     router.replace(safeNext); router.refresh();
   }
 

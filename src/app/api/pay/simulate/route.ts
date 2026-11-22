@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { report } from "@/lib/report";
 import { getProvider } from "@/lib/payments";
 
 /**
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
   if (!payment) {
     // surface the database reason (RLS/privilege problems look like "not found" otherwise)
     console.error("pay/simulate lookup failed", { paymentId, user: user.id, error: lookupError });
+    if (lookupError && lookupError.code !== "PGRST116") await report("paymentLookup", "payment", { code: lookupError.code });
     return NextResponse.json({ error: "not_found", detail: lookupError?.message ?? "no row" }, { status: 404 });
   }
   const booking = payment.bookings as unknown as { status: string; hold_expires_at: string | null };
