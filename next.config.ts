@@ -43,6 +43,11 @@ export default withSentryConfig(nextConfig, {
   silent: !process.env.CI,
   telemetry: false,
   sourcemaps: { disable: !process.env.SENTRY_AUTH_TOKEN, deleteSourcemapsAfterUpload: true },
+  // No tunnel: left unset, Vercel builds get a generated /sentry-tunnel route and a rewrite (found on the preview,
+  // 22 Nov). The browser sends straight to Sentry; no extra public endpoint.
+  tunnelRoute: false,
+  // Navigation tracing is off (tracesSampleRate 0), so the onRouterTransitionStart hook is not needed.
+  suppressOnRouterTransitionStartWarning: true,
   bundleSizeOptimizations: {
     excludeDebugStatements: true,
     excludeTracing: true,
