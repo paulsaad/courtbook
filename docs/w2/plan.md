@@ -1,6 +1,6 @@
 # W2 — Monitoring and operational readiness (plan for review)
 
-**Status: plan only, 22 Nov 2026. Nothing implemented or configured.** Base: production `main` = `26d6244` (W1
+**Status: approved by Paul 22 Nov 2026 with two review corrections (privacy: no free text; test endpoint staging-only), now in §3, §9. W2b deferred; OPS-1 after W2a, before real users; Vercel Hobby until a commercial pilot.** Base: production `main` = `26d6244` (W1
 released and closed). This plan supersedes Part 3 of the website completion plan.
 
 W2 is split so the launch-critical part stays small:
@@ -46,30 +46,34 @@ behaves exactly as today.
 | booking paths: `club/[slug]/PlayerGrid.tsx`, `courts/BookSheet.tsx`, `bookings/[id]/CancelButton.tsx`, `pay/[id]/PayPanel.tsx`, `staff/[slug]/DayCalendar.tsx` | where `friendlyError` falls back to "Something went wrong", also call `reportUnexpected("booking", error)`; known refusals (taken, blocked, hold, validation) are not reported. `friendlyError` itself stays untouched (it is shared with the app) |
 | sign-in: `app/auth/callback/route.ts`, `app/login/LoginForm.tsx` | report a failed code exchange (Google return) and sign-in calls that fail for a reason other than a wrong or expired code (e.g. Supabase unreachable); never the code itself |
 | `api/club-media/route.ts`, `api/pay/simulate/route.ts` | the five `console.error` cases also reported (they mean data needs attention) |
-| `src/app/api/monitoring/test/route.ts` (new) + a button on `/admin` | admin-only: raises one server and one browser test error tagged `test`, to prove reports arrive and are clean (T3, T6); refuses everyone else |
+| `src/app/api/monitoring/test/route.ts` (new) + a button on `/admin` | **staging and previews only:** answers *not found* in production for everyone, and elsewhere only to an admin; raises one server and one browser test error with fixed messages (T3) |
 
 **What a report contains:** error type, message (scrubbed), stack (readable with source maps), route path without
 query string, environment, release, browser/OS family, tags `area` (`booking`, `auth`, `server`, `client`) and Supabase
 error `code` where present.
 
-## 3. Privacy and security of monitoring (W2a)
+## 3. Privacy and security of monitoring (W2a) — corrected after review (22 Nov)
 
-Allowlist, not blocklist: `beforeSend` rebuilds each event from permitted fields only.
+**Principle: no free text leaves the site.** Masking text with patterns cannot be trusted with arbitrary error messages
+(any message can carry a name, a row value or a code in a shape no pattern expects). So messages are not masked — they
+are **withheld**, and what is sent is built from fixed parts. `beforeSend` rebuilds every event from an allowlist.
 
-| Never sent | How |
+| Part of an event | What is sent |
 | --- | --- |
-| user, IP address | `sendDefaultPii: false`; `user` deleted |
-| cookies, session tokens, `Authorization`, any header | `request` reduced to `{ url without query, method }` |
-| email codes, Google `?code=`, any query string | query strings stripped from request URL, transaction names and every breadcrumb (navigation, fetch) |
-| request and response bodies | not captured; fetch breadcrumbs keep method, path, status only |
-| emails, phone numbers, long digit runs (codes) | masked in message, exception values and breadcrumbs (`[email]`, `[number]` for 6+ digit runs and phone patterns) |
-| names, typed text, on-screen text | no session replay; UI-click and console breadcrumbs dropped; `extra` and the Supabase error object's `details`/`hint` dropped (they can contain row values) — only its `code` is kept |
-| secrets | only the public DSN reaches the browser (it is designed to be public); the upload token is build-time only and never bundled (same leak check as W1: build with dummy values and search the output) |
+| Messages from our own reporting (`reportUnexpected`) | **only predefined messages** from a fixed list (e.g. `booking: unexpected database error`, `auth: code exchange failed`), with tags `area` and `code` (a Supabase/Postgres error code or HTTP status — never its message, details or hint) |
+| Exception message (uncaught errors, error boundaries) | **withheld** (`[withheld]`) unless it is one of our own fixed messages (W1's `Couldn't load …` labels, the staging test messages) or a framework message with no data in it (React's numbered production errors, chunk-load failures by file name). The exception **type** is kept |
+| Stack | file (relative to the app, no server paths), function, line and column only; no source lines, no local variables |
+| URL, route, breadcrumbs | path only, **IDs replaced** (`/bookings/:id`); no query string anywhere (so no sign-in codes); fetch and navigation breadcrumbs keep method, normalised path and status; UI, console and all other breadcrumbs dropped |
+| Request | method and normalised path only: no headers, cookies, body or query |
+| user, IP, server name, `extra`, modules, other contexts | dropped (`sendDefaultPii: false` as well); kept contexts: browser, OS and runtime name and version |
+| tags | allowlist: `area`, `code`, `status`, environment and release |
+| secrets | only the public DSN reaches the browser; the source-map upload token is build-time only (build leak check, as in W1) |
 
-**Tests (unit, in CI):** feed events containing a cookie header, a bearer token, `/auth/callback?code=…`, an email, a
-Lebanese phone number, an 8-digit code, a user object, `extra` with a row, a Supabase error with `details` → assert each
-is absent. Assert expected refusals (`slot_taken`, `hold_conflict`, wrong OTP) are not reported. **Staging:** the
-received event is inspected in Sentry and its JSON checked field by field.
+**Tests:** unit tests feed events carrying a cookie, a bearer token, `/auth/callback?code=…`, an email, a phone number,
+a name in a message, a database row in `extra` and in a Supabase error's `details`, a user object and source lines, and
+assert none survives; an integration test runs the **real Sentry SDK** with a capturing transport and checks the exact
+JSON it would send. Expected refusals (`slot_taken`, `hold_conflict`, wrong or expired code) produce no event.
+**Staging:** the received events are opened in Sentry and their JSON checked field by field (T3).
 
 ## 4. Alerts (W2a) — Sentry issue alerts by email, production only
 
@@ -166,10 +170,10 @@ Sentry create alert rules A1–A3 and the uptime monitor A4 (steps provided).
 | --- | --- | --- |
 | T1 | unit tests (§3, §5) and build leak check | green in GitHub CI; the upload token and service key absent from all browser files |
 | T2 | build without the DSN | identical behaviour, no Sentry network calls |
-| T3 | staging test error, server and browser (admin-only test action) | arrives tagged `staging`, readable stack, and its JSON has no user, IP, cookie, header, query string, email, phone or code |
+| T3 | staging test error, server and browser (admin-only, staging-only test action) | arrives tagged `staging`, readable stack, and its JSON has no user, IP, cookie, header, query string, email, phone or code |
 | T4 | expected refusal on staging (book a taken slot) | **no** event |
 | T5 | `/api/health` | 200 normally; 503 when the database is unreachable (unit test) |
-| T6 | after release: production test error | A1 email received; then the issue is resolved |
+| T6 | after release, **controlled production check without a test endpoint** | production page code carries the DSN and environment `production`; Sentry's *Send test notification* on each alert rule delivers the email (A1–A3); the uptime monitor's first production checks arrive green and its alert is proven with a monitor pointed at a missing path (A4); the test route answers *not found* in production |
 | T7 | uptime monitor | green; a deliberately failing check (wrong path in a test monitor) sends the A4 email |
 | T8 | performance | added browser code measured (expected a few tens of KB); page times unchanged within noise |
 
@@ -193,11 +197,11 @@ use (filters, production-only rules, spike protection); ad blockers dropping som
 errors are unaffected); a wrong upload token breaking the build (optional; the build continues without maps); the
 SDK interacting with the W1 proxy (covered by T3 on staging).
 
-## 11. Decisions for Paul
+## 11. Decisions (Paul, 22 Nov, after ChatGPT's review of PR #2)
 
-1. **Approve W2a** as above (Sentry free, alerts A1–A4, health check, runbook).
-2. **Source maps:** add the existing upload-only token to Vercel (readable stacks) — recommended yes.
-3. **Notification emails for the pilot:** needed now (W2b next), or later? If needed: default **off** until the player
-   turns it on (recommended), and a dedicated CourtBook sender.
-4. **OPS-1 timing:** before real users (recommended), after W2a.
-5. **Vercel plan:** stay on Hobby until the pilot becomes commercial, or move to Pro.
+1. **W2a approved:** Sentry free plan, privacy filtering, essential alerts, one database-aware health check, runbook —
+   with the two corrections in §3 and §9.
+2. **Source maps approved** with the existing upload-only token, build-side only.
+3. **W2b deferred:** the notification-email problems (§7) stay documented as a separate pilot-readiness task.
+4. **OPS-1** after W2a and before onboarding real users; no cleanup or rotation authorised yet.
+5. **Vercel:** Hobby for non-commercial testing; plan the Pro upgrade before a commercial pilot.
