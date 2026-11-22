@@ -201,8 +201,8 @@ function Location({ f, setF, areas, town, busy, save }: { f: Settings; setF: Set
       )}
       {addError && <p className="text-xs text-danger">{addError}</p>}
       <div className="flex gap-3">
-        <label className="flex flex-1 flex-col gap-1 text-sm">Latitude<input className={input} inputMode="decimal" placeholder="34.2553" value={f.lat} onChange={(e) => setF({ ...f, lat: e.target.value })} /></label>
-        <label className="flex flex-1 flex-col gap-1 text-sm">Longitude<input className={input} inputMode="decimal" placeholder="35.6586" value={f.lng} onChange={(e) => setF({ ...f, lng: e.target.value })} /></label>
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">Latitude<input className={input} inputMode="decimal" placeholder="34.2553" value={f.lat} onChange={(e) => setF({ ...f, lat: e.target.value })} /></label>
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">Longitude<input className={input} inputMode="decimal" placeholder="35.6586" value={f.lng} onChange={(e) => setF({ ...f, lng: e.target.value })} /></label>
       </div>
       <label className="flex flex-col gap-1 text-sm">Map link<input className={input} placeholder="https://maps.google.com/…" value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} /></label>
       <p className="text-xs text-muted">Players find the club by area and town. Coordinates are optional (used for distance later).</p>
