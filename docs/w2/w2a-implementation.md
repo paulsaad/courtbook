@@ -18,7 +18,7 @@ No database migration, no W2b, no OPS-1, nothing changed in production or in any
 | The five `console.error` cases (club photos, simulated payment lookup) | `api/club-media`, `api/pay/simulate` |
 | Error pages report browser-side errors (server ones are already reported by `onRequestError`) | `error.tsx`, `global-error.tsx` |
 | Health check: one public read, 3 s limit, `200 {ok:true}` / `503 {ok:false}`, no-store | `api/health/route.ts`, `lib/health.ts` |
-| Staging-only test errors (404 on production and for non-admins): server test, server privacy probe, browser test, browser privacy probe | `api/monitoring/test/route.ts`, `admin/monitoring/` (no link in the menus) |
+| Test errors, only on a Vercel Preview connected to the staging database and only for an admin (404 everywhere else): server test, server privacy probe, browser test, browser privacy probe | `api/monitoring/test/route.ts`, `admin/monitoring/`, `lib/monitoringTest.ts` (no link in the menus) |
 | Incident runbook | `docs/ops/runbook.md` |
 | CI: no source maps and no Sentry token in the build output | `.github/workflows/web-checks.yml` |
 
@@ -29,15 +29,19 @@ Shared mobile files (`fees`, `geo`, `levels`, `time`, `types`) are unchanged; `f
 | Field | Sent |
 | --- | --- |
 | message | one of `SAFE_MESSAGES`, otherwise `[withheld]` |
-| exception | type; value only if fixed (ours; a `LoadError`'s "Couldn't load …"; React's error number); mechanism type |
-| stack frames | file and path without query, function, line, column, in-app flag; no source lines, no variables |
-| request | method and path (IDs → `:id`, numbers → `:n`, token-like → `:token`, `@` → `:value`); no query, headers, cookies, body |
-| transaction | method and the same normalised path |
-| breadcrumbs | navigation (from/to paths) and network (method, path, status) only |
-| tags | `area`, `code`, `status`, `runtime` |
-| contexts | browser, OS, runtime (name, version); trace ids |
-| kept for reading the error | environment, release, SDK, source-map ids (`debug_meta`), fingerprint |
-| never | user, IP, server name, extra, modules, other contexts |
+| exception | type if it is an error class name (`TypeError`, `LoadError`, `DOMException`), else `Error`; value only if fixed (ours; a `LoadError`'s "Couldn't load …"; React's error number); mechanism type (lower-case name) and handled flag |
+| stack frames | file (see below), function name if identifier-shaped (else `?`), line and column (whole numbers), in-app flag (boolean); no module, source lines or variables |
+| our URLs and paths | **route template only** (`/club/:slug/info`, from the list of the site's routes, `ROUTES`); a path matching no route → `/[unmatched]`; build files under `/_next/` kept if hash-shaped; no query or fragment anywhere |
+| Supabase URLs | `/rest/v1/<table>`, `/rest/v1/rpc/<function>`, `/auth/v1/<endpoint>` (one identifier); everything else, including all storage paths, `[redacted]` |
+| other URLs | listed hosts (Google fonts, Sentry) as host only; any other or spoofed host → `[redacted]` |
+| frame files | browser: our `/_next/` build files; server: paths inside `.next/` or `node_modules/`, or `node:` internals; file-name characters only, nothing email-shaped; else `[redacted]` |
+| request | known HTTP method and the route template |
+| transaction | known HTTP method and the route template |
+| breadcrumbs | navigation (from/to) and network (method, URL as above, status) only; level and timestamp checked |
+| tags | one shape each: `area` (fixed list), `code` (code-shaped), `status` (HTTP status), `runtime` (node/edge/browser) |
+| contexts | browser, OS, runtime (name and version, plain characters); trace ids (hex) |
+| kept for reading the error | environment (fixed list), release (commit SHA only), SDK name and version, source-map ids (`debug_meta`: type `sourcemap`, debug id, build file only) |
+| never | user, IP, server name, extra, modules, fingerprint, dist, SDK integrations and packages, other contexts |
 
 ## Two things the tests found, and what changed
 
@@ -55,6 +59,22 @@ Shared mobile files (`fees`, `geo`, `levels`, `time`, `types`) are unchanged; `f
 Server reports (`report()` on the server) wait for the send (`flush`, 2 s at most) before the route answers, so a
 serverless function frozen after its response cannot lose them. This affects only failure paths.
 
+## Review round 2 (ChatGPT on PR #3, 22 Nov) — all three accepted
+
+1. **High — short arbitrary path segments survived.** Correct: the old normaliser only replaced segments that looked
+   like IDs, so `/p/jana` passed. Now every path on our site is matched against the site's own route list and sent
+   as its template; an unknown path is `/[unmatched]`. A test checks the route list against the `src/app` folders, so
+   a new page cannot be forgotten (it would fail CI, not leak). Supabase and third-party URLs reduced as above.
+2. **Medium — some metadata forwarded unchecked.** Correct: frame function names, fingerprint, `debug_meta`, SDK
+   details, release, environment, tag values and context values went through as given. Each now has a strict
+   format; fingerprint, dist, module and SDK integrations/packages are dropped. Source maps still work: the frame file
+   and the `debug_meta` file are normalised the same way (tested), and the debug id is kept.
+3. **Medium — test errors allowed everything except production.** Correct. Now an explicit allowlist: only
+   `VERCEL_ENV=preview` **and** a Supabase URL of exactly `https://<staging project>.supabase.co`. Production, local,
+   unknown environments and a preview connected to any other database answer 404.
+
+Kept as approved: sessions disabled; the browser SDK loaded as a separate file.
+
 ## Deviations from the plan
 
 - `pay/[id]/PayPanel.tsx` is not instrumented: it shows the raw `detail` from `/api/pay/simulate` (tracked as F-PAY-1,
@@ -69,14 +89,17 @@ serverless function frozen after its response cannot lose them. This affects onl
 
 | Test | Checks |
 | --- | --- |
-| `lib/monitoring.test.ts` (21) | message withholding; path normalisation; an event carrying a user, cookies, a bearer token, a sign-in code, an email, a phone, a name, source lines and variables comes out with none of them; tags, contexts and breadcrumbs reduced; environment names; options |
+| `lib/monitoring.test.ts` (39) | message withholding; route templates (short and arbitrary segments → template or `/[unmatched]`); Supabase, third-party and spoofed hosts; frame files; every metadata field rejected when malformed or carrying fake data; an event carrying a user, cookies, a bearer token, a sign-in code, an email, a phone, a name, source lines and variables comes out with none of them; tags, contexts and breadcrumbs reduced; environment names; options |
 | `lib/monitoring.sdk.test.ts` | **real server SDK** + recording transport: our reports arrive as fixed messages with codes, an exception and its cause as `[withheld]`, no user / extra / server name, no session, no IP instruction, none of the fake data anywhere on the wire |
 | `lib/monitoring.browser.test.ts` | **real browser SDK** in jsdom: uncaught error after a click, form input and console output, page URL with an ID, query and fragment — none of it on the wire |
 | `lib/report.test.ts` | the text shown is unchanged; only fallbacks are reported; expected refusals and the person's own sign-in mistakes are not; codes filtered |
 | `api/health/health.test.ts` | 200 / 503, timeout, no-store, body `{ok}` only |
-| `api/monitoring/test/route.test.ts`, `admin/monitoring/page.test.tsx` | 404 on production even for an admin; 404 for non-admins on staging; the test errors otherwise |
+| `lib/monitoring.routes.test.ts` | `ROUTES` equals the pages and routes under `src/app` |
+| `lib/monitoringTest.test.ts`, `api/monitoring/test/route.test.ts`, `admin/monitoring/page.test.tsx` | allowed only on a preview connected to staging; 404 on production, local, unknown, and a preview on the live database, even for an admin; 404 for non-admins; the test errors otherwise |
 
-Full suite 415 tests, stable over repeated runs; `tsc` clean; production build without any Sentry variable succeeds;
+Full suite **440 tests** (26 files), passing on three consecutive full runs; `tsc` clean; production build without any
+Sentry variable succeeds; shared first-load JavaScript **135.7 KB gzip** (main: 131.7 KB; +4.0 KB in total, the route
+list and checks included);
 no `.map` file in `.next/static`; `mobile/scripts/check-shared.sh` passes; lint adds no finding (the 4 on `main` remain).
 
 ## Staging verification (after Paul's setup; Preview variables only)
@@ -92,6 +115,7 @@ On the branch preview (environment `preview`), signed in as an admin, `/admin/mo
 | S5 | `/_next/static/…/*.js.map` of the preview | 404 (maps deleted after upload) |
 | S6 | `/api/health` | `{"ok":true}` |
 | S7 | `/admin/monitoring` signed out or as a non-admin | not found |
+| S8 | in S1–S2 JSON: request URL, transaction, breadcrumbs | route templates only (`/admin/monitoring`, `/api/monitoring/test`); no query string |
 
 ## Paul's setup (account actions; nothing for production yet)
 
