@@ -97,6 +97,23 @@ live migration session as well.
 - **Not in the backup:** the club photo files themselves (their records are included; the M3 migrations
   don't touch them) and project settings such as API keys and sign-in settings (unchanged by migrations).
 
-## After the release
+## Rule since 22 Nov 2026 (B9): no live credential or live data stays on GitHub
 
-Delete the `LIVE_DB_URL` secret (or reset the database password), so no live credential stays stored.
+Between backups, `live-backup` holds only `BACKUP_PASSPHRASE`. The live database password lives only in
+your password manager (it was reset on 22 Nov; the old one is dead). For each live backup:
+
+1. **Before:** add `LIVE_DB_URL` to `live-backup` (connection string as in setup step 2, with the
+   current password from your password manager).
+2. **Run and approve** the backup as above.
+3. **Keep two copies:** download the artifact (a `.zip`) to two places. Check them:
+   - the `.tar.gpg` inside: its SHA-256 (`Get-FileHash` in PowerShell) must equal the **Kept:** line
+     on the run's Summary page;
+   - the `.zip` itself: ask me for GitHub's fingerprint of the artifact and compare both copies;
+   - open one `.tar.gpg` with `gpg --decrypt --output NUL <file>.tar.gpg` in Command Prompt
+     (decrypts and discards; nothing readable is written). Success: AES256 and no error.
+4. **Then remove from GitHub, the same day:** delete the artifact from the run (or ask me to delete it
+   by its id), and delete `LIVE_DB_URL`. The repository is public: any signed-in GitHub user can
+   download a run's artifacts while they exist.
+
+Never reset the database password to an old value. If you suspect the password was seen, reset it in
+Supabase → Project Settings → Database; nothing in the website or apps uses it.
