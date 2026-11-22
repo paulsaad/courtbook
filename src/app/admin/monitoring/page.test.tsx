@@ -1,0 +1,28 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+/** The staging test page: 404 on production and for anyone but an admin. */
+async function render(admin: boolean) {
+  vi.resetModules();
+  vi.doMock("next/navigation", () => ({ notFound: () => { throw new Error("NOT_FOUND"); } }));
+  vi.doMock("@/lib/monitoringTest", async () => ({
+    ...(await vi.importActual<typeof import("@/lib/monitoringTest")>("@/lib/monitoringTest")),
+    isAdmin: async () => admin,
+  }));
+  return (await import("./page")).default();
+}
+afterEach(() => { vi.unstubAllEnvs(); });
+
+describe("monitoring test page", () => {
+  it("is not found on production, even for an admin", async () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    await expect(render(true)).rejects.toThrow("NOT_FOUND");
+  });
+  it("is not found on staging for anyone but an admin", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    await expect(render(false)).rejects.toThrow("NOT_FOUND");
+  });
+  it("renders for an admin on staging", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    expect(await render(true)).toBeTruthy();
+  });
+});
