@@ -964,7 +964,9 @@ check $ADMIN "94z same name, different phones -> separate suggestions" "select c
 check $ADMIN "94z2 the one stored without a phone keeps no phone"      "select count(*) from club_recent_guests('$CLUB','Same Name') where phone is null;" 1
 # the week view reads a 7-day range for one court straight from the table, so RLS is what scopes it
 WK="start_at < (current_date + 20) and end_at > (current_date + 13)"
-check $ADMIN "95a staff read the week's rows for one court"           "select count(*) from bookings where club_id='$CLUB' and court_id='$COURT' and $WK;" 4
+# (counts this block's three desk rows only: an earlier check's hold lands in the same week or not depending on the
+#  hour the suite runs, which made the old total of 4 fail between midnight and 08:00 Beirut time)
+check $ADMIN "95a staff read the week's rows for one court"           "select count(*) from bookings where club_id='$CLUB' and court_id='$COURT' and $WK and guest_name = 'Same Name';" 3
 check $STAFF_B "95b staff of another club read none of them"          "select count(*) from bookings where club_id='$CLUB' and court_id='$COURT' and $WK;" 0
 check $P1 "95c a player reads only their own in that range"           "select count(*) from bookings where club_id='$CLUB' and court_id='$COURT' and $WK and player_id is distinct from '$P1';" 0
 
