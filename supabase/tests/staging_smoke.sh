@@ -21,18 +21,19 @@ check() { CHECKS=$((CHECKS+1)); local got; got=$(q "$1" "$3"); if [ "$got" == "$
 fails_with() { CHECKS=$((CHECKS+1)); local got; got=$(q "$1" "$3"); if echo "$got" | grep -q "$4"; then echo "  ok    $2 ($4)"; else echo "  FAIL  $2 — expected an error containing [$4], got [$got]"; FAILS=$((FAILS+1)); fi; }
 
 CLUB=$(q admin "select id from clubs where slug='batroun'")
-COURT=$(q admin "select id from courts where club_id='$CLUB' and name='Padel 1'")
-COURT2=$(q admin "select id from courts where club_id='$CLUB' and name='Padel 2'")
-COURT3=$(q admin "select id from courts where club_id='$CLUB' and name='Padel 3'")
 MODE=$(q admin "select payment_mode from clubs where id='$CLUB'")
 MINB=$(q admin "select min_booking_minutes from clubs where id='$CLUB'")
-[ -n "$COURT" ] || { echo "demo club or court missing"; exit 1; }
+[ -n "$CLUB" ] || { echo "demo club missing"; exit 1; }
 at() { echo "((current_date + 2 + time '$1') at time zone 'Asia/Beirut')"; }
 
+# the test's own courts (padel, the club's hours and club-wide prices): existing bookings and calendar blocks are never touched
+TESTCOURTS="(select id from courts where club_id = '$CLUB' and name like 'zz-smoke-%')"
 cleanup() {
   { echo "\\set QUIET on"; cat <<SQL
-delete from payments where booking_id in (select id from bookings where player_id in ('$U1','$U2') or created_by in ('$U1','$U2'));
-delete from bookings where player_id in ('$U1','$U2') or created_by in ('$U1','$U2');
+delete from payments where booking_id in (select id from bookings where player_id in ('$U1','$U2') or created_by in ('$U1','$U2') or court_id in $TESTCOURTS);
+delete from bookings where player_id in ('$U1','$U2') or created_by in ('$U1','$U2') or court_id in $TESTCOURTS;
+delete from blocks where court_id in $TESTCOURTS;
+delete from courts where id in $TESTCOURTS;
 delete from club_staff where profile_id in ('$U1','$U2');
 delete from auth.users where id in ('$U1','$U2');
 update clubs set payment_mode = '$MODE', min_booking_minutes = $MINB where id = '$CLUB';
@@ -41,7 +42,13 @@ SQL
 }
 cleanup
 trap cleanup EXIT
+trap 'exit 130' INT TERM   # a cancelled job still runs the clean-up
 $PSQL -q -c "insert into auth.users (id, email, aud, role) values ('$U1','smoke1@courtbook.test','authenticated','authenticated'), ('$U2','smoke2@courtbook.test','authenticated','authenticated');" >/dev/null || { echo "could not create test users"; exit 1; }
+$PSQL -q -c "insert into courts (club_id, name, sport, surface, sort) values ('$CLUB','zz-smoke-1','padel','test',901), ('$CLUB','zz-smoke-2','padel','test',902), ('$CLUB','zz-smoke-3','padel','test',903);" >/dev/null || { echo "could not create test courts"; exit 1; }
+COURT=$(q admin "select id from courts where club_id='$CLUB' and name='zz-smoke-1'")
+COURT2=$(q admin "select id from courts where club_id='$CLUB' and name='zz-smoke-2'")
+COURT3=$(q admin "select id from courts where club_id='$CLUB' and name='zz-smoke-3'")
+echo "test courts: zz-smoke-1..3 (temporary, removed at the end)"
 
 echo "--- S1. pay at the club (book_at_desk), the native app's path today"
 $PSQL -q -c "update clubs set payment_mode='at_desk' where id='$CLUB';" >/dev/null
@@ -131,10 +138,11 @@ echo "--- S4. staff and past times on today's real clock (release fix 0071): wal
 HAS_0071=$(q admin "select (prosrc like '%walk_in_too_old%')::text from pg_proc where proname='staff_book' and pronamespace='public'::regnamespace")
 FOK=$(q admin "select (to_char(date_bin('30 minutes', now(), '2000-01-01') at time zone 'Asia/Beirut', 'HH24:MI') between '11:00' and '21:30')::text")
 t() { echo "(date_bin('30 minutes', now(), '2000-01-01') + interval '$1 minutes')"; }
-BUSY=$(q admin "select count(*) from bookings where court_id in ('$COURT','$COURT2','$COURT3') and status in ('confirmed','pending') and tstzrange(start_at, end_at) && tstzrange($(t -180), $(t 90)) and coalesce(created_by::text,'') not in ('$U1','$U2')) + (select count(*) from blocks where court_id in ('$COURT','$COURT2','$COURT3') and period && tstzrange($(t -180), $(t 90)))")
-if [ "$HAS_0071" != "true" ]; then echo "  (0071 not applied: S4 skipped)"
-elif [ "$FOK" != "true" ]; then echo "  (S4 needs the club's hours around now — run between 11:00 and 22:00 Beirut; skipped)"
-elif [ "$BUSY" != "0" ]; then echo "  (S4 skipped: Padel 1–3 have other bookings or calendar blocks between 3 h ago and 1 h 30 ahead)"
+BUSY=$(q admin "select (select count(*) from bookings where court_id in ('$COURT','$COURT2','$COURT3') and status in ('confirmed','pending') and tstzrange(start_at, end_at) && tstzrange($(t -180), $(t 90)) and coalesce(created_by::text,'') not in ('$U1','$U2')) + (select count(*) from blocks where court_id in ('$COURT','$COURT2','$COURT3') and period && tstzrange($(t -180), $(t 90)))")
+S4NOTRUN() { CHECKS=$((CHECKS+1)); FAILS=$((FAILS+1)); echo "  FAIL  S4 not run: $1 (a skipped S4 is not a full verification)"; }
+if [ "$HAS_0071" != "true" ]; then S4NOTRUN "0071 not applied"
+elif [ "$FOK" != "true" ]; then S4NOTRUN "it needs the club's hours around now — run between 11:00 and 21:30 Beirut"
+elif [ "$BUSY" != "0" ]; then S4NOTRUN "the test courts are not free around now ($BUSY items)"
 else
   W1=$(q $U1 "select staff_book('$CLUB','$COURT', $(t -60), $(t 30), 'smoke-walkin', null);")
   check admin "S4a walk-in that started 60–89 min ago: accepted" "select status from bookings where id='$W1';" confirmed
@@ -149,6 +157,10 @@ else
   check admin "S4h the refused moves changed nothing" "select (select to_char(start_at,'HH24:MI')||'-'||to_char(end_at,'HH24:MI') from bookings where id='$W1') = to_char($(t -60),'HH24:MI')||'-'||to_char($(t 60),'HH24:MI');" t
 fi
 
+echo "--- Z. clean-up"
+trap - EXIT
+cleanup
+check admin "Z1 clean-up: no test users, test courts, or bookings/payments of either left; club settings restored" "select ((select count(*) from auth.users where id in ('$U1','$U2')) + (select count(*) from courts where club_id='$CLUB' and name like 'zz-smoke-%') + (select count(*) from bookings where player_id in ('$U1','$U2') or created_by in ('$U1','$U2')) = 0 and (select payment_mode::text = '$MODE' and min_booking_minutes = $MINB from clubs where id='$CLUB'))::text;" true
 echo
 echo "checks: $CHECKS, failures: $FAILS"
 [ "$FAILS" = 0 ] && echo "STAGING SMOKE OK"
