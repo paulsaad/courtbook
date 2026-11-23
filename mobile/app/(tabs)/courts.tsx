@@ -54,11 +54,14 @@ export default function Courts() {
   }, [playing.isSuccess, playing.data, restored]);
   const near = useNearby();
   const nearOn = near.state.status === "on";
-  // an area replaces Near me (the foundation's rule: no "near me" while an area is chosen)
-  const pickArea = (a: PlayingArea | null) => { setArea(a); if (a) near.turnOff(); if (userId && playing.data) rememberArea(a); };
+  // M14 review B: Near me shows every club in Lebanon, nearest first. The area the player was browsing (or the one
+  // restored from their account, even if it arrives after Near me came on) never narrows it; it is kept, and comes
+  // back when Near me is turned off. Choosing an area chip turns Near me off, including one still asking.
+  const browseArea = nearOn ? null : area;
+  const pickArea = (a: PlayingArea | null) => { near.turnOff(); setArea(a); if (userId && playing.data) rememberArea(a); };
   const points = useClubPoints(nearOn);
   const saved = playing.data?.areas ?? [];
-  const q = useDaySlots(date, sport, area);
+  const q = useDaySlots(date, sport, browseArea);
   const clubs = useMemo(() => clubsFromSlots(q.data ?? []), [q.data]);
   const free = clubs.filter((c) => c.starts.length > 0);
   // Near me: nearest first by straight-line distance; clubs without a map point keep their order after the others
@@ -84,15 +87,15 @@ export default function Courts() {
         </ScrollView>
         {userId && playing.data && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} testID="area-chips">
-            <Chip label="All Lebanon" selected={area === null} onPress={() => pickArea(null)} />
-            {saved.map((a) => <Chip key={areaKey(a)} label={a.label ?? a.governorate} selected={sameArea(a, area)} onPress={() => pickArea(a)} />)}
-            {area && !saved.some((a) => sameArea(a, area)) && <Chip label={area.label ?? "Last area"} selected onPress={() => pickArea(area)} />}
+            <Chip label="All Lebanon" selected={!nearOn && area === null} onPress={() => pickArea(null)} />
+            {saved.map((a) => <Chip key={areaKey(a)} label={a.label ?? a.governorate} selected={!nearOn && sameArea(a, area)} onPress={() => pickArea(a)} />)}
+            {area && !saved.some((a) => sameArea(a, area)) && <Chip label={area.label ?? "Last area"} selected={!nearOn} onPress={() => pickArea(area)} />}
             <Chip label={saved.length ? "Edit areas" : "Add your areas"} onPress={() => router.push("/areas")} icon={<Icon name="pin" size={16} color={color.cedar} />} />
           </ScrollView>
         )}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           <Chip label={near.busy ? "Finding you…" : "Near me"} selected={nearOn} disabled={near.busy} testID="near-me"
-                onPress={() => { if (!nearOn && area) setArea(null); void near.toggle(); }} icon={<Icon name="compass" size={16} color={nearOn ? color.onDark : color.cedar} />} />
+                onPress={() => void near.toggle()} icon={<Icon name="compass" size={16} color={nearOn ? color.onDark : color.cedar} />} />
         </ScrollView>
         {note ? <Text variant="secondary" style={{ paddingHorizontal: space.lg }} testID="near-note">{note}</Text> : null}
         <DateStrip days={days} selected={date} onSelect={setDate} />

@@ -120,3 +120,89 @@ describe("Near me (app)", () => {
     expect(JSON.parse([...mockStore.values()][0]).useLocation).toBe(false);
   });
 });
+
+describe("Near me versus the remembered area (M14 review B)", () => {
+  // A player who usually browses Beirut is standing in Batroun.
+  const BATROUN = { latitude: 34.2553, longitude: 35.6586 };
+  const beirut = { governorate: "beirut", district: null, town: null, label: "Beirut" };
+  const north = { governorate: "north", district: null, town: null, label: "North" };
+  const slotsCalls = () => sent.filter((c) => Array.isArray(c) && c[0] === "club_day_slots").map((c) => (c as [string, Record<string, unknown>])[1]);
+  beforeEach(() => {
+    mockLoc.getCurrentPositionAsync.mockImplementation(async () => ({ coords: BATROUN }));
+    rpc.mockImplementation(async (fn: string, args?: Record<string, unknown>) => {
+      sent.push([fn, args]);
+      if (fn === "club_day_slots") {
+        const all = [slot("bey", "Beirut Club"), slot("bat", "Batroun Club"), slot("far", "Tripoli Club")];
+        return { data: args?.p_governorate === "beirut" ? [all[0]] : all, error: null };   // the server narrows by area
+      }
+      if (fn === "my_playing_prefs") return { data: { asked: true, areas: [beirut, north], last: beirut }, error: null };
+      if (fn === "my_favourite_clubs") return { data: [], error: null };
+      return { data: null, error: null };
+    });
+    from.mockImplementation((t: string) => ({
+      select: (cols: string) => ({
+        eq: async (c: string, v: unknown) => { sent.push(["from", t, cols, c, v]); return { data: [{ id: "bey", lat: 33.8938, lng: 35.5018 }, { id: "bat", lat: 34.2558, lng: 35.6590 }, { id: "far", lat: 34.4367, lng: 35.8497 }], error: null }; },
+        in: async () => ({ data: [], error: null }),
+      }),
+    }));
+  });
+
+  it("browsing Beirut, then Near me in Batroun: every club, nearest first; Beirut no longer narrows it", async () => {
+    await render(wrap(<Courts />));
+    await screen.findByText("Beirut Club");
+    await waitFor(() => expect(slotsCalls().at(-1)).toMatchObject({ p_governorate: "beirut" }));
+    expect(screen.queryByText("Batroun Club")).toBeNull();          // Beirut only, as remembered
+    fireEvent.press(screen.getByTestId("near-me"));
+    await waitFor(() => expect(order()[0]).toMatch(/^Batroun Club, under 1 kilometre away/));
+    expect(slotsCalls().at(-1)).toMatchObject({ p_governorate: null, p_district: null });
+    expect(order().map((l) => l.split(",")[0])).toEqual(["Batroun Club", "Tripoli Club", "Beirut Club"]);
+    expect(screen.getByText("Beirut").parent?.parent?.props.accessibilityState?.selected ?? false).toBe(false);
+    // the account's last area is not overwritten by Near me
+    expect(sent.some((c) => Array.isArray(c) && c[0] === "set_last_area")).toBe(false);
+  });
+  it("Near me resumed on load and the last area arriving afterwards: still not narrowed", async () => {
+    mockStore.set("discovery_prefs_v1", JSON.stringify({ useLocation: true, governorate: null, district: null }));
+    mockLoc.perm = { status: "granted", canAskAgain: true };
+    await render(wrap(<Courts />));
+    await waitFor(() => expect(order()[0]).toMatch(/^Batroun Club, under 1 kilometre/));
+    await act(async () => {});
+    expect(order()).toHaveLength(3);
+    expect(slotsCalls().at(-1)).toMatchObject({ p_governorate: null });
+  });
+  it("turning Near me off returns to the area the player was browsing", async () => {
+    await render(wrap(<Courts />));
+    await screen.findByText("Beirut Club");
+    fireEvent.press(screen.getByTestId("near-me"));
+    await waitFor(() => expect(order()[0]).toMatch(/^Batroun Club/));
+    fireEvent.press(screen.getByTestId("near-me"));
+    await waitFor(() => expect(screen.queryByText("Batroun Club")).toBeNull());
+    expect(slotsCalls().at(-1)).toMatchObject({ p_governorate: "beirut" });
+    expect(screen.queryByText("Nearest first · straight-line distances")).toBeNull();
+  });
+  it("choosing a saved area turns Near me off cleanly and narrows to that area", async () => {
+    await render(wrap(<Courts />));
+    await screen.findByText("Beirut Club");
+    fireEvent.press(screen.getByTestId("near-me"));
+    await waitFor(() => expect(order()[0]).toMatch(/^Batroun Club/));
+    fireEvent.press(screen.getByText("North"));
+    await waitFor(() => expect(screen.queryByText("Nearest first · straight-line distances")).toBeNull());
+    await waitFor(() => expect(slotsCalls().at(-1)).toMatchObject({ p_governorate: "north" }));
+    expect(order().some((l) => /kilometre/.test(l))).toBe(false);
+    expect(JSON.parse(mockStore.get("discovery_prefs_v1")!).useLocation).toBe(false);
+    expect(sent).toContainEqual(["set_last_area", { p_governorate: "north", p_district: null, p_town: null }]);
+  });
+  it("choosing an area while Near me is still asking: Near me stays off when the answer comes", async () => {
+    let answer!: () => void;
+    mockLoc.requestForegroundPermissionsAsync.mockImplementation(() => new Promise((r) => { answer = () => { mockLoc.perm = { status: "granted", canAskAgain: true }; r(mockLoc.perm); }; }));
+    await render(wrap(<Courts />));
+    await screen.findByText("Beirut Club");
+    fireEvent.press(screen.getByTestId("near-me"));
+    await waitFor(() => expect(mockLoc.requestForegroundPermissionsAsync).toHaveBeenCalled());
+    fireEvent.press(screen.getByText("North"));
+    await act(async () => { answer(); await new Promise((r) => setTimeout(r, 0)); });
+    await act(async () => {});
+    expect(screen.queryByText("Nearest first · straight-line distances")).toBeNull();
+    expect(slotsCalls().at(-1)).toMatchObject({ p_governorate: "north" });
+    expect(JSON.parse(mockStore.get("discovery_prefs_v1")!).useLocation).toBe(false);
+  });
+});
