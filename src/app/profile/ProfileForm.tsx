@@ -7,13 +7,15 @@ import { createClient } from "@/lib/supabase/client";
 import LevelSheet from "@/components/LevelSheet";
 import { levelLabel } from "@/lib/levels";
 import DeleteAccount from "./DeleteAccount";
+import PlayingAreasSection from "./PlayingAreasSection";
+import type { Governorate } from "@/lib/geo";
 
 type Initial = { name: string; phone: string; level: string; sports: string[]; email_notifications: boolean };
 const LEVELS = [["beginner", "Beginner"], ["intermediate", "Intermediate"], ["advanced", "Advanced"]] as const;
 
 type Manage = { staffHref: string | null; isAdmin: boolean; isCoach: boolean; email: string };
 
-export default function ProfileForm({ initial, next, firstTime, sports, manage, levels: initialLevels }: { initial: Initial; next: string; firstTime: boolean; sports: { code: string; name_en: string }[]; manage: Manage; levels: Record<string, number> }) {
+export default function ProfileForm({ initial, next, firstTime, sports, manage, levels: initialLevels, areas = [] }: { initial: Initial; next: string; firstTime: boolean; sports: { code: string; name_en: string }[]; manage: Manage; levels: Record<string, number>; areas?: Governorate[] }) {
   const router = useRouter();
   const [f, setF] = useState(initial);
   const [busy, setBusy] = useState(false);
@@ -92,6 +94,7 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage, 
         {row("Activity", "/notifications")}
         {row("Your bookings and matches", "/me")}
       </section>
+      {!firstTime && areas.length > 0 && <PlayingAreasSection govs={areas} />}
       {(manage.staffHref || manage.isAdmin || manage.isCoach) && (
         <section className="card overflow-hidden">
           <div className="eyebrow px-4 pb-1.5 pt-3.5">You manage</div>

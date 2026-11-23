@@ -7,13 +7,19 @@ import { createClient } from "@/lib/supabase/client";
 import type { Governorate, Sport } from "@/lib/geo";
 import { EMPTY, readPrefs, writePrefs, type Prefs } from "@/lib/prefs";
 import AreaPicker from "./AreaPicker";
+import { AreasQuestion, SavedAreaChips } from "./SavedAreas";
+import FavouriteClubsRow from "./FavouriteClubsRow";
+import { areaFromPrefs, prefsFromArea, usePlaying } from "@/lib/playing";
+import type { PlayingArea } from "@/lib/places";
 import { IconCourt, IconPin, IconRacket, IconSearch, IconUsers } from "./Icons";
 import type { OpenMatch } from "./Discover";
 import { fitLabel, rangeLabel } from "@/lib/levels";
 
 const TZ = "Asia/Beirut";
 
-/** Home: area row, search, three actions, matches for you. The next-game card is rendered by the server page above this. */
+/** Home: area row (with the player's saved areas), search, three actions, your clubs, matches for you. The next-game card is
+ *  rendered by the server page above this. Signed in, the area browsed last comes from the account (0088), so it is the
+ *  same on every device; the first-use question "Where do you usually play?" is asked once. */
 export default function HomeClient({ areas, sports, initialMatches, signedIn }: { areas: Governorate[]; sports: Sport[]; initialMatches: OpenMatch[]; signedIn: boolean }) {
   const [prefs, setPrefs] = useState<Prefs>(EMPTY);
   const [loaded, setLoaded] = useState(false);
@@ -23,6 +29,18 @@ export default function HomeClient({ areas, sports, initialMatches, signedIn }: 
   const [attempt, setAttempt] = useState(0);
   const [q, setQ] = useState("");
   const sportName = (code: string) => sports.find((s) => s.code === code)?.name_en ?? code;
+  const playing = usePlaying(signedIn);
+  // the account's last area wins over this browser's, once, when it arrives (the player may have moved device)
+  const [fromAccount, setFromAccount] = useState(false);
+  useEffect(() => {
+    if (fromAccount || !loaded || !playing.prefs) return;
+    const t = setTimeout(() => {
+      setFromAccount(true);
+      const last = playing.prefs?.last ?? null;
+      if (last) setPrefs((p) => { const n = { ...p, ...prefsFromArea(last) }; writePrefs(n); return n; });
+    }, 0);
+    return () => clearTimeout(t);
+  }, [playing.prefs, loaded, fromAccount]);
 
   useEffect(() => { const t = setTimeout(() => { setPrefs(readPrefs()); setLoaded(true); }, 0); return () => clearTimeout(t); }, []);
   useEffect(() => {
@@ -36,20 +54,28 @@ export default function HomeClient({ areas, sports, initialMatches, signedIn }: 
     });
     return () => { alive = false; };
   }, [prefs, loaded, signedIn, initialMatches, attempt]);
-  const update = (p: Prefs) => { setPrefs(p); writePrefs(p); };
+  const update = (p: Prefs) => {
+    if (p.gov !== prefs.gov || p.district !== prefs.district || p.town !== prefs.town) playing.rememberArea(p);
+    setPrefs(p); writePrefs(p);
+  };
+  const pickArea = (a: PlayingArea | null) => update({ ...prefs, ...prefsFromArea(a) });
 
   const action = "flex flex-col items-center gap-2 text-[13px] font-bold text-ink";
   const circle = "flex h-[68px] w-[68px] items-center justify-center rounded-full";
 
   return (
     <div className="flex flex-col gap-4">
-      <AreaPicker areas={areas} value={{ gov: prefs.gov, district: prefs.district }} onChange={(a) => update({ ...prefs, gov: a.gov, district: a.district })}
+      <AreaPicker areas={areas} value={{ gov: prefs.gov, district: prefs.district }} onChange={(a) => update({ ...prefs, gov: a.gov, district: a.district, town: null, townName: null })}
         trigger={(open, label) => (
           <button onClick={open} className="flex w-full items-center justify-between rounded-full border border-grid bg-white px-4 py-2.5 text-left">
-            <span className="flex min-w-0 items-center gap-2"><IconPin size={20} className="shrink-0 text-cedar" /><span className="truncate text-[15px] font-semibold"><span className="font-normal text-muted">Playing in </span>{label}</span></span>
+            <span className="flex min-w-0 items-center gap-2"><IconPin size={20} className="shrink-0 text-cedar" /><span className="truncate text-[15px] font-semibold"><span className="font-normal text-muted">Playing in </span>{prefs.townName ?? label}</span></span>
             <span className="shrink-0 text-sm font-semibold text-turf">Change</span>
           </button>
         )} />
+      <div className="-mx-5"><SavedAreaChips prefs={playing.prefs} govs={areas} current={areaFromPrefs(prefs)} onPick={pickArea} /></div>
+      {playing.prefs && !playing.prefs.asked && (
+        <AreasQuestion govs={areas} onSave={async (a) => { const next = await playing.saveAreas(a); if (next.areas[0]) pickArea(next.areas[0]); }} onDismiss={() => void playing.dismissQuestion()} />
+      )}
 
       <form onSubmit={(e) => { e.preventDefault(); window.location.href = `/courts?q=${encodeURIComponent(q.trim())}`; }} className="flex items-center gap-2.5 rounded-full border border-grid bg-white px-4 py-3">
         <IconSearch size={20} className="text-muted" />
@@ -61,6 +87,8 @@ export default function HomeClient({ areas, sports, initialMatches, signedIn }: 
         <Link href="/play" className={action}><span className={`${circle} bg-cedar-soft`}><IconUsers size={30} className="text-cedar" /></span>Find a game</Link>
         <Link href="/coaches" className={action}><span className={`${circle} bg-sand-soft`}><IconRacket size={30} className="text-sand" /></span>Coaches</Link>
       </div>
+
+      <FavouriteClubsRow signedIn={signedIn} />
 
       {signedIn && (
         <section className="flex flex-col gap-3">

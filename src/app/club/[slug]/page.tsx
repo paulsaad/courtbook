@@ -24,7 +24,7 @@ export default async function ClubPage({ params, searchParams }: { params: Promi
 
   const { data: club } = loaded(await supabase
     .from("clubs")
-    .select("id, name, slug, timezone, slot_minutes, cancel_cutoff_hours, open_time, close_time, min_booking_minutes, max_booking_minutes, booking_window_days, service_fee_usd, location_url, hold_minutes, town_id, payment_mode, is_demo")
+    .select("id, name, slug, timezone, slot_minutes, cancel_cutoff_hours, open_time, close_time, min_booking_minutes, max_booking_minutes, booking_window_days, service_fee_usd, location_url, hold_minutes, town_id, payment_mode, is_demo, lat, lng")
     .eq("slug", slug).eq("active", true).single<ClubRow>(), "this club");
   if (!club) notFound();
 
@@ -53,7 +53,7 @@ export default async function ClubPage({ params, searchParams }: { params: Promi
 
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col">
-      <ClubHeader club={head} tab="" />
+      <ClubHeader club={head} tab="" signedIn={!!user} />
       <PlayerGrid signedIn={!!user} club={club} courts={(courts ?? []) as Court[]} occ={(occ ?? []) as Occ[]} occError={!!occError} date={date} hold={hold} preselect={preselect} sportNames={sportNames} />
     </main>
   );

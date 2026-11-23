@@ -13,64 +13,10 @@
  * expo-location adapter is added when screens are built (it is a native change: new build).
  */
 
-export type LatLng = { lat: number; lng: number };
-
-/** Lebanon's database check is loose (lat 33–35, lng 35–37); points outside it are never used. */
-export function clubPoint(lat: unknown, lng: unknown): LatLng | null {
-  const a = typeof lat === "string" ? Number(lat) : lat;
-  const b = typeof lng === "string" ? Number(lng) : lng;
-  if (typeof a !== "number" || typeof b !== "number" || !Number.isFinite(a) || !Number.isFinite(b)) return null;
-  if (a < 33 || a > 35 || b < 35 || b > 37) return null;
-  return { lat: a, lng: b };
-}
-
-/** Straight-line ("as the crow flies") distance in km. Good to a few metres at Lebanon's scale. */
-export function haversineKm(a: LatLng, b: LatLng): number {
-  const R = 6371.0088;
-  const rad = (d: number) => (d * Math.PI) / 180;
-  const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
-}
-
-/** Round to 2 decimals (≈1.1 km north–south, ≈0.9 km east–west here): enough to sort clubs. */
-export function coarsen(p: LatLng): LatLng {
-  return { lat: Math.round(p.lat * 100) / 100, lng: Math.round(p.lng * 100) / 100 };
-}
-
-/**
- * Display. The position is coarse and the distance is straight-line, so nothing finer than
- * "Under 1 km" is claimed. Screen readers get the unit in words.
- */
-export function distanceLabel(km: number): { text: string; a11y: string } {
-  if (!Number.isFinite(km) || km < 0) return { text: "", a11y: "" };
-  if (km < 1) return { text: "Under 1 km", a11y: "under 1 kilometre away" };
-  if (km < 10) {
-    const v = (Math.round(km * 10) / 10).toFixed(1);
-    return { text: `${v} km`, a11y: `${v} kilometres away` };
-  }
-  const v = String(Math.round(km));
-  return { text: `${v} km`, a11y: `${v} kilometres away` };
-}
-
-/**
- * Nearest first. Clubs without usable coordinates keep their incoming order and come after every
- * club that has one — they are never given a made-up distance.
- */
-export function sortByDistance<T extends { id: string }>(items: T[], points: Map<string, LatLng>, origin: LatLng):
-  { item: T; km: number | null }[] {
-  const withKm = items.map((item, i) => {
-    const p = points.get(item.id);
-    return { item, km: p ? haversineKm(origin, p) : null, i };
-  });
-  withKm.sort((a, b) => {
-    if (a.km === null && b.km === null) return a.i - b.i;
-    if (a.km === null) return 1;
-    if (b.km === null) return -1;
-    return a.km - b.km || a.i - b.i;
-  });
-  return withKm.map(({ item, km }) => ({ item, km }));
-}
+// Distances and the club point check are shared with the website (src/lib/places.ts → @shared/places).
+import { clubPoint, coarsen, distanceLabel, haversineKm, sortByDistance, type LatLng } from "@shared/places";
+export { clubPoint, coarsen, distanceLabel, haversineKm, sortByDistance };
+export type { LatLng };
 
 // ---- location state -------------------------------------------------------------------------------
 
