@@ -3,14 +3,14 @@ import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 
 /** "2026-11-09" + "09:30" in a club's timezone → UTC Date. "24:00" means midnight at the end of that day. */
 export function clubLocalToUtc(date: string, time: string, tz: string): Date {
-  if (time.startsWith("24:")) return fromZonedTime(`${shiftDate(date, 1)}T00:00:00`, tz);
+  if (time.startsWith("24:")) return nextDayStart(date, tz);   // 0084: the next day's first instant (DST-safe)
   return fromZonedTime(`${date}T${time.length === 5 ? time + ":00" : time}`, tz);
 }
 
 /** The first instant of the day after `date` in the club's time zone. Where the clocks jump forward at
  *  midnight (Beirut, last Saturday night of March) local 00:00 does not exist and the day starts at 01:00;
- *  plain conversion of "00:00" lands an hour early, inside the previous day. Used for blocks that end at
- *  closing time 24:00. (clubLocalToUtc keeps its existing behaviour for everything else.) */
+ *  plain conversion of "00:00" lands an hour early, inside the previous day. Used for day bounds and for
+ *  closing time 24:00 (0084). */
 export function nextDayStart(date: string, tz: string): Date {
   const next = shiftDate(date, 1);
   let t = fromZonedTime(`${next}T00:00:00`, tz);
@@ -21,8 +21,10 @@ export function nextDayStart(date: string, tz: string): Date {
 /** [start, end) of a local calendar day as UTC ISO strings; end is the next local midnight (DST-safe). */
 export function dayBounds(date: string, tz: string): { dayStart: string; dayEnd: string } {
   return {
-    dayStart: fromZonedTime(`${date}T00:00:00`, tz).toISOString(),
-    dayEnd: fromZonedTime(`${shiftDate(date, 1)}T00:00:00`, tz).toISOString(),
+    // the first instant of the day and of the next one: where the clocks jump forward at midnight, local 00:00 does
+    // not exist and plain conversion lands an hour early, inside the previous day (spring night, Beirut)
+    dayStart: nextDayStart(shiftDate(date, -1), tz).toISOString(),
+    dayEnd: nextDayStart(date, tz).toISOString(),
   };
 }
 
