@@ -35,7 +35,8 @@ mutant held_runs_full_data 's.replace("p_cancel_only: true", "p_cancel_only: fal
 #    the run then completes normally. Surviving here IS the guard working (also 0086 suite G8)
 #  - no lease renewal at all (review 23 Nov, finding 5): a worker that was taken over carries on beside the new one. E9
 #    must still end in the same state, because every step is idempotent: renewal only makes it stop sooner
-mutant no_renewal 's.replace("    const r = await record(\"renew\");\n    if (r === false) return { result: \"lease_lost\", step };", "    const r = true;")' survives
+#    (the renewal is replaced by a harmless read, so the run makes the same number of calls and E9 pauses at the same points)
+mutant no_renewal 's.replace("const r = await record(\"renew\");", "const r = (await deps.rpc(\"deletion_processing_active\", {}), true) as boolean | \"error\";")' survives
 mutant ignore_lease_lost 's.replace("if (r === false) return { result: \"lease_lost\", step: \"ban\" };", "")' survives
 mutant delete_before_data 's.replace("    // C: always (see header)", "    await deps.deleteUser(subject);\n    // C: always (see header)")' survives
 mutant no_finish 's.replace("const fin = await deps.rpc(\"finish_account_deletion\", { p_subject: subject });", "const fin = { error: null };")'

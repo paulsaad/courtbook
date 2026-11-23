@@ -240,7 +240,9 @@ async function takeover(k, m, label) {
   const ca = await newClient(), cb = await newClient();
   const A = depsFor(ca, { at: k });
   const runA = processDeletion(id(n0), A);
-  await A.paused;
+  // a run with fewer calls than k would never pause: report it instead of waiting for ever
+  const reached = (d, run) => Promise.race([d.paused.then(() => true), run.then(() => false)]);
+  if (!(await reached(A, runA))) { rep(`E9 ${label}: A reaches call ${k}`, false, JSON.stringify(A.log)); await ca.end(); await cb.end(); return; }
   await expireLease(n0);
   let outB;
   if (m == null) {
@@ -248,7 +250,7 @@ async function takeover(k, m, label) {
   } else {   // B is slow too: A resumes while B is in the middle
     const B = depsFor(cb, { at: m });
     const runB = processDeletion(id(n0), B);
-    await B.paused;
+    if (!(await reached(B, runB))) { rep(`E9 ${label}: B reaches call ${m}`, false, JSON.stringify(B.log)); A.release(); await runA; await ca.end(); await cb.end(); return; }
     A.release();
     const a0 = await runA;
     B.release();

@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # Records what 0086 answers to the exact calls the RELEASED app makes (mobile/components/DeleteAccount.tsx at ed68d21:
 # my_account_deletion(), request_account_deletion({ p_via: "app" }), cancel_account_deletion()), for the app test that
-# runs that released screen against them (mobile/__tests__/oldAppCompat.test.tsx). Local replica only, one rolled-back
-# transaction. Writes mobile/__tests__/fixtures/old_app_answers.json (dates replaced by a fixed value).
-#   PSQL="sudo -u postgres psql" bash supabase/tests/m86/old_app_answers.sh
+# runs that released screen against them (mobile/__tests__/oldAppCompat.test.tsx). One transaction, ROLLED BACK: the
+# throwaway account, the request and the club setting never persist.
+#   record (local replica): PSQL="sudo -u postgres psql" bash supabase/tests/m86/old_app_answers.sh
+#     → writes mobile/__tests__/fixtures/old_app_answers.json (dates replaced by a fixed value)
+#   compare (staging after 0086, the staging-db action m86_old_app): DBNAME="$DB" COMPARE=1 bash supabase/tests/m86/old_app_answers.sh
+#     → the same calls against that database; fails unless every answer equals the recorded one
 set -eu
 cd "$(dirname "$0")/../../.."
 PSQL=${PSQL:-psql}
-out=$($PSQL -X -q -At -d courtbook_test -v ON_ERROR_STOP=1 <<'SQL'
+DBNAME=${DBNAME:-courtbook_test}
+out=$($PSQL -X -q -At -d "$DBNAME" -v ON_ERROR_STOP=1 <<'SQL'
 begin;
 insert into auth.users (id, phone) values ('e8600000-0000-4000-8000-0000000000c1', '+96178600c1');
 update profiles set rules_accepted_at = now() where id = 'e8600000-0000-4000-8000-0000000000c1';
@@ -51,10 +55,17 @@ rollback;
 SQL
 )
 json=$(echo "$out" | grep '^{' | tail -1)
-echo "$json" | python3 -c '
-import json,re,sys
+echo "$json" | COMPARE=${COMPARE:-} python3 -c '
+import json,os,re,sys
 d=json.load(sys.stdin)
 s=json.dumps(d, indent=2, sort_keys=True)
 s=re.sub(r"\"20\d\d-\d\d-\d\dT[^\"]*\"", "\"2026-11-23T10:00:00+00:00\"", s)
-open("mobile/__tests__/fixtures/old_app_answers.json","w").write(s+"\n")
-print(s)'
+f="mobile/__tests__/fixtures/old_app_answers.json"
+if not os.environ.get("COMPARE"):
+    open(f,"w").write(s+"\n"); print(s); sys.exit(0)
+want=json.load(open(f)); got=json.loads(s)
+bad=[k for k in sorted(set(want)|set(got)) if want.get(k)!=got.get(k)]
+for k in sorted(set(want)|set(got)):
+    print(("ok  " if k not in bad else "FAIL"), k, "got", json.dumps(got.get(k)), "" if k not in bad else "want "+json.dumps(want.get(k)))
+print("RESULT:", "FAIL" if bad else "PASS — the released app gets the answers its screen was tested against")
+sys.exit(1 if bad else 0)'
