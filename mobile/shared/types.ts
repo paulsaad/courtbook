@@ -80,6 +80,8 @@ export const ERRORS: Record<string, string> = {
   blocked: "You can't join this match.",
   account_suspended: "Your account is suspended. Contact courtbook.contact@gmail.com.",
   rules_not_accepted: "Please accept the community rules first.",
+  club_not_ready: "This club isn't ready for players yet. Finish the checklist at the top of this page, then publish.",
+  bad_contact: "Check the phone number (digits, spaces, +, - and brackets) and the email address.",
   message_not_allowed: "This message can't be sent. Check the community rules.",
   bad_target: "You can't do that to your own account.",
   bad_reason: "Choose a reason for the report.",
