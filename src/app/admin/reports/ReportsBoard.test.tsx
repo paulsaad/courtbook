@@ -127,3 +127,52 @@ describe("Reports (admin)", () => {
     expect(screen.getByText(/not available on this database yet/)).toBeTruthy();
   });
 });
+
+describe("Reports (admin), 0082 moderation readiness", () => {
+  const st = (over = {}) => ({ r1: { report_id: "r1", legal_hold: false, handled_by_name: "Paul", closed_at: null, log_entries: 2, ...over } });
+  it("lifting a suspension asks for a reason and sends it", async () => {
+    render(<ReportsBoard status="open" reports={[report({ reported_suspended: true })]} unavailable={false} failed={false} state={st()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Lift suspension" }));
+    const send = screen.getAllByRole("button", { name: "Lift suspension" }).at(-1)!;
+    expect(send.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(screen.getByLabelText(/Why lift the suspension/), { target: { value: "apologised" } });
+    fireEvent.click(send);
+    await waitFor(() => expect(calls).toContainEqual({ fn: "admin_unsuspend", args: { p_profile: "p2", p_reason: "apologised" } }));
+  });
+  it("a handled report shows who handled it and can be reopened with a reason", async () => {
+    render(<ReportsBoard status="actioned" reports={[report({ status: "actioned", handled_at: "2026-11-21T10:00:00Z", action: "warned" })]} unavailable={false} failed={false} state={st()} />);
+    expect(screen.getByText(/by Paul/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+    fireEvent.change(screen.getByLabelText(/Why reopen it/), { target: { value: "new evidence" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Reopen" }).at(-1)!);
+    await waitFor(() => expect(calls).toContainEqual({ fn: "admin_reopen_report", args: { p_report: "r1", p_note: "new evidence" } }));
+  });
+  it("legal hold: badge when on; the control sends the opposite value with a reason", async () => {
+    render(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} state={st({ legal_hold: true })} />);
+    expect(screen.getByText("legal hold")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Release legal hold" }));
+    fireEvent.change(screen.getByLabelText(/Why release the hold/), { target: { value: "case closed" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Release legal hold" }).at(-1)!);
+    await waitFor(() => expect(calls).toContainEqual({ fn: "admin_set_legal_hold", args: { p_report: "r1", p_hold: false, p_note: "case closed" } }));
+  });
+  it("history lists the logged actions", async () => {
+    answer = (c) => c.fn === "admin_moderation_log" ? { data: [{ at: "2026-11-21T10:00:00Z", admin_name: "Paul", action: "suspend", note: "abuse", report_id: null }], error: null } : { data: null, error: null };
+    render(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} state={st()} />);
+    fireEvent.click(screen.getByRole("button", { name: "History (2)" }));
+    await waitFor(() => expect(screen.getByText(/Suspended/)).toBeTruthy());
+    expect(screen.getByText(/— abuse/)).toBeTruthy();
+  });
+  it("before 0082 (no state) the new controls are not shown", () => {
+    render(<ReportsBoard status="actioned" reports={[report({ status: "actioned" })]} unavailable={false} failed={false} />);
+    expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /legal hold/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Clear text/ })).toBeNull();
+  });
+  it("the 180-day clearing button reports how many were cleared", async () => {
+    answer = (c) => c.fn === "clear_old_report_text" ? { data: 3, error: null } : { data: null, error: null };
+    render(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} state={st()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Clear text of reports closed over 180 days ago/ }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/Cleared the text of 3 report/));
+    expect(calls).toContainEqual({ fn: "clear_old_report_text", args: { p_days: 180 } });
+  });
+});
