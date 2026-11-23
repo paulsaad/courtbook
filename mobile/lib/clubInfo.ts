@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { directionsUrl } from "@shared/places";
 import { supabase, supabaseOrigin } from "./supabase";
 import { sportName } from "./days";
 
@@ -155,9 +156,9 @@ export function lengthRange(min: number, max: number): string {
 }
 
 /** Google Maps at the club's pin when it has one, else the link the club gave, else null. */
+/** "Directions": a route to the club's exact map point, or the club's own map link (shared with the website). */
 export function mapsUrl(club: Pick<ClubInfoRow, "lat" | "lng" | "location_url">): string | null {
-  if (club.lat != null && club.lng != null) return `https://www.google.com/maps/search/?api=1&query=${Number(club.lat)},${Number(club.lng)}`;
-  return club.location_url || null;
+  return directionsUrl(club.lat, club.lng, club.location_url);
 }
 
 /** "Padel · artificial grass" */
