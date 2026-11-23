@@ -86,6 +86,19 @@ describe("M5 legal pages: public, structured, honest about what is not final", (
     expect(container.querySelector("#how-long")?.closest("section")?.querySelector('mark[data-pending="decision"]')?.textContent).toMatch(/latest date/);
   });
 
+  it("error reports are described as Sentry received them on staging (docs/m5/crash-privacy.md), open points marked", () => {
+    const { container } = render(<PrivacyPage />);
+    const h = [...container.querySelectorAll("h3")].find((x) => /Error reports/.test(x.textContent ?? ""));
+    const list = h?.nextElementSibling;
+    const t = (list?.textContent ?? "").replace(/\s+/g, " ");
+    expect(t).toMatch(/text of an error is left out/);
+    expect(t).toMatch(/approximate location \(country and city\)/);              // app reports: derived by Sentry
+    expect(t).toMatch(/random identifier for this installation/);                // native crashes
+    expect(t).toMatch(/system’s own error message, which our filtering does not reach/);
+    expect(t).not.toMatch(/email addresses are removed/);                        // the old, weaker-than-claimed promise
+    expect([...(list?.querySelectorAll('mark[data-pending="decision"]') ?? [])].map((m) => m.textContent).join(" ")).toMatch(/approximate location[\s\S]*live app/);
+  });
+
   it("the operator, address and governing law are never filled in by guessing: they stay marked", () => {
     const { container: privacy } = render(<PrivacyPage />);
     const { container: terms } = render(<TermsPage />);

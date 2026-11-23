@@ -22,7 +22,9 @@ the page together; `src/app/legal.test.tsx` checks the statements of absence aga
 | Deletion request record | `account_deletions` (`requested_at, requested_via, status, …`) (0079). |
 | Coach profile incl. WhatsApp shown to signed-in players | `coaches` (`bio, price_usd, whatsapp`); `coach_card`, `coaches_at_club` require a signed-in user. |
 | Staff actions and club photos | `created_by` on `bookings`, `blocks`; `club_media.created_by`; uploads through `/api/club-media`. |
-| Error reports: error, page/screen, version, device type and OS; no name, account, network address; emails removed | Website `src/lib/monitoring.ts` (`scrubEvent` allowlist, `DATA_COLLECTION` all off incl. `userInfo`, sessions dropped); app `mobile/lib/crash.ts` (`sendDefaultPii: false`, `delete e.user`, device name removed, taps dropped, `maskEmails`, no screenshots or view hierarchy). |
+| Error reports: kind of error, place in our code, page/screen (address scrubbed), version, device type and OS; error text withheld unless a fixed message or a code; no name, account, email or network address | Website `src/lib/monitoring.ts` (allowlist). App `mobile/lib/crash.ts` (allowlist since M5 review: `scrubEvent`, `scrubBreadcrumb` at recording time, `safeText`, `safeUrl`; sessions and automatic native breadcrumbs off). **Verified on what Sentry received** (staging, 23 Nov, `docs/m5/crash-privacy.md`): no probe value in the app's reports. |
+| App reports: Sentry derives country and city from the connection; no IP stored | Received app events carry `user.geo` (emulator run and a real iPhone report of 15 Nov); no `ip_address`. The website event checked has neither. Stopping it is a Sentry setting (**decision, not changed**). |
+| Native crashes (phone's own code) carry an installation ID, language, time zone, device state and the system's error message, not filtered by the app | Received native crash `dbf941d9…` (staging, 23 Nov): `user.id` = `device.id` (installation ID), `device.locale`, `device.timezone`, memory, storage, battery, boot time, kernel, rooted flag, app permissions; exception text from the system. `beforeSend` does not run for these. Breadcrumbs in it were the filtered ones. (**decision:** native filter in a new build, or declare) |
 | Hosting providers keep server records with IP addresses | Standard Vercel and Supabase request logs (provider-side; retention set by the provider). |
 | App keeps sign-in in secure storage; website in cookies; filters in the browser | `mobile/lib/secureStorage.ts` (expo-secure-store); `@supabase/ssr` cookies; `src/lib/prefs.ts` (`localStorage` key `cb_prefs`: area and sport). |
 
@@ -78,7 +80,8 @@ the page together; `src/app/legal.test.tsx` checks the statements of absence aga
 | terms | Governing law and courts | decision (L1) |
 | terms | "By creating an account or using CourtBook, you agree" | legal |
 | privacy | Card details handled by the payment provider (future) | proposed (payments phase) |
-| privacy | Installation identifier in native crash reports | decision: confirm on a staging crash report |
+| privacy | Installation identifier and device details in native crash reports (confirmed present, 23 Nov) | decision: remove in a new app version before live crash reporting, or declare |
+| privacy | Approximate location (country, city) Sentry derives for app reports | decision: Sentry setting (production monitoring, needs approval), or declare |
 | privacy | Provider list, locations, transfers outside Lebanon | legal |
 | privacy | Disclosure to authorities | legal |
 | privacy, delete-account | Retention of anonymised bookings and payments; server record retention; "within 30 days" | legal (L6, M2b) |

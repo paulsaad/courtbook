@@ -18,8 +18,8 @@ Legend:
 | Privacy policy and terms pages (`/privacy`, `/terms`) | **Built on this branch**, draft-marked, not published. Final text: Paul (operator, address, law) + Legal |
 | Account deletion: in-app path and web URL | **Ready.** Profile → Delete my account (app and website); public `/delete-account` (email route without the app). Two provisional phrases are now marked (M2b) |
 | Links to the legal pages in the app and the website | **Built on this branch.** Sign-in screen, Profile, Help & Feedback, the 18+ question, the deletion page. **Release order fixed (§1a):** live-app builds and updates refuse until the linked pages are final and public |
-| Apple App Privacy answers (§2) | **Ready**, one item to confirm (installation ID in native crash reports) |
-| Google Data safety answers (§3) | **Ready**, same item, plus "sharing with clubs" to confirm (Legal) |
+| Apple App Privacy answers (§2) | **Ready except two crash-report items** (installation ID confirmed present; Sentry-derived location): declare or remove (§9 E2, E2b) |
+| Google Data safety answers (§3) | **Ready except** the same two items, plus "sharing with clubs" to confirm (Legal) |
 | Age rating answers, both stores (§4) | **Ready** (18+ decided) |
 | Permissions (§5) | **Ready**: nothing to declare beyond Sign in with Apple |
 | Listing text (§6) | **Drafted**; app name and support URL: **Paul** |
@@ -57,7 +57,7 @@ the pages they open are official. The order is fixed:
 4. **Only then: app links distributed.** This means a live-app build or over-the-air update that contains the links,
    and the URLs entered in the store records (§1).
 
-**Check (built, read-only):** `mobile/scripts/check-legal-pages.mjs` (`npm run check:legal-pages` in `mobile/`)
+**Check (built, read-only):** `mobile/scripts/check-legal-pages.mjs` (`node scripts/check-legal-pages.mjs` in `mobile/`; deliberately not an npm script, because package.json scripts are part of the native fingerprint)
 fetches exactly the pages the app links to and checks step 3. It runs automatically:
 - before every **live** app build and every live over-the-air update or `check`, where it **refuses**;
 - for **staging**, where it only warns (staging builds are for testing);
@@ -84,11 +84,12 @@ data brokers).
 | User Content → Other User Content | Yes | Yes | App Functionality | game chat, game notes, reports (with a copy of the reported content) |
 | User Content → Customer Support | Yes | Yes | App Functionality | "Report an app problem / Suggest an improvement" (`send_feedback`) |
 | Identifiers → User ID | Yes | Yes | App Functionality | account ID |
-| Identifiers → Device ID | **To confirm** | No | App Functionality | only if the native crash reporter attaches an installation ID (§9 E2). If it does, declare; if not, omit |
+| Identifiers → Device ID | **Yes, unless removed** (confirmed 23 Nov: native crash reports carry an installation ID) | No | App Functionality | declare, or omit only if a new build's native filter removes it before live crash reporting (§9 E2) |
 | Purchases → Purchase History | Yes | Yes | App Functionality | bookings with their prices (paid at the desk today) |
 | Diagnostics → Crash Data | Yes | No | App Functionality | Sentry error reports with no user, account or IP |
 | Other Data → Other Data Types | Yes | Yes | App Functionality | 18+ answer, sports and playing level, community-rules acceptance |
-| Location, Health, Financial (payment) info, Sensitive info, Contacts, Browsing/Search history, Usage data, Performance data, Audio/Photos | No | — | — | none collected |
+| Location → Coarse Location | **To decide** (§9 E2b) | No | App Functionality | Sentry derives country and city from the connection for app reports. Declare, or omit only if the Sentry setting stops it |
+| Health, Financial (payment) info, Sensitive info, Contacts, Browsing/Search history, Usage data, Performance data, Audio/Photos, Precise location | No | — | — | none collected |
 
 Notes:
 - **App Functionality** includes "minimize app crashes" in Apple's definitions; there is no analytics use.
@@ -122,8 +123,9 @@ Notes:
 | App activity → Other user-generated content (game notes, reports, feedback) | Yes | **Yes** | App functionality |
 | App info and performance → Crash logs | Yes | No | Analytics (to fix problems) |
 | App info and performance → Diagnostics | Yes | No | Analytics |
-| Device or other IDs | **To confirm** (§9 E2) | No | Analytics |
-| Location, Financial (payment info), Health, Photos/videos, Audio, Files, Calendar, Contacts, Web browsing, Installed apps, Search history | No | — | — |
+| Device or other IDs | **Yes, unless removed** (§9 E2; confirmed present 23 Nov) | No | Analytics |
+| Location → Approximate location | **To decide** (§9 E2b) | No | Analytics |
+| Precise location, Financial (payment info), Health, Photos/videos, Audio, Files, Calendar, Contacts, Web browsing, Installed apps, Search history | No | — | — |
 
 ## 4. Age rating and target audience
 
@@ -299,7 +301,8 @@ Recommended before public launch. Availability on our Supabase plan is still to 
 | # | Work | Needs a native build? |
 | --- | --- | --- |
 | E1 | **Revoke Sign in with Apple tokens on account deletion** (Apple TN3194). The app sends only the identity token today; the server must exchange the authorization code at sign-in (or ask the user to sign in with Apple again when deleting) and call Apple's revoke endpoint in `/api/admin/delete-account` | No (JS + server), but needs the key from the Apple account |
-| E2 | Confirm whether native crash reports carry an installation ID (one test crash on staging); if they do, either declare it (§2/§3) or turn it off | No |
+| E2 | **Confirmed 23 Nov** (`docs/m5/crash-privacy.md`): native crash reports carry an installation ID, language, time zone, device state and the system's error message. Either a native filter (Expo config plugin with a native `beforeSend` on Android and iOS) in the next build, before crash reporting is switched on in the live app, or declare (§2/§3). **Paul decides** | Yes (native code; the fingerprint changes) |
+| E2b | App reports get a Sentry-derived country and city. Stop it with Sentry's setting (production monitoring: **needs approval**), or declare Coarse/Approximate location (§2/§3) | No |
 | E3 | Store builds with the `production` profile (exists: store distribution, auto-incremented build numbers); crash reporting on for the live apps (L11, needs the live DSN) | Yes (the store build itself) |
 | E4 | Google 512 px icon export; screenshots from the store build (§7) | No |
 | E5 | `/support` page if Paul wants a support URL other than the email | No |

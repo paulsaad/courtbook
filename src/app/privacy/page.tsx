@@ -77,11 +77,21 @@ export default function PrivacyPage() {
 
         <h3 className="mt-2 font-semibold">Error reports and server records</h3>
         <ul className="list-disc space-y-1 pl-5">
-          <li>When something goes wrong, the website and the app send an error report so we can fix it: the error, the
-            page or screen, the app version, and the device type and system version. Reports leave out your name, your account
-            and your network address, and email addresses are removed from them.{" "}
-            <Pending kind="decision">The app’s own crash reports may also carry a random identifier for the installation
-            (not linked to your account); to be confirmed on a test report before publication.</Pending></li>
+          <li>When something goes wrong, the website and the app send an error report so we can fix it. A report holds
+            the kind of error, where it happened in our code, the page or screen (with names, numbers and codes taken
+            out of its address), the app version, and the device type and system version. The text of an error is left
+            out unless it is one of our own fixed messages or an error code. Reports carry no name, account, email
+            address or network address.</li>
+          <li>For reports from the app, Sentry (the service that receives them) works out an approximate location
+            (country and city) from the connection. It does not keep the network address itself.{" "}
+            <Pending kind="decision">Whether Sentry is set to stop keeping this approximate location (a setting at
+            Sentry, not changed yet), or whether it is kept and declared.</Pending></li>
+          <li>If the app crashes in the phone’s own code rather than in ours, the phone’s part of Sentry builds the
+            report itself. Such a report also carries a random identifier for this installation of the app (not linked
+            to your account), the phone’s language and time zone, technical state such as memory, storage and battery,
+            and the system’s own error message, which our filtering does not reach.{" "}
+            <Pending kind="decision">Whether a new app version removes these before crash reporting is switched on in
+            the live app, or whether they are kept and declared in the stores.</Pending></li>
           <li>Our hosting and database providers keep ordinary server records, including network (IP) addresses, for
             security and to fix problems.</li>
         </ul>

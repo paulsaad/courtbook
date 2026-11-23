@@ -91,6 +91,8 @@ describe("crash reports: no free text, an allowlist of fields (M5 review)", () =
     expect(safeUrl("/u/p@x.com/a")).toBe("/u/[email]/a");
     expect(safeUrl("/call/+961 70 123 456")).toBe("/call/:id");
     expect(safeUrl("/q/Rami Haddad")).toBe("/q/:redacted");
+    // scrubbed twice (as the breadcrumb is recorded, then in the report): same result (seen on staging, 23 Nov)
+    for (const u of ["/booking/3f6e2b1c-9a4d-4c2e-8b7f-1a2b3c4d5e6f?t=x", "https://x.supabase.co/rest/v1/people/p@x.com/12345", "/q/Rami Haddad"]) expect(safeUrl(safeUrl(u))).toBe(safeUrl(u));
   });
 
   it("breadcrumbs are filtered as they are recorded (so the native layer's copy is clean too): navigation and HTTP only", () => {

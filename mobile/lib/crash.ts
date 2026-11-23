@@ -24,9 +24,10 @@ import { installedVariant } from "./appIdentity";
  *     identifier-shaped values; no device name, no time zone, no locale, no device hash;
  *   - never: user, IP address, server name, extra, request body/headers/cookies, modules, fingerprint.
  * Native side: no sessions (they carry an installation id), no automatic native breadcrumbs. A native
- * crash is built by the native SDK (beforeSend does not run there); it carries the already-filtered
- * breadcrumbs, the device contexts and the stack. What Sentry received is checked on staging
- * (docs/m5/crash-privacy.md).
+ * crash is built by the native SDK (beforeSend does not run there): it carries the already-filtered
+ * breadcrumbs, but also an installation ID, language, time zone, device state and the system's own
+ * error text, which only a native filter (new build) could remove — verified on staging, 23 Nov
+ * (docs/m5/crash-privacy.md), decision pending.
  */
 
 /** Our own fixed messages: they never contain anything about a person. */
@@ -57,7 +58,7 @@ export function safeUrl(v: unknown): string | undefined {
   const m = noQuery.match(/^([a-z][a-z0-9+.-]*:\/\/[^/]*)?(.*)$/i);
   const origin = m?.[1] ?? "";
   const path = (m?.[2] ?? "").split("/").map((seg) => {
-    if (seg === "" || seg === "[email]") return seg;
+    if (seg === "" || seg === "[email]" || seg === ":id" || seg === ":redacted") return seg;   // already scrubbed (idempotent)
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg)) return ":id";
     if (/^\d{3,}$/.test(seg) || /^[0-9a-f]{16,}$/i.test(seg) || /^[A-Za-z0-9_-]{24,}$/.test(seg)) return ":id";
     if (/\+?\d[\d\s-]{6,}/.test(seg)) return ":id";

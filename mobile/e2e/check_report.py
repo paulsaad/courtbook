@@ -11,7 +11,8 @@ Usage: check_report.py <logcat.txt> [--probe]
 """
 import json, os, re, sys
 
-PROBE = ["Probe Personname", "Probe", "Personname", "probe.person@example.com", "probe.person",
+# not a bare "Probe": the function sendPrivacyProbe is in every stack
+PROBE = ["Probe Personname", "Personname", "probe.person@example.com", "probe.person",
          "+961 70 123 456", "70 123 456", "70123456", "961%2070", "3f6e2b1c-9a4d-4c2e-8b7f-1a2b3c4d5e6f",
          "probetoken1234567890abcdef", "probe_name"]
 TOP = {"event_id", "timestamp", "platform", "level", "environment", "release", "dist", "sdk", "message",
