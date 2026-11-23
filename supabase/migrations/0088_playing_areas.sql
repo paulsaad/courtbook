@@ -73,8 +73,13 @@ language sql stable security definer set search_path = public as $$
         left join towns t on t.id = a.town_id
        where a.profile_id = auth.uid()), '[]'::jsonb),
     'last', (select case when p.last_governorate is null then null
-                         else jsonb_build_object('governorate', p.last_governorate, 'district', p.last_district, 'town', p.last_town) end
-               from player_prefs p where p.profile_id = auth.uid()))
+                         else jsonb_build_object('governorate', p.last_governorate, 'district', p.last_district, 'town', p.last_town,
+                                                 'label', coalesce(t.name_en, d.name_en, g.name_en)) end
+               from player_prefs p
+               left join governorates g on g.code = p.last_governorate
+               left join districts d on d.code = p.last_district
+               left join towns t on t.id = p.last_town
+              where p.profile_id = auth.uid()))
   where auth.uid() is not null;
 $$;
 revoke all on function my_playing_prefs() from public, anon;

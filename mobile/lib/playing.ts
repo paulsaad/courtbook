@@ -1,0 +1,55 @@
+import { useCallback } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { areasPayload, parsePlayingPrefs, type PlayingArea, type PlayingPrefs } from "@shared/places";
+import { supabase } from "./supabase";
+
+/**
+ * Saved playing areas and the last browsing area, on the account (0088), so a player who plays in Beirut in the week
+ * and Batroun at the weekend finds both on any device. `null` data = the server does not have 0088 yet: the screens
+ * then behave exactly as before (no chips, no question). Nothing here is a position.
+ */
+export const playingKeys = { mine: (userId: string) => ["playing-prefs", userId] as const };
+
+const missingFunction = (e: unknown) => {
+  const x = e as { code?: unknown; message?: unknown } | null;
+  return !!x && (x.code === "PGRST202" || (typeof x.message === "string" && /could not find the function/i.test(x.message)));
+};
+
+export async function fetchPlaying(): Promise<PlayingPrefs | null> {
+  const { data, error } = await supabase.rpc("my_playing_prefs");
+  if (error) { if (missingFunction(error)) return null; throw error; }
+  return parsePlayingPrefs(data);
+}
+
+export function usePlayingPrefs(userId: string | null) {
+  return useQuery({ queryKey: playingKeys.mine(userId ?? ""), enabled: !!userId, staleTime: 5 * 60_000, queryFn: fetchPlaying });
+}
+
+/** Replace the saved list (in order). Rejects with a short code ("too_many_areas", "bad_area", …). */
+export function useSaveAreas(userId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (areas: PlayingArea[]) => {
+      const { data, error } = await supabase.rpc("set_playing_areas", { p_areas: areasPayload(areas) });
+      if (error) throw new Error(typeof error.message === "string" && /^[a-z_]+$/.test(error.message) ? error.message : "failed");
+      return parsePlayingPrefs(data);
+    },
+    onSuccess: (next) => { if (userId) qc.setQueryData(playingKeys.mine(userId), next); },
+  });
+}
+
+/** "Not now" on the first-use question: never asked again, on any device. */
+export function useDismissQuestion(userId: string | null) {
+  const qc = useQueryClient();
+  return useCallback(async () => {
+    if (!userId) return;
+    qc.setQueryData<PlayingPrefs | null>(playingKeys.mine(userId), (p) => (p ? { ...p, asked: true } : p));
+    await supabase.rpc("dismiss_areas_question");
+  }, [qc, userId]);
+}
+
+/** Remember the area being browsed (best effort; the screen keeps working if it fails). */
+export function rememberArea(a: PlayingArea | null): void {
+  void Promise.resolve(supabase.rpc("set_last_area", { p_governorate: a?.governorate ?? null, p_district: a?.district ?? null, p_town: a?.district ? a.town : null }))
+    .catch(() => {});
+}

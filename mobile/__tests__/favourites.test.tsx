@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react
 import { act, renderHook, waitFor } from "@testing-library/react-native";
 import { supabase } from "../lib/supabase";
 import {
-  FAVOURITE_MESSAGES, FAVOURITES_AVAILABLE, favouriteFailure, favouriteKeys, FavouritesUnavailable, fetchFavourites, heartView,
+  FAVOURITE_MESSAGES, FAVOURITES_AVAILABLE, favouritesShown, favouriteFailure, favouriteKeys, FavouritesUnavailable, fetchFavourites, heartView,
   createFavouriteSync, saveFavourite, useFavourites, useFavouriteToggle, withFavourite,
 } from "../lib/favourites";
 
@@ -17,13 +17,19 @@ beforeEach(() => rpc.mockReset());
 const client = () => new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
 const wrap = (qc: QueryClient) => ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
 
-describe("not available until the migration is approved and applied", () => {
-  it("is switched off in this build: no call, no hearts", async () => {
-    expect(FAVOURITES_AVAILABLE).toBe(false);
-    await expect(fetchFavourites()).rejects.toBeInstanceOf(FavouritesUnavailable);
-    await expect(saveFavourite("c1", true)).rejects.toBeInstanceOf(FavouritesUnavailable);
+describe("available only where the server has 0087", () => {
+  // 23 Nov: the switch is on (0087 written); a server without the functions still means no call result, no hearts
+  it("switched on; a switched-off build makes no call and draws no hearts", async () => {
+    expect(FAVOURITES_AVAILABLE).toBe(true);
+    await expect(fetchFavourites(false)).rejects.toBeInstanceOf(FavouritesUnavailable);
+    await expect(saveFavourite("c1", true, false)).rejects.toBeInstanceOf(FavouritesUnavailable);
     expect(rpc).not.toHaveBeenCalled();
     expect(heartView({ signedIn: true, available: false, favourite: false, clubName: "X" }).visible).toBe(false);
+  });
+  it("hearts are shown only once the list loaded from a server that has 0087", () => {
+    expect(favouritesShown({ isSuccess: true, error: null })).toBe(true);
+    expect(favouritesShown({ isSuccess: false, error: new FavouritesUnavailable() })).toBe(false);
+    expect(favouritesShown({ isSuccess: false, error: null })).toBe(false);   // still loading: no heart that might lie
   });
   it("a server without the functions is 'unavailable', not an error to show", async () => {
     rpc.mockResolvedValueOnce({ data: null, error: { code: "PGRST202", message: "Could not find the function public.my_favourite_clubs" } });

@@ -162,7 +162,7 @@ select pg_temp.keep('l4_set', pg_temp.r(pg_temp.u(4), $q$select set_last_area('b
 select pg_temp.keep('l4_asked', pg_temp.prefs(pg_temp.u(4))->>'asked');
 insert into t values
   ('L1 the last area is remembered (district)', pg_temp.got('l1_set') = 'ok'
-     and pg_temp.got('l1_last')::jsonb = '{"governorate": "north", "district": "batroun", "town": null}'::jsonb, pg_temp.got('l1_last')),
+     and pg_temp.got('l1_last')::jsonb = '{"governorate": "north", "district": "batroun", "town": null, "label": "Batroun"}'::jsonb, pg_temp.got('l1_last')),
   ('L1 ... and a town', pg_temp.got('l1_town') = 'ok' and pg_temp.got('l1_town_last') = pg_temp.town('Batroun')::text, ''),
   ('L2 "All Lebanon" clears it', pg_temp.got('l2_clear') = 'ok' and pg_temp.got('l2_last') = 'null', pg_temp.got('l2_last')),
   ('L3 bad last areas refused (district elsewhere, district without governorate, town without district, town elsewhere)',

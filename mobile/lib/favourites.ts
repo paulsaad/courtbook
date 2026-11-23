@@ -9,11 +9,31 @@ import { classify, type Failure } from "./errors";
  * favourites (RLS + set_club_favourite), duplicates are impossible (primary key), inactive clubs
  * can't be added and aren't listed (my_favourite_clubs).
  *
- * The functions exist only after the favourites migration, which needs Paul's approval for staging
- * and live. Until it ships, FAVOURITES_AVAILABLE stays false: no call is made and no heart is shown.
- * A server without the functions (PostgREST PGRST202) is treated the same way.
+ * The functions exist from migration 0087 (approved design; applying it to staging and live needs Paul's go). The
+ * switch is on, but a server without the functions (PostgREST PGRST202) answers FavouritesUnavailable and the screens
+ * then draw no heart (`favouritesShown`), so this app works the same against a database with or without 0087.
  */
-export const FAVOURITES_AVAILABLE = false;
+export const FAVOURITES_AVAILABLE = true;
+
+/** Hearts and the Home row appear only once the list has loaded from a server that has 0087. */
+export function favouritesShown(q: { isSuccess: boolean; error: unknown }): boolean {
+  return q.isSuccess && !(q.error instanceof FavouritesUnavailable);
+}
+
+/** Home's "Your clubs" row: the favourites with what the row shows (name, town), across every region. */
+export type FavouriteClubRow = { club_id: string; name: string; slug: string; town: string | null; cover_url: string | null };
+export function useFavouriteClubRows(userId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["favourite-clubs", userId ?? ""],
+    enabled: !!userId && enabled,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("my_favourite_clubs");
+      if (error) throw missingFunction(error) ? new FavouritesUnavailable() : error;
+      return (data ?? []) as FavouriteClubRow[];
+    },
+  });
+}
 
 export const favouriteKeys = { mine: (userId: string) => ["favourites", userId] as const };
 

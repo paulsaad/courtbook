@@ -11,6 +11,7 @@ import { SportMark } from "../../components/SportMark";
 import { Ticket, TicketRow } from "../../components/Ticket";
 import { Button } from "../../components/Button";
 import { PendingReservationBanner } from "../../components/PendingReservation";
+import { AreasQuestionCard, YourClubsRow } from "../../components/HomeExtras";
 import { useSession } from "../../lib/session";
 import { firstName, useProfileName } from "../../lib/profile";
 import { splitAgenda, useAgenda } from "../../lib/bookings";
@@ -70,6 +71,7 @@ export default function Home() {
         {userId ? (hello ? `Ready to play, ${hello}?` : "Ready to play?") : "Book a court in Lebanon"}
       </Text>
       <PendingReservationBanner />
+      {userId ? <AreasQuestionCard userId={userId} /> : null}
 
       <View style={styles.bookCard}>
         <Pressable accessibilityRole="button" accessibilityLabel="Book a court" onPress={() => router.navigate("/courts")} style={styles.bookHead}>
@@ -93,6 +95,8 @@ export default function Home() {
           </ScrollView>
         )}
       </View>
+
+      {userId ? <YourClubsRow userId={userId} /> : null}
 
       <Pressable accessibilityRole="button" accessibilityLabel="Find a game" accessibilityHint="Games that need players"
                  onPress={() => router.push("/games")} style={({ pressed }) => [styles.gameCard, pressed && { opacity: 0.9 }]} testID="home-find-a-game">
