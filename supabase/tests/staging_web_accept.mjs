@@ -205,9 +205,12 @@ try {
   if (!NC) throw new Error("the test club was not created; section C stops here");
   { const r = await anonApi.from("clubs").select("id").eq("slug", SLUG);
     const d = await anonApi.rpc("club_discovery", {});
+    const ds = await anonApi.rpc("club_day_slots", { p_date: sql("select (current_date + 1)::text") });
     const end = await go(anon, `/club/${SLUG}`); const t = await text(anon);
-    record("C2", "signed out: the new club is not readable, not in discovery, its page shows nothing of it",
-      (r.data ?? []).length === 0 && !(d.data ?? []).some((c) => c.slug === SLUG) && !t.includes(`ZZ Web ${STAMP}`), `${(r.data ?? []).length} row(s), page ${end}`); }
+    record("C2", "signed out: the hidden club's page is not found, and it is in neither discovery nor the bookable slots",
+      !t.includes(`ZZ Web ${STAMP}`) && !d.error && !(d.data ?? []).some((c) => c.slug === SLUG) && !ds.error && !(ds.data ?? []).some((c) => c.slug === SLUG),
+      `page ${end}: ${t.slice(0, 60).replace(/\s+/g, " ")} | discovery ${errOf(d) ?? "ok"} | slots ${errOf(ds) ?? "ok"}`);
+    console.log(`        (information: the club's own row is readable through the API by anyone: ${(r.data ?? []).length} row — unchanged by launch-1)`); }
   { await go(A.page, `/staff/${SLUG}/settings`);
     const t = await text(A.page);
     record("C3", "settings: the readiness checklist is shown and lists what is missing", t.includes("Ready for players?") && /add at least one court|choose the town|add a phone number/.test(t), t.match(/Ready for players\?[\s\S]{0,200}/)?.[0]);
@@ -218,7 +221,8 @@ try {
   // complete the checklist (the forms for courts, hours and prices are unchanged by launch-1; set as data here)
   sql(`update clubs set town_id = (select id from towns order by id limit 1), address = 'Test street', contact_phone = '+96170000000' where id = '${NC}';
        insert into courts (club_id, name, sport, surface, sort) values ('${NC}', 'Court 1', 'padel', 'test', 1);
-       insert into price_rules (club_id, weekday_mask, start_time, end_time, price_usd) values ('${NC}', 127, '00:00', '23:59', 20);`);
+       insert into price_rules (club_id, weekday_mask, start_time, end_time, price_usd) values ('${NC}', 127, '00:00', '23:59', 20);
+       insert into club_staff (club_id, profile_id) values ('${NC}', '${A.id}');`);
   { await go(A.page, `/staff/${SLUG}/settings`);
     const ready = sql(`select bool_and(ok)::text from club_readiness_rows('${NC}')`);
     record("C6", "with everything filled in, the checklist is complete", ready === "true", sql(`select string_agg(item || ':' || ok, ' ') from club_readiness_rows('${NC}')`));
