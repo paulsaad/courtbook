@@ -126,7 +126,7 @@ insert into t values
   ('G9 on legal hold: kept', (select snapshot = 'old snapshot b' and note = 'old note b' from reports where id = pg_temp.u(303)), ''),
   ('G9 closed 100 days ago: kept', (select snapshot = 'recent snapshot' from reports where id = pg_temp.u(304)), ''),
   ('G9 open (even if old): kept', (select snapshot = 'open old snapshot' from reports where id = pg_temp.u(305)), ''),
-  ('G9 ...the clearing is logged with its count', (select count(*) = 1 from moderation_log where action = 'clear_text' and note like '1 report(s)%'), ''),
+  ('G9 ...the clearing is logged with its count', (select count(*) = 1 from moderation_log where action = 'clear_text' and note like '1 report text(s) and 0 log note(s)%'), ''),
   ('G9 a server job (no signed-in user) can run it too', pg_temp.r(null, 'select 1') = '1', '');
 do $$ begin
   perform clear_old_report_text();
@@ -150,6 +150,47 @@ insert into t values
      = 'legal_hold_on/G1,hide_message/G1,unsuspend/G1,suspend/G1,reopen/G2,resolve/G1', pg_temp.r(pg_temp.u(1), format($$select string_agg(action || '/' || admin_name, ',') from admin_moderation_log(null, %L)$$, pg_temp.u(4)))),
   ('G11 the board state: legal hold, history size', pg_temp.r(pg_temp.u(1), format($$select legal_hold || '/' || log_entries from admin_report_state(array[%L::uuid])$$, pg_temp.u(301))) = 'true/6', ''),
   ('G11 the log keeps ids, not names', not exists (select 1 from information_schema.columns where table_name = 'moderation_log' and column_name ~ 'name|phone|email'), '');
+
+-- ================= retention without a scheduler (review fix) =================
+-- old log entries (written directly with old dates: inserts are allowed, edits are not)
+insert into moderation_log (at, admin_id, action, report_id, profile_id, note) values
+  (now() - interval '200 days', pg_temp.u(1), 'resolve', pg_temp.u(302), pg_temp.u(4), 'm10 old note on a closed report'),
+  (now() - interval '200 days', pg_temp.u(1), 'legal_hold_on', pg_temp.u(303), pg_temp.u(5), 'm10 old note on a held report'),
+  (now() - interval '200 days', pg_temp.u(1), 'resolve', pg_temp.u(305), pg_temp.u(2), 'm10 old note on an open report'),
+  (now() - interval '200 days', pg_temp.u(1), 'unsuspend', null, pg_temp.u(4), 'm10 old note on a lifted suspension'),
+  (now() - interval '20 days', pg_temp.u(1), 'resolve', pg_temp.u(302), pg_temp.u(4), 'm10 recent note');
+insert into account_suspensions (profile_id, reason, suspended_by) values (pg_temp.u(5), 'm10 in force', pg_temp.u(1));
+insert into moderation_log (at, admin_id, action, profile_id, note) values (now() - interval '200 days', pg_temp.u(1), 'suspend', pg_temp.u(5), 'm10 old note on a suspension in force');
+-- a report closed long ago gets text again (as if filed then), then a player files a new report: the rule runs by itself
+update reports set snapshot = 'm10 should go', note = 'm10 should go' where id = pg_temp.u(302);
+insert into t values ('G12 a player files a new report (the normal report function)', pg_temp.r(pg_temp.u(3), format($$select report_content('player', %L, 'spam', null)::text$$, pg_temp.u(4))) not like 'ERR%', '');
+insert into t values
+  ('G12 ...the old report''s text was cleared automatically (no admin, no schedule)', (select snapshot is null and note is null from reports where id = pg_temp.u(302)), ''),
+  ('G12 log note older than 180 days on a closed report: cleared, entry kept', (select note is null and action = 'resolve' from moderation_log where at < now() - interval '199 days' and report_id = pg_temp.u(302)), ''),
+  ('G12 ...on a report under legal hold: kept', (select note = 'm10 old note on a held report' from moderation_log where report_id = pg_temp.u(303) and at < now() - interval '199 days'), ''),
+  ('G12 ...on an open report: kept', (select note = 'm10 old note on an open report' from moderation_log where report_id = pg_temp.u(305) and at < now() - interval '199 days'), ''),
+  ('G12 ...on a lifted suspension: cleared', (select note is null from moderation_log where action = 'unsuspend' and at < now() - interval '199 days'), ''),
+  ('G12 ...on a suspension still in force: kept', (select note = 'm10 old note on a suspension in force' from moderation_log where action = 'suspend' and profile_id = pg_temp.u(5)), ''),
+  ('G12 a recent note: kept', (select count(*) = 1 from moderation_log where note = 'm10 recent note'), ''),
+  ('G12 the automatic run records no admin', (select bool_and(admin_id is null) from moderation_log where action = 'clear_text' and note like '%log note(s)%' and note not like '1 report text(s) and 0 log note(s)%'), '');
+do $$ begin
+  update moderation_log set note = null where note = 'm10 recent note';
+  insert into t values ('G13 clearing a note outside the retention rule is refused', false, 'cleared');
+exception when others then insert into t values ('G13 clearing a note outside the retention rule is refused', sqlerrm like '%moderation_log_is_append_only%', sqlerrm);
+end $$;
+do $$ begin
+  perform set_config('courtbook.moderation_log_retention', 'on', true);
+  update moderation_log set action = 'reopen', note = null where note = 'm10 recent note';
+  insert into t values ('G13 even with the retention flag, only note -> null is allowed', false, 'changed');
+exception when others then insert into t values ('G13 even with the retention flag, only note -> null is allowed', sqlerrm like '%moderation_log_is_append_only%', sqlerrm);
+end $$;
+do $$ begin
+  perform set_config('courtbook.moderation_log_retention', 'on', true);
+  delete from moderation_log where note = 'm10 recent note';
+  insert into t values ('G13 ...and never a delete', false, 'deleted');
+exception when others then insert into t values ('G13 ...and never a delete', sqlerrm like '%moderation_log_is_append_only%', sqlerrm);
+end $$;
+select set_config('courtbook.moderation_log_retention', '', true);
 
 select case when pass then 'ok   ' else 'FAIL ' end || id || case when pass then '' else '  [' || coalesce(detail, '') || ']' end from t order by pass, id;
 select 'FAILED ' || count(*) filter (where not pass or pass is null) || ' of ' || count(*) from t;

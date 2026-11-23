@@ -36,8 +36,12 @@ mutants=(
   "M5 legal hold ignored by the clearing|s/   where status <> 'open' and not legal_hold and closed_at is not null/   where status <> 'open' and closed_at is not null/"
   "M6 clearing allowed early|s/  if p_days is null or p_days < 180 then raise exception 'too_soon'; end if;   -- never earlier than the stated rule/  null;/"
   "M7 suspensions not logged|s/  perform log_moderation('suspend', null, p_profile, null, trim(p_reason));/  null;/"
-  "M8 log editable|s/language plpgsql as \$\$ begin raise exception 'moderation_log_is_append_only'; end \$\$;/language plpgsql as \$\$ begin return coalesce(new, old); end \$\$;/"
+  "M8 log editable|s/  raise exception 'moderation_log_is_append_only';$/  return coalesce(new, old);/"
   "M9 log readable by anyone signed in|s/  if not is_admin() then raise exception 'forbidden'; end if;$/  null;/"
+  "M10 new reports do not run the retention rule|s/  perform enforce_report_retention(180);/  null;/"
+  "M11 log notes on held or open reports cleared|s/     and not exists (select 1 from reports r where r.id = l.report_id and (r.status = 'open' or r.legal_hold))/     and true/"
+  "M12 log notes never cleared|s/   where l.note is not null and l.action <> 'clear_text' and l.at < now() - make_interval(days => p_days)/   where false/"
+  "M13 retention flag allows any edit|s/     and new.note is null and (new.id, new.at, new.admin_id, new.action, new.report_id, new.profile_id, new.message_id)/     and true and (new.id, new.at)/;s/         is not distinct from (old.id, old.at, old.admin_id, old.action, old.report_id, old.profile_id, old.message_id) then/         is not distinct from (old.id, old.at) then/"
 )
 tmp=$(mktemp -d); chmod 755 "$tmp"
 for m in "${mutants[@]}"; do

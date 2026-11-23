@@ -52,7 +52,7 @@ export default function ReportsBoard({ status, reports, unavailable, failed, blo
   );
 }
 
-/** 0082: the 180-day rule, run by hand until a schedule exists. Never earlier than 180 days; legal holds are kept. */
+/** 0082: the 180-day rule. It also runs by itself (every new report, every visit to this page); this runs it now. */
 function ClearOldText() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -62,7 +62,7 @@ function ClearOldText() {
         setBusy(true); setMsg(null);
         const { data, error } = await createClient().rpc("clear_old_report_text", { p_days: 180 });
         setBusy(false);
-        setMsg(error ? friendlyError(error.message) : `Cleared the text of ${data ?? 0} report(s) closed over 180 days ago (legal holds kept).`);
+        setMsg(error ? friendlyError(error.message) : `Cleared ${data ?? 0} report text(s) and log note(s) past the 180-day rule (legal holds and open cases kept). This also runs by itself on every visit and every new report.`);
       }} className="rounded-xl border border-grid bg-white px-3 py-2">Clear text of reports closed over 180 days ago</button>
       {msg && <span role="status" className="text-muted">{msg}</span>}
     </div>

@@ -23,13 +23,21 @@ create index if not exists moderation_log_report_idx on moderation_log (report_i
 create index if not exists moderation_log_profile_idx on moderation_log (profile_id, at);
 alter table moderation_log enable row level security;
 revoke all on moderation_log from anon, authenticated;
--- append-only, also for the service role and the SQL editor (corrections are new rows, never edits)
+-- append-only, also for the service role and the SQL editor (corrections are new rows, never edits). The one change
+-- ever allowed is the retention rule below clearing a note: only inside enforce_report_retention, and only note → null.
 create or replace function moderation_log_append_only() returns trigger
-language plpgsql as $$ begin raise exception 'moderation_log_is_append_only'; end $$;
+language plpgsql as $$
+begin
+  if tg_op = 'UPDATE' and current_setting('courtbook.moderation_log_retention', true) = 'on'
+     and new.note is null and (new.id, new.at, new.admin_id, new.action, new.report_id, new.profile_id, new.message_id)
+         is not distinct from (old.id, old.at, old.admin_id, old.action, old.report_id, old.profile_id, old.message_id) then
+    return new;
+  end if;
+  raise exception 'moderation_log_is_append_only';
+end $$;
 drop trigger if exists moderation_log_append_only on moderation_log;
 create trigger moderation_log_append_only before update or delete on moderation_log
-  for each row when (current_setting('courtbook.moderation_log_maintenance', true) is distinct from 'on')
-  execute function moderation_log_append_only();
+  for each row execute function moderation_log_append_only();
 
 create or replace function log_moderation(p_action text, p_report uuid, p_profile uuid, p_message uuid, p_note text) returns void
 language sql security definer set search_path = public as $$
@@ -121,22 +129,55 @@ begin
   perform log_moderation(case when p_hold then 'legal_hold_on' else 'legal_hold_off' end, p_report, r.profile_id, r.message_id, trim(p_note));
 end $$;
 
--- the 180-day rule: once a report has been closed for 180 days, its free text (the snapshot of the reported content
--- and the reporter's note) is cleared. Reports on legal hold, and open reports, are never cleared. The report row
--- itself (kind, reason, dates, decision) stays. Admin or server context (a scheduled job) only.
-create or replace function clear_old_report_text(p_days int default 180) returns int
+-- The 180-day rule, enforced without a scheduler:
+--   * report text: once a report has been closed for 180 days, its free text (snapshot of the reported content,
+--     reporter's note) is cleared. Open reports and reports on legal hold are kept. The row (kind, reason, dates,
+--     decision) stays.
+--   * moderation-log notes (free text written by admins): cleared once the entry is 180 days old, unless its report
+--     is still open or on legal hold, or it concerns a suspension still in force. Action, date and ids stay.
+-- Runs on every new report (trigger) and whenever an admin opens the reports page; admins can also run it by hand.
+create or replace function enforce_report_retention(p_days int default 180) returns int
 language plpgsql security definer set search_path = public as $$
-declare n int;
+declare n int; m int;
 begin
-  if not (auth.uid() is null or is_admin()) then raise exception 'forbidden'; end if;
   if p_days is null or p_days < 180 then raise exception 'too_soon'; end if;   -- never earlier than the stated rule
   update reports set snapshot = null, note = null
    where status <> 'open' and not legal_hold and closed_at is not null and closed_at < now() - make_interval(days => p_days)
      and (snapshot is not null or note is not null);
   get diagnostics n = row_count;
-  if n > 0 then perform log_moderation('clear_text', null, null, null, n || ' report(s) closed over ' || p_days || ' days ago'); end if;
-  return n;
+  perform set_config('courtbook.moderation_log_retention', 'on', true);
+  update moderation_log l set note = null
+   where l.note is not null and l.action <> 'clear_text' and l.at < now() - make_interval(days => p_days)
+     and not exists (select 1 from reports r where r.id = l.report_id and (r.status = 'open' or r.legal_hold))
+     and not (l.action in ('suspend', 'unsuspend') and exists (select 1 from account_suspensions s where s.profile_id = l.profile_id));
+  get diagnostics m = row_count;
+  perform set_config('courtbook.moderation_log_retention', '', true);
+  if n + m > 0 then
+    insert into moderation_log (admin_id, action, note)      -- run by a player's new report: no admin recorded
+    values (case when is_admin() then auth.uid() end, 'clear_text', n || ' report text(s) and ' || m || ' log note(s) older than ' || p_days || ' days');
+  end if;
+  return n + m;
 end $$;
+revoke all on function enforce_report_retention(int) from public, anon, authenticated;
+
+-- admins (the reports page calls it on every visit) and server jobs
+create or replace function clear_old_report_text(p_days int default 180) returns int
+language plpgsql security definer set search_path = public as $$
+begin
+  if not (auth.uid() is null or is_admin()) then raise exception 'forbidden'; end if;
+  return enforce_report_retention(p_days);
+end $$;
+
+-- every new report (filed by any player) also runs it, so the rule holds even if no admin visits for months
+create or replace function reports_enforce_retention() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  perform enforce_report_retention(180);
+  return null;
+end $$;
+revoke all on function reports_enforce_retention() from public, anon, authenticated;
+drop trigger if exists reports_enforce_retention on reports;
+create trigger reports_enforce_retention after insert on reports for each statement execute function reports_enforce_retention();
 
 -- ============ reading ============
 create or replace function admin_moderation_log(p_report uuid default null, p_profile uuid default null)

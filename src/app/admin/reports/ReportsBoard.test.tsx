@@ -172,7 +172,7 @@ describe("Reports (admin), 0082 moderation readiness", () => {
     answer = (c) => c.fn === "clear_old_report_text" ? { data: 3, error: null } : { data: null, error: null };
     render(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} state={st()} />);
     fireEvent.click(screen.getByRole("button", { name: /Clear text of reports closed over 180 days ago/ }));
-    await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/Cleared the text of 3 report/));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/Cleared 3 report text/));
     expect(calls).toContainEqual({ fn: "clear_old_report_text", args: { p_days: 180 } });
   });
 });

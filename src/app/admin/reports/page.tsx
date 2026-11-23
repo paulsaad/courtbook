@@ -19,6 +19,10 @@ export default async function AdminReports({ searchParams }: { searchParams: Pro
   if (!me?.roles?.includes("admin")) return <main className="p-6">Admins only.</main>;
 
   const status = (STATUSES as readonly string[]).includes(q ?? "") ? (q as (typeof STATUSES)[number]) : "open";
+  // 0082: the 180-day retention rule runs on every visit (also on every new report, in the database), before anything is
+  // shown. Before 0082 the function is missing; any other failure stops the page (W1): text past the rule is never shown.
+  const retention = await supabase.rpc("clear_old_report_text", { p_days: 180 });
+  if (!(retention.error && isMissingFunction(retention.error))) loaded(retention, "the reports");
   const { data, error } = await supabase.rpc("admin_reports", { p_status: status });
   // before migration 0074 the function does not exist: say so instead of failing
   const missing = !!error && (error.code === "PGRST202" || /admin_reports/.test(error.message ?? ""));
