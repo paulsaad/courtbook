@@ -56,8 +56,8 @@ The app's legal links must not reach players before the pages they open are offi
 4. **Only then: the app's links.** The deferred PR (E8) adds them to the sign-in screen and Help. After that come a
    live-app build or over-the-air update, and the URLs entered in the store records (§1).
 
-**Separated (review, 23 Nov).** The app-side links are **not in this PR**: they are in a separate draft PR, based on
-this branch, to merge only after step 3. This PR keeps the page URLs (`mobile/lib/legal.ts`, used by no screen yet)
+**Separated (review, 23 Nov).** The app-side links are **not in this PR**: they are in **draft PR #15**, based on this
+branch, to merge only after step 3. This PR keeps the page URLs (`mobile/lib/legal.ts`, used by no screen yet)
 and the check.
 
 **Check (built, read-only):** `mobile/scripts/check-legal-pages.mjs` fetches the pages the app links to and checks
@@ -310,12 +310,13 @@ Recommended before public launch. Availability on our Supabase plan is still to 
 | E5 | `/support` page if Paul wants a support URL other than the email | No |
 | E6 | Before submission: payments phase (M12), live rollout of launch-1 and 0085, demo club hidden (M7), age switch on, outside VoiceOver/TalkBack check | Payments: yes |
 | E7 | Reviewer access (§8), **closer to store submission**: checks V1–V3 (read-only); visible password entry in the store build (reuse of the Staging form); reviewer account and Review Club prepared; optional server-side restriction (hook) | No (JS); ships with the store build |
-| E8 | App legal links: the deferred PR (sign-in and Help links), merged after §1a steps 1–3 | No (JS) |
+| E8 | App legal links: deferred **PR #15** (sign-in and Help links), merged after §1a steps 1–3 | No (JS) |
 
 ## Sources (official, read 23 Nov 2026)
 - Apple: Updated age ratings in App Store Connect; Age Rating Updates (required since 31 Jan 2026).
 - Apple: App Review Guidelines 1.2 (user-generated content), 2.1(a) (demo account; demo mode only with prior approval), 2.5.19 (no hidden features), 5.1.1(v) (account deletion).
 - Google: Requirements for providing login credentials for app access (answer 15748846); App content, sign-in details (9859455).
+- Sentry: Server-Side Data Scrubbing (geo data is derived from the IP even with IP storage off; removed by an Advanced Data Scrubbing rule on `$user.geo.**`).
 - Apple: Offering account deletion in your app; TN3194 (revoking Sign in with Apple tokens).
 - Apple: App privacy details on the App Store; Screenshot specifications (App Store Connect Help).
 - Google: Understanding Google Play's app account deletion requirements (answer 13327111).
