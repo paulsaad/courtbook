@@ -235,6 +235,13 @@ begin
   perform lock_courts(coalesce((select array_agg(distinct b.court_id) from bookings b
      where b.court_id is not null and b.status in ('confirmed', 'pending')
        and (b.player_id = p_subject or b.id in (select m.booking_id from matches m where m.organizer_id = p_subject))), '{}'));
+  -- Wait for any booking, game or message for this person still being written by another transaction: each holds a
+  -- key-share lock on the profile row (foreign-key check) until it commits, and FOR UPDATE waits for it. New ones are
+  -- refused by the insert guards, since the request is open. Then lock any court that only now appears (a hold placed
+  -- on a court none of their bookings used): the cancellation loop below sees and cancels it.
+  perform 1 from profiles where id = p_subject for update;
+  perform lock_courts(coalesce((select array_agg(distinct b.court_id) from bookings b
+     where b.court_id is not null and b.status in ('confirmed', 'pending') and b.player_id = p_subject), '{}'));
   select name into v_name from profiles where id = p_subject;
 
   -- (a) upcoming games they organise: cancelled, players told (before the bookings, so no "court lost" notices)
