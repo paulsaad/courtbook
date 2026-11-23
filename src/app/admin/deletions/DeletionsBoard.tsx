@@ -42,10 +42,22 @@ const ERRORS: Record<string, string> = { ...REFUSALS, forbidden: "Admins only, a
 const OUTCOMES: Record<string, string> = { done: "Finished.", held: "Held: cancellations done; waiting for review.",
   leased: "Another run is working on it right now. Try again in a few minutes.", busy: "Another run is working on it right now.",
   lease_lost: "Another run took over. Reload the page." };
+/** The retry worker's last clean run (0086 admin_deletion_worker). The app offers one-step deletion only while
+ *  `active` (a run in the last hour); the website processes inline either way. */
+export type Worker = { last_run_at: string | null; active: boolean };
 const when = (t: string | null) => (t ? formatInTimeZone(new Date(t), "Asia/Beirut", "d MMM HH:mm") : "—");
 
-export default function DeletionsBoard({ rows, progress, unavailable, failed, selfId }:
-  { rows: Deletion[]; progress: Progress[]; unavailable: boolean; failed: boolean; selfId: string }) {
+export function WorkerStatus({ worker }: { worker: Worker | null }) {
+  if (!worker) return null;
+  if (!worker.last_run_at) return <p role="status" className="card p-4 text-sm text-cedar">Automatic processing has never run here. Deleting an
+    account from the app is paused (the app points people to the website); deletions on the website still run at once.</p>;
+  if (worker.active) return <p role="status" className="text-sm text-muted">Automatic processing: last run {when(worker.last_run_at)}.</p>;
+  return <p role="status" className="card p-4 text-sm text-cedar">Automatic processing last ran {when(worker.last_run_at)}, over an hour ago.
+    Deleting an account from the app is paused until it runs again; deletions on the website still run at once.</p>;
+}
+
+export default function DeletionsBoard({ rows, progress, unavailable, failed, selfId, worker = null }:
+  { rows: Deletion[]; progress: Progress[]; unavailable: boolean; failed: boolean; selfId: string; worker?: Worker | null }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<Record<string, string>>({});
@@ -72,6 +84,7 @@ export default function DeletionsBoard({ rows, progress, unavailable, failed, se
       <h1 className="text-2xl font-extrabold tracking-tight">Account deletions</h1>
       <p className="text-sm text-muted">Accounts are closed the moment the person confirms; the deletion then runs by itself. Listed here until it
         finishes. Retry runs the remaining steps now; Release continues a held account. Neither can be undone.</p>
+      {!unavailable && <WorkerStatus worker={worker} />}
       {unavailable && <p className="card p-4 text-sm">One-step account closing is not set up in this database yet (migration 0086).</p>}
       {failed && <p role="alert" className="card p-4 text-sm text-cedar">The list could not be loaded. Reload the page.</p>}
       {!unavailable && !failed && rows.length === 0 && <p className="card p-4 text-sm">Nothing in progress.</p>}
