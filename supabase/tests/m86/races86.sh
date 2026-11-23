@@ -40,10 +40,12 @@ select b.id, '$P', b.club_id, 'simulated', 20, 1, 21, 'paid', now() from booking
 insert into matches (id, club_id, sport, organizer_id, start_at, end_at, players_needed, status, join_mode)
 select '$G', id, 'padel', '$P', now() + interval '3 days', now() + interval '3 days 90 min', 3, 'open', 'open' from clubs where slug = 'batroun';
 insert into match_players (match_id, profile_id, status) values ('$G', '$P2', 'accepted');
+insert into deletion_worker (id, last_run_at) values (true, now()) on conflict (id) do update set last_run_at = now();   -- processing running
 SQL
 }
 who() { if [ "$1" = service ]; then echo "set local role service_role; select set_config('request.jwt.claim.sub', '', true);"
-        else echo "set local role authenticated; select set_config('request.jwt.claim.sub', '$1', true);"; fi; }
+        else echo "set local role authenticated; select set_config('request.jwt.claim.sub', '$1', true);
+                   select set_config('request.jwt.claims', json_build_object('sub', '$1', 'amr', json_build_array(json_build_object('method', 'otp', 'timestamp', extract(epoch from now())::bigint)))::text, true);"; fi; }   # signed in just now (0086 review)
 race() {    # $1 who A, $2 statement A (held 2 s), $3 who B, $4 statement B
   ( $PSQL -X -q -At -d $DB -v ON_ERROR_STOP=1 >$W/a.out 2>&1 <<SQL
 begin; $(who "$1") $2; select pg_sleep(2); commit;

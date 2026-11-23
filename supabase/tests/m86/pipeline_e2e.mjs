@@ -25,6 +25,9 @@ async function call(client, who, fn, args) {
     await client.query("begin");
     await client.query(who === "service" ? "set local role service_role" : "set local role authenticated");
     await client.query("select set_config('request.jwt.claim.sub', $1, true)", [who === "service" ? "" : who]);
+    // a person signed in just now (0086 review: closing needs a recent sign-in; the token carries the time, "amr")
+    await client.query("select set_config('request.jwt.claims', $1, true)", [who === "service" ? "" :
+      JSON.stringify({ sub: who, role: "authenticated", amr: [{ method: "otp", timestamp: Math.floor(Date.now() / 1000) }] })]);
     const r = await client.query(sql, names.map((n) => args[n]));
     await client.query("commit");
     return { data: r.rows[0].r, error: null };
@@ -37,17 +40,31 @@ async function call(client, who, fn, args) {
 let inject = {};        // step name → "error" | "kill"
 let after = null;       // step name after which the process dies
 const hang = () => new Promise(() => {});
-function depsFor(client) {
-  let dead = false;
+/**
+ * pause: { at: k } — after this run's k-th call, wait until `release()` (a slow worker, not a dead one: it carries on).
+ * `paused` resolves when it has stopped there. log: the calls it made, in order.
+ */
+function depsFor(client, pause = null) {
+  let dead = false, n = 0;
+  const log = [];
+  let release = () => {};
+  const gateOpen = pause ? new Promise((r) => { release = r; }) : null;
+  let markPaused = () => {};
+  const paused = pause ? new Promise((r) => { markPaused = r; }) : null;
   const gate = async (name, run) => {
     if (dead) return hang();
+    if (pause && n >= pause.at) await gateOpen;
+    n++;
+    log.push(name);
     if (inject[name] === "kill") { dead = true; return hang(); }
     if (inject[name] === "error") return null;
     const out = await run();
     if (after === name) { dead = true; after = null; }
+    if (pause && n === pause.at) markPaused();
     return out;
   };
   return {
+    log, paused, release: () => release(),
     rpc: async (fn, args) => (await gate(fn, () => call(client, "service", fn, args))) ?? { data: null, error: { message: "injected", code: "XX000" } },
     banUser: async (id) => (await gate("ban", async () => {
       const n = (await client.query("select 1 from auth.users where id = $1", [id])).rowCount;
@@ -90,7 +107,8 @@ async function game(n, other) {
   await q("insert into match_players (match_id, profile_id, status) values ($1, $2, 'accepted')", [g, id(other)]);
   return g;
 }
-const status = (n) => one("select status from account_deletions where subject_id = $1 order by requested_at desc limit 1", [id(n)]);
+// the open record if there is one (a cancelled earlier request can be newer than a backdated one)
+const status = (n) => one("select status from account_deletions where subject_id = $1 order by (status not in ('cancelled', 'done')) desc, requested_at desc limit 1", [id(n)]);
 const authExists = async (n) => (await one("select count(*)::int from auth.users where id = $1", [id(n)])) === 1;
 const banned = async (n) => (await one("select count(*)::int from e2e_bans where id = $1", [id(n)])) === 1;
 const notices = (other, g) => one("select count(*)::int from notifications where profile_id = $1 and match_id = $2", [id(other), g]);
@@ -210,6 +228,76 @@ rep("E8: three failed runs → listed as stuck", JSON.stringify(att).includes(id
 await call(db, "service", "mark_deletion_alerted", { p_subject: id(61) });
 att = (await call(db, "service", "deletions_needing_attention", {})).data;
 rep("E8: once alerted, not listed again", !JSON.stringify(att).includes(id(61)));
+
+// E9 (review 23 Nov, finding 5): a SLOW worker A stops after its k-th call; its lease expires; worker B takes over.
+// Then A carries on. Whatever A does after that, the end state is the same as one clean run: done, sign-in gone, one
+// notice, nothing under the name, no error recorded by A. A must never report "done" for a record B finished.
+async function takeover(k, m, label) {
+  reset();
+  const n0 = 70 + takeover.count++;
+  await person(n0, `Takeover ${label}`); await booking(n0); await booking(n0); const g = await game(n0, 99);
+  await close(n0);
+  const ca = await newClient(), cb = await newClient();
+  const A = depsFor(ca, { at: k });
+  const runA = processDeletion(id(n0), A);
+  await A.paused;
+  await expireLease(n0);
+  let outB;
+  if (m == null) {
+    outB = await processDeletion(id(n0), depsFor(cb));
+  } else {   // B is slow too: A resumes while B is in the middle
+    const B = depsFor(cb, { at: m });
+    const runB = processDeletion(id(n0), B);
+    await B.paused;
+    A.release();
+    const a0 = await runA;
+    B.release();
+    outB = await runB;
+    await ca.end(); await cb.end();
+    return check(n0, g, a0, outB, label, A.log);
+  }
+  A.release();
+  const outA = await runA;
+  await ca.end(); await cb.end();
+  return check(n0, g, outA, outB, label, A.log);
+}
+takeover.count = 0;
+async function check(n0, g, outA, outB, label, logA) {
+  const st = await q("select status, last_error, lease_until is null as free from account_deletions where subject_id = $1", [id(n0)]);
+  const ok = st[0].status === "done" && st[0].last_error === null && !(await authExists(n0)) && await banned(n0)
+    && (await notices(99, g)) === 1 && (await named(n0)) === 0
+    && (await one("select count(*)::int from account_deletions where subject_id = $1", [id(n0)])) === 1;
+  rep(`E9 ${label}: final state as one clean run (done, sign-in gone, banned, 1 notice, nothing named, no error, 1 record)`, ok,
+      JSON.stringify({ st, outA, outB, logA }));
+  // A records nothing after the takeover (no error, no second record: checked above) and what it reports is true: it
+  // lost the lease, or (paused just before the idempotent finish) the record really is done
+  rep(`E9 ${label}: the slow worker stops (lease_lost) or reports only what is true; it records nothing`,
+      outA.result === "lease_lost" || (outA.result === "done" && st[0].status === "done") || (outA.result === "failed" && st[0].last_error === null),
+      JSON.stringify({ outA, logA }));
+  rep(`E9 ${label}: the worker that took over finished it`, outB.result === "done" || outB.result === "lease_lost" || (outB.result === "skipped" && outB.reason === "done"), JSON.stringify(outB));
+}
+console.log("== E9 a slow worker resumes after its lease expired and another took over");
+// A's calls: 1 claim, 2 ban, 3 record banned, 4 renew, 5 data, 6 renew, 7 sign-in delete, 8 renew, 9 finish
+for (const k of [1, 2, 3, 4, 5, 6, 7, 8]) await takeover(k, null, `A paused after call ${k}, B runs to the end, then A carries on`);
+for (const [k, m] of [[3, 4], [4, 6], [5, 5], [6, 4], [7, 2]]) await takeover(k, m, `A paused after ${k}, B paused after ${m}; A resumes first, then B`);
+
+// E10 (review 23 Nov, finding 3): an older app's request, end to end
+console.log("== E10 an older app's request: cancellable for 24 hours, then processed automatically");
+reset(); await person(91, "Old app"); await booking(91); const g10 = await game(91, 99);
+const req = (n) => call(db, id(n), "request_account_deletion", { p_via: "app" });
+let r10 = await req(91);
+rep("E10: the older app's request is accepted (requested)", r10.data?.status === "requested", JSON.stringify(r10));
+out = await processDeletion(id(91), deps);
+rep("E10: not processed during the grace period", out.result === "skipped" && out.reason === "requested" && await authExists(91), JSON.stringify(out));
+rep("E10: cancel works during the grace period", !(await call(db, id(91), "cancel_account_deletion", {})).error && (await status(91)) === "cancelled");
+r10 = await req(91);
+await q("update account_deletions set requested_at = now() - interval '25 hours' where subject_id = $1 and status = 'requested'", [id(91)]);
+const p10 = await call(db, "service", "promote_due_requests", {});
+rep("E10: after 24 hours the worker promotes it", p10.data === 1 && (await status(91)) === "closing", JSON.stringify(p10));
+out = await processDeletion(id(91), deps);
+rep("E10: then processes it like any closure (done, sign-in gone, one notice)", out.result === "done" && !(await authExists(91)) && (await notices(99, g10)) === 1, JSON.stringify(out));
+rep("E10: the person's earlier cancelled request is kept as history; one open record at a time",
+    (await one("select string_agg(status, ',' order by status) from account_deletions where subject_id = $1", [id(91)])) === "cancelled,done");
 
 await db.end();
 console.log(`\nsummary: ${oks} ok, ${fails} FAIL`);

@@ -9,10 +9,18 @@ create temp table t (id text, pass boolean, detail text);
 insert into t values ('E0 the migration applies twice without error', true, '');
 
 -- run q as user `who` (null = signed out); returns its single value, 'ok', or 'ERR <message>'
-create function pg_temp.r(who uuid, q text) returns text language plpgsql as $f$
-declare res text;
+-- signed in `age` ago (the access token's amr timestamp, as Supabase sets it); default: just now
+create function pg_temp.claims(who uuid, age interval default interval '0') returns void language plpgsql as $f$
 begin
   perform set_config('request.jwt.claim.sub', coalesce(who::text, ''), true);
+  perform set_config('request.jwt.claims', case when who is null then '' else
+    jsonb_build_object('sub', who, 'role', 'authenticated', 'amr', jsonb_build_array(jsonb_build_object('method', 'otp',
+      'timestamp', extract(epoch from now() - age)::bigint)))::text end, true);
+end $f$;
+create function pg_temp.r(who uuid, q text, age interval default interval '0') returns text language plpgsql as $f$
+declare res text;
+begin
+  perform pg_temp.claims(who, age);
   if who is null then execute 'set local role anon'; else execute 'set local role authenticated'; end if;
   begin
     if q ~* '^\s*select' then execute q into res; else execute q; end if;
@@ -21,6 +29,7 @@ begin
   end;
   execute 'reset role';
   perform set_config('request.jwt.claim.sub', '', true);
+  perform set_config('request.jwt.claims', '', true);
   return res;
 end $f$;
 -- the same with the service key (no signed-in person): the website's server
@@ -48,6 +57,7 @@ begin
 end $f$;
 grant all on t to anon, authenticated, service_role;
 create function pg_temp.u(n int) returns uuid language sql as $$ select ('d8600000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid $$;
+insert into deletion_worker (id, last_run_at) values (true, now()) on conflict (id) do update set last_run_at = now();   -- processing running
 create function pg_temp.club() returns uuid language sql as $$ select id from clubs where slug = 'batroun' $$;
 insert into courts (id, club_id, name, sport, active, sort)
 select 'd8600000-0000-4000-8000-000000000900', id, 'M86 court', 'padel', true, 99 from clubs where slug = 'batroun';
@@ -64,7 +74,8 @@ create function pg_temp.pay(b uuid, who uuid, st payment_status) returns void la
 -- a fresh token from a claim, as the server would hold it
 create function pg_temp.claim(n int) returns uuid language sql as $$ select (pg_temp.s(format('select claim_deletion(%L)::text', pg_temp.u(n)))::jsonb->>'token')::uuid $$;
 create function pg_temp.rec(n int) returns account_deletions language sql as $$
-  select * from account_deletions where subject_id = pg_temp.u(n) order by requested_at desc limit 1 $$;
+  -- the open record if there is one (in one transaction every now() is equal, so time alone cannot order them)
+  select * from account_deletions where subject_id = pg_temp.u(n) order by (status not in ('cancelled', 'done')) desc, requested_at desc, id limit 1 $$;
 
 -- fixtures. 1 normal player; 2 other player; 3 admin; 4 club staff; 5 reported player under legal hold; 6 coach with a
 -- coach booking; 7 suspended player; 8 retry player; 9 asked by email (support); 10 auth-before-data; 11 old request
@@ -103,15 +114,33 @@ insert into bookings (club_id, coach_id, player_id, created_by, start_at, end_at
 values (pg_temp.club(), pg_temp.u(406), pg_temp.u(2), pg_temp.u(2), now() + interval '4 days', now() + interval '4 days 1 hour', 'confirmed', 'app');
 alter table bookings enable trigger user;
 insert into account_suspensions (profile_id, reason, suspended_by) values (pg_temp.u(7), 'm86 suspension', pg_temp.u(3));
+create function pg_temp.set_noamr() returns void language plpgsql as $f$
+declare me uuid := pg_temp.u(13);
+begin
+  -- a token without a sign-in time, and one with a malformed time
+  perform set_config('request.jwt.claim.sub', me::text, true);
+  perform set_config('request.jwt.claims', jsonb_build_object('sub', me, 'role', 'authenticated')::text, true);
+  execute 'set local role authenticated';
+  begin perform close_my_account('web'); insert into k values ('k3a', 'ok'); exception when others then insert into k values ('k3a', 'ERR ' || sqlerrm); end;
+  perform set_config('request.jwt.claims', jsonb_build_object('sub', me, 'amr', jsonb_build_array(jsonb_build_object('method', 'otp', 'timestamp', 'soon')))::text, true);
+  begin perform close_my_account('web'); insert into k values ('k3b', 'ok'); exception when others then insert into k values ('k3b', 'ERR ' || sqlerrm); end;
+  execute 'reset role';
+  perform set_config('request.jwt.claim.sub', '', true);
+  perform set_config('request.jwt.claims', '', true);
+end $f$;
+-- after a cancelled request the account writes again (the lock-out is lifted)
+create function update_my_profile_name_probe() returns text language plpgsql as $f$
+begin update profiles set name = name where id = auth.uid(); return 'ok'; end $f$;
+grant execute on function update_my_profile_name_probe() to authenticated;
 create temp table tok (k text primary key, v uuid);
 grant all on tok to service_role;
 
 -- ================= E: schema =================
 insert into t values
-  ('E1 every table but account_deletions has the closed-account lock-out (a new table must get it too)',
-     (select count(*) = 0 from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p') and c.relname <> 'account_deletions'
+  ('E1 every table but account_deletions and the worker heartbeat has the closed-account lock-out (a new table must get it too)',
+     (select count(*) = 0 from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p') and c.relname not in ('account_deletions', 'deletion_worker')
         and not exists (select 1 from pg_trigger g where g.tgrelid = c.oid and g.tgname = 'closed_account_lockout')),
-     (select string_agg(c.relname, ', ') from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p') and c.relname <> 'account_deletions'
+     (select string_agg(c.relname, ', ') from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p') and c.relname not in ('account_deletions', 'deletion_worker')
         and not exists (select 1 from pg_trigger g where g.tgrelid = c.oid and g.tgname = 'closed_account_lockout'))),
   ('E2 exactly one delete_account_data (the old one-argument version is gone)', (select count(*) = 1 from pg_proc where proname = 'delete_account_data' and pronamespace = 'public'::regnamespace), ''),
   ('E2 players and signed-out visitors cannot run the server steps',
@@ -172,8 +201,8 @@ insert into t values
   ('F4 another player is unaffected (books, chats)', pg_temp.r(pg_temp.u(2), format($$select hold_slot(%L, %L, %L, %L, gen_random_uuid())::text$$,
      pg_temp.club(), pg_temp.court(), pg_temp.at(8, 6), pg_temp.at(8, 6) + interval '60 min')) not like 'ERR%'
      and pg_temp.r(pg_temp.u(2), format($$insert into match_messages (match_id, profile_id, body) values (%L, auth.uid(), 'still here')$$, pg_temp.u(102))) = 'ok', ''),
-  ('F5 no undo (D1): cancel is not available to players', pg_temp.r(pg_temp.u(1), $$select cancel_account_deletion()::text$$) like 'ERR%permission denied%', ''),
-  ('F5 the old request function is not available to players', not has_function_privilege('authenticated', 'request_account_deletion(text)', 'execute'), '');
+  ('F5 no undo (D1): a closed account cannot be cancelled', pg_temp.r(pg_temp.u(1), $$select cancel_account_deletion()::text$$) like 'ERR no_open_request%', ''),
+  ('F5 an older app asking again gets the closed record back (no second record, no undo)', pg_temp.r(pg_temp.u(1), $$select request_account_deletion()->>'status'$$) in ('closing', 'closed'), '');
 
 -- ================= G: the pipeline for player 1 =================
 insert into tok select 'p1', pg_temp.claim(1);
@@ -306,10 +335,119 @@ insert into t values
   ('I3 the admin sees progress (codes and dates only)', pg_temp.r(pg_temp.u(3), format($$select status || '/' || coalesce(held_reason, '-') from admin_deletion_progress() where subject_id = %L$$, pg_temp.u(6))) = 'held/coach_has_bookings', ''),
   ('I3 a player cannot', pg_temp.r(pg_temp.u(2), $$select count(*)::text from admin_deletion_progress()$$) like 'ERR forbidden%', ''),
   ('I3 the admin list (0079 shape) shows the new states', pg_temp.r(pg_temp.u(3), $$select count(*)::text from admin_account_deletions()$$) = (select count(*)::text from account_deletions where status in ('closing', 'closed', 'held', 'data_removed')), '');
--- an open request of the old flow becomes a closure when 0086 is applied
+-- an open request of the old flow stays a request when 0086 is applied (review 23 Nov: it was promised cancellable)
 insert into account_deletions (subject_id, requested_via, status) values (pg_temp.u(11), 'app', 'requested');
 \i :mig
-insert into t values ('I4 an old open request becomes a closure on applying 0086', (select status = 'closing' and closing_at is not null from pg_temp.rec(11)), '');
+insert into t values ('I4 an old open request stays a request on applying 0086 (processed after the grace period)', (select status = 'requested' and closing_at is null from pg_temp.rec(11)), '');
+
+-- ================= review 23 Nov =================
+-- Every call that changes data runs on its own and its answer is kept; checks only read (evaluation order).
+create temp table k (id text primary key, v text);
+grant all on k to anon, authenticated, service_role;
+create function pg_temp.keep(i text, v text) returns void language sql as $$ insert into k values (i, v) $$;
+create function pg_temp.got(i text) returns text language sql as $$ select v from k where id = i $$;
+insert into auth.users (id, phone) select pg_temp.u(n), '+9617860' || lpad(n::text, 2, '0') from generate_series(13, 22) n;
+update profiles set name = 'Review ' || right(id::text, 2), rules_accepted_at = now() where id in (select pg_temp.u(n) from generate_series(13, 22) n);
+
+-- K: recent sign-in (finding 2) -------------------------------------------------------------------------------------
+select pg_temp.keep('k1', pg_temp.r(pg_temp.u(13), $$select close_my_account('web')::text$$, interval '2 hours'));
+select pg_temp.keep('k1_rows', (select count(*)::text from account_deletions where subject_id = pg_temp.u(13)));
+select pg_temp.keep('k2', pg_temp.r(pg_temp.u(13), $$select close_my_account('web')::text$$, interval '11 minutes'));
+select pg_temp.set_noamr();
+select pg_temp.keep('k4', pg_temp.r(pg_temp.u(13), $$select close_my_account('web')->>'status'$$, interval '9 minutes'));
+select pg_temp.keep('k5', pg_temp.s(format($$select admin_record_deletion_request(%L)::text$$, pg_temp.u(14))));
+insert into t values
+  ('K1 a session signed in 2 hours ago cannot close the account; nothing written',
+     pg_temp.got('k1') = 'ERR reauth_required' and pg_temp.got('k1_rows') = '0', pg_temp.got('k1')),
+  ('K2 11 minutes is too old (the window is 10)', pg_temp.got('k2') = 'ERR reauth_required', pg_temp.got('k2')),
+  ('K3 a token with no sign-in time, or a malformed one, counts as not recent', pg_temp.got('k3a') = 'ERR reauth_required' and pg_temp.got('k3b') = 'ERR reauth_required', pg_temp.got('k3a') || ' / ' || pg_temp.got('k3b')),
+  ('K4 signed in 9 minutes ago: closes', pg_temp.got('k4') = 'closing', pg_temp.got('k4')),
+  ('K5 support (an admin, after checking identity by email) is not asked for the person''s sign-in', pg_temp.got('k5') = 'ok', pg_temp.got('k5'));
+
+-- W: the app closes only while automatic processing is running (finding 1) --------------------------------------------
+update deletion_worker set last_run_at = now() - interval '61 minutes';
+select pg_temp.keep('w1', pg_temp.r(pg_temp.u(15), $$select close_my_account('app')::text$$));
+select pg_temp.keep('w1_rows', (select count(*)::text from account_deletions where subject_id = pg_temp.u(15)));
+select pg_temp.keep('w1_active', pg_temp.r(pg_temp.u(15), $$select deletion_processing_active()::text$$));
+select pg_temp.keep('w2', pg_temp.r(pg_temp.u(16), $$select close_my_account('web')->>'status'$$));
+select pg_temp.keep('w3', pg_temp.s($$select record_deletion_worker_run('{"done": 1}'::jsonb)::text$$));
+select pg_temp.keep('w3_active', pg_temp.r(pg_temp.u(15), $$select deletion_processing_active()::text$$));
+select pg_temp.keep('w4', pg_temp.r(pg_temp.u(15), $$select close_my_account('app')->>'status'$$));
+select pg_temp.keep('w5_player', pg_temp.r(pg_temp.u(17), $$select record_deletion_worker_run()::text$$));
+select pg_temp.keep('w5_read', pg_temp.r(pg_temp.u(17), $$select count(*)::text from deletion_worker$$));
+select pg_temp.keep('w6_admin', pg_temp.r(pg_temp.u(3), $$select (admin_deletion_worker()->>'active')$$));
+select pg_temp.keep('w6_player', pg_temp.r(pg_temp.u(17), $$select admin_deletion_worker()::text$$));
+insert into t values
+  ('W1 processing not run for over an hour: the app cannot close; nothing written', pg_temp.got('w1') = 'ERR processing_unavailable' and pg_temp.got('w1_rows') = '0'
+     and pg_temp.got('w1_active') = 'false', pg_temp.got('w1')),
+  ('W2 the website still closes (it processes inline)', pg_temp.got('w2') = 'closing', pg_temp.got('w2')),
+  ('W3 a worker run (service key) makes processing active again', pg_temp.got('w3') = 'ok' and pg_temp.got('w3_active') = 'true', pg_temp.got('w3')),
+  ('W4 ...and the app closes again', pg_temp.got('w4') = 'closing', pg_temp.got('w4')),
+  ('W5 players cannot record a run or read the heartbeat table', pg_temp.got('w5_player') like 'ERR%permission denied%' and pg_temp.got('w5_read') like 'ERR%permission denied%', pg_temp.got('w5_player') || ' / ' || pg_temp.got('w5_read')),
+  ('W6 the admin sees the heartbeat; players do not', pg_temp.got('w6_admin') = 'true' and pg_temp.got('w6_player') like 'ERR forbidden%', pg_temp.got('w6_player'));
+
+-- L: older apps keep their request-and-cancel (finding 3): exactly the calls and fields the released app uses ------------
+-- (mobile/components/DeleteAccount.tsx at ed68d21: rpc("request_account_deletion", { p_via: "app" }),
+--  rpc("cancel_account_deletion"), rpc("my_account_deletion") reading status and requested_at)
+select pg_temp.keep('l1', pg_temp.r(pg_temp.u(18), $$select request_account_deletion(p_via => 'app')::text$$, interval '30 days'));
+select pg_temp.keep('l1_mine', pg_temp.r(pg_temp.u(18), $$select my_account_deletion()::text$$, interval '30 days'));
+select pg_temp.keep('l1_locked', pg_temp.r(pg_temp.u(18), format($$select hold_slot(%L, %L, %L, %L, gen_random_uuid())::text$$, pg_temp.club(), pg_temp.court(), pg_temp.at(9, 3), pg_temp.at(9, 3) + interval '60 min'), interval '30 days'));
+select pg_temp.keep('l2', pg_temp.r(pg_temp.u(18), $$select cancel_account_deletion()::text$$, interval '30 days'));
+select pg_temp.keep('l2_mine', coalesce(pg_temp.r(pg_temp.u(18), $$select coalesce(my_account_deletion()::text, 'null')$$), ''));
+select pg_temp.keep('l2_unlocked', pg_temp.r(pg_temp.u(18), $$select update_my_profile_name_probe()$$));
+select pg_temp.keep('l3', pg_temp.r(pg_temp.u(18), $$select request_account_deletion(p_via => 'app')->>'status'$$, interval '30 days'));
+select pg_temp.keep('l3_claim', pg_temp.s(format($$select claim_deletion(%L)->>'reason'$$, pg_temp.u(18))));
+select pg_temp.keep('l4_early', pg_temp.s($$select promote_due_requests()::text$$));
+update account_deletions set requested_at = now() - interval '25 hours' where subject_id = pg_temp.u(18) and status = 'requested';
+select pg_temp.keep('l4', pg_temp.s($$select promote_due_requests()::text$$));
+select pg_temp.keep('l4_rec', (select status || '/' || (closing_at is not null)::text || '/' || (next_attempt_at <= now())::text from pg_temp.rec(18)));
+select pg_temp.keep('l4_due', pg_temp.s(format($$select (%L = any(array(select deletions_due(100))))::text$$, pg_temp.u(18))));
+select pg_temp.keep('l4_cancel', pg_temp.r(pg_temp.u(18), $$select cancel_account_deletion()::text$$, interval '30 days'));
+select pg_temp.keep('l4_old_ui', pg_temp.r(pg_temp.u(18), $$select (my_account_deletion()->>'status') || '/' || (my_account_deletion() ? 'requested_at')::text$$, interval '30 days'));
+-- an older app's request, then the new app's one-step close: closes now
+select pg_temp.keep('l5_req', pg_temp.r(pg_temp.u(19), $$select request_account_deletion(p_via => 'app')->>'status'$$, interval '30 days'));
+select pg_temp.keep('l5_close', pg_temp.r(pg_temp.u(19), $$select close_my_account('app')::text$$));
+-- a suspended person's old request becomes held; one who became staff stays a request and is listed for a person
+insert into account_suspensions (profile_id, reason, suspended_by) values (pg_temp.u(20), 'review', pg_temp.u(3));
+select pg_temp.keep('l6_req', pg_temp.r(pg_temp.u(20), $$select request_account_deletion(p_via => 'app')->>'status'$$, interval '30 days'));
+select pg_temp.keep('l7_req', pg_temp.r(pg_temp.u(21), $$select request_account_deletion(p_via => 'app')->>'status'$$, interval '30 days'));
+insert into club_staff (club_id, profile_id) values (pg_temp.club(), pg_temp.u(21));
+update account_deletions set requested_at = now() - interval '26 hours' where subject_id in (pg_temp.u(20), pg_temp.u(21)) and status = 'requested';
+select pg_temp.keep('l6', pg_temp.s($$select promote_due_requests()::text$$));
+select pg_temp.keep('l6_rec', (select status || '/' || coalesce(held_reason, '-') from pg_temp.rec(20)));
+select pg_temp.keep('l7_rec', (select status from pg_temp.rec(21)));
+select pg_temp.keep('l7_att', pg_temp.s(format($$select coalesce(string_agg(reason, ','), '') from deletions_needing_attention() where subject_id = %L$$, pg_temp.u(21))));
+select pg_temp.keep('l8_player', pg_temp.r(pg_temp.u(22), $$select promote_due_requests()::text$$));
+insert into t values
+  ('L1 an older app''s request works: "requested", with the date its screen shows', pg_temp.got('l1') like '{"status": "requested", "requested_at": %', pg_temp.got('l1')),
+  ('L1 ...my_account_deletion gives that app the fields it reads (status, requested_at)', pg_temp.got('l1_mine')::jsonb ? 'requested_at' and pg_temp.got('l1_mine')::jsonb->>'status' = 'requested', pg_temp.got('l1_mine')),
+  ('L1 ...and the account is locked at once, as that app says ("you can''t make new bookings")', pg_temp.got('l1_locked') like 'ERR%account_closed%', pg_temp.got('l1_locked')),
+  ('L2 "Keep my account" in that app cancels it; nothing open; unlocked again', pg_temp.got('l2') = 'ok' and pg_temp.got('l2_mine') in ('null', 'ok') and pg_temp.got('l2_unlocked') = 'ok', pg_temp.got('l2') || ' / ' || pg_temp.got('l2_mine') || ' / ' || pg_temp.got('l2_unlocked')),
+  ('L3 a request is not processed before its grace period (not claimable)', pg_temp.got('l3') = 'requested' and pg_temp.got('l3_claim') = 'requested', pg_temp.got('l3_claim')),
+  ('L4 not promoted early', pg_temp.got('l4_early') = '0', pg_temp.got('l4_early')),
+  ('L4 after 24 hours it becomes a closure, due for processing at once', pg_temp.got('l4') = '1' and pg_temp.got('l4_rec') = 'closing/true/true' and pg_temp.got('l4_due') = 'true', pg_temp.got('l4_rec') || ' ' || pg_temp.got('l4_due')),
+  ('L4 ...from then on it cannot be cancelled (it has been processed, as that app said)', pg_temp.got('l4_cancel') like 'ERR no_open_request%', pg_temp.got('l4_cancel')),
+  ('L4 ...and that app''s screen still finds a status and a date (no cancel button for a non-request)', pg_temp.got('l4_old_ui') = 'closing/true', pg_temp.got('l4_old_ui')),
+  ('L5 an older app''s request confirmed in the new one-step flow closes now', pg_temp.got('l5_req') = 'requested' and pg_temp.got('l5_close')::jsonb->>'status' = 'closing'
+     and (select count(*) = 1 from account_deletions where subject_id = pg_temp.u(19)), pg_temp.got('l5_close')),
+  ('L6 a suspended person''s old request becomes held (suspended), not processed', pg_temp.got('l6_rec') = 'held/suspended', pg_temp.got('l6_rec')),
+  ('L7 one who became staff since stays a request (refused), listed for a person', pg_temp.got('l7_req') = 'requested' and pg_temp.got('l7_rec') = 'requested' and pg_temp.got('l7_att') = 'stuck', pg_temp.got('l7_rec') || ' ' || pg_temp.got('l7_att')),
+  ('L8 players cannot promote requests', pg_temp.got('l8_player') like 'ERR%permission denied%', pg_temp.got('l8_player'));
+
+-- R: lease renewal before each long step (finding 5) ------------------------------------------------------------------
+select pg_temp.keep('r_token', pg_temp.claim(16)::text);
+update account_deletions set lease_until = now() + interval '10 seconds' where subject_id = pg_temp.u(16);
+select pg_temp.keep('r1', pg_temp.s(format($$select record_deletion_step(%L, %L, 'renew')->>'status'$$, pg_temp.u(16), pg_temp.got('r_token'))));
+select pg_temp.keep('r1_lease', (select (lease_until > now() + interval '4 minutes')::text from pg_temp.rec(16)));
+select pg_temp.keep('r2', pg_temp.s(format($$select record_deletion_step(%L, %L, 'renew')::text$$, pg_temp.u(16), gen_random_uuid())));
+update account_deletions set lease_until = now() - interval '1 second' where subject_id = pg_temp.u(16);
+select pg_temp.keep('r3_token', pg_temp.claim(16)::text);
+select pg_temp.keep('r3', pg_temp.s(format($$select record_deletion_step(%L, %L, 'renew')::text$$, pg_temp.u(16), pg_temp.got('r_token'))));
+insert into t values
+  ('R1 the run holding the lease renews it for another 5 minutes', pg_temp.got('r1') is not null and pg_temp.got('r1') not like 'ERR%' and pg_temp.got('r1_lease') = 'true', pg_temp.got('r1')),
+  ('R2 a stranger''s token cannot renew', pg_temp.got('r2') like 'ERR lease_lost%', pg_temp.got('r2')),
+  ('R3 after its lease expired and another run took over, the old run''s renewal is refused (it stops)',
+     pg_temp.got('r3_token') is not null and pg_temp.got('r3_token') <> pg_temp.got('r_token') and pg_temp.got('r3') like 'ERR lease_lost%', pg_temp.got('r3'));
 
 select case when pass then 'ok   ' else 'FAIL ' end || id || case when pass then '' else '  [' || coalesce(detail, '') || ']' end from t order by pass, id;
 select 'FAILED ' || count(*) filter (where not pass or pass is null) || ' of ' || count(*) from t;

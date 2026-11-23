@@ -42,8 +42,8 @@ drop index if exists account_deletions_one_open;
 create unique index account_deletions_one_open on account_deletions (subject_id) where status in ('requested', 'closing', 'closed', 'held', 'data_removed');
 create index if not exists account_deletions_due on account_deletions (next_attempt_at) where status in ('closing', 'closed', 'held', 'data_removed');
 -- open requests of the old flow become closures (staging had none open on 23 Nov: deletion_state; live has no 0079)
-update account_deletions set status = 'closing', closing_at = coalesce(closing_at, requested_at), next_attempt_at = coalesce(next_attempt_at, now())
- where status = 'requested';
+-- (review 23 Nov) An open request from before 0086 stays a request: the person was told they could cancel it until it
+-- is processed. It is processed automatically after the grace period (promote_due_requests, section 6b).
 
 -- ============ 2. a closed account writes nothing ============
 create or replace function deletion_requested(p_profile uuid) returns boolean
@@ -75,13 +75,76 @@ revoke all on function refuse_writes_by_closed_account() from public, anon, auth
 do $$
 declare t text;
 begin
-  for t in select c.relname from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p') and c.relname <> 'account_deletions' loop
+  for t in select c.relname from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p') and c.relname not in ('account_deletions', 'deletion_worker') loop   -- the worker's own heartbeat: server only
     execute format('drop trigger if exists closed_account_lockout on %I', t);
     execute format('create trigger closed_account_lockout before insert or update or delete on %I for each statement execute function refuse_writes_by_closed_account()', t);
   end loop;
 end $$;
 
+-- ============ 2b. recent sign-in (review 23 Nov, finding 2) ============
+-- Closing is irreversible, so it needs a recent sign-in, not just a session that may be weeks old (refreshed) or stolen.
+-- Supabase puts each sign-in method and its time in the access token ("amr": [{"method": "otp", "timestamp": …}]);
+-- refreshing a session keeps the original time (verified against staging Auth: supabase/tests/staging_auth.mjs).
+-- The person proves it again with an email code (website and app), then confirms once as before.
+create or replace function recently_authenticated(p_window interval default interval '10 minutes') returns boolean
+language sql stable set search_path = public as $$
+  select coalesce((
+    select max((e->>'timestamp')::bigint)
+      from jsonb_array_elements(coalesce(
+             case when jsonb_typeof(nullif(current_setting('request.jwt.claims', true), '')::jsonb -> 'amr') = 'array'
+                  then nullif(current_setting('request.jwt.claims', true), '')::jsonb -> 'amr' end, '[]'::jsonb)) e
+     where jsonb_typeof(e) = 'object' and (e->>'timestamp') ~ '^[0-9]{1,12}$'), 0)
+    >= extract(epoch from now() - p_window)::bigint;
+$$;
+revoke all on function recently_authenticated(interval) from public, anon, authenticated;
+grant execute on function recently_authenticated(interval) to authenticated, service_role;
+
+-- ============ 2c. automatic processing heartbeat (review 23 Nov, finding 1) ============
+-- The retry worker records each run. The app's one-step closing is offered only while processing has run within the
+-- hour, so no closure ever waits for an admin to press Retry (the website processes inline; the app does not).
+create table if not exists deletion_worker (
+  id          boolean primary key default true check (id),
+  last_run_at timestamptz,
+  last_counts jsonb
+);
+alter table deletion_worker enable row level security;   -- no policy: read through the functions below
+revoke all on deletion_worker from public, anon, authenticated;
+
+create or replace function deletion_processing_active() returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce((select last_run_at > now() - interval '1 hour' from deletion_worker), false);
+$$;
+revoke all on function deletion_processing_active() from public, anon, authenticated;
+grant execute on function deletion_processing_active() to authenticated, service_role;
+
+create or replace function record_deletion_worker_run(p_counts jsonb default null) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is not null then raise exception 'forbidden'; end if;
+  insert into deletion_worker (id, last_run_at, last_counts) values (true, now(), p_counts)
+  on conflict (id) do update set last_run_at = now(), last_counts = excluded.last_counts;
+end $$;
+revoke all on function record_deletion_worker_run(jsonb) from public, anon, authenticated;
+grant execute on function record_deletion_worker_run(jsonb) to service_role;
+
 -- ============ 3. A: close (one confirmation) ============
+-- A request made by an older app version (request-and-wait, 0079) becomes a closure: held or closing, like a new one.
+create or replace function promote_request(p_id uuid) returns account_deletions
+language plpgsql security definer set search_path = public as $$
+declare d account_deletions%rowtype; refusal text; hold text;
+begin
+  select * into d from account_deletions where id = p_id and status = 'requested' for update;
+  if not found then select * into d from account_deletions where id = p_id; return d; end if;
+  refusal := deletion_refusal(d.subject_id);
+  if refusal in ('admin_role', 'staff_role') then raise exception '%', refusal; end if;
+  hold := coalesce(refusal, case when exists (select 1 from account_suspensions where profile_id = d.subject_id) then 'suspended' end);
+  update account_deletions set status = case when hold is null then 'closing' else 'held' end, held_reason = hold,
+    closing_at = now(), next_attempt_at = now()
+   where id = d.id returning * into d;
+  return d;
+end $$;
+revoke all on function promote_request(uuid) from public, anon, authenticated, service_role;
+
 create or replace function close_account_internal(p_subject uuid, p_via text) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare d account_deletions%rowtype; refusal text; hold text;
@@ -93,6 +156,7 @@ begin
   if not found then raise exception 'not_found'; end if;
   select * into d from account_deletions where subject_id = p_subject and status in ('requested', 'closing', 'closed', 'held', 'data_removed');
   if found then   -- already closed: the same record, nothing new (a second tap, a second device)
+    if d.status = 'requested' then d := promote_request(d.id); end if;   -- an older app's request, now confirmed: closes now
     return jsonb_build_object('status', d.status, 'held_reason', d.held_reason, 'closed_at', d.closing_at, 'new', false);
   end if;
   refusal := deletion_refusal(p_subject);
@@ -110,6 +174,9 @@ language plpgsql security definer set search_path = public as $$
 begin
   if auth.uid() is null then raise exception 'not_authenticated'; end if;
   if p_via is null or p_via not in ('app', 'web') then raise exception 'invalid_via'; end if;
+  -- the app does not process inline: it may close only while automatic processing is running (finding 1)
+  if p_via = 'app' and not deletion_processing_active() then raise exception 'processing_unavailable'; end if;
+  if not recently_authenticated() then raise exception 'reauth_required'; end if;   -- finding 2
   return close_account_internal(auth.uid(), p_via);
 end $$;
 revoke all on function close_my_account(text) from public, anon, authenticated;
@@ -125,9 +192,29 @@ end $$;
 revoke all on function admin_record_deletion_request(uuid) from public, anon, authenticated;
 grant execute on function admin_record_deletion_request(uuid) to authenticated, service_role;
 
--- D1: no undo, and no request-and-wait any more
-revoke execute on function request_account_deletion(text) from authenticated;
-revoke execute on function cancel_account_deletion() from authenticated;
+-- (review 23 Nov, finding 3) Apps released before this change still call request_account_deletion and
+-- cancel_account_deletion (0079). They keep working exactly as those apps describe them: the request locks the account
+-- at once (0086's lock-out covers 'requested'), can be cancelled until it is processed, and is processed automatically
+-- after a grace period (promote_due_requests). New apps and the website use close_my_account (one step, no undo).
+-- The only change from 0079: an account already closed in one step gets its record back instead of an error.
+create or replace function request_account_deletion(p_via text default 'app') returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare d account_deletions%rowtype;
+begin
+  if auth.uid() is null then raise exception 'not_authenticated'; end if;
+  if p_via not in ('app', 'web') then raise exception 'invalid_via'; end if;
+  if exists (select 1 from profiles where id = auth.uid() and 'admin' = any(roles)) then raise exception 'admin_role'; end if;
+  if exists (select 1 from club_staff where profile_id = auth.uid()) then raise exception 'staff_role'; end if;
+  select * into d from account_deletions where subject_id = auth.uid() and status in ('requested', 'closing', 'closed', 'held', 'data_removed');
+  if not found then
+    insert into account_deletions (subject_id, requested_via) values (auth.uid(), p_via) returning * into d;
+  end if;
+  return jsonb_build_object('status', d.status, 'requested_at', d.requested_at);
+end $$;
+revoke all on function request_account_deletion(text) from public, anon, authenticated;
+grant execute on function request_account_deletion(text) to authenticated;
+-- cancel_account_deletion is 0079's, unchanged: only a 'requested' record (an older app's) can be cancelled
+grant execute on function cancel_account_deletion() to authenticated;
 
 create or replace function my_account_deletion() returns jsonb
 language sql stable security definer set search_path = public as $$
@@ -311,7 +398,8 @@ begin
     if exists (select 1 from account_deletions where subject_id = p_subject and status in ('closing', 'closed', 'held', 'data_removed')) then
       return jsonb_build_object('claimed', false, 'reason', 'busy');
     end if;
-    select status into s from account_deletions where subject_id = p_subject order by requested_at desc limit 1;
+    -- an older app's request (open, not yet claimable) wins over older finished or cancelled records
+    select status into s from account_deletions where subject_id = p_subject order by (status = 'requested') desc, requested_at desc, id limit 1;
     return jsonb_build_object('claimed', false, 'reason', coalesce(s, 'none'));
   end if;
   if d.lease_until is not null and d.lease_until > now() then return jsonb_build_object('claimed', false, 'reason', 'leased'); end if;
@@ -343,6 +431,8 @@ begin
     if p_error is null or p_error !~ '^[a-z_]{1,60}$' then p_error := 'unknown_error'; end if;
     update account_deletions set last_error = p_error, next_attempt_at = now() + deletion_backoff(attempts), lease_until = null, lease_token = null
      where id = d.id returning * into d;
+  elsif p_step = 'renew' then   -- before each long step: still mine? then keep it mine for another lease (finding 5)
+    update account_deletions set lease_until = now() + interval '5 minutes' where id = d.id returning * into d;
   elsif p_step = 'released' then
     update account_deletions set lease_until = null, lease_token = null, last_error = null,
       next_attempt_at = case when status = 'held' then null else now() end
@@ -352,6 +442,26 @@ begin
   end if;
   return jsonb_build_object('status', d.status, 'attempts', d.attempts, 'next_attempt_at', d.next_attempt_at);
 end $$;
+
+-- Older apps' requests whose grace period has passed become closures (finding 3). One that cannot (the person has
+-- since become staff or admin) stays a request and is listed for attention. Returns how many were promoted.
+create or replace function promote_due_requests(p_grace interval default interval '24 hours') returns int
+language plpgsql security definer set search_path = public as $$
+declare r record; n int := 0;
+begin
+  if auth.uid() is not null then raise exception 'forbidden'; end if;
+  for r in select id from account_deletions where status = 'requested' and requested_at < now() - p_grace order by requested_at
+           for update skip locked loop
+    begin
+      perform promote_request(r.id);
+      n := n + 1;
+    exception when raise_exception then null;   -- admin_role / staff_role: left for a person (deletions_needing_attention)
+    end;
+  end loop;
+  return n;
+end $$;
+revoke all on function promote_due_requests(interval) from public, anon, authenticated;
+grant execute on function promote_due_requests(interval) to service_role;
 
 -- What a retry run should pick up: due, not leased, with work left
 create or replace function deletions_due(p_limit int default 20) returns setof uuid
@@ -372,13 +482,14 @@ language sql stable security definer set search_path = public as $$
     from account_deletions d
    where d.alerted_at is null and auth.uid() is null
      and (d.status = 'held'
-          or (d.status in ('closing', 'closed', 'data_removed') and (d.closing_at < now() - interval '1 hour' or d.attempts >= 3)));
+          or (d.status in ('closing', 'closed', 'data_removed') and (d.closing_at < now() - interval '1 hour' or d.attempts >= 3))
+          or (d.status = 'requested' and d.requested_at < now() - interval '25 hours'));   -- could not be promoted
 $$;
 create or replace function mark_deletion_alerted(p_subject uuid) returns void
 language plpgsql security definer set search_path = public as $$
 begin
   if auth.uid() is not null then raise exception 'forbidden'; end if;
-  update account_deletions set alerted_at = now() where subject_id = p_subject and status in ('closing', 'closed', 'held', 'data_removed');
+  update account_deletions set alerted_at = now() where subject_id = p_subject and status in ('requested', 'closing', 'closed', 'held', 'data_removed');
 end $$;
 
 -- An admin releases a held record once nothing holds it any more; the run then continues at C.
@@ -447,3 +558,14 @@ begin
 end $$;
 revoke all on function admin_deletion_progress() from public, anon, authenticated;
 grant execute on function admin_deletion_progress() to authenticated, service_role;
+
+-- the automatic processing heartbeat, for the admin page (finding 1)
+create or replace function admin_deletion_worker() returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not is_admin() then raise exception 'forbidden'; end if;
+  return jsonb_build_object('last_run_at', (select last_run_at from deletion_worker), 'active', deletion_processing_active(),
+                            'last_counts', (select last_counts from deletion_worker));
+end $$;
+revoke all on function admin_deletion_worker() from public, anon, authenticated;
+grant execute on function admin_deletion_worker() to authenticated, service_role;

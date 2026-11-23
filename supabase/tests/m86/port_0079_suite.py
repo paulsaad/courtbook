@@ -26,8 +26,8 @@ r("('C2 finishing twice is refused', pg_temp.r(pg_temp.u(3), format($$select fin
   "('C2 finishing twice is fine (idempotent; 0086)', pg_temp.r(pg_temp.u(3), format($$select finish_account_deletion(%L)::text$$, pg_temp.u(1))) = 'ok', '')")
 r("not has_function_privilege('anon', 'delete_account_data(uuid)', 'execute')", "not has_function_privilege('anon', 'delete_account_data(uuid, boolean)', 'execute')")
 a=s.index("  ('A4 the person can cancel the request'"); b=s.index("-- ================= who may process =================")
-R.append((s[a:b], '''  ('A4 no undo: players cannot cancel (D1)', pg_temp.r(pg_temp.u(1), $$select cancel_account_deletion()::text$$) like 'ERR%permission denied%', ''),
-  ('A4 no undo: the old request function is not available either', pg_temp.r(pg_temp.u(1), $$select request_account_deletion()::text$$) like 'ERR%permission denied%', '');
+R.append((s[a:b], '''  ('A4 no undo: a closed account cannot be cancelled (D1; only an older app''s request can)', pg_temp.r(pg_temp.u(1), $$select cancel_account_deletion()::text$$) like 'ERR%no_open_request%', ''),
+  ('A4 an older app asking again gets the closed record back, not an undo (review 23 Nov: old apps keep their request)', pg_temp.r(pg_temp.u(1), $$select request_account_deletion()->>'status'$$) = 'closing', '');
 insert into t values
   ('A4 the record is still closing', (select status = 'closing' from account_deletions where subject_id = pg_temp.u(1)), ''),
   ('A4 still locked out after the refused undo', pg_temp.r(pg_temp.u(1), $$select post_match((select id from clubs where slug = 'batroun'), 'padel', now() + interval '4 days', now() + interval '4 days 90 min', null, null, 3, 'm2 after cancel', null, 'open', gen_random_uuid())::text$$) like 'ERR%account_closed%', '');
@@ -38,6 +38,16 @@ insert into t values ('A4 closing again: still one record', pg_temp.r(pg_temp.u(
 insert into t values ('A4 one record only', (select count(*) = 1 from account_deletions where subject_id = pg_temp.u(1)), '');
 
 ''', 1))
+r("""  perform set_config('request.jwt.claim.sub', coalesce(who::text, ''), true);
+  if who is null then execute 'set local role anon'; else execute 'set local role authenticated'; end if;""",
+  """  perform set_config('request.jwt.claim.sub', coalesce(who::text, ''), true);
+  -- 0086 (review 23 Nov): closing needs a recent sign-in; the token says when (amr), as Supabase sets it
+  perform set_config('request.jwt.claims', case when who is null then '' else jsonb_build_object('sub', who, 'role', 'authenticated',
+    'amr', jsonb_build_array(jsonb_build_object('method', 'otp', 'timestamp', extract(epoch from now())::bigint)))::text end, true);
+  if who is null then execute 'set local role anon'; else execute 'set local role authenticated'; end if;""")
+r("""create function pg_temp.u(n int) returns uuid language sql as $$ select ('d2000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid $$;""",
+  """create function pg_temp.u(n int) returns uuid language sql as $$ select ('d2000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid $$;
+insert into deletion_worker (id, last_run_at) values (true, now()) on conflict (id) do update set last_run_at = now();   -- 0086: processing running""")
 for old,new,n in R:
     c=s.count(old)
     assert c==n, (c,n,old[:90])

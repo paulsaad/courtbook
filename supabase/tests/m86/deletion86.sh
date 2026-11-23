@@ -56,7 +56,7 @@ mutants=(
   "N9 finish not idempotent|s/    if exists (select 1 from account_deletions where subject_id = p_subject and status = 'done') then return; end if;   -- already finished/    null;/"
   "N10 due list includes leased records|s/     and (lease_until is null or lease_until < now())/     and true/"
   "N11 release ignores a suspension|s/  if exists (select 1 from account_suspensions where profile_id = p_subject) then raise exception 'suspended'; end if;   -- D3: legal review/  null;/"
-  "N12 undo still available|s/^revoke execute on function cancel_account_deletion() from authenticated;/grant execute on function cancel_account_deletion() to authenticated;/"
+  "N12 older apps lose their request (review 23 Nov, finding 3)|s/^grant execute on function request_account_deletion(text) to authenticated;/revoke execute on function request_account_deletion(text) from authenticated;/"
   "N13 a second close makes a second record|s/  if found then   -- already closed/  if false then   -- already closed/"
   "N14 free text stored as the error|s/    if p_error is null or p_error !~ '^\[a-z_\]{1,60}\$' then p_error := 'unknown_error'; end if;/    null;/"
   "N15 cancel-only allowed on a normal record|s/  if p_cancel_only and d.status <> 'held' then raise exception 'not_held'; end if;/  null;/"
@@ -64,6 +64,16 @@ mutants=(
   "N17 data step does not advance a closed record|s/  if d.status in ('requested', 'closing', 'closed') then/  if d.status in ('requested', 'closing') then/"
   "N18 failure keeps the lease (no retry possible)|s/next_attempt_at = now() + deletion_backoff(attempts), lease_until = null, lease_token = null/next_attempt_at = now() + deletion_backoff(attempts)/"
   "N19 a done record could be claimed|s/  select \* into d from account_deletions where subject_id = p_subject and status in ('closing', 'closed', 'held', 'data_removed')\$/  select * into d from account_deletions where subject_id = p_subject and status in ('closing', 'closed', 'held', 'data_removed', 'done')/"
+  # review 23 Nov
+  "N20 no recent sign-in needed|s/  if not recently_authenticated() then raise exception 'reauth_required'; end if;   -- finding 2/  null;/"
+  "N21 any sign-in time counts as recent|s/    >= extract(epoch from now() - p_window)::bigint;/    >= 0;/"
+  "N22 the app closes without automatic processing|s/  if p_via = 'app' and not deletion_processing_active() then raise exception 'processing_unavailable'; end if;/  null;/"
+  "N23 the heartbeat never goes stale|s/last_run_at > now() - interval '1 hour'/last_run_at is not null/"
+  "N24 older apps' requests processed at once (no grace)|s/where status = 'requested' and requested_at < now() - p_grace order by requested_at/where status = 'requested' order by requested_at/"
+  "N25 an older request confirmed in one step is not closed|s/    if d.status = 'requested' then d := promote_request(d.id); end if;/    null;/"
+  "N26 renewal does not extend the lease|s/    update account_deletions set lease_until = now() + interval '5 minutes' where id = d.id returning \* into d;/    null;/"
+  "N27 players may record worker runs|s/^grant execute on function record_deletion_worker_run(jsonb) to service_role;/grant execute on function record_deletion_worker_run(jsonb) to authenticated, service_role;/"
+  "N28 a request is never promoted|s/      perform promote_request(r.id);/      null;/"
 )
 tmp=$(mktemp -d); chmod 755 "$tmp"
 for m in "${mutants[@]}"; do
