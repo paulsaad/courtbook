@@ -76,7 +76,8 @@ revoke insert, update, delete on account_deletions from anon, authenticated;
 
 create or replace function deletion_requested(p_profile uuid) returns boolean
 language sql stable security definer set search_path = public as $$
-  select p_profile is not null and exists (select 1 from account_deletions where subject_id = p_profile and status = 'requested');
+  -- 'data_removed' too: if the sign-in deletion is late, the still-signed-in person cannot start anything new
+  select p_profile is not null and exists (select 1 from account_deletions where subject_id = p_profile and status in ('requested', 'data_removed'));
 $$;
 revoke all on function deletion_requested(uuid) from public, anon, authenticated;
 grant execute on function deletion_requested(uuid) to service_role;
@@ -97,6 +98,25 @@ drop trigger if exists matches_deletion_guard on matches;
 create trigger matches_deletion_guard before insert on matches for each row execute function block_new_activity_after_deletion_request('organizer_id');
 drop trigger if exists match_players_deletion_guard on match_players;
 create trigger match_players_deletion_guard before insert on match_players for each row execute function block_new_activity_after_deletion_request('profile_id');
+
+-- ============ 3b. no shortcut: a profile with history is deleted only after delete_account_data ============
+-- Deleting the sign-in account in the Supabase dashboard would otherwise skip the cancellations and anonymisation
+-- (bookings would also hit their "player or guest name" check). An account with no bookings, games or messages
+-- (e.g. a sign-up that was never used) can still be removed directly.
+create or replace function profiles_delete_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from account_deletions where subject_id = old.id and status = 'data_removed')
+     and (exists (select 1 from bookings where player_id = old.id)
+          or exists (select 1 from matches where organizer_id = old.id)
+          or exists (select 1 from match_messages where profile_id = old.id)) then
+    raise exception 'use_delete_account';
+  end if;
+  return old;
+end $$;
+revoke all on function profiles_delete_guard() from public, anon, authenticated;
+drop trigger if exists profiles_delete_guard on profiles;
+create trigger profiles_delete_guard before delete on profiles for each row execute function profiles_delete_guard();
 
 -- ============ 4. the person's side ============
 create or replace function deletion_refusal(p_subject uuid) returns text
@@ -185,7 +205,8 @@ declare
   d account_deletions%rowtype;
   refusal text;
   r record;
-  n_games int := 0; n_cancelled int := 0; n_refund int := 0; n_anon int; n_msgs int; n_left int;
+  n_games int := 0; n_cancelled int := 0; n_refund int := 0; n_anon int; n_msgs int; n_left int; n_notes int;
+  v_name text;
   susp jsonb;
   v_cutoff int;
 begin
@@ -193,9 +214,19 @@ begin
   if p_subject is null then raise exception 'not_found'; end if;
   select * into d from account_deletions where subject_id = p_subject and status in ('requested', 'data_removed') for update;
   if not found then raise exception 'no_open_request'; end if;
-  if d.status = 'data_removed' then return d.summary; end if;          -- already done: re-run is a no-op
+  -- Re-running after the data step is allowed and repeats it: every step only touches what is still there, so a
+  -- second run changes nothing — unless something arrived in between (a hold that was being written while the first
+  -- run ran), which it then cancels and anonymises too. The first run's counts are kept; a re-run is recorded.
   refusal := deletion_refusal(p_subject);
   if refusal is not null then raise exception '%', refusal; end if;
+
+  -- Lock order, same as every other path: courts (sorted, as lock_courts does for move_booking and the desk), then
+  -- games, then bookings, then payments. cancel_booking and the booking→game trigger take courts → booking → game,
+  -- so taking every court first leaves no cycle with them.
+  perform lock_courts(coalesce((select array_agg(distinct b.court_id) from bookings b
+     where b.court_id is not null and b.status in ('confirmed', 'pending')
+       and (b.player_id = p_subject or b.id in (select m.booking_id from matches m where m.organizer_id = p_subject))), '{}'));
+  select name into v_name from profiles where id = p_subject;
 
   -- (a) upcoming games they organise: cancelled, players told (before the bookings, so no "court lost" notices)
   for r in select * from matches where organizer_id = p_subject and status <> 'cancelled'
@@ -211,8 +242,9 @@ begin
   --     pending → payment expired; paid and before the club's cutoff → refund due; inside the cutoff → no refund.
   --     Lock order as cancel_booking: court, then booking, then payments. Legacy credits are not re-issued.
   for r in select b.id, b.court_id, b.club_id from bookings b
-             where b.player_id = p_subject and b.status in ('confirmed', 'pending') and b.start_at > now() order by b.start_at loop
-    if r.court_id is not null then perform 1 from courts where id = r.court_id for update; end if;
+             where b.player_id = p_subject
+               and (b.status = 'pending' or (b.status = 'confirmed' and b.start_at > now()))  -- every hold, even a stale one
+             order by b.start_at loop
     perform 1 from bookings where id = r.id for update;
     perform 1 from payments where booking_id = r.id for update;
     select cancel_cutoff_hours into v_cutoff from clubs where id = r.club_id;
@@ -249,15 +281,33 @@ begin
   end loop;
   delete from match_players where profile_id = p_subject;              -- past games: off the list too
 
+  -- (d2) what others hold about them: chat excerpts in others' notifications go; their name in other notices becomes
+  --      "A player"; notes on games they organised (free text: could hold a phone number) are cleared; their own
+  --      Help & Feedback messages go (support, not moderation). Moderation reports and snapshots stay (evidence).
+  delete from notifications where actor_id = p_subject and kind = 'match_message';
+  if coalesce(btrim(v_name), '') <> '' then
+    update notifications set body = regexp_replace(body, '\m' || regexp_replace(v_name, '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g') || '\M', 'A player', 'g')
+     where actor_id = p_subject or body like '%' || v_name || '%' and match_id in (select id from matches where organizer_id = p_subject);
+  end if;
+  update matches set note = null where organizer_id = p_subject and note is not null;
+  get diagnostics n_notes = row_count;
+  delete from reports where reporter_id = p_subject and target_kind = 'feedback';
+
   -- (e) coach listing (no coach bookings, checked above); profile anonymised now in case the sign-in deletion is late
   delete from coaches where profile_id = p_subject;
   select jsonb_build_object('suspended_at', suspended_at, 'reason', reason) into susp from account_suspensions where profile_id = p_subject;
   update profiles set name = null, phone = null, level = null, sports = '{}', email_notifications = false where id = p_subject;
 
-  update account_deletions set status = 'data_removed', data_removed_at = now(), processed_by = auth.uid(),
-    summary = jsonb_build_object('games_cancelled', n_games, 'bookings_cancelled', n_cancelled, 'refunds_due', n_refund,
-                                 'bookings_anonymised', n_anon, 'messages_deleted', n_msgs, 'suspension', susp)
-   where id = d.id returning summary into susp;
+  if d.status = 'requested' then
+    update account_deletions set status = 'data_removed', data_removed_at = now(), processed_by = auth.uid(),
+      summary = jsonb_build_object('games_cancelled', n_games, 'bookings_cancelled', n_cancelled, 'refunds_due', n_refund,
+                                   'bookings_anonymised', n_anon, 'messages_deleted', n_msgs, 'game_notes_cleared', n_notes, 'suspension', susp)
+     where id = d.id returning summary into susp;
+  else
+    update account_deletions set summary = summary || jsonb_build_object('last_rerun', jsonb_build_object('at', now(),
+        'games_cancelled', n_games, 'bookings_cancelled', n_cancelled, 'bookings_anonymised', n_anon, 'messages_deleted', n_msgs))
+     where id = d.id returning summary into susp;
+  end if;
   return susp;
 end $$;
 

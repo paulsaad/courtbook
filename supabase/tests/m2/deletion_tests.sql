@@ -40,8 +40,8 @@ create function pg_temp.pay(b uuid, who uuid, st payment_status) returns void la
 
 -- fixtures. 1 = the person deleting; 2 = another player; 3 = admin; 4 = club staff; 5 = coach with a coach booking;
 -- 6 = a reported player under legal hold; 7 = control player (same bookings as 1, cancelled through cancel_booking)
-insert into auth.users (id, phone) select pg_temp.u(n), '+9617100' || lpad(n::text, 2, '0') from generate_series(1, 7) n;
-update profiles set name = 'Person ' || right(id::text, 1), rules_accepted_at = now() where id in (select pg_temp.u(n) from generate_series(1, 7) n);
+insert into auth.users (id, phone) select pg_temp.u(n), '+9617100' || lpad(n::text, 2, '0') from generate_series(1, 12) n;
+update profiles set name = 'Person ' || ltrim(right(id::text, 2), '0'), rules_accepted_at = now() where id in (select pg_temp.u(n) from generate_series(1, 12) n);
 update profiles set roles = '{player,admin}' where id = pg_temp.u(3);
 insert into club_staff (club_id, profile_id) values (pg_temp.club(), pg_temp.u(4));
 -- simulated payments, and a cutoff (200 h) that puts day 5 inside it and day 10 outside it
@@ -54,8 +54,10 @@ insert into f select 'b_hold', pg_temp.bk(pg_temp.u(1), 6, 2, 'pending');       
 insert into f select 'b_past', pg_temp.bk(pg_temp.u(1), 9, 4, 'confirmed');     -- moved to the past below
 select pg_temp.pay((select id from f where k = 'b_out'), pg_temp.u(1), 'paid'), pg_temp.pay((select id from f where k = 'b_in'), pg_temp.u(1), 'paid'),
        pg_temp.pay((select id from f where k = 'b_hold'), pg_temp.u(1), 'pending'), pg_temp.pay((select id from f where k = 'b_past'), pg_temp.u(1), 'paid');
-alter table bookings disable trigger user;      -- a past booking: written directly, as history
+insert into f select 'b_now', pg_temp.bk(pg_temp.u(1), 9, 6, 'confirmed');      -- moved to "being played now" below
+alter table bookings disable trigger user;      -- history and an ongoing booking: written directly
 update bookings set start_at = now() - interval '2 days', end_at = now() - interval '2 days' + interval '60 min' where id = (select id from f where k = 'b_past');
+update bookings set start_at = now() - interval '30 min', end_at = now() + interval '30 min' where id = (select id from f where k = 'b_now');
 alter table bookings enable trigger user;
 -- control: the same three upcoming bookings for player 7
 insert into f select 'c_out',  pg_temp.bk(pg_temp.u(7), 10, 4, 'confirmed');
@@ -79,6 +81,13 @@ values (pg_temp.u(301), pg_temp.u(2), 'message', pg_temp.u(201), pg_temp.u(1), p
        (pg_temp.u(302), pg_temp.u(1), 'player', null, pg_temp.u(2), null, pg_temp.u(2), 'spam', null),
        (pg_temp.u(303), pg_temp.u(2), 'player', null, pg_temp.u(6), null, pg_temp.u(6), 'danger', null);
 update reports set legal_hold = true where id = pg_temp.u(303);
+insert into reports (id, reporter_id, target_kind, target_key, reason, note) values (pg_temp.u(304), pg_temp.u(1), 'feedback', pg_temp.u(1), 'suggestion', 'm2 feedback: call me on 03 123 456');
+-- what others hold about 1: a join notice with their name, a chat excerpt, and an unrelated notice naming Person 11
+insert into notifications (profile_id, kind, match_id, actor_id, body) values
+  (pg_temp.u(2), 'player_joined', pg_temp.u(102), pg_temp.u(1), 'Person 1 joined your match'),
+  (pg_temp.u(2), 'match_message', pg_temp.u(102), pg_temp.u(1), 'Person 1: m2 message by 1'),
+  (pg_temp.u(2), 'player_joined', pg_temp.u(102), pg_temp.u(11), 'Person 11 joined your match');
+update matches set note = 'm2 own: call 03 999 999' where id = pg_temp.u(101);
 -- coach listing for 1 (no coach bookings); coach 5 with a coach booking
 insert into coaches (id, profile_id, sports, active) values (pg_temp.u(401), pg_temp.u(1), '{padel}', true), (pg_temp.u(405), pg_temp.u(5), '{padel}', true);
 insert into coach_clubs (coach_id, club_id, status) values (pg_temp.u(401), pg_temp.club(), 'approved');
@@ -132,7 +141,7 @@ insert into t values
   ('A5 another player cannot', pg_temp.r(pg_temp.u(2), format($$select delete_account_data(%L)::text$$, pg_temp.u(1))) like 'ERR%', ''),
   ('A5 club staff cannot', pg_temp.r(pg_temp.u(4), format($$select delete_account_data(%L)::text$$, pg_temp.u(1))) like 'ERR%', ''),
   ('A5 signed out cannot', pg_temp.r(null, format($$select delete_account_data(%L)::text$$, pg_temp.u(1))) like 'ERR%', ''),
-  ('A5 nothing changed after the refused attempts', (select count(*) from bookings where player_id = pg_temp.u(1)) = 4, ''),
+  ('A5 nothing changed after the refused attempts', (select count(*) from bookings where player_id = pg_temp.u(1)) = 5, ''),
   ('A6 no request, no deletion', pg_temp.r(pg_temp.u(3), format($$select delete_account_data(%L)::text$$, pg_temp.u(2))) like 'ERR no_open_request%', ''),
   ('A6 the admin list shows the request with what it will touch',
      pg_temp.r(pg_temp.u(3), format($$select upcoming_bookings || '/' || upcoming_games_organised || '/' || open_reports_about || '/' || coalesce(refusal, '-')
@@ -150,21 +159,58 @@ insert into t values
 insert into account_suspensions (profile_id, reason, suspended_by) values (pg_temp.u(1), 'm2 suspension reason', pg_temp.u(3));
 create temp table res (summary jsonb);
 grant all on res to authenticated;
+-- roles gained after the request are checked again when it is processed (server side, not only at request time)
+insert into t values
+  ('A8 player 8 and player 9 request', pg_temp.r(pg_temp.u(8), $$select request_account_deletion()->>'status'$$) = 'requested'
+     and pg_temp.r(pg_temp.u(9), $$select request_account_deletion()->>'status'$$) = 'requested', '');
+insert into club_staff (club_id, profile_id) values (pg_temp.club(), pg_temp.u(8));
+update profiles set roles = '{player,admin}' where id = pg_temp.u(9);
+insert into t values
+  ('A8 became staff after asking: processing refused', pg_temp.r(pg_temp.u(3), format($$select delete_account_data(%L)::text$$, pg_temp.u(8))) like 'ERR staff_role%', ''),
+  ('A8 became admin after asking: processing refused', pg_temp.r(pg_temp.u(3), format($$select delete_account_data(%L)::text$$, pg_temp.u(9))) like 'ERR admin_role%', ''),
+  ('A8 the refused requests changed nothing', (select count(*) = 2 from account_deletions where subject_id in (pg_temp.u(8), pg_temp.u(9)) and status = 'requested'), '');
+-- no dashboard shortcut: an account with history cannot be deleted before its data step; an unused one can
+do $$ begin
+  delete from auth.users where id = pg_temp.u(2);
+  insert into t values ('A9 deleting a sign-in account with history directly is refused', false, 'deleted');
+exception when others then
+  insert into t values ('A9 deleting a sign-in account with history directly is refused', sqlerrm like '%use_delete_account%', sqlerrm);
+end $$;
+do $$ begin
+  delete from auth.users where id = pg_temp.u(12);
+  insert into t values ('A9 an unused account can still be deleted directly', true, '');
+exception when others then
+  insert into t values ('A9 an unused account can still be deleted directly', false, sqlerrm);
+end $$;
+-- a stale hold (its slot time already passed, never swept): player 10 asks, admin processes
+insert into f select 'h10', pg_temp.bk(pg_temp.u(10), 13, 2, 'pending');
+select pg_temp.pay((select id from f where k = 'h10'), pg_temp.u(10), 'pending');
+alter table bookings disable trigger user;
+update bookings set start_at = now() - interval '3 hours', end_at = now() - interval '2 hours', hold_expires_at = now() - interval '4 hours' where id = (select id from f where k = 'h10');
+alter table bookings enable trigger user;
+insert into t values ('A10 player 10 with a stale hold: processed', pg_temp.r(pg_temp.u(10), $$select request_account_deletion()->>'status'$$) = 'requested'
+  and pg_temp.r(pg_temp.u(3), format($$select delete_account_data(%L)::text$$, pg_temp.u(10))) not like 'ERR%', '');
+insert into t values ('A10 the stale hold is cancelled, not left pending for a nameless owner',
+  (select b.status = 'cancelled' and p.status = 'expired' and b.player_id is null from bookings b join payments p on p.booking_id = b.id where b.id = (select id from f where k = 'h10')), '');
+
 insert into t values ('B1 the admin processes the request',
   pg_temp.r(pg_temp.u(3), format($$select delete_account_data(%L)::text$$, pg_temp.u(1))) not like 'ERR%', '');
 insert into res select summary from account_deletions where subject_id = pg_temp.u(1) and status = 'data_removed';
 insert into t values
   ('B1 status data_removed, processed by the admin', (select status = 'data_removed' and processed_by = pg_temp.u(3) from account_deletions where subject_id = pg_temp.u(1) and status <> 'cancelled'), ''),
   ('B1 summary counts', (select summary->>'games_cancelled' = '1' and summary->>'bookings_cancelled' = '3' and summary->>'refunds_due' = '1'
-      and summary->>'bookings_anonymised' = '4' and summary->>'messages_deleted' = '1' from res), (select summary::text from res)),
+      and summary->>'bookings_anonymised' = '5' and summary->>'messages_deleted' = '1' and summary->>'game_notes_cleared' = '1' from res), (select summary::text from res)),
   ('B1 the suspension is recorded in the summary', (select summary->'suspension'->>'reason' = 'm2 suspension reason' from res), ''),
   -- bookings: same outcomes as cancel_booking for the control player
   ('B2 before the cutoff: cancelled, refund due', (select b.status = 'cancelled' and p.status = 'refund_due' from bookings b join payments p on p.booking_id = b.id where b.id = (select id from f where k = 'b_out')), ''),
   ('B2 inside the cutoff: cancelled, payment kept (no refund)', (select b.status = 'cancelled' and p.status = 'paid' from bookings b join payments p on p.booking_id = b.id where b.id = (select id from f where k = 'b_in')), ''),
   ('B2 hold: cancelled, payment expired', (select b.status = 'cancelled' and p.status = 'expired' from bookings b join payments p on p.booking_id = b.id where b.id = (select id from f where k = 'b_hold')), ''),
   ('B2 past booking: kept as it was (confirmed, paid)', (select b.status = 'confirmed' and p.status = 'paid' from bookings b join payments p on p.booking_id = b.id where b.id = (select id from f where k = 'b_past')), ''),
-  ('B2 every booking anonymised: no player, "Former player", no phone', (select count(*) = 4 and bool_and(player_id is null and guest_name = 'Former player' and guest_phone is null)
+  ('B2 every booking anonymised: no player, "Former player", no phone', (select count(*) = 5 and bool_and(player_id is null and guest_name = 'Former player' and guest_phone is null)
       from bookings where id in (select id from f where k like 'b_%')), ''),
+  ('B2 the booking being played now stays as it is (confirmed), anonymised', (select status = 'confirmed' and player_id is null from bookings where id = (select id from f where k = 'b_now')), ''),
+  ('B2 no anonymised booking is still upcoming or pending', (select count(*) = 0 from bookings where id in (select id from f where k like 'b_%')
+      and (status = 'pending' or (status = 'confirmed' and start_at > now()))), ''),
   ('B2 payments: all kept, same amounts', (select count(*) = (select n_pay from snap) and sum(total_usd) = (select total from snap) from payments where booking_id in (select id from f where k like 'b_%')), '');
 insert into t values
   ('B3 control: player 7 cancels the same three bookings through cancel_booking',
@@ -186,10 +232,32 @@ insert into t values
       and (select count(*) = 1 from match_messages where id = pg_temp.u(202)), ''),
   ('B5 the report on their message is kept with its snapshot', (select message_id is null and snapshot = 'm2 message by 1' and target_key = pg_temp.u(201) from reports where id = pg_temp.u(301)), ''),
   ('B6 coach listing removed', (select count(*) = 0 from coaches where profile_id = pg_temp.u(1)) and (select count(*) = 0 from coach_clubs where coach_id = pg_temp.u(401)), ''),
+  ('B8 the chat excerpt in another player''s notifications is gone', (select count(*) = 0 from notifications where actor_id = pg_temp.u(1) and kind = 'match_message'), ''),
+  ('B8 their name in another player''s notice became "A player"', (select count(*) >= 1 and bool_and(body like 'A player %') from notifications where actor_id = pg_temp.u(1) and kind = 'player_joined'), ''),
+  ('B8 a notice naming someone else is untouched (Person 11 is not Person 1)', (select bool_and(body = 'Person 11 joined your match') from notifications where actor_id = pg_temp.u(11)), ''),
+  ('B8 no notification anywhere still names them', (select count(*) = 0 from notifications where body ~ '\mPerson 1\M'), ''),
+  ('B8 the note on their game is cleared', (select note is null from matches where id = pg_temp.u(101)), ''),
+  ('B8 their Help & Feedback message is deleted; their moderation report is kept', (select count(*) = 0 from reports where id = pg_temp.u(304))
+      and (select count(*) = 1 from reports where id = pg_temp.u(302)), ''),
+  ('B9 still signed in while the sign-in deletion is pending: no new booking', pg_temp.r(pg_temp.u(1), format($$select hold_slot(%L, %L, %L, %L, gen_random_uuid())::text$$,
+       pg_temp.club(), pg_temp.court(), pg_temp.at(11, 6), pg_temp.at(11, 6) + interval '60 min')) like 'ERR%account_deletion_requested%', ''),
+  ('B9 ...and no new game', pg_temp.r(pg_temp.u(1), $$select post_match((select id from clubs where slug = 'batroun'), 'padel', now() + interval '4 days', now() + interval '4 days 90 min', null, null, 3, 'x', null, 'open', gen_random_uuid())::text$$) like 'ERR%', ''),
   ('B6 profile anonymised already (name, phone)', (select name is null and phone is null and not email_notifications from profiles where id = pg_temp.u(1)), ''),
-  ('B7 running it again changes nothing', pg_temp.r(pg_temp.u(3), format($$select delete_account_data(%L)::text$$, pg_temp.u(1))) = (select summary::text from res)
-      and (select count(*) = 1 from notifications where profile_id = pg_temp.u(2) and match_id = pg_temp.u(101)), ''),
+  ('B7 running it again succeeds', pg_temp.r(pg_temp.u(3), format($$select delete_account_data(%L)::text$$, pg_temp.u(1))) not like 'ERR%', ''),
   ('B7 finishing before the sign-in account is gone is refused', pg_temp.r(pg_temp.u(3), format($$select finish_account_deletion(%L)::text$$, pg_temp.u(1))) like 'ERR account_still_exists%', '');
+insert into t values
+  ('B7 ...and changed nothing: first-run counts kept, the re-run found nothing, no second notice',
+     (select (summary - 'last_rerun') = (select r.summary from res r) and summary->'last_rerun'->>'bookings_cancelled' = '0'
+        and summary->'last_rerun'->>'bookings_anonymised' = '0' from account_deletions where subject_id = pg_temp.u(1) and status = 'data_removed')
+     and (select count(*) = 1 from notifications where profile_id = pg_temp.u(2) and match_id = pg_temp.u(101)),
+     (select summary::text from account_deletions where subject_id = pg_temp.u(1) and status = 'data_removed'));
+-- a hold that was still being written while the data step ran (lands after it): the re-run cancels and anonymises it
+alter table bookings disable trigger user;
+insert into f select 'b_late', pg_temp.bk(pg_temp.u(1), 13, 6, 'pending');
+alter table bookings enable trigger user;
+insert into t values ('B10 a late hold: re-run succeeds', pg_temp.r(pg_temp.u(3), format($$select delete_account_data(%L)::text$$, pg_temp.u(1))) not like 'ERR%', '');
+insert into t values ('B10 ...the late hold is cancelled and anonymised', (select status = 'cancelled' and player_id is null and guest_name = 'Former player' from bookings where id = (select id from f where k = 'b_late')), ''),
+  ('B10 ...and recorded as a re-run', (select summary->'last_rerun'->>'bookings_cancelled' = '1' from account_deletions where subject_id = pg_temp.u(1) and status = 'data_removed'), '');
 
 -- ================= the server deletes the sign-in account =================
 do $$ begin
@@ -200,13 +268,16 @@ exception when others then
 end $$;
 insert into t values
   ('C1 the sign-in account and profile are gone', (select count(*) = 0 from profiles where id = pg_temp.u(1)), ''),
-  ('C1 bookings kept', (select count(*) = 4 from bookings where id in (select id from f where k like 'b_%')), ''),
+  ('C1 bookings kept', (select count(*) = 6 from bookings where id in (select id from f where k like 'b_%')), ''),
   ('C1 payments kept, payer removed', (select count(*) = (select n_pay from snap) and bool_and(profile_id is null) from payments where booking_id in (select id from f where k like 'b_%')), ''),
-  ('C1 bookings they entered: author removed, rows kept', (select count(*) = 4 and bool_and(created_by is null) from bookings where id in (select id from f where k like 'b_%')), ''),
+  ('C1 bookings they entered: author removed, rows kept', (select count(*) = 6 and bool_and(created_by is null) from bookings where id in (select id from f where k like 'b_%')), ''),
   ('C1 their cancelled game kept, organiser removed', (select organizer_id is null and status = 'cancelled' from matches where id = pg_temp.u(101)), ''),
   ('C1 the report they filed is kept (moderation evidence)', (select reporter_id is null and target_key = pg_temp.u(2) from reports where id = pg_temp.u(302)), ''),
   ('C1 the report about their message is kept', (select count(*) = 1 from reports where id = pg_temp.u(301)), ''),
   ('C1 their own suspension row went with the account (its date and reason are in the summary)', (select count(*) = 0 from account_suspensions where profile_id = pg_temp.u(1)), ''),
+  ('C1 a session token that outlives the account cannot book', pg_temp.r(pg_temp.u(1), format($$select hold_slot(%L, %L, %L, %L, gen_random_uuid())::text$$,
+       pg_temp.club(), pg_temp.court(), pg_temp.at(12, 6), pg_temp.at(12, 6) + interval '60 min')) like 'ERR%', ''),
+  ('C1 ...nor post in chat', pg_temp.r(pg_temp.u(1), $$insert into match_messages (match_id, profile_id, body) values ('d2000000-0000-4000-8000-000000000102', auth.uid(), 'hello')$$) like 'ERR%', ''),
   ('C2 finishing succeeds', pg_temp.r(pg_temp.u(3), format($$select finish_account_deletion(%L)::text$$, pg_temp.u(1))) = 'ok', '');
 insert into t values
   ('C2 the request is marked done', (select status = 'done' and done_at is not null from account_deletions where subject_id = pg_temp.u(1) and status <> 'cancelled'), ''),

@@ -145,10 +145,52 @@ insert into t values
      pg_temp.r(pg_temp.u(5), format($$select book_at_desk(%L, %L, %L, gen_random_uuid())::text$$,
        (select id from courts where club_id = pg_temp.demo() order by sort limit 1), pg_temp.at(pg_temp.demo(), 3), pg_temp.at(pg_temp.demo(), 3) + interval '60 min')) like 'ERR club_not_found%', '');
 
+-- every other path a player could use (review hardening): boards, detail, tables, slot and price functions, coaches,
+-- posting and joining. Player 1 has no history at the demo club; 5 booked there, 6 is in its game, 2 is its staff.
+create temp table g as select id, note from matches where note in ('m7 demo game', 'm7 real game');
+grant select on g to anon, authenticated;
+insert into t values
+  ('D13 match_board: a player does not see the demo game', pg_temp.r(pg_temp.u(1), $$select count(*)::text from match_board(null, 14) where note = 'm7 demo game'$$) = '0', ''),
+  ('D13 match_board: a player still sees the real game', pg_temp.r(pg_temp.u(1), $$select count(*)::text from match_board(null, 14) where note = 'm7 real game'$$) = '1', ''),
+  ('D13 match_board: the demo club''s staff still see its game', pg_temp.r(pg_temp.u(2), $$select count(*)::text from match_board(null, 14) where note = 'm7 demo game'$$) = '1', ''),
+  ('D13 match_board: a player in the demo game still sees it', pg_temp.r(pg_temp.u(6), $$select count(*)::text from match_board(null, 14) where note = 'm7 demo game'$$) = '1', ''),
+  ('D13 match_detail: a player cannot open the demo game by id', pg_temp.r(pg_temp.u(1), $$select count(*)::text from match_detail((select id from g where note = 'm7 demo game'))$$) = '0', ''),
+  ('D13 match_detail: its member and its staff still can', pg_temp.r(pg_temp.u(6), $$select count(*)::text from match_detail((select id from g where note = 'm7 demo game'))$$) = '1'
+     and pg_temp.r(pg_temp.u(2), $$select count(*)::text from match_detail((select id from g where note = 'm7 demo game'))$$) = '1', ''),
+  ('D13 matches table: signed out has no access at all (unchanged)', pg_temp.r(null, $$select count(*)::text from matches$$) like 'ERR permission denied%', ''),
+  ('D13 matches table: a player cannot read the open demo game', pg_temp.r(pg_temp.u(1), $$select count(*)::text from matches where note = 'm7 demo game'$$) = '0', ''),
+  ('D13 matches table: a player still reads the open real game', pg_temp.r(pg_temp.u(1), $$select count(*)::text from matches where note = 'm7 real game'$$) = '1', ''),
+  ('D13 matches table: the demo game stays readable to its member and its staff', pg_temp.r(pg_temp.u(6), $$select count(*)::text from matches where note = 'm7 demo game'$$) = '1'
+     and pg_temp.r(pg_temp.u(2), $$select count(*)::text from matches where note = 'm7 demo game'$$) = '1', ''),
+  ('D13 courts table: signed out and a player read no demo courts', pg_temp.r(null, format($$select count(*)::text from courts where club_id = %L$$, pg_temp.demo())) = '0'
+     and pg_temp.r(pg_temp.u(1), format($$select count(*)::text from courts where club_id = %L$$, pg_temp.demo())) = '0', ''),
+  ('D13 courts table: the real club''s courts are still readable signed out', pg_temp.r(null, format($$select (count(*) > 0)::text from courts where club_id = %L$$, pg_temp.real())) = 'true', ''),
+  ('D13 courts table: staff and a player with a booking there still read the demo courts (court name on the booking)',
+     pg_temp.r(pg_temp.u(2), format($$select (count(*) > 0)::text from courts where club_id = %L$$, pg_temp.demo())) = 'true'
+     and pg_temp.r(pg_temp.u(5), $$select count(*)::text from bookings b join courts k on k.id = b.court_id where b.player_id = auth.uid()$$) = '1', ''),
+  ('D13 price_rules table: no demo prices signed out; real prices still', pg_temp.r(null, format($$select count(*)::text from price_rules where club_id = %L$$, pg_temp.demo())) = '0'
+     and pg_temp.r(null, format($$select (count(*) > 0)::text from price_rules where club_id = %L$$, pg_temp.real())) = 'true', ''),
+  ('D13 club_media table: no demo photos signed out', pg_temp.r(null, format($$select count(*)::text from club_media where club_id = %L$$, pg_temp.demo())) = '0', ''),
+  ('D13 next_free_slot: nothing for the demo club', pg_temp.r(null, format($$select count(*)::text from next_free_slot(%L)$$, pg_temp.demo())) = '0', ''),
+  ('D13 quote_price: a player cannot price a demo court', pg_temp.r(pg_temp.u(1), format($$select quote_price(%L, %L, %L)::text$$,
+       (select id from courts where club_id = pg_temp.demo() order by sort limit 1), pg_temp.at(pg_temp.demo(), 5), pg_temp.at(pg_temp.demo(), 5) + interval '60 min')) like 'ERR club_not_found%', ''),
+  ('D13 quote_price: staff still can', pg_temp.r(pg_temp.u(2), format($$select quote_price(%L, %L, %L)::text$$,
+       (select id from courts where club_id = pg_temp.demo() order by sort limit 1), pg_temp.at(pg_temp.demo(), 5), pg_temp.at(pg_temp.demo(), 5) + interval '60 min')) not like 'ERR%', ''),
+  ('D13 club_sports: empty for the demo club, not for the real one', pg_temp.r(null, format($$select club_sports(%L)::text$$, pg_temp.demo())) = '{}'
+     and pg_temp.r(null, format($$select club_sports(%L)::text$$, pg_temp.real())) <> '{}', ''),
+  ('D13 coaches_at_club: none at the demo club; the real club keeps its coach', pg_temp.r(pg_temp.u(1), format($$select count(*)::text from coaches_at_club(%L)$$, pg_temp.demo())) = '0'
+     and pg_temp.r(pg_temp.u(1), format($$select count(*)::text from coaches_at_club(%L)$$, pg_temp.real())) = '1', ''),
+  ('D13 coach_card: the coach''s card no longer lists the demo club', pg_temp.r(pg_temp.u(1), format($$select (clubs::text like '%%M7 Real Club%%' and clubs::text not like '%%Batroun%%')::text from coach_card(%L)$$, pg_temp.u(40))) = 'true', ''),
+  ('D13 post_match: a player cannot post a game at the demo club', pg_temp.r(pg_temp.u(1), format($$select post_match(%L, 'padel', now() + interval '5 days', now() + interval '5 days 90 min', null, null, 3, 'm7 x', null, 'open', gen_random_uuid())::text$$, pg_temp.demo())) like 'ERR club_not_found%', ''),
+  ('D13 post_match: posting at the real club still works', pg_temp.r(pg_temp.u(1), format($$select post_match(%L, 'padel', now() + interval '5 days', now() + interval '5 days 90 min', null, null, 3, 'm7 y', null, 'open', gen_random_uuid())::text$$, pg_temp.real())) not like 'ERR%', ''),
+  ('D13 join_match: a player cannot join the demo game by id', pg_temp.r(pg_temp.u(1), $$select join_match((select id from g where note = 'm7 demo game'))::text$$) like 'ERR not_found%', '');
+
 -- switch back off
 update app_settings set value = 'false' where key = 'hide_demo_clubs';
 insert into t values
   ('D10 off again: visible to a signed-out visitor', pg_temp.r(null, $$select count(*)::text from clubs where slug = 'batroun'$$) = '1', ''),
+  ('D10 off again: the demo game is back on match_board', pg_temp.r(pg_temp.u(1), $$select count(*)::text from match_board(null, 14) where note = 'm7 demo game'$$) = '1', ''),
+  ('D10 off again: its courts are readable signed out again', pg_temp.r(null, format($$select (count(*) > 0)::text from courts where club_id = %L$$, pg_temp.demo())) = 'true', ''),
   ('D10 off again: a player can book the demo club', pg_temp.r(pg_temp.u(1), format($$select book_at_desk(%L, %L, %L, gen_random_uuid())::text$$,
        (select id from courts where club_id = pg_temp.demo() order by sort limit 1), pg_temp.at(pg_temp.demo(), 8), pg_temp.at(pg_temp.demo(), 8) + interval '60 min')) not like 'ERR club_not_found%', '');
 
