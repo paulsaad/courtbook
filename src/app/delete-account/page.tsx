@@ -4,7 +4,10 @@ export const metadata = { title: "Delete your CourtBook account" };
 
 /**
  * M2: the public page app stores link to ("how to delete your account and data"). Works without signing in, for
- * people who no longer have the app. Texts about timing and retention are provisional until the legal review (L6).
+ * people who no longer have the app.
+ * LAUNCH REQUIREMENTS (master checklist M2): (1) the processing time and the retention wording below are provisional
+ * until the legal review (L6); (2) no confirmation email is sent yet (needs the CourtBook sender, M5) — do not promise
+ * one here until it exists.
  */
 const CONTACT = "courtbook.contact@gmail.com";
 
@@ -36,7 +39,7 @@ export default function DeleteAccountInfo() {
       <section className="card p-4">
         <h2 className="font-bold">What happens</h2>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-          <li>We process requests within 30 days and email you when it is done.</li>
+          <li>We aim to process requests within 30 days. Once your account is deleted, signing in with your email starts a new, empty account.</li>
           <li><b>Deleted:</b> your name, phone number, email sign-in, playing levels and sports, coach profile, chat messages,
             notifications and blocked-player list. You are taken out of the games you joined.</li>
           <li><b>Cancelled:</b> your upcoming bookings, under the club’s normal cancellation rules, and the games you organise

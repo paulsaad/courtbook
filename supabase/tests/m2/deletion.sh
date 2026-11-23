@@ -48,6 +48,8 @@ mutants=(
   "M17 stale holds left pending|s/               and (b.status = 'pending' or (b.status = 'confirmed' and b.start_at > now()))  -- every hold, even a stale one/               and b.status in ('confirmed', 'pending') and b.start_at > now()/"
   "M18 dashboard deletion skips the data step|s/    raise exception 'use_delete_account';/    null;/"
   "M19 game notes kept|s/  update matches set note = null where organizer_id = p_subject and note is not null;/  update matches set note = note where organizer_id = p_subject and note is not null;/"
+  "M20 direct deletion ignores staff, admin and legal hold|s/  if refusal is not null then raise exception 'use_delete_account: %', refusal; end if;/  null;/"
+  "M21 chat allowed while a request is open|s/on match_messages for each row execute function block_new_activity_after_deletion_request('profile_id');/on match_messages for each row execute function block_new_activity_after_deletion_request('nobody');/"
 )
 tmp=$(mktemp -d); chmod 755 "$tmp"
 for m in "${mutants[@]}"; do

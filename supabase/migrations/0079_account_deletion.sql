@@ -82,7 +82,8 @@ $$;
 revoke all on function deletion_requested(uuid) from public, anon, authenticated;
 grant execute on function deletion_requested(uuid) to service_role;
 
--- ============ 3. while a request is open: no new bookings, games or joins (cancelling and leaving still work) ============
+-- ============ 3. while a request is open: no new bookings, games, joins, chat messages or coach listings
+--              (cancelling and leaving still work) ============
 create or replace function block_new_activity_after_deletion_request() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_who uuid;
@@ -98,14 +99,22 @@ drop trigger if exists matches_deletion_guard on matches;
 create trigger matches_deletion_guard before insert on matches for each row execute function block_new_activity_after_deletion_request('organizer_id');
 drop trigger if exists match_players_deletion_guard on match_players;
 create trigger match_players_deletion_guard before insert on match_players for each row execute function block_new_activity_after_deletion_request('profile_id');
+drop trigger if exists match_messages_deletion_guard on match_messages;
+create trigger match_messages_deletion_guard before insert on match_messages for each row execute function block_new_activity_after_deletion_request('profile_id');
+drop trigger if exists coaches_deletion_guard on coaches;
+create trigger coaches_deletion_guard before insert on coaches for each row execute function block_new_activity_after_deletion_request('profile_id');
 
 -- ============ 3b. no shortcut: a profile with history is deleted only after delete_account_data ============
 -- Deleting the sign-in account in the Supabase dashboard would otherwise skip the cancellations and anonymisation
--- (bookings would also hit their "player or guest name" check). An account with no bookings, games or messages
--- (e.g. a sign-up that was never used) can still be removed directly.
+-- (bookings would also hit their "player or guest name" check). The protections of delete_account_data hold here
+-- too, for every account, with or without history: no admin, no club staff, nothing on legal hold, no coach with
+-- coach bookings (remove the role or lift the hold first). An unused, unprotected sign-up can still be removed.
 create or replace function profiles_delete_guard() returns trigger
 language plpgsql security definer set search_path = public as $$
+declare refusal text;
 begin
+  refusal := deletion_refusal(old.id);
+  if refusal is not null then raise exception 'use_delete_account: %', refusal; end if;
   if not exists (select 1 from account_deletions where subject_id = old.id and status = 'data_removed')
      and (exists (select 1 from bookings where player_id = old.id)
           or exists (select 1 from matches where organizer_id = old.id)
@@ -295,7 +304,9 @@ begin
 
   -- (e) coach listing (no coach bookings, checked above); profile anonymised now in case the sign-in deletion is late
   delete from coaches where profile_id = p_subject;
-  select jsonb_build_object('suspended_at', suspended_at, 'reason', reason) into susp from account_suspensions where profile_id = p_subject;
+  -- only the date: the reason is free text written about the person; it is kept (with its retention rule) in the
+  -- moderation records, not in this permanent deletion record
+  select jsonb_build_object('suspended_at', suspended_at) into susp from account_suspensions where profile_id = p_subject;
   update profiles set name = null, phone = null, level = null, sports = '{}', email_notifications = false where id = p_subject;
 
   if d.status = 'requested' then

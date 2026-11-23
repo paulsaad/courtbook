@@ -40,8 +40,8 @@ create function pg_temp.pay(b uuid, who uuid, st payment_status) returns void la
 
 -- fixtures. 1 = the person deleting; 2 = another player; 3 = admin; 4 = club staff; 5 = coach with a coach booking;
 -- 6 = a reported player under legal hold; 7 = control player (same bookings as 1, cancelled through cancel_booking)
-insert into auth.users (id, phone) select pg_temp.u(n), '+9617100' || lpad(n::text, 2, '0') from generate_series(1, 12) n;
-update profiles set name = 'Person ' || ltrim(right(id::text, 2), '0'), rules_accepted_at = now() where id in (select pg_temp.u(n) from generate_series(1, 12) n);
+insert into auth.users (id, phone) select pg_temp.u(n), '+9617100' || lpad(n::text, 2, '0') from generate_series(1, 15) n;
+update profiles set name = 'Person ' || ltrim(right(id::text, 2), '0'), rules_accepted_at = now() where id in (select pg_temp.u(n) from generate_series(1, 15) n);
 update profiles set roles = '{player,admin}' where id = pg_temp.u(3);
 insert into club_staff (club_id, profile_id) values (pg_temp.club(), pg_temp.u(4));
 -- simulated payments, and a cutoff (200 h) that puts day 5 inside it and day 10 outside it
@@ -120,6 +120,8 @@ insert into t values
        pg_temp.club(), pg_temp.court(), pg_temp.at(7, 6), pg_temp.at(7, 6) + interval '60 min')) like 'ERR%account_deletion_requested%', ''),
   ('A3 no new game', pg_temp.r(pg_temp.u(1), $$select post_match((select id from clubs where slug = 'batroun'), 'padel', now() + interval '4 days', now() + interval '4 days 90 min', null, null, 3, 'm2 blocked', null, 'open', gen_random_uuid())::text$$) like 'ERR%account_deletion_requested%', ''),
   ('A3 no joining a game', pg_temp.r(pg_temp.u(1), $$select join_match('d2000000-0000-4000-8000-000000000103')::text$$) like 'ERR%account_deletion_requested%', ''),
+  ('A3 no chat message in a game they are already in', pg_temp.r(pg_temp.u(1), $$insert into match_messages (match_id, profile_id, body) values ('d2000000-0000-4000-8000-000000000102', auth.uid(), 'still here')$$) like 'ERR%account_deletion_requested%', ''),
+  ('A3 no new coach listing', pg_temp.r(pg_temp.u(1), $$insert into coaches (profile_id, sports, active) values (auth.uid(), '{padel}', true)$$) like 'ERR%', ''),
   ('A3 other players are unaffected', pg_temp.r(pg_temp.u(2), format($$select hold_slot(%L, %L, %L, %L, gen_random_uuid())::text$$,
        pg_temp.club(), pg_temp.court(), pg_temp.at(7, 6), pg_temp.at(7, 6) + interval '60 min')) not like 'ERR%', ''),
   ('A4 the person can cancel the request', pg_temp.r(pg_temp.u(1), $$select cancel_account_deletion()::text$$) = 'ok', '');
@@ -176,6 +178,21 @@ do $$ begin
 exception when others then
   insert into t values ('A9 deleting a sign-in account with history directly is refused', sqlerrm like '%use_delete_account%', sqlerrm);
 end $$;
+-- protected accounts without any history: staff (13), admin (14), reported player on legal hold (15)
+insert into club_staff (club_id, profile_id) values (pg_temp.club(), pg_temp.u(13));
+update profiles set roles = '{player,admin}' where id = pg_temp.u(14);
+insert into reports (reporter_id, target_kind, profile_id, target_key, reason, legal_hold) values (pg_temp.u(2), 'player', pg_temp.u(15), pg_temp.u(15), 'danger', true);
+do $$ declare n int; v text; begin
+  foreach n in array array[13, 14, 15] loop
+    begin
+      delete from auth.users where id = pg_temp.u(n);
+      insert into t values ('A9 direct deletion of protected account ' || n || ' (no history) is refused', false, 'deleted');
+    exception when others then
+      v := case n when 13 then 'staff_role' when 14 then 'admin_role' else 'legal_hold' end;
+      insert into t values ('A9 direct deletion of protected account ' || n || ' (no history) is refused: ' || v, sqlerrm like '%use_delete_account: ' || v || '%', sqlerrm);
+    end;
+  end loop;
+end $$;
 do $$ begin
   delete from auth.users where id = pg_temp.u(12);
   insert into t values ('A9 an unused account can still be deleted directly', true, '');
@@ -200,7 +217,7 @@ insert into t values
   ('B1 status data_removed, processed by the admin', (select status = 'data_removed' and processed_by = pg_temp.u(3) from account_deletions where subject_id = pg_temp.u(1) and status <> 'cancelled'), ''),
   ('B1 summary counts', (select summary->>'games_cancelled' = '1' and summary->>'bookings_cancelled' = '3' and summary->>'refunds_due' = '1'
       and summary->>'bookings_anonymised' = '5' and summary->>'messages_deleted' = '1' and summary->>'game_notes_cleared' = '1' from res), (select summary::text from res)),
-  ('B1 the suspension is recorded in the summary', (select summary->'suspension'->>'reason' = 'm2 suspension reason' from res), ''),
+  ('B1 the suspension''s date is recorded, not its free-text reason', (select summary->'suspension'->>'suspended_at' is not null and not (summary->'suspension') ? 'reason' from res), ''),
   -- bookings: same outcomes as cancel_booking for the control player
   ('B2 before the cutoff: cancelled, refund due', (select b.status = 'cancelled' and p.status = 'refund_due' from bookings b join payments p on p.booking_id = b.id where b.id = (select id from f where k = 'b_out')), ''),
   ('B2 inside the cutoff: cancelled, payment kept (no refund)', (select b.status = 'cancelled' and p.status = 'paid' from bookings b join payments p on p.booking_id = b.id where b.id = (select id from f where k = 'b_in')), ''),
@@ -241,6 +258,7 @@ insert into t values
       and (select count(*) = 1 from reports where id = pg_temp.u(302)), ''),
   ('B9 still signed in while the sign-in deletion is pending: no new booking', pg_temp.r(pg_temp.u(1), format($$select hold_slot(%L, %L, %L, %L, gen_random_uuid())::text$$,
        pg_temp.club(), pg_temp.court(), pg_temp.at(11, 6), pg_temp.at(11, 6) + interval '60 min')) like 'ERR%account_deletion_requested%', ''),
+  ('B9 ...and no chat message', pg_temp.r(pg_temp.u(1), $$insert into match_messages (match_id, profile_id, body) values ('d2000000-0000-4000-8000-000000000102', auth.uid(), 'after')$$) like 'ERR%', ''),
   ('B9 ...and no new game', pg_temp.r(pg_temp.u(1), $$select post_match((select id from clubs where slug = 'batroun'), 'padel', now() + interval '4 days', now() + interval '4 days 90 min', null, null, 3, 'x', null, 'open', gen_random_uuid())::text$$) like 'ERR%', ''),
   ('B6 profile anonymised already (name, phone)', (select name is null and phone is null and not email_notifications from profiles where id = pg_temp.u(1)), ''),
   ('B7 running it again succeeds', pg_temp.r(pg_temp.u(3), format($$select delete_account_data(%L)::text$$, pg_temp.u(1))) not like 'ERR%', ''),
