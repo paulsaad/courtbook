@@ -52,6 +52,7 @@ function cleanup() {
     delete from club_staff where profile_id in ${U} or club_id in ${TESTCLUBS};
     delete from clubs where id in ${TESTCLUBS};
     delete from account_deletions where subject_id in ${U} or processed_by in ${U} or summary::text like '%web-%@courtbook.test%';
+    update profiles set roles = array_remove(roles, 'admin') where id in ${U};   -- an admin account cannot be deleted (profiles_delete_guard)
     delete from auth.users where email like 'web-%@courtbook.test';
     update clubs set payment_mode = '${MODE}' where id = '${CLUB}';
     commit;`);
@@ -193,10 +194,13 @@ try {
     await A.page.type('input[placeholder="Club name"]', `ZZ Web Test ${STAMP}`);
     await A.page.type('input[placeholder^="url-name"]', SLUG);
     await click(A.page, "Create club");
-    await until(A.page, () => !document.body.innerText.includes("Creating…"), null, 20000).catch(() => {});
-    const row = sql(`select coalesce((select active::text from clubs where slug='${SLUG}'), 'missing')`);
-    record("C1", "admin: Add a club → created, hidden (not published)", row === "false", row); }
-  const NC = sql(`select id from clubs where slug='${SLUG}'`);
+    let row = "missing";
+    for (let i = 0; i < 30 && row === "missing"; i++) { await new Promise((r) => setTimeout(r, 500)); row = sql(`select coalesce((select active::text from clubs where slug='${SLUG}'), 'missing')`); }
+    await shot(A.page, "c1-created");
+    const form = await A.page.evaluate(() => (document.querySelector("form")?.innerText ?? "").slice(0, 200));
+    record("C1", "admin: Add a club → created, hidden (not published)", row === "false", row === "false" ? "" : `${row}; form says: ${form}`); }
+  const NC = sql(`select coalesce((select id::text from clubs where slug='${SLUG}'), '')`);
+  if (!NC) throw new Error("the test club was not created; section C stops here");
   { const r = await anonApi.from("clubs").select("id").eq("slug", SLUG);
     const d = await anonApi.rpc("club_discovery", {});
     const end = await go(anon, `/club/${SLUG}`); const t = await text(anon);
