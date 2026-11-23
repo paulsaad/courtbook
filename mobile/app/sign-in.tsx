@@ -10,6 +10,7 @@ import { appleAvailable, signInWithApple } from "../lib/appleAuth";
 import { installedVariant } from "../lib/appIdentity";
 import { color, radius, TOUCH } from "../lib/theme";
 import { CODE_MAX, cleanCode, codeReady } from "../lib/otpCode";
+import { LegalLinks } from "../components/LegalLinks";
 
 type Stage = "email" | "code";
 
@@ -203,6 +204,7 @@ export default function SignIn() {
 
       {busy && <ActivityIndicator style={styles.spinner} />}
       {error !== null && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
+      <LegalLinks only={["privacy", "terms"]} testID="sign-in-legal" />
     </ScrollView>
   );
 }
