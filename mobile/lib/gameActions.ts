@@ -6,6 +6,7 @@ import { gameFailure } from "./gameErrors";
 import { createSingleFlight } from "./singleFlight";
 import { gameKeys, invalidateAfterGameChange } from "./games";
 import type { JoinMode, MatchStatus } from "./gameTypes";
+import type { Secondary } from "./gameState";
 import { PROJECT_REF, refFromUrl } from "./variant";
 
 /**
@@ -58,6 +59,25 @@ export const GAME_RPC_ARGS = {
   remove_player: ["p_match", "p_profile"], // M3-H
   resolve_court: ["p_match", "p_booking"], // M3-H
 } as const;
+
+/**
+ * What each secondary button on the Game screen does. Typed over every Secondary, so a button can never be drawn
+ * without an action (Galaxy A17 acceptance, 23 Nov: "Hide from my games" had no handler and did nothing).
+ *  confirm — ask once, then run the action; `leaveScreen` returns to the previous screen when it is done
+ *  manage  — opens the organiser's sheet
+ *  none    — not handled here (Directions is the club link, drawn elsewhere)
+ */
+export type SecondaryStep =
+  | { kind: "confirm"; title: string; text: string; ok: string; destructive: boolean; action: GameAction; leaveScreen: boolean }
+  | { kind: "manage" }
+  | { kind: "none" };
+export const SECONDARY_STEPS: Record<Secondary, SecondaryStep> = {
+  withdraw: { kind: "confirm", title: "Withdraw your request?", text: "The organiser will no longer see it.", ok: "Withdraw", destructive: false, action: { kind: "leave" }, leaveScreen: false },
+  leave: { kind: "confirm", title: "Leave this game?", text: "Your place opens for someone else.", ok: "Leave", destructive: true, action: { kind: "leave" }, leaveScreen: false },
+  hide: { kind: "confirm", title: "Hide this game?", text: "It's removed from your games, for you only. The other players still see it.", ok: "Hide", destructive: false, action: { kind: "hide", hidden: true }, leaveScreen: true },
+  manage: { kind: "manage" },
+  directions: { kind: "none" },
+};
 
 /** Shown if an action is called before writes are switched on (no screen offers one before then). */
 export const JOIN_LATER_TEXT = "Joining from the app arrives in the next update.";

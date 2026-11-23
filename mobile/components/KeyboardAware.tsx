@@ -1,5 +1,5 @@
-import { useRef, useState, type ReactNode } from "react";
-import { KeyboardAvoidingView, View, type ViewStyle } from "react-native";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Keyboard, KeyboardAvoidingView, Platform, View, type ScrollViewInstance, type ViewStyle } from "react-native";
 
 /**
  * Keeps its bottom (a composer, a Save button) above the on-screen keyboard on both platforms.
@@ -17,4 +17,31 @@ export function KeyboardAware({ children, style }: { children: ReactNode; style?
       </KeyboardAvoidingView>
     </View>
   );
+}
+
+/** True while the on-screen keyboard is open (Android reports "did" events only; iOS "will", for no lag). */
+export function useKeyboardVisible(): boolean {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const show = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hide = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const a = Keyboard.addListener(show, () => setVisible(true));
+    const b = Keyboard.addListener(hide, () => setVisible(false));
+    return () => { a.remove(); b.remove(); };
+  }, []);
+  return visible;
+}
+
+/**
+ * A ScrollView ref that scrolls to its end each time the keyboard opens, so a form's text field and its Send button
+ * come into view above the keyboard (used by the report and feedback sheets).
+ */
+export function useRevealOnKeyboard(keyboard: boolean) {
+  const ref = useRef<ScrollViewInstance | null>(null);
+  useEffect(() => {
+    if (!keyboard) return;
+    const t = setTimeout(() => ref.current?.scrollToEnd({ animated: true }), 50);
+    return () => clearTimeout(t);
+  }, [keyboard]);
+  return ref;
 }
