@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/types";
+import { LegalLinks } from "@/components/legal";
 
 /** The question and the two answers. "Under 18" records nothing: the person is told CourtBook is not for them. */
 export default function AgeForm({ next }: { next: string }) {
@@ -27,6 +28,7 @@ export default function AgeForm({ next }: { next: string }) {
         <p className="text-[15px]">You can&apos;t book courts, join games or chat on CourtBook.</p>
         <form action="/auth/signout" method="post"><button className="btn btn-secondary">Sign out</button></form>
         <button type="button" onClick={() => setUnder(false)} className="text-sm text-muted">I answered by mistake</button>
+        <LegalLinks />
       </main>
     );
   }
@@ -38,6 +40,7 @@ export default function AgeForm({ next }: { next: string }) {
       <button type="button" onClick={confirm} disabled={busy} className="btn btn-primary">{busy ? "Saving…" : "Yes, I am 18 or over"}</button>
       <button type="button" onClick={() => setUnder(true)} disabled={busy} className="btn btn-secondary">No, I am under 18</button>
       {error && <p role="alert" className="text-sm text-cedar">{error}</p>}
+      <LegalLinks />
     </main>
   );
 }

@@ -104,6 +104,14 @@ jobs:
           npm run typecheck
           npm test -- --ci
 
+      # M5 release order: the app's legal links reach players only after the official pages are legally approved,
+      # published and public. Only when a screen links to them (the deferred links PR); until then this passes, so
+      # unrelated live-app fixes are never blocked. Live app: refuses unless every linked page is final and public.
+      # Staging: a warning only.
+      - name: Legal pages the app links to are final and public (only if the app links to them)
+        if: (inputs.action == 'publish' || inputs.action == 'check')
+        run: node scripts/check-legal-pages.mjs --gate --mode "$([ "${{ inputs.app }}" = live ] && echo fail || echo warn)"
+
       # The runtime version is the app's "version" in app.json. An update only reaches builds with
       # the same runtime version, so it can never land on a build whose native code it was not made for.
       # This check closes the remaining gap: someone adding native code and forgetting to bump the
