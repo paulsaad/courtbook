@@ -32,7 +32,8 @@ const CLUB = sql("select id from clubs where slug='batroun'");
 const MODE = sql(`select payment_mode from clubs where id='${CLUB}'`);
 const U = "(select id from auth.users where email like 'web-%@courtbook.test')";
 const TESTCOURTS = `(select id from courts where club_id = '${CLUB}' and name like 'zz-web-%')`;
-const TESTCLUBS = "(select id from clubs where slug like 'zz-web-%')";
+// (zzz-web-…: two hidden clubs left by the first runs of this test on 23 Nov, before the URL-name fix)
+const TESTCLUBS = "(select id from clubs where slug like 'zz-web-%' or slug like 'zzz-web-%')";
 function cleanup() {
   sql(`begin;
     alter table moderation_log disable trigger moderation_log_append_only;
@@ -191,8 +192,9 @@ try {
   console.log("--- C. new club setup and publishing");
   const SLUG = `zz-web-${STAMP}`;
   { await go(A.page, "/admin"); await click(A.page, "Add a club");
-    await A.page.type('input[placeholder="Club name"]', `ZZ Web Test ${STAMP}`);
-    await A.page.type('input[placeholder^="url-name"]', SLUG);
+    await A.page.type('input[placeholder="Club name"]', `ZZ Web ${STAMP}`);
+    const auto = await A.page.$eval('input[placeholder^="url-name"]', (i) => i.value);
+    record("C0", "typing the club name fills the URL name from the whole name", auto === SLUG, auto);
     await click(A.page, "Create club");
     let row = "missing";
     for (let i = 0; i < 30 && row === "missing"; i++) { await new Promise((r) => setTimeout(r, 500)); row = sql(`select coalesce((select active::text from clubs where slug='${SLUG}'), 'missing')`); }
@@ -205,7 +207,7 @@ try {
     const d = await anonApi.rpc("club_discovery", {});
     const end = await go(anon, `/club/${SLUG}`); const t = await text(anon);
     record("C2", "signed out: the new club is not readable, not in discovery, its page shows nothing of it",
-      (r.data ?? []).length === 0 && !(d.data ?? []).some((c) => c.slug === SLUG) && !t.includes(`ZZ Web Test ${STAMP}`), `${(r.data ?? []).length} row(s), page ${end}`); }
+      (r.data ?? []).length === 0 && !(d.data ?? []).some((c) => c.slug === SLUG) && !t.includes(`ZZ Web ${STAMP}`), `${(r.data ?? []).length} row(s), page ${end}`); }
   { await go(A.page, `/staff/${SLUG}/settings`);
     const t = await text(A.page);
     record("C3", "settings: the readiness checklist is shown and lists what is missing", t.includes("Ready for players?") && /add at least one court|choose the town|add a phone number/.test(t), t.match(/Ready for players\?[\s\S]{0,200}/)?.[0]);
@@ -225,7 +227,7 @@ try {
     record("C7", "Publish to players → published", pub && sql(`select active::text from clubs where id='${NC}'`) === "true");
     const r = await anonApi.from("clubs").select("id").eq("slug", SLUG);
     await go(anon, `/club/${SLUG}`);
-    record("C8", "signed out: the published club is readable and its page shows it", (r.data ?? []).length === 1 && (await text(anon)).includes(`ZZ Web Test ${STAMP}`)); }
+    record("C8", "signed out: the published club is readable and its page shows it", (r.data ?? []).length === 1 && (await text(anon)).includes(`ZZ Web ${STAMP}`)); }
 
   // ------------------------------------------------------------------ M. moderation
   console.log("--- M. reports, admin actions, legal hold, permissions");
@@ -282,7 +284,7 @@ try {
 } finally {
   try { await browser?.close(); } catch {}
   cleanup();
-  const left = sql(`select (select count(*) from auth.users where email like 'web-%@courtbook.test') + (select count(*) from courts where name like 'zz-web-%') + (select count(*) from clubs where slug like 'zz-web-%')`);
+  const left = sql(`select (select count(*) from auth.users where email like 'web-%@courtbook.test') + (select count(*) from courts where name like 'zz-web-%') + (select count(*) from clubs where slug like 'zz-web-%' or slug like 'zzz-web-%')`);
   record("Z1", "clean-up: no test accounts, courts, clubs, games, reports or log entries left; payment mode restored; switches off",
     left === "0" && sql(`select payment_mode from clubs where id='${CLUB}'`) === MODE && sql("select count(*) from app_settings where key in ('hide_demo_clubs','require_age_confirmation') and value = 'true'") === "0", `left: ${left}`);
 }
