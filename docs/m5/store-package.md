@@ -86,7 +86,7 @@ data brokers).
 | Identifiers → User ID | Yes | Yes | App Functionality | account ID |
 | Identifiers → Device ID | **Yes, unless removed** (confirmed 23 Nov: native crash reports carry an installation ID) | No | App Functionality | declare, or omit only if a new build's native filter removes it before live crash reporting (§9 E2) |
 | Purchases → Purchase History | Yes | Yes | App Functionality | bookings with their prices (paid at the desk today) |
-| Diagnostics → Crash Data | Yes | No | App Functionality | Sentry error reports with no user, account or IP |
+| Diagnostics → Crash Data | Yes | No | App Functionality | Sentry error reports: no account, name, email or IP; error text withheld. Native crashes also carry an installation ID and device details (§9 E2) |
 | Other Data → Other Data Types | Yes | Yes | App Functionality | 18+ answer, sports and playing level, community-rules acceptance |
 | Location → Coarse Location | **To decide** (§9 E2b) | No | App Functionality | Sentry derives country and city from the connection for app reports. Declare, or omit only if the Sentry setting stops it |
 | Health, Financial (payment) info, Sensitive info, Contacts, Browsing/Search history, Usage data, Performance data, Audio/Photos, Precise location | No | — | — | none collected |
@@ -311,7 +311,8 @@ Recommended before public launch. Availability on our Supabase plan is still to 
 
 ## Sources (official, read 23 Nov 2026)
 - Apple: Updated age ratings in App Store Connect; Age Rating Updates (required since 31 Jan 2026).
-- Apple: App Review Guidelines 1.2 (user-generated content), 2.1 (demo account), 5.1.1(v) (account deletion).
+- Apple: App Review Guidelines 1.2 (user-generated content), 2.1(a) (demo account; demo mode only with prior approval), 2.5.19 (no hidden features), 5.1.1(v) (account deletion).
+- Google: Requirements for providing login credentials for app access (answer 15748846); App content, sign-in details (9859455).
 - Apple: Offering account deletion in your app; TN3194 (revoking Sign in with Apple tokens).
 - Apple: App privacy details on the App Store; Screenshot specifications (App Store Connect Help).
 - Google: Understanding Google Play's app account deletion requirements (answer 13327111).
