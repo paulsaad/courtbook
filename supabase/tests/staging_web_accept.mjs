@@ -236,6 +236,7 @@ try {
   // ------------------------------------------------------------------ M. moderation
   console.log("--- M. reports, admin actions, legal hold, permissions");
   const MATCH = sql(`insert into matches (club_id, sport, organizer_id, start_at, end_at, players_needed, status, join_mode) values ('${CLUB}', 'padel', '${X.id}', ${"(" + "(current_date + 5 + time '18:00') at time zone 'Asia/Beirut')"}, ${"(" + "(current_date + 5 + time '19:30') at time zone 'Asia/Beirut')"}, 3, 'open', 'open') returning id`).split("\n")[0];
+  sql(`update profiles set rules_accepted_at = now() where id in ('${X.id}', '${T.id}')`);   // community rules (M3), needed to chat
   sql(`insert into match_players (match_id, profile_id, status) values ('${MATCH}', '${T.id}', 'accepted')`);
   const MSG = sql(`insert into match_messages (match_id, profile_id, body) values ('${MATCH}', '${X.id}', 'zz web test message ${STAMP}') returning id`).split("\n")[0];
   const rep = await T.api.rpc("report_content", { p_kind: "message", p_target: MSG, p_reason: "abuse", p_note: "web acceptance test" });
