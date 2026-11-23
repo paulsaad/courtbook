@@ -5,7 +5,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Text } from "../components/Text";
 import { Icon, type IconName } from "../components/Icon";
 import { Loading } from "../components/StateView";
-import { LegalLinks } from "../components/LegalLinks";
 import { confirmBlock, FeedbackSheet, ReportSheet } from "../components/game/SafetySheets";
 import { useSession } from "../lib/session";
 import { currentBuild } from "../lib/buildInfo";
@@ -76,10 +75,6 @@ export default function Help() {
         </Pressable>
         {!signedIn ? <Text variant="caption">Sign in to send a problem or a suggestion from the app.</Text> : null}
         <Text variant="caption">If anyone is in danger, contact the police or emergency services now.</Text>
-      </View>
-      <View style={styles.card} testID="help-legal">
-        <Text variant="label">Privacy and terms</Text>
-        <LegalLinks />
       </View>
 
       <FeedbackSheet kind={kind} onClose={() => setKind(null)}
