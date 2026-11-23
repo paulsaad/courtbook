@@ -12,13 +12,15 @@ POLT = ["clubs", "courts", "price_rules", "club_media", "matches", "account_dele
 PQ = lambda t: f"select coalesce(string_agg(policyname || ':' || cmd || ':' || coalesce(qual, '') || ':' || coalesce(with_check, ''), ' | ' order by policyname), '') from pg_policies where schemaname = 'public' and tablename = '{t}'"
 pol_old = {t: q("cb_0077", PQ(t))[0] if q("cb_0077", PQ(t)) else "" for t in POLT}
 pol_new = {t: q("courtbook_test", PQ(t))[0] if q("courtbook_test", PQ(t)) else "" for t in POLT}
-AQ = "select string_agg(proname, ',' order by proname) from pg_proc where pronamespace = 'public'::regnamespace and has_function_privilege('anon', oid, 'execute')"
-anon_old = q("cb_0077", AQ)[0]; anon_new = q("courtbook_test", AQ)[0]
 lit = lambda s: "'" + s.replace("'", "''") + "'"
 fsel = lambda n, a: f"(select {M} from pg_proc where pronamespace = 'public'::regnamespace and proname = {lit(n)} and pg_get_function_identity_arguments(oid) = {lit(a)})"
 TRQ = "(select count(*)::int from pg_trigger where not tgisinternal and tgrelid::regclass::text || '.' || tgname = any(array[" + ",".join(lit(t) for t in newtrig) + "]))"
 POL = lambda t: f"(select coalesce(string_agg(policyname || ':' || cmd || ':' || coalesce(qual, '') || ':' || coalesce(with_check, ''), ' | ' order by policyname), '') from pg_policies where schemaname = 'public' and tablename = {lit(t)})"
-ANON = "(select string_agg(proname, ',' order by proname) from pg_proc where pronamespace = 'public'::regnamespace and has_function_privilege('anon', oid, 'execute'))"
+# extension members (btree_gist / pgcrypto support functions) are excluded: Supabase grants them to anon, they are not ours
+# (0036 excludes them for the same reason)
+ANON = "(select string_agg(p.proname, ',' order by p.proname) from pg_proc p where p.pronamespace = 'public'::regnamespace and has_function_privilege('anon', p.oid, 'execute') and not exists (select 1 from pg_depend d where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e'))"
+
+anon_old = q("cb_0077", "select " + ANON)[0]; anon_new = q("courtbook_test", "select " + ANON)[0]
 
 pre = ["-- launch-1 (migrations 0078–0084) — STAGING PREFLIGHT. READ ONLY: one SELECT, changes nothing.",
 "-- Run immediately before applying 0078 0079 0080 0081 0082 0083 0084 (in that order). 0077 must be applied.",

@@ -19,9 +19,15 @@ for f in $(ls supabase/migrations/*.sql | sort | awk -F/ '$NF < "0078"'); do
   { cat "$f"; echo; echo "insert into staging_meta.applied (name, sha) values ('$(basename $f)', 'rehearsal');"; } | P -v ON_ERROR_STOP=1 -1 >/dev/null 2>&1 || { echo "cannot build: $f"; exit 2; }
 done
 P -v ON_ERROR_STOP=1 -f supabase/seed.sql >/dev/null 2>&1 || { echo "cannot seed"; exit 2; }
+# as on Supabase: signed-out visitors can run the extension support functions (btree_gist, pgcrypto) in public
+P -c "do \$\$ declare r record; begin for r in select p.oid::regprocedure as sig from pg_proc p join pg_depend d on d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e' where p.pronamespace = 'public'::regnamespace loop execute format('grant execute on function %s to anon', r.sig); end loop; end \$\$" >/dev/null
 WT=$(mktemp -d); cp -r .github supabase "$WT"/; chmod -R a+rX "$WT"; trap 'rm -rf "$WT"' EXIT
 
 step launch1_preflight 1; rep "R1 launch1_preflight action passes at 0077 (+ seed)" "$([ $? = 0 ] && echo true)" "$(tail -3 /tmp/launch1_step.out)"
+EXT="select p.oid::regprocedure as sig from pg_proc p join pg_depend d on d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e' where p.pronamespace = 'public'::regnamespace"
+P -c "do \$\$ declare r record; begin for r in $EXT loop execute format('revoke execute on function %s from public, anon', r.sig); end loop; end \$\$" >/dev/null
+step launch1_preflight 1; rep "R1b launch1_preflight passes whatever the extension functions' grants are" "$([ $? = 0 ] && echo true)" "$(grep FAIL /tmp/launch1_step.out | head -2)"
+P -c "do \$\$ declare r record; begin for r in $EXT loop execute format('grant execute on function %s to anon', r.sig); end loop; end \$\$" >/dev/null
 step apply 2 MIGRATIONS="0079"; rc=$?
 rep "R2 apply 0079 without 0078: refused, nothing applied" "$([ $rc != 0 ] && [ "$(applied)" = 0 ] && grep -q 'need 0078 first' /tmp/launch1_step.out && echo true)" "rc $rc $(tail -2 /tmp/launch1_step.out)"
 P -c "create function club_readiness(p_club uuid) returns int language sql as 'select 1'" >/dev/null
