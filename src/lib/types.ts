@@ -80,6 +80,8 @@ export const ERRORS: Record<string, string> = {
   blocked: "You can't join this match.",
   account_suspended: "Your account is suspended. Contact courtbook.contact@gmail.com.",
   rules_not_accepted: "Please accept the community rules first.",
+  age_not_confirmed: "CourtBook is for people aged 18 and over. Please confirm your age first: reload the page and you will be asked.",
+  under_18: "CourtBook is only for people aged 18 and over.",
   message_not_allowed: "This message can't be sent. Check the community rules.",
   bad_target: "You can't do that to your own account.",
   bad_reason: "Choose a reason for the report.",

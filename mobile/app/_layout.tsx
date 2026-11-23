@@ -17,6 +17,7 @@ import { ConnectionBlocked } from "../components/ConnectionBlocked";
 import { connectionBlocked } from "../lib/supabase";
 import { startCrashReporting, wrapRoot } from "../lib/crash";
 import { color, font } from "../lib/theme";
+import { AgeGate } from "../components/AgeGate";
 
 startCrashReporting();
 wireAppLifecycle();
@@ -80,6 +81,7 @@ function RootLayout() {
               <Stack.Screen name="help" options={{ title: "Help & Feedback" }} />
               <Stack.Screen name="e2e-games" options={{ title: "" }} />
             </Stack>
+            <AgeGate />
             <OfflineBanner />
             <TestFaultBanner />
           </View>

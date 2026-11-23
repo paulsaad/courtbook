@@ -67,7 +67,7 @@ export function safeText(text: unknown, exceptionType?: string): string {
 
 /** Every page and route of the website (src/app). Kept in step with the folders by monitoring.routes.test.ts. */
 export const ROUTES = [
-  "/", "/admin", "/admin/clubs/[slug]", "/admin/monitoring", "/admin/payments", "/admin/reports",
+  "/", "/admin", "/admin/clubs/[slug]", "/admin/monitoring", "/admin/payments", "/admin/reports", "/age",
   "/api/club-media", "/api/health", "/api/monitoring/test", "/api/notify/email", "/api/pay/simulate", "/api/payments.csv",
   "/auth/callback", "/auth/signout", "/bookings", "/bookings/[id]", "/club/[slug]", "/club/[slug]/coaches",
   "/club/[slug]/info", "/club/[slug]/matches", "/coach", "/coaches", "/coaches/[id]", "/courts", "/levels", "/login",
