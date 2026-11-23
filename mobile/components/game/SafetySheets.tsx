@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text } from "../Text";
 import { Icon } from "../Icon";
 import { Button } from "../Button";
+import { useKeyboardVisible, useRevealOnKeyboard } from "../KeyboardAware";
 import { ChoiceRow } from "./GameFields";
 import {
   COMMUNITY_RULES, COMMUNITY_RULES_TITLE, FEEDBACK_MAX, FEEDBACK_TEXT, FEEDBACK_THANKS, type FeedbackKind, REPORT_BLOCK_OFFER, REPORT_DANGER, REPORT_NOTE_MAX, REPORT_REASONS, REPORT_THANKS, type ReportReason,
@@ -20,18 +21,30 @@ export function confirmBlock(name: string | null, onBlock: () => void) {
   ]);
 }
 
+/**
+ * The bottom sheet for the report and feedback forms. Keyboard-aware (Galaxy A17 acceptance, 23 Nov: the text field
+ * sat behind the Samsung keyboard). The app draws edge to edge, so Android does not resize the window for the
+ * keyboard. The sheet is therefore drawn edge to edge too (status and navigation bars translucent, safe areas
+ * handled here), and a KeyboardAvoidingView lifts it above the keyboard. The sheet shrinks to the space left and its
+ * content scrolls; when the keyboard opens, the content scrolls to its end (the text field and Send).
+ */
 function Sheet({ visible, title, onClose, children }: { visible: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
   const insets = useSafeAreaInsets();
+  const keyboard = useKeyboardVisible();
+  const scroll = useRevealOnKeyboard(keyboard);
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={styles.scrim} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
-      <View style={[styles.sheet, { paddingBottom: insets.bottom + space.md }]}>
-        <View style={styles.head}>
-          <Text variant="heading" accessibilityRole="header" style={{ flex: 1 }}>{title}</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} style={styles.close}><Icon name="close" size={22} /></Pressable>
+    <Modal visible={visible} animationType="slide" transparent statusBarTranslucent navigationBarTranslucent onRequestClose={onClose} testID="sheet-modal">
+      <KeyboardAvoidingView behavior="padding" style={[styles.frame, { paddingTop: insets.top + space.lg }]} testID="sheet-keyboard-frame">
+        <Pressable style={styles.scrim} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
+        {/* With the keyboard open it covers the navigation bar, so the bottom safe area is not added again. */}
+        <View style={[styles.sheet, { paddingBottom: (keyboard ? 0 : insets.bottom) + space.md }]} testID="sheet">
+          <View style={styles.head}>
+            <Text variant="heading" accessibilityRole="header" style={{ flex: 1 }}>{title}</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} style={styles.close}><Icon name="close" size={22} /></Pressable>
+          </View>
+          <ScrollView ref={scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled" testID="sheet-scroll">{children}</ScrollView>
         </View>
-        <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">{children}</ScrollView>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -102,8 +115,9 @@ export function RulesSheet({ visible, onAgree, onClose }: { visible: boolean; on
 }
 
 const styles = StyleSheet.create({
-  scrim: { flex: 1, backgroundColor: "rgba(15,21,18,0.35)" },
-  sheet: { backgroundColor: color.card, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: "85%" },
+  frame: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15,21,18,0.35)" },
+  scrim: { flexGrow: 1, minHeight: space.lg },
+  sheet: { backgroundColor: color.card, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: "85%", flexShrink: 1 },
   head: { flexDirection: "row", alignItems: "center", paddingHorizontal: space.xl, paddingTop: space.lg },
   close: { width: TOUCH, height: TOUCH, alignItems: "center", justifyContent: "center", marginRight: -space.md },
   body: { padding: space.xl, gap: space.md },
