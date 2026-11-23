@@ -21,6 +21,10 @@ export default async function ClubInfo({ params }: { params: Promise<{ slug: str
     supabase.from("courts").select("name, sport, surface").eq("club_id", club.id).eq("active", true).order("sort"),
     supabase.from("price_rules").select("start_time, end_time, price_usd, label, court_id").eq("club_id", club.id).order("start_time"),
   ]), "this club");
+  // 0081: the club's phone and email; read on their own so this page keeps working before the columns exist
+  const contactRes = await supabase.from("clubs").select("contact_phone, contact_email").eq("id", club.id).single();
+  const contact = contactRes.error && /contact_(phone|email)|42703/.test(`${contactRes.error.code} ${contactRes.error.message}`)
+    ? null : (loaded(contactRes, "this club").data as { contact_phone: string | null; contact_email: string | null } | null);
   const maps = club.lat != null && club.lng != null ? `https://www.google.com/maps?q=${club.lat},${club.lng}` : club.location_url;
   const row = "flex justify-between gap-4 py-2 text-sm";
   // A club that takes payment at its desk charges no booking fee; the page must not promise one.
@@ -42,6 +46,13 @@ export default async function ClubInfo({ params }: { params: Promise<{ slug: str
           <section className="rounded-2xl border border-grid bg-white px-4 py-3">
             <h2 className="font-medium">About</h2>
             <p className="mt-1 whitespace-pre-line text-sm text-muted">{club.description}</p>
+          </section>
+        )}
+        {(contact?.contact_phone || contact?.contact_email) && (
+          <section className="rounded-2xl border border-grid bg-white px-4 py-3">
+            <h2 className="font-medium">Contact the club</h2>
+            {contact.contact_phone && <p className="mt-1 text-sm"><a className="text-action underline" href={`tel:${contact.contact_phone.replace(/[^0-9+]/g, "")}`}>{contact.contact_phone}</a></p>}
+            {contact.contact_email && <p className="mt-1 text-sm"><a className="text-action underline" href={`mailto:${contact.contact_email}`}>{contact.contact_email}</a></p>}
           </section>
         )}
         {(club.address || club.arrival_notes) && (

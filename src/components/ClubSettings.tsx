@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import ClubReadiness, { type ReadinessRow } from "./ClubReadiness";
 import ClubPhotos from "@/components/ClubPhotos";
 import ClubVenue, { type VenueRow } from "@/components/ClubVenue";
 import type { ClubMedia } from "@/lib/media";
@@ -31,7 +32,7 @@ const primary = "rounded-xl bg-action px-4 py-2.5 font-medium text-white disable
 const hhmm = (t: string) => t.slice(0, 5);
 const section = "flex flex-col gap-3 rounded-2xl border border-grid bg-white p-4";
 
-export default function ClubSettings({ club, courts, rules, staff, coaches, isAdmin, backHref, areas, sports, town, media }: { club: ClubRow; courts: CourtRow[]; rules: RuleRow[]; staff: StaffRow[]; coaches: CoachReq[]; isAdmin: boolean; backHref: string; areas: Governorate[]; sports: Sport[]; town: TownWithArea | null; media: ClubMedia[] }) {
+export default function ClubSettings({ club, courts, rules, staff, coaches, isAdmin, backHref, areas, sports, town, media, readiness }: { club: ClubRow; courts: CourtRow[]; rules: RuleRow[]; staff: StaffRow[]; coaches: CoachReq[]; isAdmin: boolean; backHref: string; areas: Governorate[]; sports: Sport[]; town: TownWithArea | null; media: ClubMedia[]; readiness?: ReadinessRow[] | null }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -64,10 +65,12 @@ export default function ClubSettings({ club, courts, rules, staff, coaches, isAd
       <h1 className="text-2xl font-semibold tracking-tight">{club.name}</h1>
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
 
-      {isAdmin && <AdminBasics club={club} busy={busy} run={run} />}
+      {readiness && <ClubReadiness clubId={club.id} active={club.active} rows={readiness} isAdmin={isAdmin} />}
+      {isAdmin && <AdminBasics club={club} busy={busy} run={run} hasChecklist={!!readiness} />}
       <ClubPhotos clubId={club.id} initial={media} />
       <ClubVenue club={club as unknown as VenueRow} />
       <Location f={f} setF={setF} areas={areas} town={town} busy={busy} save={save} />
+      {readiness && <Contact club={club} busy={busy} run={run} />}
       <Hours f={f} setF={setF} busy={busy} save={save} />
       <Courts clubId={club.id} courts={courts} sports={sports} busy={busy} run={run} />
       <Prices clubId={club.id} courts={courts} rules={rules} busy={busy} run={run} />
@@ -81,7 +84,22 @@ type Run = (fn: () => PromiseLike<{ error: { message: string } | null }>, after?
 type Settings = { open: string; close: string; slot: number; min: number; max: number; cutoff: number; hold: number; window: number; location: string; town: string | null; lat: string; lng: string };
 type SetF = (f: Settings) => void;
 
-function AdminBasics({ club, busy, run }: { club: ClubRow; busy: boolean; run: Run }) {
+function Contact({ club, busy, run }: { club: ClubRow; busy: boolean; run: Run }) {
+  const c = club as unknown as { contact_phone?: string | null; contact_email?: string | null };
+  const [phone, setPhone] = useState(c.contact_phone ?? "");
+  const [email, setEmail] = useState(c.contact_email ?? "");
+  return (
+    <section className={section}>
+      <h2 className="font-medium">Contact</h2>
+      <p className="text-xs text-muted">Shown to players on the club&apos;s page. A phone number is required before the club can be published.</p>
+      <label className="flex flex-col gap-1 text-sm">Phone<input className={input} inputMode="tel" autoComplete="off" value={phone} placeholder="+961 6 123 456" onChange={(e) => setPhone(e.target.value)} /></label>
+      <label className="flex flex-col gap-1 text-sm">Email (optional)<input className={input} inputMode="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+      <button disabled={busy} onClick={() => run(() => createClient().rpc("set_club_contact", { p_club: club.id, p_phone: phone, p_email: email }))} className={primary}>Save contact</button>
+    </section>
+  );
+}
+
+function AdminBasics({ club, busy, run, hasChecklist }: { club: ClubRow; busy: boolean; run: Run; hasChecklist: boolean }) {
   const [name, setName] = useState(club.name);
   const [fee, setFee] = useState(String(club.service_fee_usd));
   const [active, setActive] = useState(club.active);
@@ -92,8 +110,9 @@ function AdminBasics({ club, busy, run }: { club: ClubRow; busy: boolean; run: R
       <h2 className="font-medium">Club (admin)</h2>
       <label className="flex flex-col gap-1 text-sm">Name<input className={input} value={name} onChange={(e) => setName(e.target.value)} /></label>
       <label className="flex flex-col gap-1 text-sm">CourtBook fee per booking ($)<input className={input} inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} /></label>
-      <label className="flex min-h-11 items-center gap-2 text-sm sm:min-h-0"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Visible to players</label>
-      <button disabled={busy} onClick={() => run(() => createClient().from("clubs").update({ name: name.trim(), service_fee_usd: Number(fee), active }).eq("id", club.id))} className={primary}>Save</button>
+      {/* with the checklist (0081), visibility is set by Publish / Hide at the top of the page */}
+      {!hasChecklist && <label className="flex min-h-11 items-center gap-2 text-sm sm:min-h-0"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Visible to players</label>}
+      <button disabled={busy} onClick={() => run(() => createClient().from("clubs").update(hasChecklist ? { name: name.trim(), service_fee_usd: Number(fee) } : { name: name.trim(), service_fee_usd: Number(fee), active }).eq("id", club.id))} className={primary}>Save</button>
 
       <div className="mt-2 border-t border-grid pt-3">
         <h3 className="text-sm font-medium">How this club takes money</h3>
