@@ -24,6 +24,18 @@ export const CLOSE_MESSAGES: Record<string, string> = {
   admin_role: "Admin accounts can't be deleted here. Contact CourtBook support.",
 };
 export const CLOSE_FAILED = "That didn't work, and nothing was changed. Please try again.";
+/** Review 23 Nov: the app closes only while automatic processing runs (the website processes on the spot). */
+export const PROCESSING_PAUSED = "Deleting your account from the app is paused for a moment, and nothing was changed. Please try again later, or delete it on the CourtBook website: Profile → Delete my account.";
+/** Review 23 Nov: closing needs a recent sign-in; a stale session gets an email code first, then the same confirmation. */
+export const REAUTH_TEXT = "For your security, enter the sign-in code we've just emailed to";
+/** Same wording as the website (src/lib/deletion/copy.ts legacyRequestText). */
+export function legacyRequestText(requestedAt: string | null | undefined): string {
+  const t = requestedAt ? new Date(requestedAt) : null;
+  const when = t && !Number.isNaN(t.getTime())
+    ? new Date(t.getTime() + 24 * 3_600_000).toLocaleString("en-GB", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Beirut" })
+    : null;
+  return `You asked to delete your account in the app. ${when ? `It will be deleted after ${when} (Beirut time)` : "It will be deleted within a day"} unless you keep it. Until then you can't make bookings, join games or send messages.`;
+}
 
 type Rpc = (fn: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: { message?: string } | null }>;
 type SignOut = (opts: { scope: "global" | "local" }) => PromiseLike<{ error: unknown } | unknown>;
@@ -39,10 +51,14 @@ async function signOutEverywhere(signOut: SignOut) {
   }
 }
 
-export async function closeMyAccount(rpc: Rpc, signOut: SignOut): Promise<{ ok: true } | { ok: false; message: string }> {
+export type CloseResult = { ok: true } | { ok: false; message: string } | { ok: false; reauth: true };
+
+export async function closeMyAccount(rpc: Rpc, signOut: SignOut): Promise<CloseResult> {
   let error: { message?: string } | null = null;
   try { ({ error } = await rpc("close_my_account", { p_via: "app" })); } catch { error = { message: "network" }; }
   if (error) {
+    if (error.message === "reauth_required") return { ok: false, reauth: true };   // nothing written; ask for a code
+    if (error.message === "processing_unavailable") return { ok: false, message: PROCESSING_PAUSED };
     const refused = CLOSE_MESSAGES[error.message ?? ""];
     if (refused) return { ok: false, message: refused };
     // the close may have committed before the answer was lost: if the account is closed, carry on
@@ -54,6 +70,26 @@ export async function closeMyAccount(rpc: Rpc, signOut: SignOut): Promise<{ ok: 
   }
   await signOutEverywhere(signOut);
   return { ok: true };
+}
+
+type Otp = {
+  getUser: () => PromiseLike<{ data: { user: { email?: string | null } | null } }>;
+  signInWithOtp: (a: { email: string; options: { shouldCreateUser: boolean } }) => PromiseLike<{ error: unknown }>;
+  verifyOtp: (a: { email: string; token: string; type: "email" }) => PromiseLike<{ error: unknown }>;
+};
+/** Emails a sign-in code to the account's own address (never creates an account). Returns the address, or a message. */
+export async function sendReauthCode(otp: Otp): Promise<{ email: string } | { message: string }> {
+  const { data } = await otp.getUser();
+  const email = data.user?.email;
+  if (!email) return { message: "We couldn't send you a sign-in code. Contact CourtBook support to delete your account." };
+  const { error } = await otp.signInWithOtp({ email, options: { shouldCreateUser: false } });
+  return error ? { message: "We couldn't send the code just now. Please try again in a minute." } : { email };
+}
+/** A fresh sign-in from the code, then the same close. */
+export async function verifyAndClose(otp: Otp, rpc: Rpc, signOut: SignOut, email: string, code: string): Promise<CloseResult> {
+  const { error } = await otp.verifyOtp({ email, token: code.replace(/\D/g, ""), type: "email" });
+  if (error) return { ok: false, message: "That code didn't work. Check it, or send a new one." };
+  return closeMyAccount(rpc, signOut);
 }
 
 /** At sign-in and cold start: a session for an account that is already closed (another device closed it) is ended. */

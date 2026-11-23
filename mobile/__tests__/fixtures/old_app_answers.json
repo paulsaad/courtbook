@@ -1,0 +1,29 @@
+{
+  "booking_while_requested": "account_closed",
+  "cancel": "ok",
+  "cancel_after_promotion": "no_open_request",
+  "mine_after_cancel": null,
+  "mine_before": null,
+  "mine_promoted": {
+    "closed": true,
+    "requested_at": "2026-11-23T10:00:00+00:00",
+    "status": "closing"
+  },
+  "mine_requested": {
+    "closed": false,
+    "requested_at": "2026-11-23T10:00:00+00:00",
+    "status": "requested"
+  },
+  "request": {
+    "requested_at": "2026-11-23T10:00:00+00:00",
+    "status": "requested"
+  },
+  "request_after_promotion": {
+    "requested_at": "2026-11-23T10:00:00+00:00",
+    "status": "closing"
+  },
+  "request_again": {
+    "requested_at": "2026-11-23T10:00:00+00:00",
+    "status": "requested"
+  }
+}

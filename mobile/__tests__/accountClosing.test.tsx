@@ -13,6 +13,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-
 import { supabase } from "../lib/supabase";
 import {
   closeMyAccount, signOutIfClosed, CLOSE_FAILED, CLOSED_TEXT, CLOSED_TITLE, CONFIRM_TEXT, CONFIRM_TITLE,
+  PROCESSING_PAUSED, REAUTH_TEXT, legacyRequestText, sendReauthCode, verifyAndClose,
 } from "../lib/accountClosing";
 import { DeleteAccount } from "../components/DeleteAccount";
 
@@ -34,12 +35,12 @@ describe("wording and contract", () => {
     expect(MIGRATION).toMatch(/create or replace function close_my_account\(p_via text default 'app'\)/);
     expect(MIGRATION).toContain("p_via not in ('app', 'web')");
   });
-  it("the old request/cancel functions are gone for players, and the app no longer calls them", () => {
-    expect(MIGRATION).toContain("revoke execute on function request_account_deletion(text) from authenticated");
-    expect(MIGRATION).toContain("revoke execute on function cancel_account_deletion() from authenticated");
+  it("older apps keep request/cancel (review 23 Nov), while this app's one-step flow never calls request", () => {
+    expect(MIGRATION).toContain("grant execute on function request_account_deletion(text) to authenticated");
+    expect(MIGRATION).toContain("grant execute on function cancel_account_deletion() to authenticated");
     const screenSrc = fs.readFileSync(path.join(__dirname, "../components/DeleteAccount.tsx"), "utf8");
     const libSrc = fs.readFileSync(path.join(__dirname, "../lib/accountClosing.ts"), "utf8");
-    expect(screenSrc + libSrc).not.toMatch(/request_account_deletion|cancel_account_deletion/);
+    expect(screenSrc + libSrc).not.toMatch(/request_account_deletion/);   // cancel stays, for an older app's request
   });
 });
 
@@ -78,6 +79,37 @@ describe("closeMyAccount", () => {
   it("a thrown network error is handled the same way", async () => {
     const rpc = jest.fn(async () => { throw new TypeError("Network request failed"); });
     await expect(closeMyAccount(rpc, jest.fn())).resolves.toEqual({ ok: false, message: CLOSE_FAILED });
+  });
+});
+
+describe("review 23 Nov", () => {
+  it("signed in too long ago: asks for a code; nothing closed, not signed out", async () => {
+    const signOut = jest.fn();
+    await expect(closeMyAccount(async () => err("reauth_required"), signOut)).resolves.toEqual({ ok: false, reauth: true });
+    expect(signOut).not.toHaveBeenCalled();
+  });
+  it("automatic processing not running: says to try later or use the website; nothing closed", async () => {
+    await expect(closeMyAccount(async () => err("processing_unavailable"), jest.fn())).resolves.toEqual({ ok: false, message: PROCESSING_PAUSED });
+  });
+  it("the code goes to the account's own address and never creates an account; then the same close", async () => {
+    const otp = { getUser: async () => ({ data: { user: { email: "p@example.com" } } }), signInWithOtp: jest.fn(async () => ({ error: null })), verifyOtp: jest.fn(async () => ({ error: null })) };
+    await expect(sendReauthCode(otp)).resolves.toEqual({ email: "p@example.com" });
+    expect(otp.signInWithOtp).toHaveBeenCalledWith({ email: "p@example.com", options: { shouldCreateUser: false } });
+    const rpc = jest.fn(async () => ({ data: { status: "closing" }, error: null }));
+    await expect(verifyAndClose(otp, rpc, jest.fn(async () => ({ error: null })), "p@example.com", "12 34 56")).resolves.toEqual({ ok: true });
+    expect(otp.verifyOtp).toHaveBeenCalledWith({ email: "p@example.com", token: "123456", type: "email" });
+    expect(rpc).toHaveBeenCalledWith("close_my_account", { p_via: "app" });
+  });
+  it("a wrong code closes nothing", async () => {
+    const otp = { getUser: async () => ({ data: { user: { email: "p@example.com" } } }), signInWithOtp: jest.fn(), verifyOtp: jest.fn(async () => ({ error: { message: "invalid" } })) };
+    const rpc = jest.fn();
+    await expect(verifyAndClose(otp, rpc, jest.fn(), "p@example.com", "000000")).resolves.toEqual({ ok: false, message: expect.stringMatching(/code didn't work/) });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("the app's texts for these are the website's", () => {
+    const flat = WEB_COPY.replace(/"\s*\+\s*"/g, "");
+    expect(flat).toContain(REAUTH_TEXT);
+    expect(legacyRequestText("2026-11-23T10:00:00Z")).toMatch(/It will be deleted after 24 November at 12:00 \(Beirut time\) unless you keep it/);
   });
 });
 
