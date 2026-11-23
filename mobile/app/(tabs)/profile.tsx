@@ -17,6 +17,7 @@ import { FAULT_LABEL, currentFault, faultsAvailable, setFault, subscribeFault, t
 import { sendTestReport } from "../../lib/crash";
 import { useSafety } from "../../lib/safety";
 import { BlockedPlayers } from "../../components/BlockedPlayers";
+import { DeleteAccount } from "../../components/DeleteAccount";
 import { color, font, radius, space, text, MAX_FONT_SCALE, TOUCH } from "../../lib/theme";
 
 /**
@@ -91,6 +92,12 @@ export default function Profile() {
         <>
           <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.section}>Blocked players</Text>
           <BlockedPlayers />
+        </>
+      ) : null}
+      {session.status === "signed-in" ? (
+        <>
+          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.section}>Delete account</Text>
+          <DeleteAccount />
         </>
       ) : null}
 
