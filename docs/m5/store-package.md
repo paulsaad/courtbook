@@ -17,14 +17,14 @@ Legend:
 | --- | --- |
 | Privacy policy and terms pages (`/privacy`, `/terms`) | **Built on this branch**, draft-marked, not published. Final text: Paul (operator, address, law) + Legal |
 | Account deletion: in-app path and web URL | **Ready.** Profile → Delete my account (app and website); public `/delete-account` (email route without the app). Two provisional phrases are now marked (M2b) |
-| Links to the legal pages in the app and the website | **Built on this branch.** Sign-in screen, Profile, Help & Feedback, the 18+ question, the deletion page |
+| Links to the legal pages in the app and the website | **Built on this branch.** Sign-in screen, Profile, Help & Feedback, the 18+ question, the deletion page. **Release order fixed (§1a):** live-app builds and updates refuse until the linked pages are final and public |
 | Apple App Privacy answers (§2) | **Ready**, one item to confirm (installation ID in native crash reports) |
 | Google Data safety answers (§3) | **Ready**, same item, plus "sharing with clubs" to confirm (Legal) |
 | Age rating answers, both stores (§4) | **Ready** (18+ decided) |
 | Permissions (§5) | **Ready**: nothing to declare beyond Sign in with Apple |
 | Listing text (§6) | **Drafted**; app name and support URL: **Paul** |
 | Screenshots and graphics (§7) | **Eng** after the store build exists; specifications below |
-| Reviewer access (§8) | **Paul**: choose an option; the live app has no password sign-in |
+| Reviewer access (§8) | **Recommended:** one dedicated reviewer account with a password, on Supabase's existing sign-in. Password entry in the store build: **Eng, not built**. Label, and a server-side restriction to that account: **Paul** |
 | Sign in with Apple token revocation on deletion (§9 E1) | **Eng, blocked on Account** (needs the company's Sign in with Apple key) |
 | Message filter word list (Apple 1.2) | **Paul**: the filter exists (0074) but its list is empty by design |
 | Developer accounts, D-U-N-S, store records (§9) | **Account / Paul** |
@@ -41,6 +41,35 @@ Legend:
 
 `<domain>` is **Paul**: today the only public address is `courtbook-three.vercel.app`. The app links use one constant,
 `mobile/lib/legal.ts` `WEBSITE_URL`; change it there when the domain is decided.
+
+## 1a. Release order for the legal pages and the app's links (review, 23 Nov)
+
+The app's legal links point at the public website (`mobile/lib/legal.ts`). They must not reach players before
+the pages they open are official. The order is fixed:
+
+1. **Legal approval.** The lawyer approves the final wording. Paul fills in the operator, address and law (P1), and
+   every marked item on `/privacy`, `/terms` and `/delete-account` is resolved. Nothing is guessed.
+2. **Website published.** `src/lib/legal.ts` gets `LEGAL_STATUS = "final"` and a `LEGAL_UPDATED` date. The web tests
+   refuse "final" while any marked item is left. The website then goes live through the normal approved deploy.
+3. **Publicly reachable.** Each page the app links to returns 200 without signing in, on the final domain (P2;
+   `WEBSITE_URL` changed first if the domain changes). It shows a "Last updated" date, no draft notice and no marked
+   item, and it is not marked noindex.
+4. **Only then: app links distributed.** This means a live-app build or over-the-air update that contains the links,
+   and the URLs entered in the store records (§1).
+
+**Check (built, read-only):** `mobile/scripts/check-legal-pages.mjs` (`npm run check:legal-pages` in `mobile/`)
+fetches exactly the pages the app links to and checks step 3. It runs automatically:
+- before every **live** app build and every live over-the-air update or `check`, where it **refuses**;
+- for **staging**, where it only warns (staging builds are for testing);
+- its own tests run on fixture pages in Mobile checks.
+
+`--base https://<domain>` checks a new domain before the constant is changed. Run it by hand before entering the
+URLs in App Store Connect and Play Console.
+
+**Consequence to plan for:** once this branch is merged, no live-app build or update can ship until step 3 passes,
+including unrelated fixes. <mark>**Pending decision (Paul):** either (a) accept this (the legal pages are on the
+critical path to launch anyway), or (b) merge the app-side links only when legal approval is close.</mark> The
+website pages can be merged earlier: they stay draft-marked and noindex until step 2.
 
 ## 2. Apple — App Privacy ("nutrition label")
 
@@ -175,21 +204,69 @@ Proposed set (5 screens, same for both stores): Courts (free times), Booking con
 Club info. Made from the **store build** with real (or clearly fictional) club data, after the demo club is hidden or
 renamed (M7). Not made now: tonight's staging builds are for acceptance only.
 
-## 8. Reviewer access (Apple 2.1, Google "App access") — Paul decides
+## 8. Reviewer access (Apple 2.1, Google "Sign-in details") — recommendation; Paul decides
 
-The live app signs in only by email code, Google or Apple; there is no password sign-in (it exists only in the Staging
-app). Reviewers cannot receive codes sent to an address we own.
+**What the stores require** (official pages, read 23 Nov 2026):
+- Apple 2.1(a): if the app has a login, include **demo account info**. A built-in demo mode is accepted only **with
+  Apple's prior approval**, and only when a demo account cannot be provided for legal or security reasons.
+- Google (Play Console, Sign-in details): credentials must be **accessible at all times, reusable, and valid wherever
+  the reviewer is**; if the app normally uses a one-time code, provide **reusable credentials that bypass it**.
+  Otherwise the app may be rejected.
 
-| Option | How | Trade-off |
-| --- | --- | --- |
-| **A (recommended)** | Reviewers sign in with **Sign in with Apple** (iOS) or **Google** (Android) using their own account, as any player would; the review notes explain this. So that they can book without disturbing a real club, either keep the demo club visible during review (demo hiding off until launch) or publish a clearly named "CourtBook Review Club" for the review period only | No code change. Needs a bookable club during review that is not a real club; no staff or admin rights for reviewers |
-| B | Enable password sign-in in the live app for **one** review account only (server-checked allowlist) | Code change + security review; adds a sign-in path to production |
-| C | A fixed one-time code for one review email (Supabase test OTP) | Supabase supports fixed codes for **phone** test numbers, not email — not available for our email sign-in |
+**What the live app has today:** sign-in by emailed one-time code, Google, or Apple. There is no password entry (the
+password form exists only in the Staging app, `mobile/app/sign-in.tsx` `StagingPasswordSignIn`). A reviewer cannot
+receive a code sent to an address we own, so **today the live app has no dependable reviewer route**.
 
-Either way:
-- Reviewers may test deletion. Our deletion is processed by an admin (by design), so the notes say "request deletion
-  from Profile; it is processed by our team".
-- Provide a fresh account per submission.
+**Withdrawn (review, 23 Nov):** "reviewers sign in with their own Apple or Google identity". Neither store asks for
+that, and it is not dependable. We could not prepare that account (18+ answer, rules accepted, a booking to show and
+cancel), would not know which account it is, would hold a reviewer's real personal data, and every review would
+start empty. It may be mentioned in the notes as an extra, never as the access route.
+
+### Recommended: one dedicated reviewer account, email and password, on the existing sign-in
+
+Use the email-and-password sign-in that **Supabase Auth already provides** (the same `signInWithPassword` call the
+Staging app's test sign-in uses). No new sign-in system and no new server code. Accounts made by code, Google or
+Apple have no password, so a password entry does nothing for them.
+
+| Item | Proposal |
+| --- | --- |
+| Address | `review@<domain>`, a mailbox we control (**Paul**, needs the domain, P2) |
+| Rights | **Player only**: no staff, coach or admin role. Roles can only be given by an admin (already enforced) |
+| Password | Random, at least 24 characters, kept in the password manager. Entered only in App Store Connect and Play Console. Never in the repository, chat or email. **Rotated after every review**, and the store fields are updated |
+| State | Age confirmed and rules accepted. One upcoming booking (to show and cancel) and one open game. Kept **active at all times** while the app is listed (Google requires credentials valid at all times) |
+| Where it books | A clearly fictional **"CourtBook Review Club"**, published for the review period only (0085 hides it again when unpublished), or the demo club while it is still visible (M7). Never a real club |
+| Deletion | Reviewers may test it. The notes say: "request deletion from Profile; it is processed by our team." If it is processed, the account is re-created before the next review |
+| Watching | Sign-ins appear in the Supabase Auth logs; any sign-in outside a review period triggers an immediate password change |
+
+**What this needs in the store build (Eng, not built in M5):** a visible, plainly labelled password entry on the
+sign-in screen of the live app. It would be the Staging form, reused. It cannot be hidden behind a gesture: Apple
+2.5.19 forbids hidden or undocumented features, and the review notes must describe it.
+<mark>**Pending decision (Paul):** the label and placement of the password entry, e.g. a small "Sign in with a
+password" link under the other options.</mark>
+
+**Checks before choosing (read-only, on the live project; nothing changed in M5):**
+- V1. The Email provider is already on (it sends the codes) and also serves passwords. Check, without changing
+  anything:
+  - whether new accounts can be created with a password through the API;
+  - whether those must confirm their email;
+  - the minimum password length;
+  - leaked-password protection.
+  If password sign-up is already open, the API allows it today and the new field adds no server path. Either way,
+  record the settings in the evidence file.
+- V2. Rate limits on password sign-in (Supabase Auth defaults) are acceptable for one account.
+- V3. The reviewer account appears nowhere a real player could see it, except as the booker in the Review Club.
+
+<mark>**Pending decision (Paul + Eng): restrict password sign-in to the reviewer account on the server.** This would
+use Supabase's password-verification hook, which rejects password attempts for any other account. It is not built.
+Recommended before public launch. Availability on our Supabase plan is still to be checked.</mark>
+
+### Options considered and not recommended
+
+| Option | Why not |
+| --- | --- |
+| Built-in demo mode | Apple accepts it only with prior approval, and only when a demo account is impossible. It would also need building |
+| A fixed code for one email address (Supabase test codes) | Supabase's fixed test codes are for **phone** numbers, not email. Not available for our sign-in |
+| The reviewer's own Apple or Google identity | Not dependable (above). Allowed only as an extra in the notes |
 
 ## 9. Remaining blockers
 
@@ -199,7 +276,7 @@ Either way:
 | P1 | Operator entity, postal address, governing law (L1) — fills the marked items on both pages |
 | P2 | Product domain (privacy, terms, deletion and support URLs; also the sign-in email sender) |
 | P3 | App name in both stores (and name availability); copyright line |
-| P4 | Reviewer access option (§8) and a bookable review club |
+| P4 | Reviewer access (§8): approve the dedicated reviewer account; label and placement of the password entry; whether to restrict password sign-in to that account on the server; a bookable review club |
 | P5 | Message filter word list (Apple 1.2 asks for a filter; the 0074 filter is built, list empty "until approved") |
 | P6 | How quickly reports are reviewed (Apple 1.2 "timely responses"; terms item) and who moderates |
 | P7 | Approve the "proposed wording" items on the pages (under-18 accounts closed, change notices, no-show limits) |
@@ -227,6 +304,7 @@ Either way:
 | E4 | Google 512 px icon export; screenshots from the store build (§7) | No |
 | E5 | `/support` page if Paul wants a support URL other than the email | No |
 | E6 | Before submission: payments phase (M12), live rollout of launch-1 and 0085, demo club hidden (M7), age switch on, outside VoiceOver/TalkBack check | Payments: yes |
+| E7 | Reviewer access (§8): checks V1–V3 (read-only); visible password entry in the store build (reuse of the Staging form); reviewer account and Review Club prepared; optional server-side restriction (hook) | No (JS); ships with the store build |
 
 ## Sources (official, read 23 Nov 2026)
 - Apple: Updated age ratings in App Store Connect; Age Rating Updates (required since 31 Jan 2026).
