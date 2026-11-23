@@ -74,3 +74,48 @@ describe("Near me (website)", () => {
     expect(getCurrentPosition).not.toHaveBeenCalled();
   });
 });
+
+describe("Near me versus the remembered area (M14 review B, website)", () => {
+  // browsing Beirut (remembered in this browser), standing in Batroun
+  const BATROUN = { latitude: 34.2553, longitude: 35.6586 };
+  const slotsArgs = () => sent.filter((c) => Array.isArray(c) && c[0] === "club_day_slots").map((c) => (c as [string, Record<string, unknown>])[1]);
+  beforeEach(() => {
+    localStorage.setItem("cb_prefs", JSON.stringify({ sport: null, gov: "beirut", district: null, town: null, townName: null }));
+    getCurrentPosition = vi.fn((ok: (p: unknown) => void) => ok({ coords: BATROUN }));
+    Object.defineProperty(navigator, "geolocation", { value: { getCurrentPosition }, configurable: true });
+  });
+  it("Near me asks the server for every area, nearest first; turning it off returns to Beirut", async () => {
+    mount();
+    await waitFor(() => expect(slotsArgs().at(-1)).toMatchObject({ p_governorate: "beirut" }));
+    fireEvent.click(screen.getByRole("button", { name: "Near me" }));
+    await waitFor(() => expect(slotsArgs().at(-1)).toMatchObject({ p_governorate: null, p_district: null }));
+    await waitFor(() => expect(names()).toEqual(["Tripoli Club", "Beirut Club"]));   // Tripoli is nearer Batroun
+    expect(JSON.parse(localStorage.getItem("cb_prefs")!).gov).toBe("beirut");       // kept, not cleared
+    fireEvent.click(screen.getByRole("button", { name: "Near me" }));
+    await waitFor(() => expect(slotsArgs().at(-1)).toMatchObject({ p_governorate: "beirut" }));
+    expect(screen.queryByText(/straight-line/)).toBeNull();
+  });
+  it("resumed on load with an area remembered: still not narrowed", async () => {
+    localStorage.setItem("cb_near", "1");
+    mount();
+    await waitFor(() => expect(names()).toEqual(["Tripoli Club", "Beirut Club"]));
+    expect(slotsArgs().at(-1)).toMatchObject({ p_governorate: null });
+  });
+  it("an answer from the location prompt that arrives after Near me was turned off is dropped", async () => {
+    let answer!: () => void;
+    getCurrentPosition = vi.fn((ok: (p: unknown) => void) => { answer = () => ok({ coords: BATROUN }); });
+    Object.defineProperty(navigator, "geolocation", { value: { getCurrentPosition }, configurable: true });
+    mount();
+    await screen.findByText("Tripoli Club");
+    fireEvent.click(screen.getByRole("button", { name: "Near me" }));
+    await waitFor(() => expect(getCurrentPosition).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Finding you…" })).toBeTruthy();
+    // the player picks Beirut in the area picker while the browser is still asking
+    fireEvent.click(screen.getByText("▾").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: "All Lebanon" }));
+    answer();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByRole("button", { name: "Near me" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.queryByText(/straight-line/)).toBeNull();
+  });
+});

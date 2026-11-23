@@ -66,11 +66,17 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
   const playing = usePlaying(signedIn);
   const [fromAccount, setFromAccount] = useState(false);
   const [near, setNear] = useState<Near>({ status: "off", origin: null });
+  // M14 review B (same rule as the app): while Near me is on, the area being browsed never narrows the list; it is
+  // kept and comes back when Near me is turned off. Choosing an area turns Near me off, and a location answer that
+  // arrives after that (or after Near me was turned off) is dropped.
+  const nearSeq = useRef(0);
+  const nearOn = near.status === "on";
+  const view: Prefs = nearOn ? { ...prefs, gov: null, district: null, town: null, townName: null } : prefs;
   const [points, setPoints] = useState<Map<string, LatLng> | null>(null);
   const days = Array.from({ length: 15 }, (_, i) => shiftDate(today, i));
   const dayOf = (d: string) => new Date(`${d}T12:00:00+02:00`);
 
-  const key = reqKey(date, query, prefs);
+  const key = reqKey(date, query, view);
   const rows: DaySlot[] | null | undefined = result.key === key ? result.rows : undefined;   // undefined = loading, null = failed
   const loading = rows === undefined;
 
@@ -89,10 +95,11 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
   useEffect(() => {
     if (!loaded || !nearChosen() || typeof navigator === "undefined" || !navigator.permissions) return;
     let alive = true;
+    const mine = ++nearSeq.current;
     navigator.permissions.query({ name: "geolocation" as PermissionName }).then((st) => {
-      if (!alive || st.state !== "granted") return;
+      if (!alive || st.state !== "granted" || mine !== nearSeq.current) return;
       setNear({ status: "locating", origin: null });
-      locate().then((r) => { if (alive) setNear(typeof r === "string" ? { status: r, origin: null } : { status: "on", origin: r }); });
+      locate().then((r) => { if (alive && mine === nearSeq.current) setNear(typeof r === "string" ? { status: r, origin: null } : { status: "on", origin: r }); });
     }).catch(() => {});
     return () => { alive = false; };
   }, [loaded]);
@@ -125,7 +132,7 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
     let alive = true;
     (async () => {
       setBusy(true);
-      const { data, error } = await createClient().rpc("club_day_slots", { p_date: date, p_sport: prefs.sport, p_governorate: prefs.gov, p_district: prefs.district, p_query: query.trim() || null });
+      const { data, error } = await createClient().rpc("club_day_slots", { p_date: date, p_sport: view.sport, p_governorate: view.gov, p_district: view.district, p_query: query.trim() || null });
       if (!alive) return;
       setBusy(false);
       setResult({ key, rows: error ? null : (data as DaySlot[]) });
@@ -139,19 +146,20 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
   const update = (p: Prefs) => {
     if (p.gov !== prefs.gov || p.district !== prefs.district || p.town !== prefs.town) {
       playing.rememberArea(p);
-      if (p.gov && near.status !== "off") { setNear({ status: "off", origin: null }); rememberNear(false); }   // an area replaces Near me
+      if (near.status !== "off") { nearSeq.current++; setNear({ status: "off", origin: null }); rememberNear(false); }   // an area replaces Near me
     }
     setPrefs(p); writePrefs(p);
   };
   const pickArea = (a: PlayingArea | null) => update({ ...prefs, ...prefsFromArea(a) });
   const startNear = async () => {
-    if (near.status === "on") { setNear({ status: "off", origin: null }); rememberNear(false); return; }
+    if (near.status === "on") { nearSeq.current++; setNear({ status: "off", origin: null }); rememberNear(false); return; }
+    const mine = ++nearSeq.current;
     setNear({ status: "locating", origin: null });
     const r = await locate();
+    if (mine !== nearSeq.current) return;   // an area was chosen meanwhile: stay off
     if (typeof r === "string") { setNear({ status: r, origin: null }); rememberNear(false); return; }
     rememberNear(true);
-    setNear({ status: "on", origin: r });
-    if (prefs.gov) update({ ...prefs, gov: null, district: null, town: null, townName: null });
+    setNear({ status: "on", origin: r });   // the area is kept (not cleared, not sent to the account); `view` ignores it
   };
 
   // group by club → distinct start times → courts free at that time
@@ -168,10 +176,10 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
       c.times.set(r.start_at, list);
     }
     // a saved town narrows its district's answer (club_day_slots filters by district; the town by name)
-    const list = [...m.values()].filter((c) => !prefs.townName || c.town === prefs.townName);
+    const list = [...m.values()].filter((c) => !view.townName || c.town === view.townName);
     if (near.status !== "on" || !near.origin || !points) return list.map((c) => ({ ...c, km: null as number | null }));
     return sortByDistance(list.map((c) => ({ ...c, id: c.club.id })), points, near.origin).map(({ item, km }) => ({ ...item, km }));
-  }, [rows, prefs.townName, near, points]);
+  }, [rows, view.townName, near, points]);
   const sportsPresent = useMemo(() => new Set((rows ?? []).flatMap((r) => r.sports)), [rows]);
   const chips = sports.filter((s) => sportsPresent.has(s.code) || s.code === prefs.sport || (prefs.sport === null && sportsPresent.size === 0));
 
@@ -199,20 +207,20 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
     <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-3xl flex-col">
       <div className="flex items-center justify-between px-5 pt-12">
         <div className="text-[13px] font-bold uppercase tracking-wider text-muted">{formatInTimeZone(dayOf(date), TZ, "MMM yyyy")}</div>
-        <AreaPicker areas={areas} value={{ gov: prefs.gov, district: prefs.district }} onChange={(a) => update({ ...prefs, gov: a.gov, district: a.district, town: null, townName: null })} />
+        <AreaPicker areas={areas} value={{ gov: view.gov, district: view.district }} onChange={(a) => update({ ...prefs, gov: a.gov, district: a.district, town: null, townName: null })} />
       </div>
       <div className="flex items-center gap-2 overflow-x-auto px-5 pt-1">
         <button type="button" onClick={startNear} aria-pressed={near.status === "on"} disabled={near.status === "locating"} className={`chip shrink-0 ${near.status === "on" ? "chip-on" : ""}`}>
           {near.status === "locating" ? "Finding you…" : "Near me"}
         </button>
-        {prefs.townName && <span className="shrink-0 text-[13px] text-muted">Town: {prefs.townName}</span>}
+        {view.townName && <span className="shrink-0 text-[13px] text-muted">Town: {view.townName}</span>}
       </div>
       {(near.status === "denied" || near.status === "unavailable") && (
         <p className="mx-5 mt-2 rounded-xl bg-sand-soft px-3 py-2 text-sm">
           {near.status === "denied" ? "Location is off for CourtBook in this browser. Choose an area instead, or allow location and tap Near me again." : "Couldn't find your location. Choose an area instead."}
         </p>
       )}
-      <div className="pt-2"><SavedAreaChips prefs={playing.prefs} govs={areas} current={areaFromPrefs(prefs)} onPick={pickArea} /></div>
+      <div className="pt-2"><SavedAreaChips prefs={playing.prefs} govs={areas} current={areaFromPrefs(prefs)} none={nearOn} onPick={pickArea} /></div>
       <FavouriteMessage signedIn={signedIn} />
       <div ref={stripRef} className="flex gap-1 overflow-x-auto px-3 pb-3 pt-3">
         {days.map((d) => {

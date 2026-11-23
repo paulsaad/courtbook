@@ -12,14 +12,16 @@ import { areaKey, areaName, MAX_AREAS, sameArea, type PlayingArea, type PlayingP
  *  - AreasQuestion: the optional first-use question, asked once per account ("Not now" also counts);
  *  - PlayingAreasEditor: add, refine to a district or town, remove — on the profile page.
  */
-export function SavedAreaChips({ prefs, govs, current, onPick }: { prefs: PlayingPrefs | null; govs: Governorate[]; current: PlayingArea | null; onPick: (a: PlayingArea | null) => void }) {
+/** `none`: nothing shown as chosen (Near me is on and ignores the area). */
+export function SavedAreaChips({ prefs, govs, current, onPick, none = false }: { prefs: PlayingPrefs | null; govs: Governorate[]; current: PlayingArea | null; onPick: (a: PlayingArea | null) => void; none?: boolean }) {
   if (!prefs || prefs.areas.length === 0) return null;
   const chip = (on: boolean) => `chip shrink-0 ${on ? "chip-on" : ""}`;
+  const on = (a: PlayingArea | null) => !none && (a === null ? current === null : sameArea(a, current));
   return (
     <div className="flex gap-2 overflow-x-auto px-5 pb-1" role="group" aria-label="Your areas">
-      <button type="button" onClick={() => onPick(null)} className={chip(current === null)}>All Lebanon</button>
+      <button type="button" onClick={() => onPick(null)} className={chip(on(null))} aria-pressed={on(null)}>All Lebanon</button>
       {prefs.areas.map((a) => (
-        <button key={areaKey(a)} type="button" onClick={() => onPick(a)} className={chip(sameArea(a, current))} aria-pressed={sameArea(a, current)}>{areaName(a, govs)}</button>
+        <button key={areaKey(a)} type="button" onClick={() => onPick(a)} className={chip(on(a))} aria-pressed={on(a)}>{areaName(a, govs)}</button>
       ))}
       <Link href="/profile#areas" className="chip shrink-0 text-turf">Edit</Link>
     </div>
