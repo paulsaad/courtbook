@@ -3,6 +3,12 @@
 Status: **prepared, not active.** No scheduler is configured, no `CRON_SECRET` is set anywhere, and `vercel.json` is
 unchanged. Activation needs Paul's separate approval, after 0086 is on the environment concerned.
 
+**Release gate (PR #18 review, 23 Nov, finding 1):** the app's one-step deletion is released on an environment only
+after R1 is active and verified there (docs/ops/m2-0086-rollout.md, step 3). The database enforces it too: each run
+that gets through records a heartbeat (`deletion_worker`), and `close_my_account('app')` refuses with
+`processing_unavailable` when there has been no run in the last hour. The website is not gated (it processes inline).
+Watch it: `staging-db` → `m86_worker_check` (read only), or the line at the top of `/admin/deletions`.
+
 ## What exists in code
 
 `GET|POST /api/internal/deletions/retry` (src/app/api/internal/deletions/retry/route.ts):
@@ -35,7 +41,13 @@ finish) wait for this route or for an admin. Website closures run B to E inline,
 | B. GitHub Actions schedule (fallback) | Free | Every 15 min (GitHub may delay or skip runs) | Workflow with `schedule:`; the secret as a repository secret; `curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://<site>/api/internal/deletions/retry` |
 | C. Supabase pg_cron + pg_net | Free | Any | Extensions plus the secret in Supabase Vault. pg_net does not retry and keeps responses in a table. More moving parts; the M3 push design anticipates it, but nothing is set up today |
 
-Recommendation: **A** if Pro is approved for other reasons (L7), otherwise **B**.
+Recommendation: **B now** (prepared as `.github/workflows/deletion-retry.yml`), because it works on the free plans and
+for staging. Vercel runs crons only for production deployments, so A cannot drive staging at all. Move production to A
+later if Pro is approved for other reasons (L7).
+
+**Staging is behind Vercel login** (Standard Protection, no bypass; inventory of 22 Nov). A caller from outside needs
+Vercel's **Protection Bypass for Automation** secret, sent as the `x-vercel-protection-bypass` header. Turning that
+on is a Vercel setting: Paul's decision. The production domain is not protected.
 
 ## Steps for option A, when approved (staging first)
 
@@ -55,14 +67,32 @@ Recommendation: **A** if Pro is approved for other reasons (L7), otherwise **B**
    - with no `CRON_SECRET` set it gives **503**.
 5. Watch the first runs: `/admin/deletions` shows attempts and last errors, and the Vercel logs show status codes only.
 
-## Steps for option B, when approved
+## Steps for option B, when approved (the workflow file is prepared: `.github/workflows/deletion-retry.yml`)
 
-1. Repository secret `CRON_SECRET_STAGING` (the same value as Vercel's `CRON_SECRET` for Preview).
-2. `.github/workflows/deletion-retry.yml`:
-   - `on: schedule: - cron: "*/15 * * * *"` plus `workflow_dispatch`;
-   - one `curl -fsS` step;
-   - no checkout, no other permissions (`permissions: {}`).
-3. Same checks as A, step 4.
+It runs every 15 minutes (`7,22,37,52 * * * *`) and on demand. It has no checkout and no permissions. It makes one
+POST per target that is configured; a target that is not configured is skipped and nothing is called. GitHub runs
+schedules only from `main`, so the file does nothing until merged.
+
+**Staging:**
+
+1. Vercel → Settings → Deployment Protection → **Protection Bypass for Automation** → generate (Paul).
+2. Repository secrets:
+   - `CRON_SECRET_STAGING`: the same value as Vercel's `CRON_SECRET` for Preview, at least 32 characters;
+   - `VERCEL_BYPASS_STAGING`: the bypass from step 1.
+3. Repository variable `DELETION_RETRY_URL_STAGING`: `https://<staging alias>/api/internal/deletions/retry`.
+4. Run the workflow by hand once and expect `staging: HTTP 200 {…counts…}`. Then `staging-db` → `m86_worker_check`
+   should show the run.
+
+**Production:**
+
+1. Secret `CRON_SECRET`, the same value as Vercel's Production `CRON_SECRET`.
+2. Variable `DELETION_RETRY_URL`: `https://<production domain>/api/internal/deletions/retry`.
+
+**Notes:**
+
+- GitHub may delay scheduled runs by several minutes. The 1-hour heartbeat window tolerates that.
+- If runs stop, app deletions pause; they do not pile up.
+- A failed run (any status but 200) fails the workflow. GitHub emails the person who last changed the schedule.
 
 ## Turning it off
 
