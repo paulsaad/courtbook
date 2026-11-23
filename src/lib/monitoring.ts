@@ -67,10 +67,10 @@ export function safeText(text: unknown, exceptionType?: string): string {
 
 /** Every page and route of the website (src/app). Kept in step with the folders by monitoring.routes.test.ts. */
 export const ROUTES = [
-  "/", "/admin", "/admin/clubs/[slug]", "/admin/monitoring", "/admin/payments", "/admin/reports",
-  "/api/club-media", "/api/health", "/api/monitoring/test", "/api/notify/email", "/api/pay/simulate", "/api/payments.csv",
+  "/", "/admin", "/admin/clubs/[slug]", "/admin/deletions", "/admin/monitoring", "/admin/payments", "/admin/reports",
+  "/api/admin/delete-account", "/api/club-media", "/api/health", "/api/monitoring/test", "/api/notify/email", "/api/pay/simulate", "/api/payments.csv",
   "/auth/callback", "/auth/signout", "/bookings", "/bookings/[id]", "/club/[slug]", "/club/[slug]/coaches",
-  "/club/[slug]/info", "/club/[slug]/matches", "/coach", "/coaches", "/coaches/[id]", "/courts", "/levels", "/login",
+  "/club/[slug]/info", "/club/[slug]/matches", "/coach", "/coaches", "/coaches/[id]", "/courts", "/delete-account", "/levels", "/login",
   "/matches/[id]", "/me", "/notifications", "/pay/[id]", "/play", "/profile", "/staff", "/staff/[slug]",
   "/staff/[slug]/payments", "/staff/[slug]/settings",
   // files served by the app itself

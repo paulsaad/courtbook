@@ -6,6 +6,7 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import LevelSheet from "@/components/LevelSheet";
 import { levelLabel } from "@/lib/levels";
+import DeleteAccount from "./DeleteAccount";
 
 type Initial = { name: string; phone: string; level: string; sports: string[]; email_notifications: boolean };
 const LEVELS = [["beginner", "Beginner"], ["intermediate", "Intermediate"], ["advanced", "Advanced"]] as const;
@@ -101,6 +102,7 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage, 
       )}
       {!manage.isCoach && <Link href="/coach" className="text-center text-sm text-muted">Are you a coach? <span className="font-semibold text-turf">Set up your coach profile</span></Link>}
       <form action="/auth/signout" method="post" className="text-center"><button className="py-2 text-[15px] font-semibold text-cedar">Sign out</button></form>
+      <DeleteAccount />
     </main>
   );
 

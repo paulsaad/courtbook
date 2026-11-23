@@ -5,7 +5,7 @@ import { Wordmark } from "./Brand";
 type Item = { href: string; label: string; key: string };
 type Props =
   | { area: "staff"; slug: string; clubName: string; active: "calendar" | "payments" | "settings" }
-  | { area: "admin"; active: "clubs" | "payments" | "reports" };
+  | { area: "admin"; active: "clubs" | "payments" | "reports" | "deletions" };
 
 /**
  * Admin pages show the open-reports count on Reports, read with the same admin-only call the admin
@@ -37,6 +37,7 @@ export function WorkNavBar(props: Props & { openReports?: number | null }) {
         { key: "clubs", label: "Clubs", href: "/admin" },
         { key: "payments", label: "Payments", href: "/admin/payments" },
         { key: "reports", label: props.openReports ? `Reports (${props.openReports} open)` : "Reports", href: "/admin/reports" },
+        { key: "deletions", label: "Deletions", href: "/admin/deletions" },
       ];
   const title = props.area === "staff" ? props.clubName : "Admin";
   return (

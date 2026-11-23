@@ -1,0 +1,55 @@
+# B8: which kind of Supabase key an app's EAS environment holds — READ ONLY.
+# Pulls the app's EAS environment into a temporary file, reports only the key's KIND
+# (legacy anon JWT / publishable / other) and whether it belongs to the app's database project,
+# then deletes the file. The key value is never printed. Nothing in EAS, GitHub or Supabase changes.
+# The installed apps carry the key from the EAS environment as it was at their last build or update.
+name: App key kind (read only)
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "Which app: live (EAS environment preview) or staging (EAS environment development)"
+        type: choice
+        options: [live, staging]
+        default: live
+permissions:
+  contents: read
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Report key kind (value never printed)
+        env:
+          APP: ${{ inputs.app }}
+        run: |
+          set -euo pipefail
+          case "$APP" in
+            live)    EAS_ENV=preview;     WANT=lgujfbwunokobjxlvpuf ;;
+            staging) EAS_ENV=development; WANT=pwznauyioqykdwodwpvx ;;
+          esac
+          f=$(mktemp); trap 'rm -f "$f"' EXIT
+          eas env:pull "$EAS_ENV" --path "$f" --non-interactive >/dev/null
+          key=$(grep -E '^EXPO_PUBLIC_SUPABASE_ANON_KEY=' "$f" | head -1 | cut -d= -f2- | tr -d '"'"'"' ' || true)
+          url=$(grep -E '^EXPO_PUBLIC_SUPABASE_URL=' "$f" | head -1 | cut -d= -f2- | tr -d '"'"'"' ' || true)
+          ref=$(printf '%s' "$url" | sed -nE 's#^https://([a-z0-9]{20})\.supabase\.co/?$#\1#p')
+          if [ -z "$key" ]; then kind="missing or not readable (secret visibility)"; detail=""
+          elif [ "${key#sb_publishable_}" != "$key" ]; then kind="publishable (new)"; detail=""
+          elif [ "${key#sb_secret_}" != "$key" ]; then kind="SECRET KEY - must never be in an app"; detail=""
+          elif [ "${key#eyJ}" != "$key" ]; then
+            kind="legacy JWT"
+            detail=$(printf '%s' "$key" | cut -d. -f2 | tr '_-' '/+' | { b=$(cat); while [ $(( ${#b} % 4 )) -ne 0 ]; do b="$b="; done; printf '%s' "$b"; } | base64 -d 2>/dev/null | python3 -c 'import json,sys; p=json.load(sys.stdin); print("role=%s project=%s" % (p.get("role"), p.get("ref")))' || echo "payload unreadable")
+          else kind="unknown format"; detail=""
+          fi
+          unset key
+          echo "App: $APP · EAS environment: $EAS_ENV"
+          echo "Database project in URL: ${ref:-unreadable} (expected $WANT: $([ "$ref" = "$WANT" ] && echo match || echo MISMATCH))"
+          echo "Key kind: $kind ${detail:+($detail)}"
+          { echo "### App key kind: $APP"; echo "- EAS environment: \`$EAS_ENV\`"; echo "- Database project: \`${ref:-unreadable}\` ($([ "$ref" = "$WANT" ] && echo match || echo MISMATCH))"; echo "- Key kind: **$kind** ${detail:+($detail)}"; } >> "$GITHUB_STEP_SUMMARY"
