@@ -88,6 +88,7 @@ export const ERRORS: Record<string, string> = {
   already_open: "This report is already open.",
   not_suspended: "This account is not suspended any more. Refresh the page.",
   too_soon: "Report text can only be cleared 180 days after the report was closed.",
+  booking_started: "This booking has already started, so it can no longer be cancelled here. Contact the club.",
   message_not_allowed: "This message can't be sent. Check the community rules.",
   bad_target: "You can't do that to your own account or to an admin's (remove their admin role first).",
   bad_reason: "Choose a reason for the report.",
