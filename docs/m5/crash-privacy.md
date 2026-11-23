@@ -24,6 +24,23 @@ allowlist (`scrubEvent`). Nothing else is sent.
 Unit tests (`mobile/__tests__/crash.test.ts`) feed an SDK-shaped event carrying personal data in every field and
 require that none of it survives.
 
+## Tightened after review 2 (23 Nov, commit `98c11d2`, JavaScript only)
+
+- **Text:** only the app's own error codes pass (`KNOWN_CODES`, from shared `ERRORS` and `GAME_ERRORS`), plus fixed
+  messages, known connection failures and the React error number. A single lowercase word ("rami") or a short token
+  ("x7k2p9") is withheld.
+- **URLs are route templates:** a known host or `[host]`, and only the app's own segments (screen names, Supabase API
+  words, the tables and RPCs it calls). Every other segment becomes `:id`, including short names ("Rami", "paul").
+  Tests keep the lists in step with `mobile/app` and the calls in the code.
+- **Device fields:** each has its own rule (OS name from a fixed set, versions numeric, model must contain a digit,
+  app identifier one of ours…). Manufacturer and brand are dropped. Exception types must be error class names.
+
+## Decisions (23 Nov)
+
+- Installation ID in native crashes: **declared** in the stores; no native filter solely for it.
+- Sentry-derived approximate location: **prepared, not executed** (`docs/m5/sentry-location-change.md`); disclosed
+  until applied and verified.
+
 ## Verified on staging (emulator run 45191427054, 23 Nov 2026, 14:28–14:31 UTC)
 
 This was an emulator test build of CourtBook Staging (environment `staging`, release
@@ -63,7 +80,7 @@ the needle was too broad (fixed). It found nothing else.
 1. **Approximate location on app reports.** Every app event, JS and native, has `user.geo` (city, region, country).
    Sentry derives it from the connection; no IP address is stored. A real iPhone report from 15 Nov shows the same.
    The website event checked has neither geo nor IP. Stopping it is a Sentry project setting. That is production
-   monitoring, so it is **not changed: decision needed** (store package §9 E2b).
+   monitoring, so it is **not changed**. The change is prepared (`docs/m5/sentry-location-change.md`).
 2. **Native crashes are built by Sentry's native SDK** (`beforeSend` does not run there). The received native crash
    carries:
    - `user.id` = `device.id` = **a random installation ID** (open question E2: answered *yes*);
@@ -77,14 +94,15 @@ the needle was too broad (fixed). It found nothing else.
 3. Sentry adds its own tags from those contexts (device model, OS build, `os.rooted`, `user:id:…` on the native
    crash).
 
-### Not possible in M5 without a native change
+### Native crashes: declared, not filtered (decided 23 Nov)
 
-Filtering native crash reports needs native code: an Expo config plugin that gives the Android and iOS SDKs their
-own `beforeSend`. That changes the native fingerprint, so it needs new builds. Tonight's builds stay unchanged.
-Until then:
-- the privacy page states these facts, with marked decisions;
-- store answers §2/§3 say "declare unless removed";
-- crash reporting stays **off in the live app** (no live DSN; L11).
+Filtering native crash reports would need native code: an Expo config plugin that gives the Android and iOS SDKs
+their own `beforeSend`, which means new builds. Decided: **no native filter solely for the installation ID**. It is
+declared instead:
+- the privacy page states it, together with the language, time zone, device state and system error text;
+- store answers §2/§3 declare Device ID.
+
+Crash reporting stays **off in the live app** until L11 (no live DSN).
 
 ## How to repeat the check
 

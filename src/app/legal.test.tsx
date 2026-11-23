@@ -83,7 +83,7 @@ describe("M5 legal pages: public, structured, honest about what is not final", (
     expect(t).toMatch(/opens the reports page/);
     expect(t).toMatch(/note itself is 180 days old/);                 // log notes: from when written, not from closing
     expect(t).toMatch(/suspension they concern is still in force/);
-    expect(container.querySelector("#how-long")?.closest("section")?.querySelector('mark[data-pending="decision"]')?.textContent).toMatch(/latest date/);
+    expect(container.querySelector("#how-long")?.closest("section")?.querySelector('mark[data-pending="decision"]')?.textContent).toMatch(/No latest date[\s\S]*retention policy is approved/);
   });
 
   it("error reports are described as Sentry received them on staging (docs/m5/crash-privacy.md), open points marked", () => {
@@ -96,7 +96,16 @@ describe("M5 legal pages: public, structured, honest about what is not final", (
     expect(t).toMatch(/random identifier for this installation/);                // native crashes
     expect(t).toMatch(/system’s own error message, which our filtering does not reach/);
     expect(t).not.toMatch(/email addresses are removed/);                        // the old, weaker-than-claimed promise
-    expect([...(list?.querySelectorAll('mark[data-pending="decision"]') ?? [])].map((m) => m.textContent).join(" ")).toMatch(/approximate location[\s\S]*live app/);
+    // decided 23 Nov: installation ID declared; Sentry location disclosed until switched off and verified — stated, not marked
+    expect(list?.querySelectorAll("mark[data-pending]").length).toBe(0);
+  });
+
+  it("location (review, 23 Nov): no GPS or device location is requested; the Sentry-derived location stays disclosed", () => {
+    const { container } = render(<PrivacyPage />);
+    const t = (container.querySelector("#not-collected")?.closest("section")?.textContent ?? "").replace(/\s+/g, " ");
+    expect(t).not.toMatch(/We do not use your location/);                    // contradicted by the Sentry location
+    expect(t).toMatch(/do not ask for your phone’s GPS or device location, in the app or on the website/);
+    expect(t).toMatch(/approximate location \(country and city\) that Sentry works out/);
   });
 
   it("the operator, address and governing law are never filled in by guessing: they stay marked", () => {
@@ -145,7 +154,7 @@ describe("M5 privacy policy: what it says is absent stays absent in the code", (
   const appJson = JSON.parse(readFileSync("mobile/app.json", "utf8")).expo;
   const deps = [...Object.keys(web.dependencies ?? {}), ...Object.keys(app.dependencies ?? {})];
 
-  it("“We do not use your location”: no location library in the app, no location request on the website", () => {
+  it("“We do not ask for … GPS or device location”: no location library in the app, no location request on the website", () => {
     expect(deps.filter((d) => /location|geoloc/i.test(d))).toEqual([]);
     for (const f of ["src/components/Discover.tsx", "src/components/HomeClient.tsx", "src/app/courts/page.tsx"]) {
       expect(readFileSync(f, "utf8")).not.toMatch(/geolocation/);

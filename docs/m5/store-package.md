@@ -17,14 +17,14 @@ Legend:
 | --- | --- |
 | Privacy policy and terms pages (`/privacy`, `/terms`) | **Built on this branch**, draft-marked, not published. Final text: Paul (operator, address, law) + Legal |
 | Account deletion: in-app path and web URL | **Ready.** Profile → Delete my account (app and website); public `/delete-account` (email route without the app). Two provisional phrases are now marked (M2b) |
-| Links to the legal pages in the app and the website | **Built on this branch.** Sign-in screen, Profile, Help & Feedback, the 18+ question, the deletion page. **Release order fixed (§1a):** live-app builds and updates refuse until the linked pages are final and public |
-| Apple App Privacy answers (§2) | **Ready except two crash-report items** (installation ID confirmed present; Sentry-derived location): declare or remove (§9 E2, E2b) |
-| Google Data safety answers (§3) | **Ready except** the same two items, plus "sharing with clubs" to confirm (Legal) |
+| Links to the legal pages | **Website:** built on this branch (sign-in, profile, the 18+ question, the deletion page). **App:** moved to a separate, deferred PR, merged only after the approved pages are public (§1a). Unrelated app fixes are not blocked |
+| Apple App Privacy answers (§2) | **Ready.** Installation ID in native crashes: **declared** (decided 23 Nov). Sentry-derived approximate location: declared until the prepared Sentry change is applied and verified (§9 E2b) |
+| Google Data safety answers (§3) | **Ready**, same two declarations; "sharing with clubs" to confirm (Legal) |
 | Age rating answers, both stores (§4) | **Ready** (18+ decided) |
 | Permissions (§5) | **Ready**: nothing to declare beyond Sign in with Apple |
 | Listing text (§6) | **Drafted**; app name and support URL: **Paul** |
 | Screenshots and graphics (§7) | **Eng** after the store build exists; specifications below |
-| Reviewer access (§8) | **Recommended:** one dedicated reviewer account with a password, on Supabase's existing sign-in. Password entry in the store build: **Eng, not built**. Label, and a server-side restriction to that account: **Paul** |
+| Reviewer access (§8) | **Approved in principle (23 Nov):** one dedicated, player-only reviewer account with a password, on Supabase's existing sign-in. Built closer to store submission (E7). Label and server-side restriction: decided then |
 | Sign in with Apple token revocation on deletion (§9 E1) | **Eng, blocked on Account** (needs the company's Sign in with Apple key) |
 | Message filter word list (Apple 1.2) | **Paul**: the filter exists (0074) but its list is empty by design |
 | Developer accounts, D-U-N-S, store records (§9) | **Account / Paul** |
@@ -44,32 +44,32 @@ Legend:
 
 ## 1a. Release order for the legal pages and the app's links (review, 23 Nov)
 
-The app's legal links point at the public website (`mobile/lib/legal.ts`). They must not reach players before
-the pages they open are official. The order is fixed:
+The app's legal links must not reach players before the pages they open are official. The order is fixed:
 
 1. **Legal approval.** The lawyer approves the final wording. Paul fills in the operator, address and law (P1), and
    every marked item on `/privacy`, `/terms` and `/delete-account` is resolved. Nothing is guessed.
 2. **Website published.** `src/lib/legal.ts` gets `LEGAL_STATUS = "final"` and a `LEGAL_UPDATED` date. The web tests
    refuse "final" while any marked item is left. The website then goes live through the normal approved deploy.
-3. **Publicly reachable.** Each page the app links to returns 200 without signing in, on the final domain (P2;
-   `WEBSITE_URL` changed first if the domain changes). It shows a "Last updated" date, no draft notice and no marked
-   item, and it is not marked noindex.
-4. **Only then: app links distributed.** This means a live-app build or over-the-air update that contains the links,
-   and the URLs entered in the store records (§1).
+3. **Publicly reachable.** Each page the app will link to returns 200 without signing in, on the final domain (P2;
+   `mobile/lib/legal.ts` `WEBSITE_URL` changed first if the domain changes). It shows a "Last updated" date, no draft
+   notice and no marked item, and it is not marked noindex.
+4. **Only then: the app's links.** The deferred PR (E8) adds them to the sign-in screen and Help. After that come a
+   live-app build or over-the-air update, and the URLs entered in the store records (§1).
 
-**Check (built, read-only):** `mobile/scripts/check-legal-pages.mjs` (`node scripts/check-legal-pages.mjs` in `mobile/`; deliberately not an npm script, because package.json scripts are part of the native fingerprint)
-fetches exactly the pages the app links to and checks step 3. It runs automatically:
-- before every **live** app build and every live over-the-air update or `check`, where it **refuses**;
-- for **staging**, where it only warns (staging builds are for testing);
-- its own tests run on fixture pages in Mobile checks.
+**Separated (review, 23 Nov).** The app-side links are **not in this PR**: they are in a separate draft PR, based on
+this branch, to merge only after step 3. This PR keeps the page URLs (`mobile/lib/legal.ts`, used by no screen yet)
+and the check.
 
-`--base https://<domain>` checks a new domain before the constant is changed. Run it by hand before entering the
-URLs in App Store Connect and Play Console.
-
-**Consequence to plan for:** once this branch is merged, no live-app build or update can ship until step 3 passes,
-including unrelated fixes. <mark>**Pending decision (Paul):** either (a) accept this (the legal pages are on the
-critical path to launch anyway), or (b) merge the app-side links only when legal approval is close.</mark> The
-website pages can be merged earlier: they stay draft-marked and noindex until step 2.
+**Check (built, read-only):** `mobile/scripts/check-legal-pages.mjs` fetches the pages the app links to and checks
+step 3.
+- **In the build and update workflows (`--gate`)** it checks only if an app screen actually links to the pages. With
+  no links, as in this PR, it passes and says so, so unfinished legal pages never block unrelated live-app fixes. Once
+  the links PR is merged, it refuses live builds and updates until every linked page is final and public. Staging
+  only warns.
+- **By hand (`node scripts/check-legal-pages.mjs` in `mobile/`):** run before merging the links PR and before
+  entering the store URLs. `--base https://<domain>` checks a new domain before the constant is changed.
+- Its own tests run on fixture pages in Mobile checks. It is deliberately not an npm script: package.json scripts are
+  part of the native fingerprint.
 
 ## 2. Apple — App Privacy ("nutrition label")
 
@@ -84,11 +84,11 @@ data brokers).
 | User Content → Other User Content | Yes | Yes | App Functionality | game chat, game notes, reports (with a copy of the reported content) |
 | User Content → Customer Support | Yes | Yes | App Functionality | "Report an app problem / Suggest an improvement" (`send_feedback`) |
 | Identifiers → User ID | Yes | Yes | App Functionality | account ID |
-| Identifiers → Device ID | **Yes, unless removed** (confirmed 23 Nov: native crash reports carry an installation ID) | No | App Functionality | declare, or omit only if a new build's native filter removes it before live crash reporting (§9 E2) |
+| Identifiers → Device ID | **Yes** (declared, decided 23 Nov) | No | App Functionality | native crash reports carry a random installation ID (§9 E2). No native filter is planned for it |
 | Purchases → Purchase History | Yes | Yes | App Functionality | bookings with their prices (paid at the desk today) |
 | Diagnostics → Crash Data | Yes | No | App Functionality | Sentry error reports: no account, name, email or IP; error text withheld. Native crashes also carry an installation ID and device details (§9 E2) |
 | Other Data → Other Data Types | Yes | Yes | App Functionality | 18+ answer, sports and playing level, community-rules acceptance |
-| Location → Coarse Location | **To decide** (§9 E2b) | No | App Functionality | Sentry derives country and city from the connection for app reports. Declare, or omit only if the Sentry setting stops it |
+| Location → Coarse Location | **Yes, for now** | No | App Functionality | Sentry derives country and city for app error reports. The app never asks for GPS or device location. Remove this row only after the prepared Sentry change is applied **and verified** (§9 E2b) |
 | Health, Financial (payment) info, Sensitive info, Contacts, Browsing/Search history, Usage data, Performance data, Audio/Photos, Precise location | No | — | — | none collected |
 
 Notes:
@@ -123,8 +123,8 @@ Notes:
 | App activity → Other user-generated content (game notes, reports, feedback) | Yes | **Yes** | App functionality |
 | App info and performance → Crash logs | Yes | No | Analytics (to fix problems) |
 | App info and performance → Diagnostics | Yes | No | Analytics |
-| Device or other IDs | **Yes, unless removed** (§9 E2; confirmed present 23 Nov) | No | Analytics |
-| Location → Approximate location | **To decide** (§9 E2b) | No | Analytics |
+| Device or other IDs | **Yes** (declared; §9 E2) | No | Analytics |
+| Location → Approximate location | **Yes, for now** (§9 E2b; derived by Sentry for error reports, never GPS) | No | Analytics |
 | Precise location, Financial (payment info), Health, Photos/videos, Audio, Files, Calendar, Contacts, Web browsing, Installed apps, Search history | No | — | — |
 
 ## 4. Age rating and target audience
@@ -206,7 +206,7 @@ Proposed set (5 screens, same for both stores): Courts (free times), Booking con
 Club info. Made from the **store build** with real (or clearly fictional) club data, after the demo club is hidden or
 renamed (M7). Not made now: tonight's staging builds are for acceptance only.
 
-## 8. Reviewer access (Apple 2.1, Google "Sign-in details") — recommendation; Paul decides
+## 8. Reviewer access (Apple 2.1, Google "Sign-in details") — approved in principle 23 Nov; built closer to submission
 
 **What the stores require** (official pages, read 23 Nov 2026):
 - Apple 2.1(a): if the app has a login, include **demo account info**. A built-in demo mode is accepted only **with
@@ -224,7 +224,9 @@ that, and it is not dependable. We could not prepare that account (18+ answer, r
 cancel), would not know which account it is, would hold a reviewer's real personal data, and every review would
 start empty. It may be mentioned in the notes as an extra, never as the access route.
 
-### Recommended: one dedicated reviewer account, email and password, on the existing sign-in
+### Approved in principle (23 Nov): one dedicated reviewer account, email and password, on the existing sign-in
+
+The sign-in is built closer to store submission (E7), not now.
 
 Use the email-and-password sign-in that **Supabase Auth already provides** (the same `signInWithPassword` call the
 Staging app's test sign-in uses). No new sign-in system and no new server code. Accounts made by code, Google or
@@ -278,7 +280,7 @@ Recommended before public launch. Availability on our Supabase plan is still to 
 | P1 | Operator entity, postal address, governing law (L1) — fills the marked items on both pages |
 | P2 | Product domain (privacy, terms, deletion and support URLs; also the sign-in email sender) |
 | P3 | App name in both stores (and name availability); copyright line |
-| P4 | Reviewer access (§8): approve the dedicated reviewer account; label and placement of the password entry; whether to restrict password sign-in to that account on the server; a bookable review club |
+| P4 | Reviewer access (§8): **approved in principle 23 Nov.** Still open, closer to submission: label and placement of the password entry; server-side restriction to that account; a bookable review club |
 | P5 | Message filter word list (Apple 1.2 asks for a filter; the 0074 filter is built, list empty "until approved") |
 | P6 | How quickly reports are reviewed (Apple 1.2 "timely responses"; terms item) and who moderates |
 | P7 | Approve the "proposed wording" items on the pages (under-18 accounts closed, change notices, no-show limits) |
@@ -301,13 +303,14 @@ Recommended before public launch. Availability on our Supabase plan is still to 
 | # | Work | Needs a native build? |
 | --- | --- | --- |
 | E1 | **Revoke Sign in with Apple tokens on account deletion** (Apple TN3194). The app sends only the identity token today; the server must exchange the authorization code at sign-in (or ask the user to sign in with Apple again when deleting) and call Apple's revoke endpoint in `/api/admin/delete-account` | No (JS + server), but needs the key from the Apple account |
-| E2 | **Confirmed 23 Nov** (`docs/m5/crash-privacy.md`): native crash reports carry an installation ID, language, time zone, device state and the system's error message. Either a native filter (Expo config plugin with a native `beforeSend` on Android and iOS) in the next build, before crash reporting is switched on in the live app, or declare (§2/§3). **Paul decides** | Yes (native code; the fingerprint changes) |
-| E2b | App reports get a Sentry-derived country and city. Stop it with Sentry's setting (production monitoring: **needs approval**), or declare Coarse/Approximate location (§2/§3) | No |
+| E2 | **Decided 23 Nov: declare** the installation ID (§2/§3); no native filter solely for it. Native crash reports also carry language, time zone, device state and the system's error message, which `/privacy` states (`docs/m5/crash-privacy.md`) | No |
+| E2b | App reports get a Sentry-derived country and city. **Prepared, not executed** (`docs/m5/sentry-location-change.md`): a Sentry data-scrubbing rule on `$user.geo.**`. It changes production monitoring, so it needs Paul's go. Declared on `/privacy` and in §2/§3 until it is applied and verified | No |
 | E3 | Store builds with the `production` profile (exists: store distribution, auto-incremented build numbers); crash reporting on for the live apps (L11, needs the live DSN) | Yes (the store build itself) |
 | E4 | Google 512 px icon export; screenshots from the store build (§7) | No |
 | E5 | `/support` page if Paul wants a support URL other than the email | No |
 | E6 | Before submission: payments phase (M12), live rollout of launch-1 and 0085, demo club hidden (M7), age switch on, outside VoiceOver/TalkBack check | Payments: yes |
-| E7 | Reviewer access (§8): checks V1–V3 (read-only); visible password entry in the store build (reuse of the Staging form); reviewer account and Review Club prepared; optional server-side restriction (hook) | No (JS); ships with the store build |
+| E7 | Reviewer access (§8), **closer to store submission**: checks V1–V3 (read-only); visible password entry in the store build (reuse of the Staging form); reviewer account and Review Club prepared; optional server-side restriction (hook) | No (JS); ships with the store build |
+| E8 | App legal links: the deferred PR (sign-in and Help links), merged after §1a steps 1–3 | No (JS) |
 
 ## Sources (official, read 23 Nov 2026)
 - Apple: Updated age ratings in App Store Connect; Age Rating Updates (required since 31 Jan 2026).

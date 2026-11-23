@@ -82,16 +82,14 @@ export default function PrivacyPage() {
             out of its address), the app version, and the device type and system version. The text of an error is left
             out unless it is one of our own fixed messages or an error code. Reports carry no name, account, email
             address or network address.</li>
+          {/* Keep this item until Sentry's location inference is switched off AND a staging report is checked without it
+              (docs/m5/sentry-location-change.md). Decided 23 Nov: prepare the change; not executed. */}
           <li>For reports from the app, Sentry (the service that receives them) works out an approximate location
-            (country and city) from the connection. It does not keep the network address itself.{" "}
-            <Pending kind="decision">Whether Sentry is set to stop keeping this approximate location (a setting at
-            Sentry, not changed yet), or whether it is kept and declared.</Pending></li>
+            (country and city) from the connection. It does not keep the network address itself.</li>
           <li>If the app crashes in the phone’s own code rather than in ours, the phone’s part of Sentry builds the
             report itself. Such a report also carries a random identifier for this installation of the app (not linked
             to your account), the phone’s language and time zone, technical state such as memory, storage and battery,
-            and the system’s own error message, which our filtering does not reach.{" "}
-            <Pending kind="decision">Whether a new app version removes these before crash reporting is switched on in
-            the live app, or whether they are kept and declared in the stores.</Pending></li>
+            and the system’s own error message, which our filtering does not reach.</li>
           <li>Our hosting and database providers keep ordinary server records, including network (IP) addresses, for
             security and to fix problems.</li>
         </ul>
@@ -105,7 +103,10 @@ export default function PrivacyPage() {
 
       <Section id="not-collected" title="What we do not do">
         <ul className="list-disc space-y-1 pl-5">
-          <li>We do not use your location. Clubs are found by the area you choose, not by your device’s position.</li>
+          <li>We do not ask for your phone’s GPS or device location, in the app or on the website. Clubs are found by the
+            area you choose, not by your device’s position. The only location information we receive is the
+            approximate location (country and city) that Sentry works out for app error reports, described under
+            “Error reports and server records”.</li>
           <li>The app does not ask for access to your contacts, photos, camera or microphone.</li>
           <li>We show no advertising, use no advertising or analytics trackers, do not track you across other apps or
             websites, and do not sell information about you.</li>
@@ -141,8 +142,8 @@ export default function PrivacyPage() {
             each time anyone files a new report and each time an administrator opens the reports page, so this text
             can stay for some time after the 180 days. It is never cleared while the report is open or under a legal
             hold. The report itself (its kind, reason, dates and decision) is kept without this text.{" "}
-            <Pending kind="decision">Whether we promise a latest date for clearing (that needs a scheduled clearing
-            job, which is not built), and how long the report itself is kept.</Pending></li>
+            <Pending kind="decision">No latest date for clearing, and no period for keeping the report itself, is
+            promised until a retention policy is approved and can be enforced.</Pending></li>
           <li>Notes written by administrators while handling reports and suspensions are cleared the same way once
             the note itself is 180 days old (counted from when it was written, not from when the report closed). They
             are kept while their report is open or under a legal hold, and while a suspension they concern is still
