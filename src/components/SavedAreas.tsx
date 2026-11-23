@@ -26,7 +26,7 @@ export function SavedAreaChips({ prefs, govs, current, onPick }: { prefs: Playin
   );
 }
 
-export function AreasQuestion({ govs, onSave, onDismiss }: { govs: Governorate[]; onSave: (areas: PlayingArea[]) => Promise<unknown>; onDismiss: () => void }) {
+export function AreasQuestion({ govs, onSave, onDismiss }: { govs: Governorate[]; onSave: (areas: PlayingArea[]) => Promise<unknown>; onDismiss: () => Promise<unknown> }) {
   const [picked, setPicked] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +46,13 @@ export function AreasQuestion({ govs, onSave, onDismiss }: { govs: Governorate[]
             try { await onSave(picked.map((g) => ({ governorate: g, district: null, town: null }))); }
             catch { setError("Couldn't save your areas. Try again."); setBusy(false); }
           }}>{busy ? "Saving…" : "Save"}</button>
-        <button type="button" disabled={busy} onClick={onDismiss} className="btn btn-secondary">Not now</button>
+        <button type="button" disabled={busy} className="btn btn-secondary"
+          onClick={async () => {
+            setBusy(true); setError(null);
+            try { await onDismiss(); }   // on success the question is no longer rendered
+            catch { setError("Couldn't save that. Try again."); }
+            setBusy(false);
+          }}>Not now</button>
       </div>
     </section>
   );

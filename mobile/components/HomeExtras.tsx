@@ -24,8 +24,9 @@ export function AreasQuestionCard({ userId }: { userId: string }) {
       <Text variant="secondary">Save the areas and towns you play in — Beirut in the week, Batroun at the weekend — and they&apos;re one tap away on every device.</Text>
       <View style={styles.row}>
         <View style={{ flex: 1 }}><Button label="Choose my areas" onPress={() => router.push("/areas")} testID="areas-question-choose" /></View>
-        <View style={{ flex: 1 }}><Button label="Not now" variant="secondary" onPress={() => void dismiss()} testID="areas-question-dismiss" /></View>
+        <View style={{ flex: 1 }}><Button label="Not now" variant="secondary" disabled={dismiss.isPending} onPress={() => dismiss.mutate()} testID="areas-question-dismiss" /></View>
       </View>
+      {dismiss.isError ? <Text accessibilityRole="alert" style={styles.error} testID="areas-question-error">Couldn&apos;t save that. Try again.</Text> : null}
     </View>
   );
 }
@@ -65,4 +66,5 @@ const styles = StyleSheet.create({
   section: { gap: space.md },
   club: { flexDirection: "row", alignItems: "center", gap: space.sm, width: 240, paddingLeft: space.lg, paddingVertical: space.sm, backgroundColor: color.card, borderRadius: radius.lg, borderWidth: 1, borderColor: color.line },
   clubName: { fontFamily: font.bold, fontSize: 16, color: color.ink },
+  error: { color: color.danger },
 });

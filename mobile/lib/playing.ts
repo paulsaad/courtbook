@@ -1,4 +1,3 @@
-import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { areasPayload, parsePlayingPrefs, type PlayingArea, type PlayingPrefs } from "@shared/places";
 import { supabase } from "./supabase";
@@ -38,14 +37,20 @@ export function useSaveAreas(userId: string | null) {
   });
 }
 
-/** "Not now" on the first-use question: never asked again, on any device. */
+/** "Not now" on the first-use question: never asked again, on any device. The question is hidden only once the
+ *  account has recorded it (M14 review C); a failure rejects with a short code and leaves it showing. */
 export function useDismissQuestion(userId: string | null) {
   const qc = useQueryClient();
-  return useCallback(async () => {
-    if (!userId) return;
-    qc.setQueryData<PlayingPrefs | null>(playingKeys.mine(userId), (p) => (p ? { ...p, asked: true } : p));
-    await supabase.rpc("dismiss_areas_question");
-  }, [qc, userId]);
+  return useMutation({
+    mutationFn: async () => {
+      if (!userId) throw new Error("not_authenticated");
+      let error: { message?: unknown } | null = null;
+      try { ({ error } = await supabase.rpc("dismiss_areas_question")); }
+      catch { error = { message: "failed" }; }
+      if (error) throw new Error(typeof error.message === "string" && /^[a-z_]+$/.test(error.message) ? error.message : "failed");
+    },
+    onSuccess: () => { if (userId) qc.setQueryData<PlayingPrefs | null>(playingKeys.mine(userId), (p) => (p ? { ...p, asked: true } : p)); },
+  });
 }
 
 /** Remember the area being browsed (best effort; the screen keeps working if it fails). */

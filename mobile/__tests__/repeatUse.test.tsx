@@ -79,6 +79,33 @@ describe("Home: Where do you usually play?", () => {
     await waitFor(() => expect(calls()).toContain("dismiss_areas_question"));
     await waitFor(() => expect(screen.queryByTestId("areas-question")).toBeNull());
   });
+  for (const [label, failure] of [["refused (closed account)", { data: null, error: { message: "account_closed" } }], ["network error", "throw"]] as const) {
+    it(`'Not now' that fails to save keeps the question and says so: ${label} (M14 review C)`, async () => {
+      rpc.mockImplementation(async (fn: string) => {
+        if (fn === "my_playing_prefs") return ok(prefs);
+        if (fn === "dismiss_areas_question") { if (failure === "throw") throw new Error("network"); return failure; }
+        return ok(null);
+      });
+      await render(wrap(<AreasQuestionCard userId="me" />));
+      fireEvent.press(await screen.findByTestId("areas-question-dismiss"));
+      expect(await screen.findByTestId("areas-question-error")).toBeTruthy();
+      expect(screen.getByTestId("areas-question")).toBeTruthy();
+      expect(screen.getByText("Couldn't save that. Try again.")).toBeTruthy();
+    });
+  }
+  it("'Not now' retried after a failure: saved, and the question goes", async () => {
+    let first = true;
+    rpc.mockImplementation(async (fn: string) => {
+      if (fn === "my_playing_prefs") return ok(prefs);
+      if (fn === "dismiss_areas_question") { if (first) { first = false; return { data: null, error: { message: "failed" } }; } return ok(null); }
+      return ok(null);
+    });
+    await render(wrap(<AreasQuestionCard userId="me" />));
+    fireEvent.press(await screen.findByTestId("areas-question-dismiss"));
+    await screen.findByTestId("areas-question-error");
+    fireEvent.press(screen.getByTestId("areas-question-dismiss"));
+    await waitFor(() => expect(screen.queryByTestId("areas-question")).toBeNull());
+  });
   it("not asked again once answered (on any device: it is on the account)", async () => {
     prefs = { asked: true, areas: [], last: null };
     await render(wrap(<AreasQuestionCard userId="me" />));

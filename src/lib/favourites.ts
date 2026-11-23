@@ -94,14 +94,15 @@ async function load() {
 function sync(): Promise<void> {
   if (syncing && syncGen === gen) return syncing;   // one per account; a new account never waits for the old one's
   syncGen = gen;
-  const mine: Promise<void> = (async () => {
+  const ref: { p?: Promise<void> } = {};
+  ref.p = (async () => {
     try {
       const uid = await sessionUser();
       if (uid !== owner || state.status === "idle" || state.status === "failed") await load();
-    } finally { if (syncing === mine) syncing = null; }
+    } finally { if (syncing === ref.p) syncing = null; }
   })();
-  syncing = mine;
-  return mine;
+  syncing = ref.p;
+  return ref.p;
 }
 
 export function useFavourites(signedIn: boolean) {

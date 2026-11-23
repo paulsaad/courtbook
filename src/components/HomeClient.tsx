@@ -74,7 +74,7 @@ export default function HomeClient({ areas, sports, initialMatches, signedIn }: 
         )} />
       <div className="-mx-5"><SavedAreaChips prefs={playing.prefs} govs={areas} current={areaFromPrefs(prefs)} onPick={pickArea} /></div>
       {playing.prefs && !playing.prefs.asked && (
-        <AreasQuestion govs={areas} onSave={async (a) => { const next = await playing.saveAreas(a); if (next.areas[0]) pickArea(next.areas[0]); }} onDismiss={() => void playing.dismissQuestion()} />
+        <AreasQuestion govs={areas} onSave={async (a) => { const next = await playing.saveAreas(a); if (next.areas[0]) pickArea(next.areas[0]); }} onDismiss={playing.dismissQuestion} />
       )}
 
       <form onSubmit={(e) => { e.preventDefault(); window.location.href = `/courts?q=${encodeURIComponent(q.trim())}`; }} className="flex items-center gap-2.5 rounded-full border border-grid bg-white px-4 py-3">

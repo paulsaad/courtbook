@@ -21,7 +21,7 @@ const govs = [
 describe("first-use question (0088)", () => {
   it("is optional, allows several areas, and saves them in the order picked", async () => {
     const onSave = vi.fn(async () => {});
-    render(<AreasQuestion govs={govs} onSave={onSave} onDismiss={() => {}} />);
+    render(<AreasQuestion govs={govs} onSave={onSave} onDismiss={async () => {}} />);
     expect(screen.getByRole("heading").textContent).toBe("Where do you usually play?");
     expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "North" }));
@@ -29,11 +29,21 @@ describe("first-use question (0088)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onSave).toHaveBeenCalledWith([{ governorate: "north", district: null, town: null }, { governorate: "beirut", district: null, town: null }]));
   });
-  it("'Not now' dismisses it", () => {
-    const onDismiss = vi.fn();
+  it("'Not now' dismisses it", async () => {
+    const onDismiss = vi.fn(async () => {});
     render(<AreasQuestion govs={govs} onSave={vi.fn()} onDismiss={onDismiss} />);
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     expect(onDismiss).toHaveBeenCalled();
+    await waitFor(() => expect((screen.getByRole("button", { name: "Not now" }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+  it("'Not now' that fails to save says so and keeps the question (M14 review C)", async () => {
+    const onDismiss = vi.fn(async () => { throw new Error("failed"); });
+    render(<AreasQuestion govs={govs} onSave={vi.fn()} onDismiss={onDismiss} />);
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Couldn't save that. Try again.");
+    expect(screen.getByRole("heading", { name: "Where do you usually play?" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Not now" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
 

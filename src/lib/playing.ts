@@ -35,9 +35,14 @@ export function usePlaying(signedIn: boolean) {
     setPrefs(next);
     return next;
   }, []);
+  /** "Not now": hidden only once the account has recorded it (M14 review C). Throws a short code on failure, and the
+   *  question stays, so a failed save is never shown as done. */
   const dismissQuestion = useCallback(async () => {
+    let error: { message?: string } | null = null;
+    try { ({ error } = await createClient().rpc("dismiss_areas_question")); }
+    catch { error = { message: "failed" }; }
+    if (error) throw new Error(/^[a-z_]+$/.test(error.message ?? "") ? error.message : "failed");
     setPrefs((p) => (p ? { ...p, asked: true } : p));
-    await createClient().rpc("dismiss_areas_question");
   }, []);
   /** Remember the area being browsed; best effort (the browser keeps its own copy). */
   const rememberArea = useCallback((p: Pick<Prefs, "gov" | "district" | "town">) => {
