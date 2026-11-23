@@ -88,6 +88,11 @@ jobs:
       - name: Release bundling, as EAS runs it (before spending a build)
         run: npm run check:bundle
 
+      # M5 release order: the app's legal links reach players only after the official pages are legally approved,
+      # published and public. Live app: refuses unless every linked page is final and public. Staging: a warning only.
+      - name: Legal pages the app links to are final and public (live app; staging warns)
+        run: node scripts/check-legal-pages.mjs --mode "$([ "${{ inputs.app }}" = live ] && echo fail || echo warn)"
+
       # No linking step: app.json carries owner and extra.eas.projectId, so the
       # build targets that one project. The previous `eas init --force` is gone
       # deliberately — it was only ever needed to create the project, and a

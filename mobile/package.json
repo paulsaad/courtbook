@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "check:shared": "bash scripts/check-shared.sh",
-    "check:bundle": "bash scripts/check-bundle.sh"
+    "check:bundle": "bash scripts/check-bundle.sh",
+    "check:legal-pages": "node scripts/check-legal-pages.mjs"
   },
   "dependencies": {
     "@react-native-community/netinfo": "^12.0.1",
