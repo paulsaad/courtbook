@@ -70,7 +70,7 @@ describe("POST /api/account/close", () => {
     expect(await res.json()).toEqual({ closed: true });
     expect(calls[0]).toEqual({ client: "user", fn: "close_my_account", args: { p_via: "web" } });
     expect(signOut).toHaveBeenCalledTimes(1);
-    expect(services()).toEqual(["claim_deletion", "auth.ban", "record_deletion_step", "delete_account_data", "auth.delete", "finish_account_deletion"]);
+    expect(services()).toEqual(["claim_deletion", "auth.ban", "record_deletion_step", "record_deletion_step", "delete_account_data", "record_deletion_step", "auth.delete", "record_deletion_step", "finish_account_deletion"]);
     for (const c of calls.filter((c) => c.client === "service")) expect(JSON.stringify(c.args)).toContain(ME);
   });
   it("ignores any account named in the body: the subject is only ever the session's", async () => {
@@ -109,6 +109,14 @@ describe("POST /api/account/close", () => {
       expect(calls).toEqual([]);
     });
   }
+  it("signed in too long ago: 409 reauth_required, not signed out, nothing processed (the page asks for a code)", async () => {
+    userRpc.close_my_account = { error: { message: "reauth_required", code: "P0001" } };
+    const res = await close.POST(post("/api/account/close", { confirm: true }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "reauth_required" });
+    expect(signOut).not.toHaveBeenCalled();
+    expect(services()).toEqual([]);
+  });
   it("staff/admin refused: 409 with the code, not signed out, nothing processed", async () => {
     userRpc.close_my_account = { error: { message: "staff_role", code: "P0001" } };
     const res = await close.POST(post("/api/account/close", { confirm: true }));
@@ -188,7 +196,9 @@ describe("GET|POST /api/internal/deletions/retry", () => {
     const res = await retry.POST(new Request(`${SITE}/api/internal/deletions/retry?subject=${OTHER}`, { method: "POST", headers: { authorization: `Bearer ${SECRET}` }, body: JSON.stringify({ subject: "ignored" }) }));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ done: 2, held: 0, skipped: 0, failed: 0, lease_lost: 0, remaining: 0, alerts: 2 });
+    expect(body).toEqual({ done: 2, held: 0, skipped: 0, failed: 0, lease_lost: 0, remaining: 0, alerts: 2, promoted: 0 });
+    expect(calls.find((c) => c.fn === "record_deletion_worker_run")?.args).toEqual({ p_counts: body });   // the heartbeat
+    expect(calls.findIndex((c) => c.fn === "promote_due_requests")).toBeLessThan(calls.findIndex((c) => c.fn === "deletions_due"));
     expect(JSON.stringify(body)).not.toContain(ME);
     expect(calls.filter((c) => c.client === "user")).toEqual([]);
     expect(calls.find((c) => c.fn === "deletions_due")?.args).toEqual({ p_limit: 20 });
@@ -205,6 +215,18 @@ describe("GET|POST /api/internal/deletions/retry", () => {
       deletions_needing_attention: () => ({ data: [] }),
     };
     expect(await (await retry.GET(req(`Bearer ${SECRET}`))).json()).toMatchObject({ done: 1, failed: 1 });
+  });
+  it("a failing run records no heartbeat (so the app's one-step closing pauses)", async () => {
+    process.env.CRON_SECRET = SECRET;
+    serviceRpc.deletions_due = () => ({ error: { message: "x", code: "57014" } });
+    expect((await retry.GET(req(`Bearer ${SECRET}`))).status).toBe(500);
+    expect(calls.map((c) => c.fn)).not.toContain("record_deletion_worker_run");
+  });
+  it("promotion failing → 500, nothing processed, no heartbeat", async () => {
+    process.env.CRON_SECRET = SECRET;
+    serviceRpc.promote_due_requests = () => ({ error: { message: "x", code: "57014" } });
+    expect((await retry.GET(req(`Bearer ${SECRET}`))).status).toBe(500);
+    expect(calls.map((c) => c.fn)).toEqual(["promote_due_requests"]);
   });
   it("the due list failing → 500, reported by code", async () => {
     process.env.CRON_SECRET = SECRET;

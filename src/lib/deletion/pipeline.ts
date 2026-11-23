@@ -11,8 +11,11 @@
  *   E  finish  finish_account_deletion → done (idempotent; clears the lease)
  *
  * Any failure: record 'failed' with a code (backoff, next try later) and stop. Every step is safe to repeat, so a run
- * that dies anywhere leaves a state the next run continues from. A run whose lease was taken over ('lease_lost' on
- * bookkeeping) stops. Nothing about the person is returned or logged: codes only.
+ * that dies anywhere leaves a state the next run continues from. Before each long step (cancel-only, C, D, E) the run
+ * renews its lease, which also checks it still holds the record: a slow run whose lease expired and was taken over
+ * stops there ('lease_lost') instead of carrying on beside the new run (review 23 Nov, finding 5; even if it did carry
+ * on, every step is idempotent: supabase/tests/m86/pipeline_e2e.mjs E9). Nothing about the person is returned or
+ * logged: codes only.
  *
  * Server only. `rpc` must be the SERVICE client (claim/record refuse any signed-in caller).
  */
@@ -62,10 +65,17 @@ export async function processDeletion(subject: string, deps: DeletionDeps): Prom
   const token = claim.token;
 
   /** Bookkeeping; false = this run no longer holds the record and must stop. */
-  async function record(step: "banned" | "failed" | "released", error?: string): Promise<boolean | "error"> {
+  async function record(step: "banned" | "failed" | "released" | "renew", error?: string): Promise<boolean | "error"> {
     const r = await deps.rpc("record_deletion_step", { p_subject: subject, p_token: token, p_step: step, p_error: error ?? null });
     if (!r.error) return true;
     return dbCode(r.error) === "lease_lost" ? false : "error";
+  }
+  /** Still mine? Keep it mine for another lease. null = carry on. */
+  async function renew(step: Step): Promise<Outcome | null> {
+    const r = await record("renew");
+    if (r === false) return { result: "lease_lost", step };
+    if (r === "error") return { result: "failed", step: "record", code: "failed" };
+    return null;
   }
   async function fail(step: Step, code: string): Promise<Outcome> {
     const r = await record("failed", errorCode(step, code));
@@ -86,6 +96,7 @@ export async function processDeletion(subject: string, deps: DeletionDeps): Prom
     // held: the cancellations once, then wait for an admin
     if (claim.status === "held") {
       if (!claim.cancellations_done) {
+        const stop = await renew("cancel_only"); if (stop) return stop;
         const x = await deps.rpc("delete_account_data", { p_subject: subject, p_cancel_only: true });
         if (x.error) return await fail("cancel_only", dbCode(x.error));
       }
@@ -95,14 +106,17 @@ export async function processDeletion(subject: string, deps: DeletionDeps): Prom
     }
 
     // C: always (see header)
+    let stop = await renew("data"); if (stop) return stop;
     const data = await deps.rpc("delete_account_data", { p_subject: subject, p_cancel_only: false });
     if (data.error) return await fail("data", dbCode(data.error));
 
     // D
+    stop = await renew("auth_delete"); if (stop) return stop;
     const del = await deps.deleteUser(subject);
     if (del.error && !notFound(del.error)) return await fail("auth_delete", "failed");
 
     // E
+    stop = await renew("finish"); if (stop) return stop;
     const fin = await deps.rpc("finish_account_deletion", { p_subject: subject });
     if (fin.error) return await fail("finish", dbCode(fin.error));
     return { result: "done" };

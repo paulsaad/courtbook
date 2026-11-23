@@ -60,6 +60,7 @@ const deps: DeletionDeps = {
         if (a.p_step === "banned") { rec.banned = true; if (rec.status === "closing") rec.status = "closed"; }
         else if (a.p_step === "failed") { rec.last_error = a.p_error as string; rec.lease = null; }
         else if (a.p_step === "released") { rec.lease = null; rec.last_error = null; }
+        else if (a.p_step === "renew") { /* token checked above; the lease is extended */ }
         out = ok({ status: rec.status });
         break;
       }
@@ -110,7 +111,7 @@ beforeEach(() => reset());
 describe("happy path", () => {
   it("closing → banned → data → sign-in deleted → done, in that order", async () => {
     expect(await processDeletion(S, deps)).toEqual({ result: "done" });
-    expect(calls).toEqual(["claim_deletion", "ban", "record_deletion_step", "delete_account_data", "delete_user", "finish_account_deletion"]);
+    expect(calls).toEqual(["claim_deletion", "ban", "record_deletion_step", "record_deletion_step", "delete_account_data", "record_deletion_step", "delete_user", "record_deletion_step", "finish_account_deletion"]);
     expect(rec).toMatchObject({ status: "done", banned: true, lease: null, noticesSent: 1 });
     expect(authUser.exists).toBe(false);
   });
@@ -217,6 +218,13 @@ describe("overlapping runs and lost leases", () => {
     expect(await processDeletion(S, deps)).toEqual({ result: "lease_lost", step: "ban" });
     expect(rec.last_error).toBeNull();
   });
+  it("taken over after the data step: stops at its renewal, before deleting the sign-in; the record is the new run's", async () => {
+    afterStep = (n) => { if (n === "delete_account_data") { afterStep = null; rec.lease = "someone-else"; } };
+    expect(await processDeletion(S, deps)).toEqual({ result: "lease_lost", step: "auth_delete" });
+    expect(calls).not.toContain("delete_user");
+    expect(rec.last_error).toBeNull();
+    expect(rec.lease).toBe("someone-else");
+  });
   it("a run that loses its lease and then fails does not overwrite the other run's record", async () => {
     fail.delete_user = "error";
     afterStep = (n) => { if (n === "delete_account_data") { afterStep = null; rec.lease = "someone-else"; } };
@@ -235,7 +243,7 @@ describe("held accounts (legal hold, coach bookings, suspended)", () => {
   beforeEach(() => reset("held", "legal_hold"));
   it("banned, cancellations only, then released; nothing else deleted, sign-in kept", async () => {
     expect(await processDeletion(S, deps)).toEqual({ result: "held", reason: "legal_hold" });
-    expect(calls).toEqual(["claim_deletion", "ban", "record_deletion_step", "delete_account_data", "record_deletion_step"]);
+    expect(calls).toEqual(["claim_deletion", "ban", "record_deletion_step", "record_deletion_step", "delete_account_data", "record_deletion_step"]);
     expect(rec).toMatchObject({ status: "held", banned: true, cancellations: true, lease: null, dataRuns: 0 });
     expect(authUser).toEqual({ exists: true, banned: true });
   });

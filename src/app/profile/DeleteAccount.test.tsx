@@ -7,8 +7,11 @@ import { CONFIRM_TEXT, CLOSED_TEXT, CLOSED_TITLE } from "@/lib/deletion/copy";
 let state: unknown = null;
 let stateError: unknown = null;
 const signOut = vi.fn(async () => ({ error: null }));
+const signInWithOtp = vi.fn(async () => ({ error: null }));
+const verifyOtp = vi.fn(async () => ({ error: null as unknown }));
+const getUser = vi.fn(async () => ({ data: { user: { email: "player@example.com" } } }));
 const rpc = vi.fn(async (fn: string) => (fn === "my_account_deletion" ? { data: state, error: stateError } : { data: null, error: null }));
-vi.mock("@/lib/supabase/client", () => ({ createClient: () => ({ rpc, auth: { signOut } }) }));
+vi.mock("@/lib/supabase/client", () => ({ createClient: () => ({ rpc, auth: { signOut, signInWithOtp, verifyOtp, getUser } }) }));
 vi.mock("next/link", () => ({ default: ({ href, children, ...p }: { href: string; children: React.ReactNode }) => <a href={href} {...p}>{children}</a> }));
 const DeleteAccount = (await import("./DeleteAccount")).default;
 const AccountClosed = (await import("../account-closed/page")).default;
@@ -16,7 +19,7 @@ const AccountClosed = (await import("../account-closed/page")).default;
 const assign = vi.fn();
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
-  state = null; stateError = null; signOut.mockClear(); rpc.mockClear(); assign.mockClear();
+  state = null; stateError = null; signOut.mockClear(); rpc.mockClear(); assign.mockClear(); signInWithOtp.mockClear(); verifyOtp.mockClear();
   Object.defineProperty(window, "location", { value: { assign }, writable: true });
   fetchMock = vi.fn(async () => new Response(JSON.stringify({ closed: true }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
@@ -100,6 +103,45 @@ describe("website Delete my account (0086)", () => {
     const { container } = render(<DeleteAccount />);
     await waitFor(() => expect(rpc).toHaveBeenCalled());
     expect(container.textContent).toBe("");
+  });
+});
+
+describe("recent sign-in (review 23 Nov)", () => {
+  it("a stale session: a code is emailed, typed, and the same confirmation then closes (no second confirmation)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "reauth_required" }), { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ closed: true }), { status: 200 }));
+    await openConfirm();
+    fireEvent.click(screen.getByRole("button", { name: "Delete my account" }));
+    expect(await screen.findByText(/enter the sign-in code we've just emailed to/)).toBeTruthy();
+    expect(signInWithOtp).toHaveBeenCalledWith({ email: "player@example.com", options: { shouldCreateUser: false } });
+    fireEvent.change(screen.getByLabelText("Sign-in code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and delete my account" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/account-closed"));
+    expect(verifyOtp).toHaveBeenCalledWith({ email: "player@example.com", token: "123456", type: "email" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+  it("a wrong code: says so, nothing closed", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: "reauth_required" }), { status: 409 }));
+    verifyOtp.mockResolvedValueOnce({ error: { message: "Token has expired or is invalid" } });
+    await openConfirm();
+    fireEvent.click(screen.getByRole("button", { name: "Delete my account" }));
+    fireEvent.change(await screen.findByLabelText("Sign-in code"), { target: { value: "000000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and delete my account" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/code didn't work/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(assign).not.toHaveBeenCalled();
+  });
+});
+
+describe("a request made in an older app (review 23 Nov)", () => {
+  it("is shown with Keep my account, which cancels it", async () => {
+    state = { status: "requested", requested_at: "2026-11-23T10:00:00Z", closed: false };
+    render(<DeleteAccount />);
+    expect(await screen.findByText(/You asked to delete your account in the app\. It will be deleted after 24 November/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Keep my account" }));
+    await waitFor(() => expect(rpc).toHaveBeenCalledWith("cancel_account_deletion"));
+    expect(await screen.findByText("Delete my account…")).toBeTruthy();
   });
 });
 

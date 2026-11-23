@@ -12,6 +12,10 @@ import { report } from "@/lib/report";
  * answers 503 and does nothing. Takes no input: what to process comes from the database (deletions_due), never from
  * the request. Each record is leased, so overlapping calls cannot process the same record twice.
  *
+ * First, requests made by older app versions (request-and-wait) whose 24-hour grace period has passed become closures
+ * (promote_due_requests). At the end of a run that got that far, it records a heartbeat (record_deletion_worker_run):
+ * the app offers one-step closing only while the heartbeat is under an hour old (review 23 Nov, finding 1).
+ *
  * Then raises one alert per record that needs a person (held, or not finished after an hour or 3 runs): a fixed
  * message with the reason as a code; no account id. R2 (the Sentry rule that emails it) is a proposal only.
  * Answers counts only.
@@ -29,6 +33,11 @@ async function run(request: Request) {
   if (auth === "no") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const deps = await serviceDeps();
+  const promoted = await deps.rpc("promote_due_requests", {});
+  if (promoted.error) {
+    await report("deletionStepFailed", "account", { code: promoted.error.code ?? "promote" });
+    return NextResponse.json({ error: "failed" }, { status: 500 });
+  }
   const due = await deps.rpc("deletions_due", { p_limit: BATCH });
   if (due.error) {
     await report("deletionStepFailed", "account", { code: due.error.code ?? "due_list" });
@@ -56,7 +65,11 @@ async function run(request: Request) {
       if (!m.error) alerts++;
     }
   }
-  return NextResponse.json({ ...counts, remaining: subjects.length - processed, alerts });
+  const summary = { ...counts, remaining: subjects.length - processed, alerts, promoted: typeof promoted.data === "number" ? promoted.data : 0 };
+  // the heartbeat: only a run that got this far counts (a failing run lets the app's one-step closing pause)
+  const beat = await deps.rpc("record_deletion_worker_run", { p_counts: summary });
+  if (beat.error) await report("deletionStepFailed", "account", { code: beat.error.code ?? "heartbeat" });
+  return NextResponse.json(summary);
 }
 
 export const GET = run;    // Vercel Cron calls GET

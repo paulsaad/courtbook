@@ -11,7 +11,8 @@ import { report } from "@/lib/report";
  *   2. The account is the signed-in person's, taken from their own session (verified with Supabase Auth). The body
  *      never names an account.
  *   3. close_my_account runs AS THEM (A): from its commit the database refuses every write by this account.
- *      Staff and admin accounts are refused here and nothing changes.
+ *      Staff and admin accounts are refused here and nothing changes. So is a session not signed in within the last
+ *      10 minutes ('reauth_required'): the page then asks for an email code and tries again (review 23 Nov).
  *   4. They are signed out everywhere (refresh tokens revoked; this browser's cookies cleared).
  *   5. The rest (B–E) runs now with the service key; if any step fails it is recorded and continues later (retry route
  *      or the admin page). The answer is the same either way: the account is closed. It never says "deleted".
@@ -19,7 +20,8 @@ import { report } from "@/lib/report";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-const REFUSED = new Set(["staff_role", "admin_role"]);
+// refusals the page explains; reauth_required: signed in too long ago, the page asks for an email code (review 23 Nov)
+const REFUSED = new Set(["staff_role", "admin_role", "reauth_required"]);
 
 export async function POST(request: Request) {
   if (!sameSiteJson(request)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
