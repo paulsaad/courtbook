@@ -146,6 +146,8 @@ jobs:
           [ -d mobile/e2e/out ] || exit 0
           mkdir -p /tmp/shots && find mobile/e2e/out ~/.maestro/tests -name '*.png' -exec cp --backup=numbered {} /tmp/shots/ \; 2>/dev/null || true
           cp mobile/e2e/out/a11y.txt /tmp/shots/ 2>/dev/null || true
+          # a suite without screenshots (crash-privacy) leaves the screenshots branch as it is
+          [ -n "$(ls -A /tmp/shots)" ] || { echo "no screenshots in this suite; e2e-screenshots branch left unchanged"; exit 0; }
           cd /tmp/shots && git init -q && git checkout -q -b e2e-screenshots
           git -c user.name=e2e -c user.email=e2e@courtbook.test add -A
           git -c user.name=e2e -c user.email=e2e@courtbook.test commit -q -m "Android test screenshots, run ${{ github.run_id }} (${{ github.sha }})"

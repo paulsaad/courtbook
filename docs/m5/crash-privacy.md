@@ -47,6 +47,17 @@ The only matches for "Probe" were the function name `sendPrivacyProbe` and our o
 from the uploaded source maps; they are code, not data. The run's own check failed on that function name, because
 the needle was too broad (fixed). It found nothing else.
 
+### Repeat after the fixes (run 45197589995, 14:59–15:01 UTC, commit `211469d`)
+
+- `check_report.py --probe` on the way out: **2 reports, OK, nothing personal**.
+- Received:
+  - `63d7f20b…` and `16ef9e5a…` (JS): no probe value. Every text is `[withheld]`. URLs arrive as
+    `/booking/:id` and `…/people/[email]/:id` (the re-scrub fix works).
+  - `44553148…` (native crash): no probe value. Breadcrumbs `/courts → /booking/:id`.
+  - Matches for "Booking failed for", "message for" and "before native crash" are our own source lines from the
+    source maps (template text with `${p.name}` placeholders), not data.
+- Unchanged: `user.geo` on all three, and the installation ID on the native crash (below).
+
 ### What Sentry received that the app does not control
 
 1. **Approximate location on app reports.** Every app event, JS and native, has `user.geo` (city, region, country).
