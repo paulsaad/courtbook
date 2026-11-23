@@ -13,7 +13,7 @@ import { useGamePeople } from "../../lib/games";
 import { useSession } from "../../lib/session";
 import { useGameScreen } from "../../lib/gameScreens";
 import { useActivity, useMarkRead } from "../../lib/activity";
-import type { ActionOutcome, GameAction } from "../../lib/gameActions";
+import { SECONDARY_STEPS, type ActionOutcome, type GameAction } from "../../lib/gameActions";
 import { NOT_AVAILABLE, organiserActions } from "../../lib/gameState";
 import { color, space } from "../../lib/theme";
 
@@ -98,9 +98,13 @@ export default function GameScreen() {
       }
     };
     handlers.onSecondary = async (s) => {
-      if (s === "withdraw" && await confirm("Withdraw your request?", "The organiser will no longer see it.", "Withdraw")) await run({ kind: "leave" });
-      if (s === "leave" && await confirm("Leave this game?", "Your place opens for someone else.", "Leave", true)) await run({ kind: "leave" });
-      if (s === "manage") setManaging(true);
+      const step = SECONDARY_STEPS[s];
+      if (step.kind === "manage") { setManaging(true); return; }
+      if (step.kind !== "confirm" || !(await confirm(step.title, step.text, step.ok, step.destructive))) return;
+      const out = await screen.actions.run(step.action);
+      report(out);
+      // Hidden: the game has left the player's lists (my_agenda refreshed by the action), so leave its screen too.
+      if (out.kind === "done" && step.leaveScreen) { if (router.canGoBack()) router.back(); else router.replace("/bookings"); }
     };
     if (d.i_organize) {
       handlers.onDecide = (profileId, accept) => void run({ kind: "decide", profileId, accept });
