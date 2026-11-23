@@ -1,4 +1,4 @@
-// node --test scripts/check-legal-pages.test.mjs   (run from mobile/)
+// node --test scripts/check-legal-pages.nodetest.mjs   (run from mobile/; named so Jest does not pick it up)
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
