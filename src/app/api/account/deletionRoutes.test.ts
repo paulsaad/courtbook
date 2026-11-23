@@ -219,7 +219,7 @@ describe("POST /api/admin/delete-account", () => {
   it("an admin's Retry runs the pipeline for that account with the service key", async () => {
     const res = await adminRoute.POST(post("/api/admin/delete-account", { subject: OTHER, action: "retry" }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, outcome: { result: "done" } });
+    expect(await res.json()).toEqual({ ok: true, outcome: { result: "done" }, released: false });
     expect(calls[0]).toEqual({ client: "user", fn: "is_admin", args: undefined });
     expect(services()[0]).toBe("claim_deletion");
   });
@@ -268,7 +268,7 @@ describe("POST /api/admin/delete-account", () => {
   it("the database refusing the data step stops before the sign-in is deleted, and says where", async () => {
     serviceRpc.delete_account_data = () => ({ error: { message: "legal_hold", code: "P0001" } });
     const res = await adminRoute.POST(post("/api/admin/delete-account", { subject: OTHER, action: "retry" }));
-    expect(await res.json()).toEqual({ ok: false, outcome: { result: "failed", step: "data", code: "legal_hold" } });
+    expect(await res.json()).toEqual({ ok: false, outcome: { result: "failed", step: "data", code: "legal_hold" }, released: false });
     expect(services()).not.toContain("auth.delete");
     expect(services()).not.toContain("finish_account_deletion");
   });
@@ -278,13 +278,27 @@ describe("POST /api/admin/delete-account", () => {
     const del = vi.spyOn(await import("@/lib/supabase/admin"), "createAdminClient").mockReturnValue(real);
     const res = await adminRoute.POST(post("/api/admin/delete-account", { subject: OTHER, action: "retry" }));
     del.mockRestore();
-    expect(await res.json()).toEqual({ ok: false, outcome: { result: "failed", step: "auth_delete", code: "failed" } });
+    expect(await res.json()).toEqual({ ok: false, outcome: { result: "failed", step: "auth_delete", code: "failed" }, released: false });
     expect(services()).not.toContain("finish_account_deletion");
   });
   it("a refused finish is reported, not hidden", async () => {
     serviceRpc.finish_account_deletion = () => ({ error: { message: "account_still_exists", code: "P0001" } });
     const res = await adminRoute.POST(post("/api/admin/delete-account", { subject: OTHER, action: "retry" }));
-    expect(await res.json()).toEqual({ ok: false, outcome: { result: "failed", step: "finish", code: "account_still_exists" } });
+    expect(await res.json()).toEqual({ ok: false, outcome: { result: "failed", step: "finish", code: "account_still_exists" }, released: false });
+  });
+  it("a network error in the pipeline is answered, not thrown; a committed release is reported as such", async () => {
+    serviceRpc.claim_deletion = () => { throw new TypeError("fetch failed"); };
+    const res = await adminRoute.POST(post("/api/admin/delete-account", { subject: OTHER, action: "release" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: false, outcome: { result: "failed", step: "claim", code: "exception" }, released: true });
+  });
+  it("the retry route raises at most 10 alerts per run", async () => {
+    process.env.CRON_SECRET = SECRET;
+    serviceRpc.deletions_due = () => ({ data: [] });
+    serviceRpc.deletions_needing_attention = () => ({ data: Array.from({ length: 25 }, (_, i) => ({ subject_id: `d8600000-0000-4000-8000-${String(i).padStart(12, "0")}`, reason: "stuck" })) });
+    const body = await (await retry.GET(new Request(`${SITE}/api/internal/deletions/retry`, { headers: { authorization: `Bearer ${SECRET}` } }))).json();
+    expect(body.alerts).toBe(10);
+    expect(reported.length).toBe(10);
   });
   it("the old body shape ({ subject } only, no action) is refused rather than guessed", async () => {
     expect((await adminRoute.POST(post("/api/admin/delete-account", { subject: OTHER }))).status).toBe(400);

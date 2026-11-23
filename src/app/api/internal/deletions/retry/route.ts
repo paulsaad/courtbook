@@ -21,6 +21,7 @@ export const maxDuration = 60;
 
 const BUDGET_MS = 40_000;   // stop starting new records after this; the rest are picked up next time
 const BATCH = 20;
+const ALERTS = 10;          // alerts per run (each waits up to 2 s for Sentry); the rest are raised next run
 
 async function run(request: Request) {
   const auth = bearerMatches(request.headers.get("authorization"), process.env.CRON_SECRET);
@@ -47,8 +48,9 @@ async function run(request: Request) {
   let alerts = 0;
   const attention = await deps.rpc("deletions_needing_attention", {});
   if (!attention.error && Array.isArray(attention.data)) {
-    for (const row of attention.data as Array<{ subject_id?: unknown; reason?: unknown }>) {
+    for (const row of (attention.data as Array<{ subject_id?: unknown; reason?: unknown }>).slice(0, ALERTS)) {
       if (typeof row?.subject_id !== "string") continue;
+      if (Date.now() - started > BUDGET_MS + 10_000) break;   // stay well inside maxDuration
       await report("deletionNeedsAttention", "account", { code: row.reason === "held" ? "held" : "stuck" });
       const m = await deps.rpc("mark_deletion_alerted", { p_subject: row.subject_id });
       if (!m.error) alerts++;

@@ -18,7 +18,7 @@
  */
 
 export type RpcResult = { data: unknown; error: { message?: string; code?: string } | null };
-export type AuthResult = { error: { message?: string; status?: number } | null };
+export type AuthResult = { error: { message?: string; status?: number; code?: string } | null };
 export type DeletionDeps = {
   rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<RpcResult>;
   banUser: (id: string) => PromiseLike<AuthResult>;
@@ -44,7 +44,10 @@ export function dbCode(err: { message?: string } | null | undefined): string {
   return held ? `held_${held[1]}` : "failed";
 }
 const errorCode = (step: string, code: string) => `${step}_${code}`.slice(0, 60);
-const notFound = (e: { message?: string; status?: number }) => e.status === 404 || /not.?found/i.test(e.message ?? "");
+/** Only Supabase Auth's own answer that the sign-in does not exist: HTTP 404 and code user_not_found (or, from
+ *  versions without codes, the message "User not found"). Any other 404 — a wrong URL, a proxy — is a failure. */
+const notFound = (e: { message?: string; status?: number; code?: string }) =>
+  e.status === 404 && (e.code === "user_not_found" || (!e.code && /^user not found$/i.test((e.message ?? "").trim())));
 
 type Claim = { claimed: true; token: string; status: string; held_reason: string | null; banned: boolean; cancellations_done: boolean }
   | { claimed: false; reason: string };
@@ -112,7 +115,8 @@ export async function processDeletion(subject: string, deps: DeletionDeps): Prom
 /** The service-role dependencies (server only; imported lazily so this module stays testable without env). */
 export async function serviceDeps(): Promise<DeletionDeps> {
   const { createAdminClient } = await import("@/lib/supabase/admin");
-  const admin = createAdminClient();
+  // every call gives up after 15 s, so a hung call cannot outlive the route (the lease covers the rest)
+  const admin = createAdminClient({ timeoutMs: 15_000 });
   return {
     rpc: (fn, args) => admin.rpc(fn, args),
     // ~100 years: Supabase's ban is a duration; the sign-in is deleted at D anyway

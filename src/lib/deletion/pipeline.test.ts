@@ -101,6 +101,7 @@ const deps: DeletionDeps = {
     authUser.exists = false; profileExists = false; afterStep?.("delete_user"); return { error: null };
   },
 };
+const realBan = deps.banUser;
 /** The lease expiring (5 min) — what lets a later run continue after one that died without recording anything. */
 const expireLease = () => { rec.lease = null; };
 
@@ -264,6 +265,24 @@ describe("sign-in already gone", () => {
     // profile gone too would make C fail in reality; here we only check the auth answers are accepted
     rec.status = "data_removed"; rec.banned = false; profileExists = false;
     expect(await processDeletion(S, deps)).toEqual({ result: "done" });
+  });
+});
+
+describe("only Supabase Auth's own 'user not found' counts as already done", () => {
+  it("a 404 from somewhere else (wrong URL, proxy) is a failure, not a ban", async () => {
+    deps.banUser = (async () => { calls.push("ban"); return { error: { message: "Not Found", status: 404 } }; }) as DeletionDeps["banUser"];
+    try {
+      expect(await processDeletion(S, deps)).toMatchObject({ result: "failed", step: "ban" });
+      expect(rec.banned).toBe(false);
+    } finally { deps.banUser = realBan; }
+  });
+  it("404 with code user_not_found is accepted", async () => {
+    deps.banUser = (async () => ({ error: { message: "whatever", status: 404, code: "user_not_found" } })) as DeletionDeps["banUser"];
+    try { expect(await processDeletion(S, deps)).toEqual({ result: "done" }); } finally { deps.banUser = realBan; }
+  });
+  it("a non-404 saying 'not found' is a failure", async () => {
+    deps.banUser = (async () => ({ error: { message: "User not found", status: 500 } })) as DeletionDeps["banUser"];
+    try { expect(await processDeletion(S, deps)).toMatchObject({ result: "failed", step: "ban" }); } finally { deps.banUser = realBan; }
   });
 });
 

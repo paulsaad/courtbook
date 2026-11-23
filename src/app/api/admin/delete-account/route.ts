@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { processDeletion, serviceDeps, dbCode } from "@/lib/deletion/pipeline";
+import { processDeletion, serviceDeps, dbCode, type Outcome } from "@/lib/deletion/pipeline";
 import { sameSiteJson, jsonBody, UUID } from "@/lib/deletion/request";
 
 /**
@@ -37,6 +37,8 @@ export async function POST(request: Request) {
     if (r.error) return NextResponse.json({ error: dbCode(r.error), step: "release" }, { status: 409 });
   }
 
-  const outcome = await processDeletion(subject, await serviceDeps());
-  return NextResponse.json({ ok: outcome.result !== "failed" && outcome.result !== "lease_lost", outcome });
+  let outcome: Outcome;
+  try { outcome = await processDeletion(subject, await serviceDeps()); }
+  catch { outcome = { result: "failed", step: "claim", code: "exception" }; }   // e.g. network; a release above has committed
+  return NextResponse.json({ ok: outcome.result !== "failed" && outcome.result !== "lease_lost", outcome, released: action === "release" });
 }
