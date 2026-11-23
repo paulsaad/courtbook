@@ -16,7 +16,7 @@ rep() { if [ "$2" = true ]; then echo "ok    $1"; oks=$((oks+1)); else echo "FAI
 P=e9000000-0000-4000-8000-000000000001     # the person deleting
 S=e9000000-0000-4000-8000-000000000002     # staff of the demo club
 A=e9000000-0000-4000-8000-000000000003     # admin
-C1=e9000000-0000-4000-8000-000000000101; C2=e9000000-0000-4000-8000-000000000102
+C1=e9000000-0000-4000-8000-000000000101; C2=e9000000-0000-4000-8000-000000000102; C3=e9000000-0000-4000-8000-000000000103
 B1=e9000000-0000-4000-8000-000000000201; B2=e9000000-0000-4000-8000-000000000202
 at() { echo "(((current_date + $1)::timestamp + (select open_time from clubs where slug = 'batroun') + interval '$2 hours') at time zone 'Asia/Beirut')"; }
 
@@ -30,6 +30,7 @@ update clubs set payment_mode = 'simulated', cancel_cutoff_hours = 6 where slug 
 insert into club_staff (club_id, profile_id) select id, '$S' from clubs where slug = 'batroun';
 insert into courts (id, club_id, name, sport, active, sort) select '$C1', id, 'Race 1', 'padel', true, 98 from clubs where slug = 'batroun';
 insert into courts (id, club_id, name, sport, active, sort) select '$C2', id, 'Race 2', 'padel', true, 99 from clubs where slug = 'batroun';
+insert into courts (id, club_id, name, sport, active, sort) select '$C3', id, 'Race 3', 'padel', true, 100 from clubs where slug = 'batroun';
 insert into bookings (id, club_id, court_id, player_id, created_by, start_at, end_at, status, source, price_usd, fee_usd)
 select '$B1', id, '$C1', '$P', '$P', $(at 5 2), $(at 5 2) + interval '60 min', 'confirmed', 'app', 20, 1 from clubs where slug = 'batroun';
 insert into bookings (id, club_id, court_id, player_id, created_by, start_at, end_at, status, source, price_usd, fee_usd)
@@ -109,6 +110,18 @@ rep "RD5: their own cancellation stands with the normal refund; the deletion can
     "$([ "$(q "select status from payments where booking_id = '$B1'")" = refund_due ] \
        && [ "$(q "select summary->>'bookings_cancelled' from account_deletions where subject_id = '$P'")" = 1 ] && echo true)" \
     "$(q "select status || ' ' || coalesce(note, '') from payments where booking_id = '$B1'")"
+
+echo "== RD6 the person's hold on a court none of their bookings use (outside the deletion's court locks) is being written"
+setup
+q "update account_deletions set status = 'cancelled', cancelled_at = now() where subject_id = '$P'" >/dev/null
+race "$P" "select hold_slot((select id from clubs where slug = 'batroun'), '$C3', $(at 7 4), $(at 7 4) + interval '60 min', gen_random_uuid())" \
+     "$A" "select admin_record_deletion_request('$P'); $DEL"
+common RD6
+rep "RD6: the new hold was cancelled with the rest (3 cancelled), its payment expired, nothing pending" \
+    "$([ "$(q "select coalesce(summary->>'bookings_cancelled', '') from account_deletions where subject_id = '$P' and status = 'data_removed'")" = 3 ] \
+       && [ "$(q "select count(*) from bookings b join payments p on p.booking_id = b.id where b.court_id = '$C3' and (b.status <> 'cancelled' or p.status <> 'expired')")" = 0 ] \
+       && [ "$(q "select count(*) from payments where status = 'pending' and booking_id in (select id from bookings where court_id in ('$C1','$C2','$C3'))")" = 0 ] && echo true)" \
+    "$(q "select summary::text from account_deletions where subject_id = '$P' and status = 'data_removed'") / C3: $(q "select string_agg(b.status || ':' || coalesce(p.status::text, '-') || ':' || coalesce(b.player_id::text, 'anon'), ',') from bookings b left join payments p on p.booking_id = b.id where b.court_id = '$C3'")"
 
 $PSQL -q -d postgres -c "drop database if exists $DB" >/dev/null
 echo; echo "summary: $oks ok, $fails FAIL"
