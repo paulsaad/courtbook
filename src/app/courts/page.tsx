@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+import { playerGatePath } from "@/lib/playerGate";
 import { createClient } from "@/lib/supabase/server";
 import { loadRefDataChecked as loadRefData } from "@/lib/refData";
 import { todayIn } from "@/lib/time";
@@ -8,6 +10,11 @@ export default async function CourtsPage({ searchParams }: { searchParams: Promi
   const sp = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  if (user) {   // signed in: confirm the profile and 18+ before reserving (browsing signed out stays open)
+    const q = new URLSearchParams(Object.entries(sp).filter(([, v]) => typeof v === "string") as [string, string][]);
+    const gate = await playerGatePath(supabase, user.id, `/courts${q.size ? `?${q}` : ""}`, "the courts");
+    if (gate) redirect(gate);
+  }
   const today = todayIn("Asia/Beirut");
   const date = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : today;
   const [ref, { data: slots, error }] = await Promise.all([

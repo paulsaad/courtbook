@@ -27,6 +27,8 @@ async function prepare() {
   const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
   if (error) throw new Error(`createUser: ${error.message}`);
   sql(`update profiles set name='Emma Tester' where id='${data.user.id}'`);
+  // 18+ (0080): automated accounts confirm in server context, so the age question never covers the screen under test
+  sql(`do $$ begin update profiles set age_confirmed_at = coalesce(age_confirmed_at, now()), age_confirmed_via = coalesce(age_confirmed_via, 'app') where id = '${data.user.id}'; exception when undefined_column then null; end $$`);
   // The app reserves only at pay-at-the-club clubs (in-app payment is deferred). The original mode is
   // recorded before it is changed, and only a recorded value is ever restored (clubMode.mjs).
   const mode = recordAndSet({ sql, club: CLUB, stateFile: modeFile, runId: GITHUB_RUN_ID });

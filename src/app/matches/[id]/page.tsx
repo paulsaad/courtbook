@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { playerGatePath } from "@/lib/playerGate";
 import { createClient } from "@/lib/supabase/server";
 import { allLoaded, loaded } from "@/lib/load";
 import { nowMs } from "@/lib/time";
@@ -12,6 +13,8 @@ export default async function MatchPage({ params }: { params: Promise<{ id: stri
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?next=/matches/${id}`);
+  const gate = await playerGatePath(supabase, user.id, `/matches/${id}`, "this game");
+  if (gate) redirect(gate);
   const found = await loadMatch(supabase, id);
   if (!found) notFound();
   const m = found.m;
