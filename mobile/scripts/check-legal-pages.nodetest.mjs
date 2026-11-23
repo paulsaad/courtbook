@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { pageProblems, readAppLinks } from "./check-legal-pages.mjs";
+import { linkingFiles, pageProblems, readAppLinks } from "./check-legal-pages.mjs";
 
 const final = (title) => `<!DOCTYPE html><html><head><title>${title}</title><meta name="viewport" content="width=device-width"></head>
 <body><main><h1>${title}</h1><p class="text-sm">Last updated: <!-- -->1 March 2027</p><article>Text.</article></main></body></html>`;
@@ -53,4 +53,15 @@ test("the website's real titles are the ones expected (src/app pages)", () => {
   assert.match(src("privacy"), /title: "Privacy policy — CourtBook"/);
   assert.match(src("terms"), /title: "Terms of use — CourtBook"/);
   assert.match(src("delete-account"), /title: "Delete your CourtBook account"/);
+});
+
+test("--gate checks only when a screen or component links to the pages", () => {
+  const none = [
+    { path: "app/sign-in.tsx", text: 'import { LegalPageView } from "../components/Other";' },
+    { path: "lib/legal.ts", text: "export const WEBSITE_URL = 'x';" },                         // the constants alone are not a link
+    { path: "__tests__/legalLinks.test.tsx", text: 'import { openLegalPage } from "../lib/legal";' },
+  ];
+  assert.deepEqual(linkingFiles(none), []);
+  assert.deepEqual(linkingFiles([{ path: "app/help.tsx", text: 'import { LegalLinks } from "../components/LegalLinks";\nimport { x } from "../lib/legal";' }]), ["app/help.tsx"]);
+  assert.deepEqual(linkingFiles([{ path: "components/LegalLinks.tsx", text: 'import { LEGAL_PAGES, openLegalPage } from "../lib/legal";' }]), ["components/LegalLinks.tsx"]);
 });

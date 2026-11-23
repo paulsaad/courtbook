@@ -8,13 +8,18 @@
  *   - final: no draft notice, no marked unfinished wording (data-pending), a "Last updated" date;
  *   - indexable: no robots "noindex" (meta tag or X-Robots-Tag header).
  * It only reads. Usage:
- *   node scripts/check-legal-pages.mjs [--mode fail|warn] [--base https://…]
+ *   node scripts/check-legal-pages.mjs [--gate] [--mode fail|warn] [--base https://…]
+ * --gate (the workflows): checks only if an app screen actually links to the pages (imports lib/legal). While no
+ *        screen does, it says so and passes, so unfinished legal pages never block unrelated app fixes (review,
+ *        23 Nov). The links themselves live in a separate, deferred PR.
  * --mode warn prints GitHub warnings and exits 0 (staging builds); fail (default) exits 1 on any problem (live app).
  * --base overrides WEBSITE_URL (to check a domain before the constant is changed).
+ * Without --gate the pages are always checked (by hand, before the links PR is merged or the store URLs entered).
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
+import { readdirSync, statSync } from "node:fs";
 
 /** Each page the app links to, and the words its <title> must contain. */
 export const EXPECTED_TITLE = { privacy: "Privacy policy", terms: "Terms of use", "delete-account": "Delete your CourtBook account" };
@@ -26,6 +31,28 @@ export function readAppLinks(source) {
   const pages = [...source.matchAll(/\{\s*key:\s*"([^"]+)"[^}]*url:\s*`\$\{WEBSITE_URL\}(\/[^`]*)`/g)].map((m) => ({ key: m[1], path: m[2] }));
   if (!pages.length) throw new Error("LEGAL_PAGES not found in mobile/lib/legal.ts");
   return { base, pages };
+}
+
+/** Files (path, text) of the app's screens and components that link to the legal pages. Pure, so it is tested on fixtures. */
+export function linkingFiles(files) {
+  return files.filter(({ path, text }) => !/(^|\/)(__tests__|scripts|e2e)\//.test(path) && !/\.test\.[jt]sx?$/.test(path)
+    && /from\s+["'](?:\.\.?\/)+(?:lib\/)?legal["']|from\s+["']@\/lib\/legal["']|\bopenLegalPage\b/.test(text)).map((f) => f.path);
+}
+
+function appFiles(root) {
+  const out = [];
+  for (const top of ["app", "components"]) {
+    (function walk(d) {
+      let names = [];
+      try { names = readdirSync(d); } catch { return; }
+      for (const n of names) {
+        const p = join(d, n);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.(t|j)sx?$/.test(n)) out.push({ path: relative(root, p), text: readFileSync(p, "utf8") });
+      }
+    })(join(root, top));
+  }
+  return out;
 }
 
 /** Problems with one fetched page (empty = ready). Pure, so it is tested on fixture pages. */
@@ -52,6 +79,14 @@ async function main(argv) {
   const mode = argv.includes("--mode") ? argv[argv.indexOf("--mode") + 1] : "fail";
   if (!["fail", "warn"].includes(mode)) throw new Error("--mode must be fail or warn");
   const here = dirname(fileURLToPath(import.meta.url));
+  if (argv.includes("--gate")) {
+    const linking = linkingFiles(appFiles(join(here, "..")));
+    if (!linking.length) {
+      console.log("The app does not link to the legal pages (no screen imports lib/legal): nothing to gate. The pages are checked once the deferred links PR adds them (docs/m5/store-package.md §1a).");
+      return 0;
+    }
+    console.log(`The app links to the legal pages from: ${linking.join(", ")}. Checking them.`);
+  }
   const { base: appBase, pages } = readAppLinks(readFileSync(join(here, "..", "lib", "legal.ts"), "utf8"));
   const base = argv.includes("--base") ? argv[argv.indexOf("--base") + 1].replace(/\/$/, "") : appBase;
   let bad = 0;

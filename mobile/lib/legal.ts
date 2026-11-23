@@ -5,8 +5,9 @@ import * as WebBrowser from "expo-web-browser";
  * M5: the legal pages live on the public website, so the app, the website and both store listings show the same text.
  * WEBSITE_URL is the live website. It changes when the product domain is decided (Paul): change it here only.
  * Both apps (live and staging) link to the live pages: the staging website preview is behind a Vercel login.
- * Release order (docs/m5/store-package.md §1a): these links reach players only after the pages are legally approved,
- * published and public. scripts/check-legal-pages.mjs checks that and refuses live builds and updates until then.
+ * Release order (docs/m5/store-package.md §1a): no screen links here yet. The links (sign-in, Help) are in a
+ * separate, deferred PR, merged only after the pages are legally approved, published and public. Once a screen imports
+ * this file, scripts/check-legal-pages.mjs --gate refuses live builds and updates until every linked page is final.
  */
 export const WEBSITE_URL = "https://courtbook-three.vercel.app";
 

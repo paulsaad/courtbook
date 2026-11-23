@@ -89,9 +89,11 @@ jobs:
         run: npm run check:bundle
 
       # M5 release order: the app's legal links reach players only after the official pages are legally approved,
-      # published and public. Live app: refuses unless every linked page is final and public. Staging: a warning only.
-      - name: Legal pages the app links to are final and public (live app; staging warns)
-        run: node scripts/check-legal-pages.mjs --mode "$([ "${{ inputs.app }}" = live ] && echo fail || echo warn)"
+      # published and public. Only when a screen links to them (the deferred links PR); until then this passes, so
+      # unrelated live-app fixes are never blocked. Live app: refuses unless every linked page is final and public.
+      # Staging: a warning only.
+      - name: Legal pages the app links to are final and public (only if the app links to them)
+        run: node scripts/check-legal-pages.mjs --gate --mode "$([ "${{ inputs.app }}" = live ] && echo fail || echo warn)"
 
       # No linking step: app.json carries owner and extra.eas.projectId, so the
       # build targets that one project. The previous `eas init --force` is gone
