@@ -13,6 +13,10 @@ export type Report = {
   reported_suspended: boolean; reports_against: number; match_id: string | null; message_id: string | null; message_deleted: boolean;
   handled_at: string | null; action: string | null;
 };
+/** 0082: what the board shows beyond admin_reports (absent before 0082). */
+export type ReportState = { report_id: string; legal_hold: boolean; handled_by_name: string | null; closed_at: string | null; log_entries: number };
+type LogRow = { at: string; admin_name: string | null; action: string; note: string | null };
+const ACTIONS: Record<string, string> = { resolve: "Resolved", reopen: "Reopened", suspend: "Suspended", unsuspend: "Suspension lifted", hide_message: "Message hidden", legal_hold_on: "Legal hold on", legal_hold_off: "Legal hold off", clear_text: "Old text cleared" };
 type Line = { id: string; created_at: string; sender: string | null; body: string; deleted: boolean; reported: boolean };
 
 const tz = "Asia/Beirut";
@@ -21,11 +25,12 @@ const REASONS: Record<string, string> = { spam: "Spam", abuse: "Abuse or harassm
 const KINDS: Record<string, string> = { message: "Message", player: "Player", game: "Game", feedback: "Help & Feedback" };
 const TABS = [["open", "Open"], ["actioned", "Handled"], ["dismissed", "Dismissed"]] as const;
 
-export default function ReportsBoard({ status, reports, unavailable, failed, blocksReceived = {} }: { status: string; reports: Report[]; unavailable: boolean; failed: boolean; blocksReceived?: Record<string, number> }) {
+export default function ReportsBoard({ status, reports, unavailable, failed, blocksReceived = {}, state = null }: { status: string; reports: Report[]; unavailable: boolean; failed: boolean; blocksReceived?: Record<string, number>; state?: Record<string, ReportState> | null }) {
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-5 p-5 pb-16">
       <Link href="/admin" className="text-sm text-muted">‹ Admin</Link>
       <h1 className="text-2xl font-semibold tracking-tight">Reports</h1>
+      {state && <ClearOldText />}
       <nav className="flex gap-2" aria-label="Report status">
         {TABS.map(([k, label]) => (
           <Link key={k} href={`/admin/reports?status=${k}`} aria-current={k === status ? "page" : undefined}
@@ -40,20 +45,54 @@ export default function ReportsBoard({ status, reports, unavailable, failed, blo
         (list as Report[]).length > 0 && (
           <section key={title as string} className="flex flex-col gap-3" aria-label={title as string}>
             <h2 className="text-sm font-medium text-muted">{title as string} · {(list as Report[]).length}</h2>
-            {(list as Report[]).map((r) => <ReportCard key={r.id} r={r} blocks={r.profile_id ? blocksReceived[r.profile_id] : undefined} />)}
+            {(list as Report[]).map((r) => <ReportCard key={r.id} r={r} blocks={r.profile_id ? blocksReceived[r.profile_id] : undefined} st={state ? state[r.id] ?? null : null} />)}
           </section>
         ))}
     </main>
   );
 }
 
-function ReportCard({ r, blocks }: { r: Report; blocks?: number }) {
+/** 0082: the 180-day rule. It also runs by itself (every new report, every visit to this page); this runs it now. */
+function ClearOldText() {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm">
+      <button disabled={busy} onClick={async () => {
+        setBusy(true); setMsg(null);
+        const { data, error } = await createClient().rpc("clear_old_report_text", { p_days: 180 });
+        setBusy(false);
+        setMsg(error ? friendlyError(error.message) : `Cleared ${data ?? 0} report text(s) and log note(s) past the 180-day rule (legal holds and open cases kept). This also runs by itself on every visit and every new report.`);
+      }} className="rounded-xl border border-grid bg-white px-3 py-2">Clear text of reports closed over 180 days ago</button>
+      {msg && <span role="status" className="text-muted">{msg}</span>}
+    </div>
+  );
+}
+
+/** A moderation action that needs a reason; the reason goes into the moderation log. */
+function WithReason({ label, prompt, danger, busy, onSubmit }: { label: string; prompt: string; danger?: boolean; busy: boolean; onSubmit: (reason: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  if (!open) return <button disabled={busy} onClick={() => setOpen(true)} className={`rounded-xl border border-grid bg-white px-3 py-2 ${danger ? "text-danger" : ""}`}>{label}</button>;
+  return (
+    <div className="flex w-full flex-col gap-2 rounded-xl border border-grid p-3">
+      <label className="text-muted">{prompt}<input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} className="mt-1 w-full rounded-xl border border-grid px-3 py-2 text-base text-ink outline-none focus:border-action" /></label>
+      <div className="flex gap-2">
+        <button disabled={busy || !reason.trim()} onClick={() => onSubmit(reason.trim())} className="rounded-xl bg-action px-3 py-2 font-medium text-white disabled:opacity-50">{label}</button>
+        <button disabled={busy} onClick={() => setOpen(false)} className="rounded-xl border border-grid bg-white px-3 py-2">Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function ReportCard({ r, blocks, st }: { r: Report; blocks?: number; st: ReportState | null }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<Line[] | null>(null);
   const [action, setAction] = useState("");
   const [suspending, setSuspending] = useState(false);
+  const [history, setHistory] = useState<LogRow[] | null>(null);
   const [reason, setReason] = useState("");
 
   async function call(fn: string, args: Record<string, unknown>) {
@@ -68,6 +107,10 @@ function ReportCard({ r, blocks }: { r: Report; blocks?: number }) {
     const out = await call("admin_report_messages", { p_report: r.id });
     if (out) setLines((out.data ?? []) as Line[]);
   }
+  async function showHistory() {
+    const out = await call("admin_moderation_log", { p_report: null, p_profile: r.profile_id ?? null });
+    if (out) setHistory(((out.data ?? []) as (LogRow & { report_id: string | null })[]).filter((l) => r.profile_id || l.report_id === r.id));
+  }
   const open = r.status === "open";
   const who = r.reported_name ?? "this player";
 
@@ -75,7 +118,7 @@ function ReportCard({ r, blocks }: { r: Report; blocks?: number }) {
     <article className="rounded-2xl border border-grid bg-white p-4 text-sm" aria-label={`Report ${KINDS[r.target_kind]} ${REASONS[r.reason] ?? r.reason}`}>
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="font-medium">{KINDS[r.target_kind]} · {REASONS[r.reason] ?? r.reason}</h2>
-        <span className="text-xs text-muted">{when(r.created_at)}</span>
+        <span className="text-xs text-muted">{st?.legal_hold && <span className="mr-2 rounded bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800">legal hold</span>}{when(r.created_at)}</span>
       </div>
       <p className="mt-1 text-muted">
         Reported by {r.reporter_name ?? "a player"}
@@ -114,10 +157,20 @@ function ReportCard({ r, blocks }: { r: Report; blocks?: number }) {
         {r.profile_id && !r.reported_suspended && !suspending && (
           <button disabled={busy} onClick={() => setSuspending(true)} className="rounded-xl border border-grid bg-white px-3 py-2 text-danger">Suspend account</button>
         )}
-        {r.profile_id && r.reported_suspended && (
-          <button disabled={busy} onClick={() => refresh("admin_unsuspend", { p_profile: r.profile_id })} className="rounded-xl border border-grid bg-white px-3 py-2">Lift suspension</button>
+        {r.profile_id && r.reported_suspended && (st
+          ? <WithReason label="Lift suspension" prompt={`Why lift the suspension of ${who}? (kept in the moderation log)`} busy={busy} onSubmit={(why) => refresh("admin_unsuspend", { p_profile: r.profile_id, p_reason: why })} />
+          : <button disabled={busy} onClick={() => refresh("admin_unsuspend", { p_profile: r.profile_id })} className="rounded-xl border border-grid bg-white px-3 py-2">Lift suspension</button>
         )}
+        {st && <WithReason label={st.legal_hold ? "Release legal hold" : "Put on legal hold"} prompt={st.legal_hold ? "Why release the hold? (its text can then be cleared on schedule)" : "Why hold this report? (its text will not be cleared)"} busy={busy}
+          onSubmit={(why) => refresh("admin_set_legal_hold", { p_report: r.id, p_hold: !st.legal_hold, p_note: why })} />}
+        {st && st.log_entries > 0 && !history && <button disabled={busy} onClick={showHistory} className="rounded-xl border border-grid bg-white px-3 py-2">History ({st.log_entries})</button>}
       </div>
+      {history && (
+        <ol className="mt-2 flex flex-col gap-1 rounded-lg bg-paper p-2" aria-label="Moderation history">
+          {history.length === 0 && <li className="text-muted">Nothing recorded.</li>}
+          {history.map((h, i) => <li key={i}><span className="text-xs text-muted">{when(h.at)} {h.admin_name ?? "Admin"}: </span>{ACTIONS[h.action] ?? h.action}{h.note && <span className="text-muted"> — {h.note}</span>}</li>)}
+        </ol>
+      )}
       {suspending && (
         <div className="mt-2 flex flex-col gap-2 rounded-xl border border-grid p-3">
           <label className="text-muted" htmlFor={`reason-${r.id}`}>Why suspend {who}? (kept with the suspension)</label>
@@ -139,7 +192,10 @@ function ReportCard({ r, blocks }: { r: Report; blocks?: number }) {
           </div>
         </div>
       ) : (
-        <p className="mt-3 border-t border-grid pt-3 text-muted">{r.status === "actioned" ? "Handled" : "Dismissed"}{r.handled_at && ` ${when(r.handled_at)}`}{r.action && ` · ${r.action}`}</p>
+        <div className="mt-3 flex flex-col gap-2 border-t border-grid pt-3">
+          <p className="text-muted">{r.status === "actioned" ? "Handled" : "Dismissed"}{r.handled_at && ` ${when(r.handled_at)}`}{st?.handled_by_name && ` by ${st.handled_by_name}`}{r.action && ` · ${r.action}`}</p>
+          {st && <WithReason label="Reopen" prompt="Why reopen it? (the earlier decision stays in the log)" busy={busy} onSubmit={(why) => refresh("admin_reopen_report", { p_report: r.id, p_note: why })} />}
+        </div>
       )}
     </article>
   );

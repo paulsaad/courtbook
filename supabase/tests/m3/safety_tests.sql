@@ -239,7 +239,7 @@ select null from pg_temp.keep('s11', pg_temp.r(:B, format('select leave_match(%L
 select null from pg_temp.keep('s12', pg_temp.r(:B, format($q$select report_content('game', %L, 'other')$q$, pg_temp.g(4))));
 select null from pg_temp.keep('s13', pg_temp.r(:B, 'select count(*)::text from account_suspensions'));
 select null from pg_temp.keep('s14', pg_temp.r(:ADM, format('select reported_suspended::text from admin_reports(null) where profile_id = %L limit 1', :B)));
-select null from pg_temp.keep('s15', pg_temp.r(:ADM, format('select admin_unsuspend(%L)', :B)));
+select null from pg_temp.keep('s15', pg_temp.r(:ADM, format('select admin_unsuspend(%L, %L)', :B, 'test: unsuspend')));
 select null from pg_temp.keep('s16', pg_temp.r(:B, format('select join_match(%L)::text', pg_temp.g(4))));
 insert into t values
   ('T-S50 only an admin suspends, and only with a reason', pg_temp.got('s1') like 'ERR forbidden%' and pg_temp.got('s2') like 'ERR reason_required%' and pg_temp.got('s3') = 'ok', pg_temp.got('s1') || '/' || pg_temp.got('s2') || '/' || pg_temp.got('s3')),
