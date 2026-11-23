@@ -15,7 +15,7 @@ cd "$(dirname "$0")/../../.."
 PSQL=${PSQL:-psql}
 SRC=courtbook_test
 DB=courtbook_fav_race
-MIGRATION=${MIGRATION:-docs/favourites/sql/club_favourites.draft.sql}
+MIGRATION=${MIGRATION:-supabase/migrations/0087_club_favourites.sql}   # was the draft until 0087 existed
 HOLD=2   # seconds session A keeps its transaction open after adding
 
 where=$($PSQL -At -d $SRC -c "select current_database()||'@'||coalesce(host(inet_server_addr()),'local-socket')" 2>/dev/null)

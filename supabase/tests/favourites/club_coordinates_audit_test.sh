@@ -11,6 +11,9 @@ case "$where" in courtbook_test@local-socket|courtbook_test@127.0.0.1|courtbook_
   *) echo "refusing: connected to '$where'"; exit 2;; esac
 out=$(cat <<'SQL' | $PSQL -d $DB -X -q -At -F '|' 2>&1
 begin;
+-- 0088 refuses NEW half-filled points (not valid: existing rows are kept). The audit exists to find old ones, so this
+-- rolled-back test recreates one by lifting the rule for its own transaction.
+alter table clubs drop constraint if exists clubs_map_point_pair;
 insert into clubs (name, slug, lat, lng, location_url, town_id) select v.name, v.slug, v.lat, v.lng, v.url, (select id from towns limit 1)
 from (values
   ('Sea','a-sea',34.30,35.20,null), ('Copy','a-copy',34.2553,35.6586,null),

@@ -14,14 +14,17 @@ set -u
 cd "$(dirname "$0")/../../.."
 PSQL=${PSQL:-psql}
 DB=courtbook_test
-MIGRATION=${MIGRATION:-docs/favourites/sql/club_favourites.draft.sql}
+MIGRATION=${MIGRATION:-supabase/migrations/0087_club_favourites.sql}   # was the draft until 0087 existed
 
 where=$($PSQL -At -d $DB -c "select current_database()||'@'||coalesce(host(inet_server_addr()),'local-socket')" 2>/dev/null)
 case "$where" in courtbook_test@local-socket|courtbook_test@127.0.0.1|courtbook_test@::1) ;;
   *) echo "refusing: connected to '$where', expected the local courtbook_test replica"; exit 2;; esac
 [ -f "$MIGRATION" ] || { echo "missing $MIGRATION"; exit 2; }
 present() { $PSQL -At -d $DB -c "select (select count(*) from pg_class where relname='club_favourites')||'/'||(select count(*) from pg_proc where proname in ('set_club_favourite','my_favourite_clubs'))"; }
-[ "$(present)" = "0/0" ] || { echo "refusing: favourites objects already exist on the replica — rebuild it with run.sh"; exit 2; }
+# With 0087 in supabase/migrations, run.sh's replica already has the objects (1/2); the suite re-applies the file
+# inside its rolled-back transaction, so it must leave the replica exactly as it found it.
+before=$(present)
+case "$MIGRATION" in docs/*) [ "$before" = "0/0" ] || { echo "refusing: draft run on a replica that already has favourites — rebuild it with run.sh"; exit 2; };; esac
 
 U1=c1000000-0000-4000-8000-000000000001
 U2=c1000000-0000-4000-8000-000000000002
@@ -45,6 +48,8 @@ insert into t select 'F14 applies twice: one table, two functions',
 insert into auth.users (id, email) values ('$U1','u1@fav.test'), ('$U2','u2@fav.test'), ('$ADM','adm@fav.test');
 update profiles set roles = '{player,admin}' where id = '$ADM';
 insert into clubs (name, slug) select 'Fav Club ' || i, 'fav-club-' || i from generate_series(1, 55) i;
+-- since 0085 a player cannot read an unpublished club, so ids the checks need are looked up here, as the server
+insert into r select 'closed_id', id::text from clubs where slug = 'closed';
 SQL
     # --- as U1 -------------------------------------------------------------------------------
     cat <<SQL
@@ -59,7 +64,7 @@ do \$\$ begin
 exception when insufficient_privilege then insert into r values ('u1_direct_insert', 'refused');
 end \$\$;
 do \$\$ begin
-  perform set_club_favourite((select id from clubs where slug = 'closed'), true);
+  perform set_club_favourite((select v::uuid from r where k = 'closed_id'), true);
   insert into r values ('u1_add_inactive', 'allowed');
 exception when others then insert into r values ('u1_add_inactive', sqlerrm);
 end \$\$;
@@ -82,7 +87,7 @@ SQL
     cat <<SQL
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '$U1', true) \g /dev/null
-insert into r select 'u1_list', string_agg(c.slug, ',' order by m.created_at desc) from my_favourite_clubs() m join clubs c on c.id = m.club_id;
+insert into r select 'u1_list', string_agg(m.slug, ',' order by m.created_at desc) from my_favourite_clubs() m;
 reset role;
 SQL
     # --- as U2 -------------------------------------------------------------------------------
@@ -144,18 +149,21 @@ SQL
 update clubs set active = false where slug = 'other';
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '$U1', true) \g /dev/null
-insert into r select 'u1_list_other_inactive', coalesce(string_agg(c.slug, ','), '') from my_favourite_clubs() m join clubs c on c.id = m.club_id;
+insert into r select 'u1_list_other_inactive', coalesce(string_agg(m.slug, ','), '') from my_favourite_clubs() m;
 reset role;
 insert into r select 'row_kept_while_inactive', count(*)::text from club_favourites where profile_id = '$U1' and club_id = (select id from clubs where slug = 'other');
+select set_config('request.jwt.claim.sub', '', true) \g /dev/null   -- the server re-publishes it (0081's check is for signed-in requests)
 update clubs set active = true where slug = 'other';
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '$U1', true) \g /dev/null
-insert into r select 'u1_list_reactivated', string_agg(c.slug, ',' order by m.created_at desc) from my_favourite_clubs() m join clubs c on c.id = m.club_id;
+insert into r select 'u1_list_reactivated', string_agg(m.slug, ',' order by m.created_at desc) from my_favourite_clubs() m;
 reset role;
 update clubs set active = false where slug = 'other';
+-- since 0085 a player cannot read an unpublished club at all, so the id comes from the server (the app holds it)
+select id as other_id from clubs where slug = 'other' \gset
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '$U1', true) \g /dev/null
-insert into r select 'u1_remove_inactive', set_club_favourite((select id from clubs where slug = 'other'), false)::text;
+insert into r select 'u1_remove_inactive', set_club_favourite(:'other_id', false)::text;
 reset role;
 insert into r select 'removed_while_inactive', count(*)::text from club_favourites where profile_id = '$U1' and club_id = (select id from clubs where slug = 'other');
 do \$\$ begin
@@ -227,11 +235,11 @@ echo "   $oks checks passed; $summary"
 
 echo "== mutation checks (each must make the suite fail)"
 mutants=(
-  "M1 inactive clubs can be added|s/where id = p_club and active)/where id = p_club)/"
+  "M1 clubs players cannot see can be added|s/where c.id = p_club and club_visible_to_me(c.id, c.is_demo))/where c.id = p_club)/"
   "M2 players may write the table directly|s/^grant select on club_favourites to authenticated;/grant select, insert, update, delete on club_favourites to authenticated;/"
   "M3 everyone reads everyone's favourites|s/for select to authenticated using (profile_id = auth.uid());/for select to authenticated using (true);/"
   "M4 adding twice errors|s/^  on conflict (profile_id, club_id) do nothing;/  ;/"
-  "M5 inactive clubs listed|s/join clubs c on c.id = f.club_id and c.active/join clubs c on c.id = f.club_id/"
+  "M5 clubs players cannot see are listed|s/join clubs c on c.id = f.club_id and club_visible_to_me(c.id, c.is_demo)/join clubs c on c.id = f.club_id/"
   "M6 anon may call|s/^revoke all on function set_club_favourite(uuid, boolean) from public, anon;/grant execute on function set_club_favourite(uuid, boolean) to anon;/"
   "M7 no cap|s/>= 50/>= 5000/"
   "M8 no signed-in check|s/if me is null then raise exception 'not_authenticated'; end if;/null;/"
@@ -248,7 +256,7 @@ for m in "${mutants[@]}"; do
   else echo "   $name: NOT DETECTED ($res)"; status=1; fi
 done
 rm -rf "$tmp"
-echo "== replica after the run: favourites table/functions = $(present) (expected 0/0)"
-[ "$(present)" = "0/0" ] || status=1
+echo "== replica after the run: favourites table/functions = $(present) (expected $before, as before the run)"
+[ "$(present)" = "$before" ] || status=1
 [ $status = 0 ] && echo "RESULT: PASS" || echo "RESULT: FAIL"
 exit $status
