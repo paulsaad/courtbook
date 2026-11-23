@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Cedar } from "@/components/Brand";
 import { reportAuthError } from "@/lib/report";
+import { LegalLinks } from "@/components/legal";
 
 const ERRORS: Record<string, string> = {
   link: "That sign-in link expired, was already used, or was opened in a different browser than the one you asked from. Request a new one below.",
@@ -97,6 +98,7 @@ export default function LoginForm() {
           <p className="text-center text-xs text-muted">No password. We email you a code. Once per phone — you stay signed in.</p>
         </form>
       )}
+      <LegalLinks className="justify-center" />
     </main>
   );
 }
