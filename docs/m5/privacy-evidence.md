@@ -51,7 +51,9 @@ the page together; `src/app/legal.test.tsx` checks the statements of absence aga
 | --- | --- |
 | Kept while the account exists | No retention job on profiles, bookings, games or chat. |
 | Unpaid hold expires after a few minutes | `bookings.hold_expires_at`, club `hold_minutes`. |
-| Report copy and moderation notes cleared 180 days after closing, except legal hold | `enforce_report_retention` / `clear_old_report_text` (0082), run on every new report and every visit to Admin → Reports. |
+| Report text (`reports.snapshot`, `reports.note`) is **due** for clearing 180 days after `closed_at`; never while `status = 'open'` or `legal_hold`; the row stays | `enforce_report_retention` (0082): `status <> 'open' and not legal_hold and closed_at < now() - 180 days`. |
+| Moderation-log notes are cleared 180 days after the entry's own `at` (not the report's closing); kept while its report is open or on legal hold, and for `suspend`/`unsuspend` entries while an `account_suspensions` row exists for that profile | Same function, second `update` (0082). |
+| **Clearing is not continuous.** It runs only when (a) any player files a report (statement trigger `reports_enforce_retention`), (b) an admin opens Admin → Reports (`clear_old_report_text`, `src/app/admin/reports/page.tsx`), or (c) an admin presses the clear button. With no reports and no admin visits, eligible text stays. | No scheduler exists (no pg_cron job, no scheduled workflow). M5 adds none (review, 23 Nov). The privacy page says "due to be cleared … can stay for some time after" and marks the latest-date promise as a pending decision. |
 | Deletion as described on `/delete-account` | `delete_account_data`, `finish_account_deletion` (0079); 102 checks + race tests (`supabase/tests/m2`). |
 
 ## Terms

@@ -73,6 +73,19 @@ describe("M5 legal pages: public, structured, honest about what is not final", (
     });
   }
 
+  it("180 days is described as it runs (0082): due after closing, cleared on the next new report or admin visit, no timer", () => {
+    const { container } = render(<PrivacyPage />);
+    const t = (container.querySelector("#how-long")?.closest("section")?.textContent ?? "").replace(/\s+/g, " ");
+    expect(t).not.toMatch(/are cleared 180 days after/);              // the old, stronger claim (review, 23 Nov)
+    expect(t).toMatch(/closed for 180 days/);
+    expect(t).toMatch(/does not run on a timer/);
+    expect(t).toMatch(/files a new report/);
+    expect(t).toMatch(/opens the reports page/);
+    expect(t).toMatch(/note itself is 180 days old/);                 // log notes: from when written, not from closing
+    expect(t).toMatch(/suspension they concern is still in force/);
+    expect(container.querySelector("#how-long")?.closest("section")?.querySelector('mark[data-pending="decision"]')?.textContent).toMatch(/latest date/);
+  });
+
   it("the operator, address and governing law are never filled in by guessing: they stay marked", () => {
     const { container: privacy } = render(<PrivacyPage />);
     const { container: terms } = render(<TermsPage />);

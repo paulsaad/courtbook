@@ -126,8 +126,17 @@ export default function PrivacyPage() {
         <ul className="list-disc space-y-1 pl-5">
           <li>Your account and what belongs to it are kept while your account exists.</li>
           <li>An unpaid booking hold expires after a few minutes.</li>
-          <li>The copy of reported content, and notes written while handling a report, are cleared 180 days after the
-            report is closed, unless it is under a legal hold.</li>
+          <li>Reports: once a report has been closed for 180 days, the copy of the reported content and the note
+            written by the person who reported it are due to be cleared. Clearing does not run on a timer: it runs
+            each time anyone files a new report and each time an administrator opens the reports page, so this text
+            can stay for some time after the 180 days. It is never cleared while the report is open or under a legal
+            hold. The report itself (its kind, reason, dates and decision) is kept without this text.{" "}
+            <Pending kind="decision">Whether we promise a latest date for clearing (that needs a scheduled clearing
+            job, which is not built), and how long the report itself is kept.</Pending></li>
+          <li>Notes written by administrators while handling reports and suspensions are cleared the same way once
+            the note itself is 180 days old (counted from when it was written, not from when the report closed). They
+            are kept while their report is open or under a legal hold, and while a suspension they concern is still
+            in force.</li>
           <li>If you delete your account, we delete or anonymise your data as described on{" "}
             <Link href="/delete-account" className="font-semibold text-turf">Delete your account</Link>.{" "}
             <Pending kind="legal">How long past bookings and payment records are kept without your name, and how long
