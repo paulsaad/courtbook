@@ -5,7 +5,7 @@ import { CourtLines } from "../CourtLines";
 import { SportMark } from "../SportMark";
 import { sportName } from "../../lib/days";
 import { NO_COURT } from "../../lib/gameFormat";
-import { color, font, radius, space } from "../../lib/theme";
+import { CANCELLED_BADGE, color, font, radius, space } from "../../lib/theme";
 import type { DetailSection } from "../../lib/gameScreens";
 
 /** Like the booking ticket: the time stays on one line and follows text size only this far (F7). */
@@ -15,12 +15,13 @@ type Hero = Extract<DetailSection, { kind: "hero" }>;
 
 /**
  * The game's night-green hero (approved Stitch exports 26–30): red top edge, Court Lines, the sport
- * and date, the time as a scoreboard, one status pill under the time (white on translucent white,
- * never red), then the club and the court. A game with no court booked through CourtBook says so in
+ * and date, the time as a scoreboard, one status pill under the time (white on translucent white; a cancelled game's
+ * pill is solid status red, CANCELLED_BADGE, A17 acceptance 23 Nov), then the club and the court. A game with no court booked through CourtBook says so in
  * those words (P1); after a cancelled booking the court line says the same, never a struck-out court.
  */
 export function GameHero({ hero }: { hero: Hero }) {
   const place = [hero.club, hero.town].filter(Boolean).join(" · ");
+  const cancelled = hero.phase === "cancelled";
   const a11y = [sportName(hero.sport), hero.when.a11y, hero.statusLabel, place, hero.courtText].filter(Boolean).join(", ");
   return (
     <View style={styles.card} accessible accessibilityLabel={a11y} testID="game-hero">
@@ -40,7 +41,9 @@ export function GameHero({ hero }: { hero: Hero }) {
           </Text>
           {hero.minutes ? <Text style={styles.minutes}>{`${hero.minutes} min`}</Text> : null}
         </View>
-        <View style={styles.status} testID="game-status"><Text style={styles.statusText}>{hero.statusLabel}</Text></View>
+        <View style={[styles.status, cancelled && styles.statusCancelled]} testID="game-status">
+          <Text style={[styles.statusText, cancelled && styles.statusTextCancelled]}>{hero.statusLabel}</Text>
+        </View>
         <View style={styles.rule} />
         {place ? (
           <View style={styles.line}>
@@ -73,6 +76,8 @@ const styles = StyleSheet.create({
   minutes: { fontFamily: font.scoreSemi, fontSize: 18, lineHeight: 26, color: color.onDarkMuted, textTransform: "uppercase" },
   status: { alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.sm, backgroundColor: "rgba(255,255,255,0.14)", borderWidth: 1, borderColor: "rgba(255,255,255,0.22)" },
   statusText: { fontFamily: font.bold, fontSize: 12, lineHeight: 16, letterSpacing: 0.6, textTransform: "uppercase", color: color.onDark },
+  statusCancelled: { backgroundColor: CANCELLED_BADGE.backgroundColor, borderColor: CANCELLED_BADGE.borderColor },
+  statusTextCancelled: { color: CANCELLED_BADGE.text },
   rule: { height: 1, backgroundColor: "rgba(255,255,255,0.14)", marginVertical: space.xs },
   line: { flexDirection: "row", alignItems: "flex-start", gap: space.sm },
   club: { flex: 1, fontFamily: font.semibold, fontSize: 16, lineHeight: 22, color: color.onDark },

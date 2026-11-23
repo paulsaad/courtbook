@@ -63,5 +63,12 @@ export const text = {
 /** Minimum touch target (iOS 44 pt; Android asks 48 dp, so 48 is used everywhere). */
 export const TOUCH = 48;
 
+/**
+ * A cancelled game's status badge, wherever it is drawn (Game screen hero, Bookings → Games): solid status red with
+ * white text, so it cannot be mistaken for an active game (Galaxy A17 acceptance, 23 Nov). Status red, not the brand
+ * red. White on it is 6.57:1. Other statuses keep their own styles.
+ */
+export const CANCELLED_BADGE = { backgroundColor: color.danger, borderColor: color.danger, text: color.onDark } as const;
+
 /** Largest text scale honoured before layouts are allowed to wrap rather than grow. */
 export const MAX_FONT_SCALE = 1.6;

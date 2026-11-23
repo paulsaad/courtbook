@@ -11,7 +11,7 @@ import { Icon } from "../../components/Icon";
 import { Segmented } from "../../components/Segmented";
 import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { SignInPrompt } from "../../components/SignInPrompt";
-import { color, font, radius, space } from "../../lib/theme";
+import { CANCELLED_BADGE, color, font, radius, space } from "../../lib/theme";
 
 /**
  * The player's own courts and games, from my_agenda (the same list the website shows). Upcoming
@@ -65,6 +65,8 @@ export function Row({ r, past = false, now }: { r: AgendaRow; past?: boolean; no
   const time = `${hhmm(r.start_at, r.timezone)}${r.end_at ? `–${hhmm(r.end_at, r.timezone)}` : ""}`;
   const status = rowStatus(r, now);
   const tone = TONE[status.tone];
+  // A cancelled game wears the solid red badge, as on the Game screen (CANCELLED_BADGE). Court bookings keep their chip.
+  const gameCancelled = r.kind === "match" && status.tone === "cancelled";
   const label = [date, time, r.club_name, r.title, status.label].filter(Boolean).join(", ");
   return (
     <Pressable
@@ -85,8 +87,8 @@ export function Row({ r, past = false, now }: { r: AgendaRow; past?: boolean; no
         {/* No line limit: the club name wraps in full at the largest text sizes (F2). */}
         <Text variant="strong">{r.club_name}</Text>
         <Text variant="secondary" numberOfLines={1}>{r.title ?? "Court"}</Text>
-        <View testID="row-status" style={[styles.chip, { backgroundColor: tone.fill }]}>
-          <Text variant="caption" style={{ fontFamily: font.semibold, color: tone.text }}>{status.label}</Text>
+        <View testID="row-status" style={[styles.chip, { backgroundColor: gameCancelled ? CANCELLED_BADGE.backgroundColor : tone.fill }]}>
+          <Text variant="caption" style={{ fontFamily: font.semibold, color: gameCancelled ? CANCELLED_BADGE.text : tone.text }}>{status.label}</Text>
         </View>
       </View>
       <Icon name="chevronRight" size={20} color={color.muted} />
