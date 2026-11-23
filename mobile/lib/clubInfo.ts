@@ -48,7 +48,18 @@ export type InfoCourt = { id: string; name: string; sport: string; surface: stri
 export type InfoPriceRule = { start_time: string; end_time: string; price_usd: number | string; label: string | null; court_id: string | null; weekday_mask?: number | null };
 export type InfoMedia = { id: string; kind: "cover" | "logo" | "gallery"; path: string | null; external_url: string | null; caption: string | null; sort: number; width: number | null; height: number | null };
 
-export type ClubInfo = { club: ClubInfoRow; courts: InfoCourt[]; rules: InfoPriceRule[]; gallery: InfoMedia[] };
+export type ClubContact = { contact_phone: string | null; contact_email: string | null };
+export type ClubInfo = { club: ClubInfoRow; courts: InfoCourt[]; rules: InfoPriceRule[]; gallery: InfoMedia[]; contact: ClubContact | null };
+
+/** 0081 added the club's phone and email. Read on their own: before the columns exist the answer is "no contact". */
+export function contactFrom(r: { data: unknown; error: { code?: string; message?: string } | null }): ClubContact | null {
+  if (r.error) {
+    if (r.error.code === "42703" || /contact_(phone|email)/.test(r.error.message ?? "")) return null;
+    throw r.error;
+  }
+  const c = r.data as ClubContact | null;
+  return c && (c.contact_phone || c.contact_email) ? c : null;
+}
 
 const CLUB_FIELDS =
   "id, name, timezone, open_time, close_time, slot_minutes, min_booking_minutes, max_booking_minutes, cancel_cutoff_hours, " +
@@ -68,11 +79,13 @@ export function useClubInfo(clubId: string | null) {
         supabase.from("club_media").select("id, kind, path, external_url, caption, sort, width, height").eq("club_id", clubId!).eq("kind", "gallery").order("sort"),
       ]);
       for (const r of [club, courts, rules, media]) if (r.error) throw r.error;
+      const contact = contactFrom(await supabase.from("clubs").select("contact_phone, contact_email").eq("id", clubId!).single());
       return {
         club: club.data as unknown as ClubInfoRow,
         courts: (courts.data ?? []) as InfoCourt[],
         rules: (rules.data ?? []) as InfoPriceRule[],
         gallery: (media.data ?? []) as InfoMedia[],
+        contact,
       };
     },
   });

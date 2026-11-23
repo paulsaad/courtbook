@@ -26,7 +26,7 @@ export default function NewClubForm() {
       <input className="rounded-xl border border-grid px-4 py-3" placeholder="Club name" required value={name}
         onChange={(e) => { setName(e.target.value); if (!slug) setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")); }} />
       <input className="rounded-xl border border-grid px-4 py-3" placeholder="url-name (letters, numbers, dashes)" required pattern="[a-z0-9-]+" value={slug} onChange={(e) => setSlug(e.target.value)} />
-      <p className="text-xs text-muted">Players open courtbook…/club/<b>{slug || "url-name"}</b>. Hours, courts and prices come next.</p>
+      <p className="text-xs text-muted">Players open courtbook…/club/<b>{slug || "url-name"}</b>. Hours, courts and prices come next. The club stays hidden from players until its checklist is complete and you publish it.</p>
       {error && <p className="text-sm text-danger">{error}</p>}
       <button disabled={busy} className="rounded-xl bg-action py-3 font-medium text-white disabled:opacity-50">{busy ? "Creating…" : "Create club"}</button>
     </form>
