@@ -3,7 +3,11 @@ jest.mock("@sentry/react-native", () => ({ init: (o: unknown) => mockInit(o), wr
 jest.mock("expo-updates", () => ({ updateId: "upd-1" }));
 jest.mock("expo-application", () => ({ applicationId: "app.courtbook.mobile.staging", nativeApplicationVersion: "0.3.0", nativeBuildVersion: "7" }));
 import type { ErrorEvent } from "@sentry/react-native";
-import { maskEmails, PROBE_VALUES, safeText, safeUrl, scrubBreadcrumb, scrubEvent, startCrashReporting } from "../lib/crash";
+import { API_SEGMENTS, KNOWN_CODES, maskEmails, PROBE_VALUES, ROUTE_SEGMENTS, safeText, safeUrl, scrubBreadcrumb, scrubEvent, startCrashReporting } from "../lib/crash";
+declare const require: (m: string) => any; // eslint-disable-line @typescript-eslint/no-explicit-any
+declare const __dirname: string;
+const fs = require("fs") as { readdirSync: (d: string) => string[]; statSync: (p: string) => { isDirectory: () => boolean }; readFileSync: (p: string, e: string) => string };
+const path = require("path") as { join: (...p: string[]) => string };
 
 const P = PROBE_VALUES;
 const NEEDLES = [P.name, "Probe", "Personname", P.email, "probe.person", P.phone, "70 123 456", "70123456", P.id, P.token, "1.2.3.4", "Bearer", "Pauls-iPhone", "Paul's iPhone", "Asia/Beirut", "device_app_hash"];
@@ -61,19 +65,19 @@ describe("crash reports: no free text, an allowlist of fields (M5 review)", () =
     expect(s.release).toBe("app.courtbook.mobile.staging@0.3.0+12");
     expect(s.message).toBe("[withheld]");
     expect(s.exception.values[0]).toEqual({ type: "Error", value: "[withheld]", mechanism: { type: "generic", handled: true },
-      stacktrace: { frames: [{ filename: "app:///index.android.bundle", function: "reserve", lineno: 10, colno: 3, in_app: true }, { filename: "/data/user/0/app/:id/x.js", lineno: 2 }] } });
+      stacktrace: { frames: [{ filename: "app:///index.android.bundle", function: "reserve", lineno: 10, colno: 3, in_app: true }, { filename: "[file]", lineno: 2 }] } });
     expect(s.tags).toEqual({ update_id: "01a1fe69-33d3-7615-948d-c7de6efd64e7" });
     expect(s.contexts).toEqual({ device: { model: "iPhone15,2", family: "iOS" }, os: { name: "Android", version: "15" }, app: { app_identifier: "app.courtbook.mobile.staging", app_version: "0.3.0", app_build: "12" } });
     expect(s.request).toEqual({ url: "https://x.supabase.co/rest/v1/bookings/:id", method: "GET" });
     expect(s.breadcrumbs).toEqual([
       { category: "navigation", data: { from: "/profile", to: "/booking/:id" } },
-      { type: "http", category: "fetch", data: { method: "POST", url: "https://x.supabase.co/rest/v1/people/[email]/:id", status_code: 400 } },
+      { type: "http", category: "fetch", data: { method: "POST", url: "https://x.supabase.co/rest/v1/:id/:id/:id", status_code: 400 } },
     ]);
     expect(s.debug_meta).toEqual({ images: [{ type: "sourcemap", debug_id: "11111111-2222-3333-4444-555555555555", code_file: "app:///index.android.bundle" }] });
     for (const k of ["user", "server_name", "extra", "modules", "fingerprint"]) expect(s[k]).toBeUndefined();
   });
 
-  it("messages: only our fixed messages, error codes and connection failures pass; everything else is withheld", () => {
+  it("messages: only our fixed messages, known error codes and connection failures pass; everything else is withheld", () => {
     expect(safeText("CourtBook test report (staging)")).toBe("CourtBook test report (staging)");
     expect(safeText("CourtBook privacy probe")).toBe("CourtBook privacy probe");
     expect(safeText("slot_taken")).toBe("slot_taken");
@@ -82,17 +86,82 @@ describe("crash reports: no free text, an allowlist of fields (M5 review)", () =
     for (const t of ["Paul", "Couldn't load Rami Haddad", "slot taken for Paul", "duplicate key (email)=(a@b.co)", "+96170123456", undefined, 42]) expect(safeText(t)).toBe("[withheld]");
   });
 
-  it("URLs: no query, fragment, IDs, tokens, phone numbers or emails", () => {
+  it("regression (review 2): a single-word name or a short token is not an error code", () => {
+    for (const t of ["rami", "paul", "nour", "georges", "x7k2p9", "abc123", "tok_9f8e7d", "a1b2c3d4", "secret_value", "my_password"]) {
+      expect(KNOWN_CODES.has(t)).toBe(false);
+      expect(safeText(t)).toBe("[withheld]");
+    }
+    expect(KNOWN_CODES.size).toBeGreaterThan(20); // the codes come from the app's own tables
+  });
+
+  it("URLs are route templates: known host, no query or fragment, only the app's own segments", () => {
     expect(safeUrl("/booking/3f6e2b1c-9a4d-4c2e-8b7f-1a2b3c4d5e6f?token=x#y")).toBe("/booking/:id");
     expect(safeUrl("https://x.supabase.co/rest/v1/rpc/hold_slot")).toBe("https://x.supabase.co/rest/v1/rpc/hold_slot");
-    expect(safeUrl("/club/batroun/info")).toBe("/club/batroun/info");
-    expect(safeUrl("/coach/12345")).toBe("/coach/:id");
-    expect(safeUrl(`/x/${"a".repeat(30)}`)).toBe("/x/:id");
-    expect(safeUrl("/u/p@x.com/a")).toBe("/u/[email]/a");
-    expect(safeUrl("/call/+961 70 123 456")).toBe("/call/:id");
-    expect(safeUrl("/q/Rami Haddad")).toBe("/q/:redacted");
-    // scrubbed twice (as the breadcrumb is recorded, then in the report): same result (seen on staging, 23 Nov)
+    expect(safeUrl("/club/batroun-padel")).toBe("/club/:id");
+    expect(safeUrl("/games/post")).toBe("/games/post");
+    expect(safeUrl("/coach/12345")).toBe("/:id/:id");
+    expect(safeUrl("/u/p@x.com/a")).toBe("/:id/:id/:id");
+    expect(safeUrl("/call/+961 70 123 456")).toBe("/:id/:id");
+    expect(safeUrl("https://tracker.example.com/rest/v1/bookings")).toBe("https://[host]/:id/:id/:id");
+    // scrubbed twice (as the breadcrumb is recorded, then in the report): same result
     for (const u of ["/booking/3f6e2b1c-9a4d-4c2e-8b7f-1a2b3c4d5e6f?t=x", "https://x.supabase.co/rest/v1/people/p@x.com/12345", "/q/Rami Haddad"]) expect(safeUrl(safeUrl(u))).toBe(safeUrl(u));
+  });
+
+  it("regression (review 2): short personal-name segments and short tokens do not survive in a URL", () => {
+    for (const seg of ["Rami", "rami", "Nour", "paul", "Georges", "x7k2p9", "ab12", "tok_9f8e", "Rami-Haddad", "r.haddad"]) {
+      expect(safeUrl(`/club/${seg}`)).toBe("/club/:id");
+      expect(safeUrl(`/${seg}`)).toBe("/:id");
+      expect(safeUrl(`https://x.supabase.co/rest/v1/${seg}`)).toBe("https://x.supabase.co/rest/v1/:id");
+      expect(safeUrl(`https://x.supabase.co/rest/v1/profiles/${seg}`)).toBe("https://x.supabase.co/rest/v1/profiles/:id");
+    }
+  });
+
+  it("device fields each have their own rule: a name or short word in any field is dropped", () => {
+    const e = scrubEvent({ contexts: {
+      os: { name: "Rami", version: "rami", build: "Rami Haddad" },
+      device: { family: "Nour", model: "Rami", model_id: "paul", arch: "Rami", manufacturer: "samsung", brand: "Rami", simulator: "no", name: "Rami's phone" },
+      app: { app_identifier: "com.other.app", app_version: "rami", app_build: "x7k2" },
+      runtime: { name: "Rami", version: "rami" },
+      react_native_context: { js_engine: "Rami", react_native_version: "paul", hermes_version: "x", expo: "yes" },
+    } } as unknown as ErrorEvent) as unknown as Record<string, unknown>;
+    expect(e.contexts).toBeUndefined();
+    const ok = scrubEvent({ contexts: { os: { name: "iOS", version: "18.1", build: "22B83" }, device: { family: "iOS", model: "iPhone15,2", arch: "arm64e", simulator: false } } } as unknown as ErrorEvent) as unknown as Record<string, unknown>;
+    expect(ok.contexts).toEqual({ os: { name: "iOS", version: "18.1", build: "22B83" }, device: { family: "iOS", model: "iPhone15,2", arch: "arm64e", simulator: false } });
+  });
+
+  it("exception type: an error class name only, never a bare word", () => {
+    const t = (type: string) => (scrubEvent({ exception: { values: [{ type, value: "x" }] } } as unknown as ErrorEvent) as unknown as { exception: { values: { type: string }[] } }).exception.values[0].type;
+    expect(t("TypeError")).toBe("TypeError");
+    expect(t("AuthApiError")).toBe("AuthApiError");
+    expect(t("Rami")).toBe("Error");
+    expect(t("paul")).toBe("Error");
+  });
+
+  it("the allowlists follow the code: every screen in mobile/app and every table and RPC the app calls is listed", () => {
+    const root = path.join(__dirname, "..");
+    const screens = new Set<string>();
+    (function walk(d: string) {
+      for (const f of fs.readdirSync(d)) {
+        const p = path.join(d, f);
+        if (fs.statSync(p).isDirectory()) { if (!f.startsWith("(") && !f.startsWith("[")) screens.add(f); walk(p); }
+        else if (/\.tsx$/.test(f) && !f.startsWith("_") && !f.startsWith("[") && f !== "index.tsx") screens.add(f.replace(/\.tsx$/, ""));
+      }
+    })(path.join(root, "app"));
+    expect([...screens].filter((x) => !ROUTE_SEGMENTS.has(x))).toEqual([]);
+    const calls = new Set<string>();
+    (function walk(d: string) {
+      for (const f of fs.readdirSync(d)) {
+        const p = path.join(d, f);
+        if (fs.statSync(p).isDirectory()) { if (!["node_modules", "__tests__", "e2e", "scripts", "android", "ios", ".expo"].includes(f)) walk(p); }
+        else if (/\.tsx?$/.test(f) && !/\.test\./.test(f)) {
+          const t = fs.readFileSync(p, "utf8");
+          for (const m of t.matchAll(/\brpc\(\s*["'`]([a-z_0-9]+)/g)) calls.add(m[1]);
+          for (const m of t.matchAll(/\.from\(\s*["'`]([a-z_0-9]+)/g)) calls.add(m[1]);
+        }
+      }
+    })(root);
+    expect([...calls].filter((x) => !API_SEGMENTS.has(x))).toEqual([]);
+    expect(calls.size).toBeGreaterThan(30);
   });
 
   it("breadcrumbs are filtered as they are recorded (so the native layer's copy is clean too): navigation and HTTP only", () => {
@@ -102,6 +171,7 @@ describe("crash reports: no free text, an allowlist of fields (M5 review)", () =
     expect(scrubBreadcrumb({ category: "device.event", message: "x" })).toBeNull();
     expect(scrubBreadcrumb({ message: `free text ${P.name}` })).toBeNull();
     expect(scrubBreadcrumb({ category: "navigation", data: { to: `/booking/${P.id}` } })).toEqual({ category: "navigation", data: { from: undefined, to: "/booking/:id" } });
+    expect(scrubBreadcrumb({ category: "fetch", data: { method: "Rami", url: "/x" } })?.data?.method).toBeUndefined();
   });
 
   it("maskEmails still masks addresses in any value", () => {
