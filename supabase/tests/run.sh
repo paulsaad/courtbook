@@ -722,7 +722,7 @@ check service "I2 at most one live match per booking"         "select count(*) f
 check service "I3 no live match linked to a non-confirmed booking" "select count(*) from matches m join bookings b on b.id=m.booking_id where m.status<>'cancelled' and b.status<>'confirmed';" 0
 check service "I4 every live hold has a pending payment"      "select count(*) from bookings b where b.status='pending' and not exists (select 1 from payments p where p.booking_id=b.id and p.status='pending');" 0
 check service "I5 no player holds two live slots"             "select count(*) from (select player_id from bookings where status='pending' and hold_expires_at>now() group by 1 having count(*)>1) x;" 0
-check service "I6 anon can execute only the public RPCs (effective, incl. PUBLIC)" "select string_agg(distinct p.proname, ',' order by p.proname) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and not exists (select 1 from pg_depend d where d.objid=p.oid and d.deptype='e') and has_function_privilege('anon', p.oid, 'EXECUTE');" "areas,club_day_slots,club_discovery,club_sports,next_free_slot,quote_price"
+check service "I6 anon can execute only the public RPCs (effective, incl. PUBLIC)" "select string_agg(distinct p.proname, ',' order by p.proname) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and not exists (select 1 from pg_depend d where d.objid=p.oid and d.deptype='e') and has_function_privilege('anon', p.oid, 'EXECUTE');" "areas,club_day_slots,club_discovery,club_id_readable_by_me,club_id_visible_to_me,club_readable_by_me,club_sports,next_free_slot,quote_price"
 $PSQL -q -d $DB -c "create function _probe_fn() returns int language sql as 'select 1';"
 denied anon    "I6b a new function without grants is not executable by anon" "select _probe_fn();"
 check  service "I6c ...nor by authenticated (explicit grant needed)" "select has_function_privilege('authenticated', '_probe_fn()', 'EXECUTE');" f
@@ -964,7 +964,9 @@ check $ADMIN "94z same name, different phones -> separate suggestions" "select c
 check $ADMIN "94z2 the one stored without a phone keeps no phone"      "select count(*) from club_recent_guests('$CLUB','Same Name') where phone is null;" 1
 # the week view reads a 7-day range for one court straight from the table, so RLS is what scopes it
 WK="start_at < (current_date + 20) and end_at > (current_date + 13)"
-check $ADMIN "95a staff read the week's rows for one court"           "select count(*) from bookings where club_id='$CLUB' and court_id='$COURT' and $WK;" 4
+# (counts this block's three desk rows only: an earlier check's hold lands in the same week or not depending on the
+#  hour the suite runs, which made the old total of 4 fail between midnight and 08:00 Beirut time)
+check $ADMIN "95a staff read the week's rows for one court"           "select count(*) from bookings where club_id='$CLUB' and court_id='$COURT' and $WK and guest_name = 'Same Name';" 3
 check $STAFF_B "95b staff of another club read none of them"          "select count(*) from bookings where club_id='$CLUB' and court_id='$COURT' and $WK;" 0
 check $P1 "95c a player reads only their own in that range"           "select count(*) from bookings where club_id='$CLUB' and court_id='$COURT' and $WK and player_id is distinct from '$P1';" 0
 

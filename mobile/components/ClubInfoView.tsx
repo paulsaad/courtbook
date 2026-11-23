@@ -41,6 +41,7 @@ export function ClubInfoView({ query, onBook }: {
   const stackActions = narrow || fontScale >= 1.3;
 
   const { club, courts, rules, gallery } = query.data;
+  const info = { contact: query.data.contact ?? null };
   const sports = clubSports(courts);
   const maps = mapsUrl(club);
   const photos = clubPhotos(club.cover_url, gallery, club.name);
@@ -131,6 +132,25 @@ export function ClubInfoView({ query, onBook }: {
           </View>
         )}
       </Section>
+
+      {info.contact && (
+        <Section title="Contact the club">
+          <View style={styles.card}>
+            {info.contact.contact_phone && (
+              <Pressable accessibilityRole="link" accessibilityLabel={`Call ${info.contact.contact_phone}`} testID="club-call"
+                         onPress={() => void Linking.openURL(`tel:${info.contact!.contact_phone!.replace(/[^0-9+]/g, "")}`)}>
+                <Text style={styles.body}>{info.contact.contact_phone}</Text>
+              </Pressable>
+            )}
+            {info.contact.contact_email && (
+              <Pressable accessibilityRole="link" accessibilityLabel={`Email ${info.contact.contact_email}`} testID="club-email"
+                         onPress={() => void Linking.openURL(`mailto:${info.contact!.contact_email}`)}>
+                <Text style={[styles.body, info.contact.contact_phone ? { marginTop: space.sm } : null]}>{info.contact.contact_email}</Text>
+              </Pressable>
+            )}
+          </View>
+        </Section>
+      )}
 
       {(place.length > 0 || club.arrival_notes) && (
         <Section title="Location">

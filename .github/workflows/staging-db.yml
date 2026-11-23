@@ -17,9 +17,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else); m3_0067_preflight / m3_0067_postcheck and m3_0072_preflight / m3_0072_postcheck, m3_0073_*, m3_0074_* and m3_0075_* = read-only checks before / after applying 0067 0072, 0073 or 0074 (supabase/live/00xx_*.sql); blocks_0076_* / blocks_0077_* = read-only checks before / after 0076 or 0077 (calendar blocks); blocks_functional = the block rules tried as a demo-club desk account, in one transaction that is rolled back"
+        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; cancel = cancellation and refund checks in SQL (temporary courts and accounts, removed after); web_accept = launch-1 website flows in a browser against this branch's website built for staging (throwaway accounts, club and court, removed after; needs confirm_ref); api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else); m3_0067_preflight / m3_0067_postcheck and m3_0072_preflight / m3_0072_postcheck, m3_0073_*, m3_0074_* and m3_0075_* = read-only checks before / after applying 0067 0072, 0073 or 0074 (supabase/live/00xx_*.sql); blocks_0076_* / blocks_0077_* = read-only checks before / after 0076 or 0077 (calendar blocks); blocks_functional = the block rules tried as a demo-club desk account, in one transaction that is rolled back; m7_0078_* = read-only checks before / after 0078 (hide demo clubs); m7_demo_hidden_on / _off = staging only: set the hide_demo_clubs switch on or off (nothing else); launch1_preflight / launch1_postcheck = read-only checks before / after applying 0078–0084 together (supabase/live/launch1_*.sql); test_conflicts = read only: what occupies the demo courts the smoke/API tests used to book (no player details)"
         type: choice
-        options: [check, apply, smoke, api, reset_demo, tester, demo_at_desk, m3_0067_preflight, m3_0067_postcheck, m3_0072_preflight, m3_0072_postcheck, m3_0073_preflight, m3_0073_postcheck, m3_0074_preflight, m3_0074_postcheck, m3_0075_preflight, m3_0075_postcheck, blocks_0076_preflight, blocks_0076_postcheck, blocks_0077_preflight, blocks_0077_postcheck, blocks_functional, m3_accounts, m3_test_games, m3_test_games_shared, m3_test_games_cleanup, m3_moderator_check, m3_moderator_grant]
+        options: [check, apply, smoke, cancel, api, web_accept, reset_demo, tester, demo_at_desk, m3_0067_preflight, m3_0067_postcheck, m3_0072_preflight, m3_0072_postcheck, m3_0073_preflight, m3_0073_postcheck, m3_0074_preflight, m3_0074_postcheck, m3_0075_preflight, m3_0075_postcheck, blocks_0076_preflight, blocks_0076_postcheck, blocks_0077_preflight, blocks_0077_postcheck, blocks_functional, m7_0078_preflight, m7_0078_postcheck, m7_demo_hidden_on, m7_demo_hidden_off, launch1_preflight, launch1_postcheck, test_conflicts, m3_accounts, m3_test_games, m3_test_games_shared, m3_test_games_cleanup, m3_moderator_check, m3_moderator_grant]
         default: check
       migrations:
         description: "apply only: the exact migration numbers to apply, e.g. '0068 0069 0070 0071' — nothing else is applied; 'check' lists what is pending"
@@ -30,7 +30,7 @@ on:
         type: string
         default: ""
       confirm_ref:
-        description: "apply and api: the staging project ref, exactly as 'check' reported it"
+        description: "apply, api and web_accept: the staging project ref, exactly as 'check' reported it"
         type: string
         default: ""
 
@@ -114,6 +114,17 @@ jobs:
           plan=$(bash .github/scripts/staging-plan.sh apply supabase/migrations /tmp/applied.txt "$MIGRATIONS") \
             || { echo "::error::$plan"; echo "$plan"; exit 1; }
           echo "plan:"; echo "$plan" | sed 's/^/  /'
+          # launch-1 (0078–0084): starting it requires the launch-1 preflight to pass; nothing is applied otherwise.
+          # Resuming it (0078 already applied) is allowed; anything 0079–0084 without 0078 is refused.
+          if echo "$plan" | grep -qE '^00(7[89]|8[0-4])_'; then
+            if echo "$plan" | grep -q '^0078_'; then
+              echo "launch-1: running the preflight before applying anything"
+              bash .github/scripts/run-check.sh "$DB" supabase/live/launch1_preflight.sql part1 \
+                || { echo "::error::launch-1 preflight failed: nothing was applied."; exit 1; }
+            elif ! grep -q '^0078_' /tmp/applied.txt; then
+              echo "::error::0079–0084 need 0078 first (apply them together, starting with 0078)."; exit 1
+            fi
+          fi
           n=0
           for name in $plan; do
             f=supabase/migrations/$name
@@ -127,9 +138,15 @@ jobs:
           echo "applied $n migration(s)"
           psql "$DB" -v ON_ERROR_STOP=1 -q -f supabase/seed.sql
           echo "demo seed applied (idempotent)"
+          # all seven launch-1 migrations now applied: the postcheck runs here and fails the job if any row is not ok
+          if [ "$(psql "$DB" -At -c "select count(*) from staging_meta.applied where name ~ '^00(7[89]|8[0-4])_'")" = 7 ] \
+             && echo "$plan" | grep -qE '^00(7[89]|8[0-4])_'; then
+            echo "launch-1: all seven applied; running the postcheck"
+            bash .github/scripts/run-check.sh "$DB" supabase/live/launch1_postcheck.sql all
+          fi
 
       - name: API credentials are staging's (api)
-        if: inputs.action == 'api'
+        if: inputs.action == 'api' || inputs.action == 'web_accept'
         env:
           CONFIRM: ${{ inputs.confirm_ref }}
           S_URL: ${{ secrets.STAGING_SUPABASE_URL }}
@@ -144,13 +161,13 @@ jobs:
           echo "API URL host: $host (matches the database's ref $REF)"
 
       - uses: actions/setup-node@v4
-        if: inputs.action == 'api'
+        if: inputs.action == 'api' || inputs.action == 'web_accept'
         with:
           node-version: 22
           cache: npm
 
       - name: Build this branch's web app against staging (api)
-        if: inputs.action == 'api'
+        if: inputs.action == 'api' || inputs.action == 'web_accept'
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.STAGING_ANON_KEY }}
@@ -172,8 +189,29 @@ jobs:
           APP_URL: http://localhost:3100
         run: node supabase/tests/staging_api.mjs
 
+      - name: Website acceptance in a browser (web_accept)
+        if: inputs.action == 'web_accept'
+        env:
+          STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          STAGING_ANON_KEY: ${{ secrets.STAGING_ANON_KEY }}
+          STAGING_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SERVICE_ROLE_KEY }}
+          EXPECTED_REF: ${{ inputs.confirm_ref }}
+          APP_URL: http://localhost:3100
+        run: |
+          mkdir -p /tmp/tools && (cd /tmp/tools && npm init -y >/dev/null && npm i --no-audit --no-fund puppeteer@23 >/dev/null)
+          node supabase/tests/staging_web_accept.mjs
+
+      - name: Website acceptance screenshots (web_accept)
+        if: always() && inputs.action == 'web_accept'
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-accept-screens
+          path: /tmp/web-accept
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Web app log (api, on failure)
-        if: failure() && inputs.action == 'api'
+        if: failure() && (inputs.action == 'api' || inputs.action == 'web_accept')
         run: tail -60 /tmp/next.log || true
 
       - name: Paul's sign-in for the staging app (tester)
@@ -293,6 +331,33 @@ jobs:
       - name: 0077 postcheck, read only (blocks_0077_postcheck)
         if: inputs.action == 'blocks_0077_postcheck'
         run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0077_postcheck.sql
+      - name: launch-1 preflight, read only (launch1_preflight)
+        if: inputs.action == 'launch1_preflight'
+        run: bash .github/scripts/run-check.sh "$DB" supabase/live/launch1_preflight.sql part1
+      - name: What occupies the old smoke/API test slots, read only (test_conflicts)
+        if: inputs.action == 'test_conflicts'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/test_conflicts.sql
+      - name: launch-1 postcheck, read only (launch1_postcheck)
+        if: inputs.action == 'launch1_postcheck'
+        run: bash .github/scripts/run-check.sh "$DB" supabase/live/launch1_postcheck.sql all
+      - name: 0078 preflight, read only (m7_0078_preflight)
+        if: inputs.action == 'm7_0078_preflight'
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/live/0078_preflight.sql
+      - name: 0078 postcheck, read only (m7_0078_postcheck)
+        if: inputs.action == 'm7_0078_postcheck'
+        run: |
+          if [ "$(psql "$DB" -At -c "select count(*) from staging_meta.applied where name like '0084_%'")" != 0 ]; then
+            echo "::error::0084 is applied: the 0078 postcheck pins a function 0084 replaces. Use launch1_postcheck."; exit 1
+          fi
+          bash .github/scripts/run-check.sh "$DB" supabase/live/0078_postcheck.sql all
+      - name: Hide demo clubs on staging (m7_demo_hidden_on)
+        if: inputs.action == 'm7_demo_hidden_on'
+        run: |
+          bash .github/scripts/demo-switch.sh "$DB" on
+      - name: Show demo clubs on staging again (m7_demo_hidden_off)
+        if: inputs.action == 'm7_demo_hidden_off'
+        run: |
+          bash .github/scripts/demo-switch.sh "$DB" off
       - name: Block rules as a desk account, rolled back (blocks_functional)
         if: inputs.action == 'blocks_functional'
         run: |
@@ -304,6 +369,10 @@ jobs:
       - name: Booking-protection checks on staging
         if: inputs.action == 'smoke'
         run: bash supabase/tests/staging_smoke.sh
+
+      - name: Cancellation and refunds (cancel)
+        if: inputs.action == 'cancel'
+        run: bash supabase/tests/staging_cancel.sh
 
       - name: Report
         if: always()

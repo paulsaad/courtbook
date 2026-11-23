@@ -1,0 +1,29 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { loaded } from "@/lib/load";
+
+/**
+ * Where a signed-in person must go before player activity (booking, games, chat), or null when they are ready:
+ *   1. no name yet → the first-time profile step;
+ *   2. not confirmed 18 or over (0080) → /age.
+ * `next` is where to come back to (a path on this site). Before 0080 exists the age step is skipped. The database
+ * enforces the age rule itself (require_age_confirmed); this only sends people to the right page first.
+ */
+export async function playerGatePath(supabase: SupabaseClient, userId: string, next: string, what = "this page"): Promise<string | null> {
+  const back = encodeURIComponent(safeNext(next));
+  const { data: me } = loaded(await supabase.from("profiles").select("name").eq("id", userId).single(), what);
+  if (!me?.name) return `/profile?next=${back}`;
+  const res = await supabase.rpc("my_age_status");
+  if (res.error && isMissingFunction(res.error)) return null;          // before 0080: no age step yet
+  const s = loaded(res, what).data as { confirmed?: boolean } | null;  // any other failure stops the page (W1)
+  return s && s.confirmed === false ? `/age?next=${back}` : null;
+}
+
+/** PostgREST's answer for a function that is not in the database (before its migration, or after a rollback). */
+export function isMissingFunction(error: { code?: string; message?: string } | null | undefined): boolean {
+  return !!error && (error.code === "PGRST202" || error.code === "42883" || /could not find the function/i.test(error.message ?? ""));
+}
+
+/** Only a path on this site: anything else (another host, "//host", a scheme) becomes "/". */
+export function safeNext(next: string | null | undefined): string {
+  return next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/";
+}

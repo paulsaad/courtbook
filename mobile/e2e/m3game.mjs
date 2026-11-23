@@ -65,6 +65,8 @@ async function createHelpers() {
     const { data, error } = await admin.auth.admin.createUser({ email: helperEmail(n), password: pw[n], email_confirm: true });
     if (error) throw new Error(`createUser h${n}: ${error.message}`);
     sql(`update profiles set name='${name}' where id='${uuid(data.user.id)}'`);
+    // 18+ (0080): automated accounts confirm in server context, so the age question never covers the screen under test
+    sql(`do $$ begin update profiles set age_confirmed_at = coalesce(age_confirmed_at, now()), age_confirmed_via = coalesce(age_confirmed_via, 'app') where id = '${uuid(data.user.id)}'; exception when undefined_column then null; end $$`);
   }
   fs.writeFileSync(PW_FILE, JSON.stringify(pw), { mode: 0o600 });
   fs.mkdirSync(IDS.replace(/\/[^/]+$/, ""), { recursive: true });

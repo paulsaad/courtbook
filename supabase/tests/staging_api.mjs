@@ -50,23 +50,30 @@ if (results.some((r) => !r.pass)) process.exit(1);
 
 // ---------------------------------------------------------------- setup
 const CLUB = sql("select id from clubs where slug='batroun'");
-const COURT = sql(`select id from courts where club_id='${CLUB}' and name='Padel 1'`);
-const COURT2 = sql(`select id from courts where club_id='${CLUB}' and name='Padel 2'`);
-const COURT3 = sql(`select id from courts where club_id='${CLUB}' and name='Padel 3'`);
 const MODE = sql(`select payment_mode from clubs where id='${CLUB}'`);
 const day = new Date(Date.now() + 3 * 86400e3).toISOString().slice(0, 10);
 const at = (hhmm) => new Date(`${day}T${hhmm}:00+02:00`).toISOString(); // Beirut is UTC+2 in November
 
+// the test's own courts (padel, the club's hours and club-wide prices): existing bookings and calendar blocks are never touched
+const TESTCOURTS = `(select id from courts where club_id = '${CLUB}' and name like 'zz-api-%')`;
 function cleanup() {
   const mine = "(select id from auth.users where email like 'api-%@courtbook.test')";
   sql(`drop function if exists public.hold_slot(uuid, uuid, timestamptz, timestamptz);
-       delete from payments where booking_id in (select id from bookings where player_id in ${mine} or created_by in ${mine});
-       delete from bookings where player_id in ${mine} or created_by in ${mine};
+       delete from payments where booking_id in (select id from bookings where player_id in ${mine} or created_by in ${mine} or court_id in ${TESTCOURTS});
+       delete from bookings where player_id in ${mine} or created_by in ${mine} or court_id in ${TESTCOURTS};
+       delete from blocks where court_id in ${TESTCOURTS};
+       delete from courts where id in ${TESTCOURTS};
        delete from club_staff where profile_id in ${mine};
        delete from auth.users where email like 'api-%@courtbook.test';
        update clubs set payment_mode='${MODE}' where id='${CLUB}';`);
 }
 cleanup();
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { try { cleanup(); } finally { process.exit(130); } });
+sql(`insert into courts (club_id, name, sport, surface, sort) values ('${CLUB}','zz-api-1','padel','test',911), ('${CLUB}','zz-api-2','padel','test',912), ('${CLUB}','zz-api-3','padel','test',913)`);
+const COURT = sql(`select id from courts where club_id='${CLUB}' and name='zz-api-1'`);
+const COURT2 = sql(`select id from courts where club_id='${CLUB}' and name='zz-api-2'`);
+const COURT3 = sql(`select id from courts where club_id='${CLUB}' and name='zz-api-3'`);
+console.log("test courts: zz-api-1..3 (temporary, removed at the end)");
 
 async function player(n) {
   const email = `api-${n}-${Date.now()}@courtbook.test`;
@@ -171,6 +178,8 @@ try {
   record("B6", "three simultaneous app calls with one token: one booking", ids.size === 1 && !ids.has(undefined) && sql(`select count(*) from bookings where client_token='${T4}'`) === "1", hb.map((r) => errOf(r) ?? "ok").join(","));
   const h3 = await app(U1, COURT3, "20:00", "21:00", T4);
   record("B7", "same token, different court: refused", errOf(h3)?.includes("token_reused"), errOf(h3) ?? "no error");
+  const busy = sql(`select (select count(*) from blocks where court_id='${COURT}' and period && tstzrange('${at("15:00")}','${at("16:00")}')) || ' block(s), ' || (select count(*) from bookings where court_id='${COURT}' and status in ('confirmed','pending') and tstzrange(start_at, end_at) && tstzrange('${at("15:00")}','${at("16:00")}')) || ' booking(s)'`);
+  if (busy !== "0 block(s), 0 booking(s)") throw new Error(`B8 needs test court zz-api-1 free on ${day} 15:00–16:00 Beirut; it has ${busy} (staging data, not a test result)`);
   const [c1, c2] = await Promise.all([app(U1, COURT, "15:00", "16:00", randomUUID()), app(U2, COURT, "15:00", "16:00", randomUUID())]);
   const okB = [c1, c2].filter((r) => !r.error);
   record("B8", "two players hold the same slot at the same moment: one hold, the other slot_taken",
@@ -250,7 +259,7 @@ try {
   m = await move(U1, COURT3, "09:00", "13:00");
   record("M3", "move to 4 h (above the 3 h maximum): bad_duration", errOf(m)?.includes("bad_duration"), errOf(m) ?? "moved!");
   record("M4", "...booking unchanged", span() === "09:00-10:00", span());
-  // 14:00 onwards is free on Padel 3 whether or not section P ran (P replaces a player's 12:00 hold).
+  // 14:00 onwards is free on test court 3 whether or not section P ran (P replaces a player's 12:00 hold).
   m = await move(U1, COURT3, "14:00", "15:30");
   record("M5", "move to 1 h 30 at another time: accepted", !m.error && span() === "14:00-15:30", errOf(m) ?? span());
   m = await move(U1, COURT3, "14:10", "15:40");
@@ -263,8 +272,8 @@ try {
   record("X", "test run stopped", false, e.message);
 } finally {
   cleanup();
-  const left = sql("select count(*) from auth.users where email like 'api-%@courtbook.test'");
-  record("Z1", "clean-up: no test players, bookings or payments left; club mode restored", left === "0" && sql(`select payment_mode from clubs where id='${CLUB}'`) === MODE);
+  const left = sql(`select (select count(*) from auth.users where email like 'api-%@courtbook.test') + (select count(*) from courts where club_id='${CLUB}' and name like 'zz-api-%')`);
+  record("Z1", "clean-up: no test players, test courts, bookings or payments left; club mode restored", left === "0" && sql(`select payment_mode from clubs where id='${CLUB}'`) === MODE, `left: ${left}`);
 }
 const failed = results.filter((r) => !r.pass);
 console.log(`\nchecks: ${results.length}, failures: ${failed.length}`);
