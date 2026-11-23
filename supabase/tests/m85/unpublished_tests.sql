@@ -128,6 +128,22 @@ insert into t values
   ('U13 ...an admin still reads it',
      pg_temp.r(pg_temp.u(3), 'select count(*)::text from clubs where slug = ''batroun''') = '1', '');
 
+-- ----------------------------------------------------------------- an unpublished demo club: hidden whatever the switch
+update app_settings set value = 'false' where key = 'hide_demo_clubs';
+insert into clubs (name, slug, is_demo, active, payment_mode) values ('M85 demo draft', 'm85-demo-draft', true, false, 'simulated');
+insert into courts (club_id, name, sport) select id, 'M85 demo court', 'padel' from clubs where slug = 'm85-demo-draft';
+insert into club_staff (club_id, profile_id) select id, pg_temp.u(2) from clubs where slug = 'm85-demo-draft';
+create function pg_temp.draft(who uuid) returns text language sql as $$
+  select pg_temp.r(who, 'select ((select count(*) from clubs where slug = ''m85-demo-draft'') + (select count(*) from courts k join clubs c on c.id = k.club_id where c.slug = ''m85-demo-draft''))::text') $$;
+insert into t values
+  ('U15 unpublished demo club, switch off: not readable by visitors or players (club and court)', pg_temp.draft(null) = '0' and pg_temp.draft(pg_temp.u(1)) = '0', pg_temp.draft(null)),
+  ('U15 ...its staff and an admin read it', pg_temp.draft(pg_temp.u(2)) = '2' and pg_temp.draft(pg_temp.u(3)) = '2', '');
+update app_settings set value = 'true' where key = 'hide_demo_clubs';
+insert into t values
+  ('U15 unpublished demo club, switch on: still not readable by visitors or players', pg_temp.draft(null) = '0' and pg_temp.draft(pg_temp.u(1)) = '0', ''),
+  ('U15 ...its staff still read it', pg_temp.draft(pg_temp.u(2)) = '2', '');
+update app_settings set value = 'false' where key = 'hide_demo_clubs';
+
 -- ----------------------------------------------------------------- privileges unchanged
 insert into t values
   ('U14 the helper is still not callable by visitors directly',

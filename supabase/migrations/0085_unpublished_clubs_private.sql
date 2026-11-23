@@ -9,6 +9,9 @@
 --   - the club's staff and admins: every club, published or not (unchanged);
 --   - a player with history at the club (a booking, a game, a coach link) keeps reading it through
 --     club_readable_by_me (unchanged), so past bookings and games still show their club, courts and prices.
+--     Known and accepted for now (23 Nov review): that access is to the club's CURRENT rows, not a snapshot — such a
+--     player can see the club's present name, address, contact, courts, prices and photos while it is unpublished,
+--     including changes made after their booking or game. Narrowing it is a separate decision.
 -- Through the existing rules this covers: clubs, courts, price_rules, club_media and open games (read policies);
 -- club_discovery, club_day_slots, next_free_slot, quote_price, club_sports, match_board, match_detail, open_matches,
 -- coaches_at_club, coach_card, coaches_directory, and new games and price quotes at the club (refused as before for a
