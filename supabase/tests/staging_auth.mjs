@@ -10,7 +10,8 @@
 //   C. ban (pipeline step B, ban_duration 876000h): no new sign-in by password or code, no refresh; what an
 //      access token issued before the ban can still do until it expires (why the database lock-out exists)
 //   D. delete (pipeline step D): sign-in gone; a second delete and a ban of a deleted user answer exactly
-//      404 user_not_found (the only answer pipeline.ts treats as "already gone"); a code cannot be issued
+//      404 user_not_found (the only answer pipeline.ts treats as "already gone"); the reauth step's code request
+//      (shouldCreateUser:false) is refused and creates nothing
 //   E. the same email registered again is a NEW account id (nothing of the old one comes back)
 //   F. access-token lifetime (how long a stolen token outlives a closure)
 //
@@ -143,12 +144,14 @@ try {
     ban2.error?.status === 404 && ban2.error?.code === "user_not_found", errOf(ban2.error));
   const pd = await passwordSignIn(U.email);
   record("D5", "deleted: password sign-in refused", !!pd.error && !pd.data.session, errOf(pd.error));
-  const cd = await codeSignIn(U.email);
-  record("D6", "deleted: no sign-in code can be used (the app asks with shouldCreateUser:false)", !!cd.error && !cd.data?.session, `${cd.stage}: ${errOf(cd.error)}`);
+  // the reauth step's own call (website and app): no account → refused, nothing created, no email sent. (Not
+  // admin.generateLink: for an unknown email that CREATES the account — run 1 of this check showed it.)
+  const cd = await client().auth.signInWithOtp({ email: U.email, options: { shouldCreateUser: false } });
+  record("D6", "deleted: asking for a sign-in code with shouldCreateUser:false is refused", !!cd.error, errOf(cd.error));
   const gd = await admin.auth.getUser(tokenBefore);
   record("D7", "deleted: Auth refuses the old token", !!gd.error, errOf(gd.error));
   const leftover = sql(`select count(*) from auth.users where email = '${U.email}'`);
-  record("D8", "the code attempt did not recreate the account", leftover === "0", `${leftover} rows`);
+  record("D8", "asking for a code did not recreate the account", leftover === "0", `${leftover} rows`);
 
   // ---------------------------------------------------------------- E. same email again
   console.log("--- E. the same email registered again");
