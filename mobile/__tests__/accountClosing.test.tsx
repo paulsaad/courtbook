@@ -175,3 +175,10 @@ describe("the Delete account card", () => {
     expect(screen.queryByTestId("delete-account")).toBeNull();
   });
 });
+
+describe("approved closed wording (Paul, 23 Nov)", () => {
+  it("title and first sentence read exactly as approved", () => {
+    const { CLOSED_TITLE, CLOSED_TEXT } = require("../lib/accountClosing");
+    expect(`${CLOSED_TITLE} ${CLOSED_TEXT}`.startsWith("Your account is closed. We're processing the deletion of your data.")).toBe(true);
+  });
+});

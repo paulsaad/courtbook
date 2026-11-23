@@ -16,7 +16,7 @@ export const CONFIRM_TEXT =
   "without your name.";
 export const CLOSED_TITLE = "Your account is closed.";
 export const CLOSED_TEXT =
-  "You've been signed out. We're processing the deletion of your data. Records a club or the law needs us to keep, " +
+  "We're processing the deletion of your data. You've been signed out. Records a club or the law needs us to keep, " +
   "such as past bookings and payments, are kept without your name.";
 
 export const CLOSE_MESSAGES: Record<string, string> = {
