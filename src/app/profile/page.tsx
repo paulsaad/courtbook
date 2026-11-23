@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { allLoaded } from "@/lib/load";
 import ProfileForm from "./ProfileForm";
+import { loadRefDataChecked as loadRefData } from "@/lib/refData";
 
 export default async function ProfilePage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   const { next } = await searchParams;
@@ -15,6 +16,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
     supabase.from("coaches").select("*", { count: "exact", head: true }).eq("profile_id", user.id),
     supabase.rpc("my_levels"),
   ]), "your profile");
+  const ref = await loadRefData(supabase);
   const levels = Object.fromEntries(((lv ?? []) as { sport: string; level: number }[]).map((r) => [r.sport, r.level]));
   const isAdmin = p?.roles?.includes("admin") ?? false;
   const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
@@ -25,6 +27,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
       firstTime={!p?.name}
       sports={sports ?? []}
       levels={levels}
+      areas={ref.areas}
       manage={{ staffHref: isAdmin || (staffCount ?? 0) > 0 ? "/staff" : null, isAdmin, isCoach: (coachCount ?? 0) > 0, email: user.email ?? user.phone ?? "" }}
     />
   );

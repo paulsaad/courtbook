@@ -1,19 +1,23 @@
 import { useQuery } from "@tanstack/react-query";
+import { areaFilter, type PlayingArea } from "@shared/places";
 import { supabase } from "./supabase";
 import type { DaySlot } from "./courts";
 
 /** All Lebanon for now; the area filter comes with the Home screen. */
 export const BEIRUT = "Asia/Beirut";
 
-export function useDaySlots(date: string, sport: string | null) {
+/** One day's free starts. An area narrows it: the function filters by governorate or district; a town by name (0088). */
+export function useDaySlots(date: string, sport: string | null, area: PlayingArea | null = null) {
+  const f = areaFilter(area);
   return useQuery({
-    queryKey: ["day-slots", date, sport],
+    queryKey: ["day-slots", date, sport, f.p_governorate, f.p_district, f.townName],
     queryFn: async () => {
       const { data, error } = await supabase.rpc("club_day_slots", {
-        p_date: date, p_sport: sport, p_governorate: null, p_district: null, p_query: null,
+        p_date: date, p_sport: sport, p_governorate: f.p_governorate, p_district: f.p_district, p_query: null,
       });
       if (error) throw error;
-      return (data ?? []) as DaySlot[];
+      const rows = (data ?? []) as DaySlot[];
+      return f.townName ? rows.filter((r) => r.town === f.townName) : rows;
     },
   });
 }

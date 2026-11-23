@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 
 export type BookingDetail = {
   id: string; status: string; start_at: string; end_at: string; price_usd: number | null; fee_usd: number | null;
-  club: { name: string; slug: string; timezone: string; cancel_cutoff_hours: number; location_url: string | null; payment_mode: string | null };
+  club: { name: string; slug: string; timezone: string; cancel_cutoff_hours: number; location_url: string | null; payment_mode: string | null; lat?: number | string | null; lng?: number | string | null };
   court: { name: string; sport: string } | null;
 };
 
@@ -15,7 +15,7 @@ export function useBooking(id: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("bookings")
-        .select("id, status, start_at, end_at, price_usd, fee_usd, clubs(name, slug, timezone, cancel_cutoff_hours, location_url, payment_mode), courts!bookings_court_id_fkey(name, sport)")
+        .select("id, status, start_at, end_at, price_usd, fee_usd, clubs(name, slug, timezone, cancel_cutoff_hours, location_url, payment_mode, lat, lng), courts!bookings_court_id_fkey(name, sport)")
         .eq("id", id!)
         .maybeSingle();
       if (error) throw error;

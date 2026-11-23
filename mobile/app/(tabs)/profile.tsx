@@ -82,6 +82,14 @@ export default function Profile() {
         </View>
       )}
       {session.status === "signed-in" ? <ActivityLink /> : null}
+      {session.status === "signed-in" ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="Where I play" onPress={() => router.push("/areas")}
+                   style={({ pressed }) => [styles.card, styles.activity, pressed && { opacity: 0.85 }]} testID="profile-areas">
+          <Icon name="pin" size={22} color={color.cedarDeep} />
+          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.activityText}>Where I play</Text>
+          <Icon name="chevronRight" size={20} color={color.muted} />
+        </Pressable>
+      ) : null}
       <Pressable accessibilityRole="button" accessibilityLabel="Help & Feedback" onPress={() => router.push("/help")}
                  style={({ pressed }) => [styles.card, styles.activity, pressed && { opacity: 0.85 }]} testID="profile-help">
         <Icon name="info" size={22} color={color.cedarDeep} />
