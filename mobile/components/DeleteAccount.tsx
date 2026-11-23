@@ -52,8 +52,8 @@ export function DeleteAccount() {
       {state ? (
         <>
           <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.body}>
-            You asked to delete your account on {date}. We will delete it soon and email you when it is done. Until then you can't
-            make new bookings or join games.
+            You asked to delete your account on {date}. We will delete it soon. Until then you can't
+            make new bookings, join games or send messages.
           </Text>
           {state.status === "requested" ? <Button label="Keep my account" variant="secondary" busy={busy} onPress={cancel} testID="delete-account-cancel" /> : null}
         </>

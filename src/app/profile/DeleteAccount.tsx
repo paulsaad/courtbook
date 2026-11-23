@@ -54,7 +54,7 @@ export default function DeleteAccount() {
         <>
           <p className="text-sm">
             You asked to delete your account on {new Date(state.requested_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}.
-            We will delete it soon and email you when it is done. Until then you cannot make new bookings or join games.
+            We will delete it soon. Until then you cannot make new bookings, join games or send messages.
           </p>
           {state.status === "requested" && (
             <button type="button" onClick={cancel} disabled={busy} className="btn btn-secondary">{busy ? "Cancelling…" : "Keep my account (cancel the request)"}</button>
