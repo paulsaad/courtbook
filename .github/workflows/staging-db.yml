@@ -329,13 +329,11 @@ jobs:
       - name: Hide demo clubs on staging (m7_demo_hidden_on)
         if: inputs.action == 'm7_demo_hidden_on'
         run: |
-          psql "$DB" -v ON_ERROR_STOP=1 -c "insert into app_settings (key, value) values ('hide_demo_clubs', 'true') on conflict (key) do update set value = 'true'"
-          bash .github/scripts/run-check.sh "$DB" supabase/live/demo_switch_check.sql all
+          bash .github/scripts/demo-switch.sh "$DB" on
       - name: Show demo clubs on staging again (m7_demo_hidden_off)
         if: inputs.action == 'm7_demo_hidden_off'
         run: |
-          psql "$DB" -v ON_ERROR_STOP=1 -c "update app_settings set value = 'false' where key = 'hide_demo_clubs'"
-          bash .github/scripts/run-check.sh "$DB" supabase/live/demo_switch_check.sql all
+          bash .github/scripts/demo-switch.sh "$DB" off
       - name: Block rules as a desk account, rolled back (blocks_functional)
         if: inputs.action == 'blocks_functional'
         run: |

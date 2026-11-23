@@ -131,10 +131,10 @@ echo "--- S4. staff and past times on today's real clock (release fix 0071): wal
 HAS_0071=$(q admin "select (prosrc like '%walk_in_too_old%')::text from pg_proc where proname='staff_book' and pronamespace='public'::regnamespace")
 FOK=$(q admin "select (to_char(date_bin('30 minutes', now(), '2000-01-01') at time zone 'Asia/Beirut', 'HH24:MI') between '11:00' and '21:30')::text")
 t() { echo "(date_bin('30 minutes', now(), '2000-01-01') + interval '$1 minutes')"; }
-BUSY=$(q admin "select count(*) from bookings where court_id in ('$COURT','$COURT2','$COURT3') and status in ('confirmed','pending') and tstzrange(start_at, end_at) && tstzrange($(t -180), $(t 90)) and coalesce(created_by::text,'') not in ('$U1','$U2')")
+BUSY=$(q admin "select count(*) from bookings where court_id in ('$COURT','$COURT2','$COURT3') and status in ('confirmed','pending') and tstzrange(start_at, end_at) && tstzrange($(t -180), $(t 90)) and coalesce(created_by::text,'') not in ('$U1','$U2')) + (select count(*) from blocks where court_id in ('$COURT','$COURT2','$COURT3') and period && tstzrange($(t -180), $(t 90)))")
 if [ "$HAS_0071" != "true" ]; then echo "  (0071 not applied: S4 skipped)"
 elif [ "$FOK" != "true" ]; then echo "  (S4 needs the club's hours around now — run between 11:00 and 22:00 Beirut; skipped)"
-elif [ "$BUSY" != "0" ]; then echo "  (S4 skipped: Padel 1–3 have other bookings between 3 h ago and 1 h 30 ahead)"
+elif [ "$BUSY" != "0" ]; then echo "  (S4 skipped: Padel 1–3 have other bookings or calendar blocks between 3 h ago and 1 h 30 ahead)"
 else
   W1=$(q $U1 "select staff_book('$CLUB','$COURT', $(t -60), $(t 30), 'smoke-walkin', null);")
   check admin "S4a walk-in that started 60–89 min ago: accepted" "select status from bookings where id='$W1';" confirmed

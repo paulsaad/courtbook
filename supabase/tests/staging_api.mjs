@@ -171,6 +171,8 @@ try {
   record("B6", "three simultaneous app calls with one token: one booking", ids.size === 1 && !ids.has(undefined) && sql(`select count(*) from bookings where client_token='${T4}'`) === "1", hb.map((r) => errOf(r) ?? "ok").join(","));
   const h3 = await app(U1, COURT3, "20:00", "21:00", T4);
   record("B7", "same token, different court: refused", errOf(h3)?.includes("token_reused"), errOf(h3) ?? "no error");
+  const busy = sql(`select (select count(*) from blocks where court_id='${COURT}' and period && tstzrange('${at("15:00")}','${at("16:00")}')) || ' block(s), ' || (select count(*) from bookings where court_id='${COURT}' and status in ('confirmed','pending') and tstzrange(start_at, end_at) && tstzrange('${at("15:00")}','${at("16:00")}')) || ' booking(s)'`);
+  if (busy !== "0 block(s), 0 booking(s)") throw new Error(`B8 needs Padel 1 free on ${day} 15:00–16:00 Beirut; it has ${busy} (staging data, not a test result)`);
   const [c1, c2] = await Promise.all([app(U1, COURT, "15:00", "16:00", randomUUID()), app(U2, COURT, "15:00", "16:00", randomUUID())]);
   const okB = [c1, c2].filter((r) => !r.error);
   record("B8", "two players hold the same slot at the same moment: one hold, the other slot_taken",

@@ -52,7 +52,7 @@ step launch1_postcheck 1; rep "R12 launch1_postcheck fails the job if the age sw
 P -c "update app_settings set value = 'false' where key = 'require_age_confirmation'" >/dev/null
 P -c "drop policy \"courts: read\" on courts; create policy \"courts: read\" on courts for select using (true)" >/dev/null
 step m7_demo_hidden_on 1; rc=$?
-rep "R13 the switch check fails the job when hiding does not work (courts readable)" "$([ $rc != 0 ] && echo true)" "rc $rc"
+rep "R13 the switch check fails the job when hiding does not work (courts readable), and the switch is put back off" "$([ $rc != 0 ] && [ "$(P -c "select value from app_settings where key = 'hide_demo_clubs'")" = false ] && grep -q 'put back to: false' /tmp/launch1_step.out && echo true)" "rc $rc $(grep -E '::error' /tmp/launch1_step.out | tail -1)"
 P -c "drop trigger match_messages_deletion_guard on match_messages" >/dev/null
 step launch1_postcheck 1; rep "R14 launch1_postcheck fails the job on a missing trigger" "$([ $? != 0 ] && echo true)" ""
 $PSQL -q -d postgres -c "drop database if exists $DBN" >/dev/null 2>&1
