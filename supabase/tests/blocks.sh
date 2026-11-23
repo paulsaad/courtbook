@@ -38,6 +38,7 @@ insert into clubs (name, slug, timezone, slot_minutes, open_time, close_time, mi
   values ('Night Club', 'night', 'Asia/Beirut', 30, '00:00', '24:00', 60, 120, 'at_desk');
 insert into courts (club_id, name, sport) select id, 'N1', 'padel' from clubs where slug='night';
 insert into club_staff (club_id, profile_id) select id, '$DESK' from clubs where slug='night';
+insert into price_rules (club_id, weekday_mask, start_time, end_time, price_usd) select id, 127, '00:00', '24:00', 20 from clubs where slug='night';   -- desk bookings there need a price (A9j)
 insert into courts (club_id, name, sport, active) select id, 'Closed court', 'padel', false from clubs where slug='batroun';
 SQL
 CLUB=$($P -c "select id from clubs where slug='batroun'")
@@ -118,8 +119,12 @@ expect_err $DESK   "A9e 23:30-00:30 runs past midnight: refused"               "
 expect     $DESK   "A9f clocks go back ($FALL): 22:00-24:00 saved"            "$(sb $NIGHT $N1 "$(nb $FALL 22:00)" "$(mid $FALL)")" saved
 [ "$(len)" = "03:00:00" ] && ok "A9g ...as the 3 real hours of that wall-clock interval" || bad "A9g" "$(len)"
 expect     $DESK   "A9h clocks go forward ($SPRING): 22:00-23:30 saved"       "$(sb $NIGHT $N1 "$(nb $SPRING 22:00)" "$(nb $SPRING 23:30)")" saved
-expect_err $DESK   "A9i clocks go forward: 23:30-24:00 refused (known, as for bookings: the day ends at 01:00 that night)" "$(sb $NIGHT $N1 "$(nb $SPRING 23:30)" "$(mid $SPRING)")" outside_opening_hours
-expect_err $DESK   "A9j ...a desk booking ending at that midnight is refused the same way (unchanged booking rule)" "select staff_book('$NIGHT','$N1', $(nb $SPRING 23:00), $(mid $SPRING), 'W', null);" outside_opening_hours
+# 0084: an end at the first instant of the next day is that day's 24:00, also on the spring night (fixed; was refused)
+expect     $DESK   "A9i clocks go forward: 23:30-24:00 saved (0084: the night's midnight is the next day's first instant)" "$(sb $NIGHT $N1 "$(nb $SPRING 23:30)" "$(mid $SPRING)")" saved
+clear_court $N1
+expect_err $DESK   "A9j2 ...but nothing past it: 23:30-01:30 next day still refused" "$(sb $NIGHT $N1 "$(nb $SPRING 23:30)" "(('$SPRING'::date + 1)::timestamp + time '01:30') at time zone 'Asia/Beirut'")" outside_opening_hours
+clear_court $N1
+expect     $DESK   "A9j a desk booking 23:00-24:00 that night is taken (same rule for bookings)" "select 'booked' from staff_book('$NIGHT','$N1', $(nb $SPRING 23:00), $(mid $SPRING), 'W', null);" booked
 clear_court $N1
 
 echo "  grid and opening hours, in each club's own time zone"
