@@ -182,3 +182,10 @@ describe("approved closed wording (Paul, 23 Nov)", () => {
     expect(`${CLOSED_TITLE} ${CLOSED_TEXT}`.startsWith("Your account is closed. We're processing the deletion of your data.")).toBe(true);
   });
 });
+
+describe("what is deleted is described in full (M14 data included)", () => {
+  it("the app's confirmation names favourite clubs and saved playing areas, as the website does", () => {
+    const { CONFIRM_TEXT } = require("../lib/accountClosing");
+    expect(CONFIRM_TEXT).toMatch(/favourite clubs, saved playing areas/);
+  });
+});
