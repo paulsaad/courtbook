@@ -209,6 +209,90 @@ const moneyWithoutBooking = () => one(`select count(*)::int from payments p join
   rep("B14 never: money taken without a booking or a refund owed (whole database)", (await moneyWithoutBooking()) === 0);
 }
 
+// ================================================================== 2B-fee. Model 2 through the API (M12.1, 0093)
+section("2B-fee court at the desk, CourtBook fee online (fee_online): grants, RLS and the attempt path through the API");
+{
+  const ADMIN = U(9);
+  await q("insert into auth.users (id, phone) values ($1, '+96170990009') on conflict do nothing", [ADMIN]);
+  await q("update profiles set roles = '{player,admin}', rules_accepted_at = now(), age_confirmed_at = now(), age_confirmed_via = 'app' where id = $1", [ADMIN]);
+  const admin = asUser(ADMIN);
+  await q("update clubs set payment_mode = 'fee_online', service_fee_usd = 1, max_upcoming_bookings = 20 where id = $1", [CLUB]);
+  const F = async (hhmm) => at(6, hhmm);
+  const feeHold = async (client, court, s, e) => { asApp(client); return reserve(newAttempt({ mode: "fee_online", clubId: CLUB, courtId: court, start: new Date(s), end: new Date(e) })); };
+  const payRow = async (bookingId) => (await q("select id, kind, amount_usd::float as amount, fee_usd::float as fee, total_usd::float as total, status from payments where booking_id = $1", [bookingId]))[0];
+  let key = 0; const newKey = () => `a1fee000-0000-4000-8000-${String(++key).padStart(12, "0")}`;
+
+  const h = await feeHold(p1, COURT, await F("09:00"), await F("10:00"));
+  const pr = await payRow(h.value.bookingId);
+  rep("BF1 a fee_online hold through the API: a fee-only payment of exactly $1 (court $ frozen on the booking, paid at the desk)",
+    h.kind === "reserved" && pr.kind === "fee_only" && pr.amount === 0 && pr.fee === 1 && pr.total === 1 && (await row(h.value.bookingId)).price > 0, { h: h.kind, pr });
+
+  const k1 = newKey();
+  const st1 = await p1.rpc("start_payment_attempt", { p_payment: pr.id, p_request: k1 });
+  const st1b = await p1.rpc("start_payment_attempt", { p_payment: pr.id, p_request: k1 });
+  const attemptId = st1.data?.[0]?.attempt_id;
+  rep("BF2 the player starts an attempt through the API; the same request key gives the same attempt", !st1.error && attemptId && st1b.data?.[0]?.attempt_id === attemptId && st1b.data?.[0]?.already === true, { e: st1.error?.message });
+  const stOther = await p2.rpc("start_payment_attempt", { p_payment: pr.id, p_request: newKey() });
+  rep("BF3 another player cannot start one on it", /not_found/.test(stOther.error?.message ?? ""), stOther.error?.message);
+
+  const forged = await p1.rpc("record_attempt_result", { p_attempt: attemptId, p_result: "succeeded", p_provider_ref: "forged", p_amount: 1, p_currency: "USD" });
+  const forged2 = await p1.rpc("reconcile_provider_charge", { p_provider: "simulated", p_external_ref: attemptId, p_provider_ref: "forged", p_amount: 1, p_currency: "USD" });
+  const forged3 = await anon.rpc("record_attempt_result", { p_attempt: attemptId, p_result: "succeeded", p_provider_ref: "forged", p_amount: 1, p_currency: "USD" });
+  const forged4 = await staff.rpc("open_payment_attempt", { p_attempt: attemptId, p_session_url: "https://evil.example", p_provider_session: "x" });
+  rep("BF4 no player, visitor or club staff can record a provider result, reconcile, or open an attempt (service only)",
+    !!forged.error && !!forged2.error && !!forged3.error && !!forged4.error && (await row(h.value.bookingId)).status === "pending",
+    [forged.error?.message, forged2.error?.message, forged3.error?.message, forged4.error?.message]);
+
+  const ok = await service.rpc("record_attempt_result", { p_attempt: attemptId, p_result: "succeeded", p_provider_ref: `SIM-${attemptId}`, p_amount: 1, p_currency: "USD" });
+  const again = await service.rpc("record_attempt_result", { p_attempt: attemptId, p_result: "succeeded", p_provider_ref: `SIM-${attemptId}`, p_amount: 1, p_currency: "USD" });
+  rep("BF5 the server records the provider's success: confirmed; the repeat is already_recorded", ok.data === "confirmed" && again.data === "already_recorded" && (await row(h.value.bookingId)).status === "confirmed", { ok, again });
+
+  const day6 = (await staffDay(staff, 6)).rows.find((x) => x.id === h.value.bookingId);
+  rep("BF6 the desk calendar says the court is still due at the desk and the fee was paid online (never 'paid in the app')",
+    day6 && settlement(day6) === "fee_paid" && /court due at the desk/.test(SETTLEMENT_TEXT[settlement(day6)]), day6 && settlement(day6));
+
+  const myAttempts = await p1.from("payment_attempts").select("id");
+  const theirAttempts = await p2.from("payment_attempts").select("id");
+  const staffAttempts = await staff.from("payment_attempts").select("id");
+  const charges = [await p1.from("fee_charges").select("id"), await staff.from("fee_charges").select("id"), await admin.from("fee_charges").select("id")];
+  rep("BF7 a player reads only their own attempts; fee charges are visible to admins only",
+    (myAttempts.data ?? []).some((a) => a.id === attemptId) && (theirAttempts.data ?? []).length === 0 && (staffAttempts.data ?? []).length === 0
+    && charges[0].data?.length === 0 && charges[1].data?.length === 0 && (charges[2].data ?? []).length >= 1,
+    { mine: myAttempts.data?.length, theirs: theirAttempts.data?.length, staff: staffAttempts.data?.length, ch: charges.map((c) => c.data?.length ?? c.error?.message) });
+
+  const pc = await p1.rpc("cancel_booking", { p_booking: h.value.bookingId });
+  rep("BF8 the player cancels: the fee is kept (payment still paid, its charge kept)", !pc.error && (await row(h.value.bookingId)).payment === "paid"
+    && (await one("select disposition from fee_charges where attempt_id = $1", [attemptId])) === "kept", pc.error?.message);
+
+  // club-caused: owed back; only an admin records the refund
+  const h2 = await feeHold(p2, COURT2, await F("11:00"), await F("12:00"));
+  const pr2 = await payRow(h2.value.bookingId);
+  await q("update payments set provider = 'whish' where id = $1", [pr2.id]);   // real money, so it can be refunded
+  const a2 = (await p2.rpc("start_payment_attempt", { p_payment: pr2.id, p_request: newKey() })).data?.[0]?.attempt_id;
+  await service.rpc("record_attempt_result", { p_attempt: a2, p_result: "succeeded", p_provider_ref: "W-journey-1", p_amount: 1, p_currency: "USD" });
+  const cc = await staff.rpc("cancel_booking", { p_booking: h2.value.bookingId, p_club_caused: true });
+  const charge2 = await one("select id from fee_charges where attempt_id = $1", [a2]);
+  const staffMark = await staff.rpc("mark_refunded", { p_payment: pr2.id });
+  const staffDone = await staff.rpc("complete_fee_refund", { p_charge: charge2, p_amount: 1, p_method: "provider_portal", p_reference: "WR-journey" });
+  const staffQueue = await staff.rpc("refunds_due");
+  const adminQueue = await admin.rpc("fee_refunds_due");
+  rep("BF9 club-caused cancellation: the fee is owed back; the club cannot mark it refunded and does not see it in its queue; the admin does",
+    !cc.error && /courtbook_fee_refund/.test(staffMark.error?.message ?? "") && /forbidden/.test(staffDone.error?.message ?? "")
+    && !(staffQueue.data ?? []).some((r) => r.payment_id === pr2.id) && (adminQueue.data ?? []).some((r) => r.charge_id === charge2),
+    { cc: cc.error?.message, staffMark: staffMark.error?.message, staffDone: staffDone.error?.message });
+  const done = await admin.rpc("complete_fee_refund", { p_charge: charge2, p_amount: 1, p_method: "provider_portal", p_reference: "WR-journey" });
+  const twice = await admin.rpc("complete_fee_refund", { p_charge: charge2, p_amount: 1, p_method: "provider_portal", p_reference: "WR-journey" });
+  rep("BF10 the admin records the refund once (amount, method, reference); the repeat is a no-op",
+    done.data === "refunded" && twice.data === "already_refunded" && (await row(h2.value.bookingId)).payment === "refunded", { done, twice });
+
+  await q("update clubs set service_fee_usd = 0 where id = $1", [CLUB]);
+  const z = await feeHold(p1, COURT2, await F("14:00"), await F("15:00"));
+  rep("BF11 a $0 fee through the API: confirmed at once, no payment row", z.kind === "reserved" && z.value.confirmed !== false
+    && (await row(z.value.bookingId)).status === "confirmed" && Number(await one("select count(*) from payments where booking_id = $1", [z.value.bookingId])) === 0, z);
+  await q("update clubs set service_fee_usd = 1 where id = $1", [CLUB]);
+  rep("BF12 never: money taken without a booking or a refund owed (whole database)", (await moneyWithoutBooking()) === 0);
+}
+
 // ================================================================== 2C. staff journey (phone, WhatsApp, walk-in)
 section("2C staff bookings: phone, WhatsApp, walk-in");
 await q("update clubs set payment_mode = 'at_desk' where id = $1", [CLUB]);
