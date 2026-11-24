@@ -37,16 +37,19 @@ const tap = async () => {
 };
 
 describe("PayPanel fee button: one request key per tap, kept until the outcome is known", () => {
-  it("in progress, uncertain, a lost answer or an unreadable one: the next tap sends the SAME key", async () => {
+  it("in progress, uncertain, a lost or unreadable answer, or an unresolved state: the next tap sends the SAME key", async () => {
     answers = [
       { status: 409, body: { error: "payment_in_progress", final: false } },
       { status: 502, body: { error: "payment_uncertain", final: false } },
       "network",
       { status: 500, body: "<html>" },
+      { status: 200, body: { attempt: "a", state: "open" } },        // open without a usable payment page
+      { status: 200, body: { attempt: "a", state: "starting" } },
+      { status: 200, body: { attempt: "a", state: "something new" } },
       { status: 200, body: { attempt: "a", state: "failed" } },
     ];
     render(<PayPanel {...props} />);
-    for (let i = 0; i < 5; i++) await tap();
+    for (let i = 0; i < 8; i++) await tap();
     expect(new Set(sentKeys).size).toBe(1);
   });
   it("a finished attempt or a final refusal: the next tap is a new attempt with a new key", async () => {

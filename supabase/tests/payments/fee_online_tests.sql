@@ -254,6 +254,20 @@ insert into t values ('R6 a callback (or anything posing as the provider) still 
   pg_temp.got('x_cb') = 'ERR attempt_evidence_conflict' and pg_temp.got('x_amt') = 'ERR charge_evidence_conflict'
   and pg_temp.charges(pg_temp.py('rc_h')) = 'kept,refund_due:extra_charge', pg_temp.got('x_cb') || ' / ' || pg_temp.got('x_amt'));
 
+-- review of PR #34 at 45f53dd: a reference already recorded counts as recorded only if amount, currency AND attempt agree
+select pg_temp.keep('y_other_attempt', pg_temp.s(format('select reconcile_provider_charge(''simulated'', %L, ''R-1'', 1.00, ''USD'')', pg_temp.aid('a3'))));
+select pg_temp.keep('y_unmatched_vs_attempt', pg_temp.s($$select reconcile_provider_charge('simulated', 'not-an-attempt', 'R-1', 1.00, 'USD')$$));
+select pg_temp.keep('y_un_first', pg_temp.s($$select reconcile_provider_charge('simulated', 'not-ours-777', 'R-UN-S', 1.00, 'USD')$$));
+select pg_temp.keep('y_attempt_vs_unmatched', pg_temp.s(format('select reconcile_provider_charge(''simulated'', %L, ''R-UN-S'', 1.00, ''USD'')', pg_temp.aid('rc_a'))));
+select pg_temp.keep('y_cur', pg_temp.s($$select reconcile_provider_charge('whish', 'not-ours-123', 'R-UN-1', 1.00, 'EUR')$$));
+insert into t values ('R7 the same provider reference under another attempt, under no attempt, or in another currency is a conflict, never already_recorded',
+  pg_temp.got('y_other_attempt') = 'ERR charge_evidence_conflict' and pg_temp.got('y_unmatched_vs_attempt') = 'ERR charge_evidence_conflict'
+  and pg_temp.got('y_cur') = 'ERR charge_evidence_conflict'
+  and pg_temp.got('y_un_first') = 'unmatched' and pg_temp.got('y_attempt_vs_unmatched') = 'ERR charge_evidence_conflict'
+  and (select count(*) from fee_charges where provider_ref in ('R-1', 'R-UN-1', 'R-UN-S')) = 3
+  and (select attempt_id from fee_charges where provider_ref = 'R-UN-S') is null,
+  concat_ws(' / ', pg_temp.got('y_other_attempt'), pg_temp.got('y_unmatched_vs_attempt'), pg_temp.got('y_attempt_vs_unmatched'), pg_temp.got('y_cur')));
+
 -- review of PR #34, corrections 2 and 3: one unresolved attempt at a time; a provider timeout is not a failure
 select pg_temp.keep('u_h', pg_temp.hold(15, 3, 4, '10:00', '11:00'));
 select pg_temp.keep('u_a1', pg_temp.att(15, pg_temp.py('u_h'), 70));          -- the provider call then times out: no answer
@@ -405,7 +419,7 @@ insert into t select 'I6 still exactly one live booking per slot (no overlap on 
   not exists (select 1 from bookings a join bookings b on a.court_id = b.court_id and a.id < b.id and a.status in ('confirmed', 'pending') and b.status in ('confirmed', 'pending') and a.period && b.period), null;
 
 -- every check above produced its row (a check reading a row that a mistake removed must fail, not vanish)
-insert into t select 'Z1 all 58 checks ran', (select count(*) from t) = 58, (select count(*) from t)::text;
+insert into t select 'Z1 all 59 checks ran', (select count(*) from t) = 59, (select count(*) from t)::text;
 
 select case when coalesce(pass, false) then 'ok   ' else 'FAIL ' end || id || case when coalesce(pass, false) then '' else '  [' || coalesce(detail, '') || ']' end from t order by left(id, 1), (regexp_replace(split_part(id, ' ', 1), '\D', '', 'g'))::int;
 select format('%s checks, %s failed', count(*), count(*) filter (where not coalesce(pass, false))) from t;

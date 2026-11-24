@@ -19,6 +19,10 @@ type Props = {
   lastAttempt?: { status: string; outcome: string | null } | null; attemptsLeft?: number;
 };
 
+/** Attempt states after which this tap is over. Any other ("starting", "open" — even without a usable payment page —
+ *  or one this page does not know) keeps the request key, so the next tap asks about the same attempt. */
+const FINISHED = new Set(["succeeded", "failed", "expired"]);
+
 /** What the latest fee attempt came to, in the player's words (null: nothing worth saying). */
 export function attemptNotice(a: Props["lastAttempt"], left: number): string | null {
   if (!a) return null;
@@ -64,7 +68,7 @@ export default function PayPanel(p: Props) {
     // The key is forgotten only once this tap's outcome is known: a finished attempt (outcome / state) or a refusal the
     // server marks final. "In progress", "uncertain" or an unreadable answer keep it, so the next tap asks about the
     // SAME attempt instead of starting another (review of PR #34).
-    if (json.outcome || json.state || json.final === true) setRequestKey(null);
+    if (json.outcome || FINISHED.has(json.state ?? "") || json.final === true) setRequestKey(null);
     setBusy(false);
     if (!res.ok) { setError(friendlyError(json.error ?? "Payment failed.")); router.refresh(); return; }
     router.refresh();                                      // shows what happened to this attempt (attemptNotice)

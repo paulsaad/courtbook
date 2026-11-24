@@ -427,7 +427,82 @@ async function feeRaces() {
     rep(`F13 provider records versus callback, two charges on one attempt [${mode}]: confirmed once, never two kept charges`,
       (okA || okB) && st.booking === "confirmed" && (ch === "kept,refund_due:extra_charge" || ch === "kept"), `${out(ra)} | ${out(rb)} | ${ch}`);
   }
-  await invariants("F11");
+  // F14 (review of PR #34 at 45f53dd). Two reconciliation runs see the same provider reference as absent at once.
+  //      Only one charge is recorded; the other run is "already recorded" ONLY if its evidence agrees, and otherwise a
+  //      conflict — never a success.
+  const rec = (ext, ref, amount, currency = "USD", provider = "simulated") =>
+    ["service", "select reconcile_provider_charge($1, $2, $3, $4, $5) as r", [provider, ext, ref, amount, currency]];
+  const isConflict = (x) => !x.ok && /charge_evidence_conflict/.test(x.err);
+  // a fresh player per hold: the club caps upcoming bookings per player (at most 20), and F14 confirms many
+  let pn = 100;
+  const newPlayer = async () => {
+    const id = U(++pn);
+    await q("insert into auth.users (id, phone) values ($1, $2) on conflict do nothing", [id, `+9617${String(pn).padStart(7, "0")}`]);
+    await q("update profiles set rules_accepted_at = now(), age_confirmed_at = now(), age_confirmed_via = 'app' where id = $1", [id]);
+    return id;
+  };
+  const one1 = async (ref) => (await q("select amount::float as amount, currency, attempt_id, reason from fee_charges where provider_ref = $1", [ref]));
+  for (const mode of MODES) {
+    const tag = `${mode}-${Math.random().toString(36).slice(2, 8)}`;
+    // a) a charge nobody can match, reported twice with conflicting amounts
+    let ref = `F14a-${tag}`;
+    let [ra, rb] = await race(mode, rec("not-ours", ref, 1), rec("not-ours", ref, 5));
+    let rows = await one1(ref);
+    rep(`F14a one unmatched reference, conflicting amounts at once [${mode}]: one recorded, the other a conflict`,
+      rows.length === 1 && ((out(ra) === "unmatched" && isConflict(rb) && rows[0].amount === 1) || (out(rb) === "unmatched" && isConflict(ra) && rows[0].amount === 5)),
+      `${out(ra)} | ${out(rb)} | ${JSON.stringify(rows)}`);
+    // a') control: the same evidence twice at once is recorded once and the repeat says so
+    ref = `F14a2-${tag}`;
+    [ra, rb] = await race(mode, rec("not-ours", ref, 1), rec("not-ours", ref, 1));
+    rep(`F14a' the same unmatched evidence twice at once [${mode}]: recorded once, the repeat is already_recorded`,
+      JSON.stringify([out(ra), out(rb)].sort()) === JSON.stringify(["already_recorded", "unmatched"]) && (await one1(ref)).length === 1, `${out(ra)} | ${out(rb)}`);
+    // a'') same reference, another currency
+    ref = `F14a3-${tag}`;
+    [ra, rb] = await race(mode, rec("not-ours", ref, 1, "USD"), rec("not-ours", ref, 1, "LBP"));
+    rep(`F14a'' one reference, two currencies at once [${mode}]: one recorded, the other a conflict`,
+      (await one1(ref)).length === 1 && (isConflict(ra) !== isConflict(rb)), `${out(ra)} | ${out(rb)}`);
+
+    // b) one unpaid attempt, the same reference with conflicting amounts
+    let court = await newCourt();
+    let pl = await newPlayer();
+    let h = await holdAs(pl, court);
+    let att = await attempt(pl, h.payment_id);
+    ref = `F14b-${tag}`;
+    [ra, rb] = await race(mode, rec(att, ref, 1), rec(att, ref, 2));
+    rows = await one1(ref);
+    rep(`F14b one attempt, one reference, conflicting amounts at once [${mode}]: one outcome recorded, the other a conflict`,
+      rows.length === 1 && (isConflict(ra) !== isConflict(rb)) && [ra, rb].some((x) => x.ok), `${out(ra)} | ${out(rb)} | ${JSON.stringify(rows)}`);
+
+    // c) the same reference reported against two DIFFERENT attempts (two players' holds)
+    court = await newCourt();
+    const plA = await newPlayer(), plB = await newPlayer();
+    h = await holdAs(plA, court);
+    const court2 = await newCourt();
+    const h2 = await holdAs(plB, court2);
+    const att1 = await attempt(plA, h.payment_id), att2 = await attempt(plB, h2.payment_id);
+    ref = `F14c-${tag}`;
+    [ra, rb] = await race(mode, rec(att1, ref, 1), rec(att2, ref, 1));
+    rows = await one1(ref);
+    const b1 = (await state(h.booking_id)).booking, b2 = (await state(h2.booking_id)).booking;
+    rep(`F14c one reference against two different attempts at once [${mode}]: one confirms, the other is a conflict and its booking is untouched`,
+      rows.length === 1 && ((out(ra) === "confirmed" && isConflict(rb) && b1 === "confirmed" && b2 === "pending" && rows[0].attempt_id === att1)
+        || (out(rb) === "confirmed" && isConflict(ra) && b2 === "confirmed" && b1 === "pending" && rows[0].attempt_id === att2)),
+      `${out(ra)} | ${out(rb)} | ${b1}/${b2} | ${JSON.stringify(rows)}`);
+
+    // d) a paid attempt: a second charge reported twice at once with conflicting amounts
+    court = await newCourt();
+    pl = await newPlayer();
+    h = await holdAs(pl, court);
+    att = await attempt(pl, h.payment_id);
+    await solo(...result(att, `F14d-own-${tag}`));
+    ref = `F14d-${tag}`;
+    [ra, rb] = await race(mode, rec(att, ref, 1), rec(att, ref, 3));
+    rows = await one1(ref);
+    rep(`F14d a paid attempt, one extra reference, conflicting amounts at once [${mode}]: one extra charge, the other a conflict; the booking untouched`,
+      rows.length === 1 && rows[0].reason === "extra_charge" && (isConflict(ra) !== isConflict(rb)) && [out(ra), out(rb)].includes("extra_charge")
+      && (await state(h.booking_id)).booking === "confirmed", `${out(ra)} | ${out(rb)} | ${JSON.stringify(rows)}`);
+  }
+  await invariants("F14");
 }
 
 const left = await one("select count(*) from bookings where status = 'pending' and hold_expires_at < now() - interval '1 hour'");

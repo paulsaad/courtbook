@@ -198,6 +198,14 @@ describe("POST /api/pay/start", () => {
       expect(provider.startAttempt).not.toHaveBeenCalled();
       expect(calls.filter((c) => c.fn === "start_payment_attempt")).toHaveLength(1);
     });
+    it("open but with no usable payment page: 'in progress', not final, no new attempt", async () => {
+      userRpc.start_payment_attempt = [inProgress];
+      unresolvedRow = { id: OPEN, status: "open", session_url: null, outcome: null, provider: "whish" };
+      attemptReads = [{ id: OPEN, status: "open", session_url: null }];
+      const res = await start.POST(post("/api/pay/start", { paymentId: PAY, requestKey: KEY }));
+      expect([res.status, await res.json()]).toEqual([409, { error: "payment_in_progress", final: false }]);
+      expect(provider.startAttempt).not.toHaveBeenCalled();
+    });
     it("still starting and the provider cannot say: 'in progress', not final, no new attempt", async () => {
       userRpc.start_payment_attempt = [inProgress];
       unresolvedRow = { id: OPEN, status: "starting", session_url: null, outcome: null, provider: "whish" };

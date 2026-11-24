@@ -459,11 +459,39 @@ begin
     where id = p.id;
   end if;
   return v_outcome;
+exception when unique_violation then
+  -- the same provider reference was recorded by another transaction meanwhile (on another attempt): everything this
+  -- call did is undone, and it is refused by name, never answered as a success
+  declare v_constraint text;
+  begin
+    get stacked diagnostics v_constraint = constraint_name;
+    if v_constraint in ('fee_charges_provider_provider_ref_key', 'payment_attempts_provider_provider_ref_key') then
+      raise exception 'duplicate_provider_ref';
+    end if;
+    raise;
+  end;
 end $$;
 
 -- ------------------------------------------------------------------ 8. reconciliation (server only)
 -- A successful charge seen in the provider's own records. Known attempt → the same path as a callback. Unknown →
 -- recorded as a charge owed back ('unmatched'). Running it again for the same charge changes nothing.
+--
+-- The same provider reference may already be recorded (an earlier run, or a concurrent one whose insert won). It is
+-- "already recorded" only if the evidence agrees: same amount, same currency, same attempt (none for an unmatched
+-- charge). Anything else is contradictory financial evidence and is refused (charge_evidence_conflict), never answered
+-- as a success. Checked before the locks, after them, and after an insert that lost to a concurrent one (review of
+-- PR #34 at 45f53dd).
+create or replace function fee_charge_already_recorded(p_provider text, p_ref text, p_amount numeric, p_currency text, p_attempt uuid)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare c fee_charges%rowtype;
+begin
+  select * into c from fee_charges where provider = p_provider and provider_ref = p_ref;
+  if not found then return false; end if;
+  if c.amount = p_amount and c.currency = p_currency and c.attempt_id is not distinct from p_attempt then return true; end if;
+  raise exception 'charge_evidence_conflict';
+end $$;
+revoke all on function fee_charge_already_recorded(text, text, numeric, text, uuid) from public, anon, authenticated, service_role;
+
 create or replace function reconcile_provider_charge(p_provider text, p_external_ref text, p_provider_ref text,
                                                      p_amount numeric, p_currency text)
 returns text language plpgsql security definer set search_path = public as $$
@@ -475,14 +503,11 @@ begin
   if v_ref is null or v_ref = '' or p_amount is null or p_amount <= 0 or v_currency is null or v_currency = '' then
     raise exception 'evidence_incomplete';
   end if;
-  select * into c from fee_charges where provider = p_provider and provider_ref = v_ref;
-  if found then
-    if c.amount = p_amount and c.currency = v_currency then return 'already_recorded'; end if;
-    raise exception 'charge_evidence_conflict';
-  end if;
   begin v_attempt := btrim(p_external_ref)::uuid; exception when invalid_text_representation then v_attempt := null; end;
   select * into a from payment_attempts where id = v_attempt and provider = p_provider;
-  if found then
+  if not found then v_attempt := null; end if;                    -- the attempt the provider's record names, if ours
+  if fee_charge_already_recorded(p_provider, v_ref, p_amount, v_currency, v_attempt) then return 'already_recorded'; end if;
+  if v_attempt is not null then
     -- club → court → booking → payment → attempt, then decide on the locked attempt
     perform 1 from clubs where id = a.club_id for share;
     select bk.court_id into v_court from payments py join bookings bk on bk.id = py.booking_id where py.id = a.payment_id;
@@ -490,8 +515,17 @@ begin
     perform 1 from bookings where id = (select booking_id from payments where id = a.payment_id) for update;
     perform 1 from payments where id = a.payment_id for update;
     select * into a from payment_attempts where id = v_attempt for update;
+    -- a concurrent run may have recorded this reference while we waited for the locks
+    if fee_charge_already_recorded(p_provider, v_ref, p_amount, v_currency, v_attempt) then return 'already_recorded'; end if;
     if a.status <> 'succeeded' then
-      return record_attempt_result(v_attempt, 'succeeded', v_ref, p_amount, v_currency);
+      begin
+        return record_attempt_result(v_attempt, 'succeeded', v_ref, p_amount, v_currency);
+      exception when raise_exception then
+        -- recorded on ANOTHER attempt by a concurrent transaction: contradictory evidence (or, if it agrees, recorded)
+        if sqlerrm <> 'duplicate_provider_ref' then raise; end if;
+        if fee_charge_already_recorded(p_provider, v_ref, p_amount, v_currency, v_attempt) then return 'already_recorded'; end if;
+        raise exception 'charge_evidence_conflict';
+      end;
     end if;
     -- The attempt already has its charge, and the provider's own records show another, distinct one on it (a
     -- different provider reference). That money was taken too: recorded and owed back in full. The booking, the
@@ -502,13 +536,18 @@ begin
             'refund_due', 'extra_charge', now())
     on conflict (provider, provider_ref) do nothing;
     get diagnostics n = row_count;
-    return case when n = 1 then 'extra_charge' else 'already_recorded' end;
+    if n = 1 then return 'extra_charge'; end if;
+    if fee_charge_already_recorded(p_provider, v_ref, p_amount, v_currency, v_attempt) then return 'already_recorded'; end if;
+    raise exception 'charge_evidence_conflict';    -- not reached: the function above raises on any disagreement
   end if;
   insert into fee_charges (provider, provider_ref, amount, currency, collected, disposition, reason, refund_due_at)
   values (p_provider, v_ref, p_amount, v_currency, p_provider <> 'simulated', 'refund_due', 'unmatched', now())
   on conflict (provider, provider_ref) do nothing;
   get diagnostics n = row_count;
-  return case when n = 1 then 'unmatched' else 'already_recorded' end;
+  if n = 1 then return 'unmatched'; end if;
+  -- a concurrent run inserted this reference first: success only if its evidence is the same
+  if fee_charge_already_recorded(p_provider, v_ref, p_amount, v_currency, null) then return 'already_recorded'; end if;
+  raise exception 'charge_evidence_conflict';
 end $$;
 
 -- attempts the server should ask the provider about (sweeper): still open, older than p_min_age, younger than p_max_age

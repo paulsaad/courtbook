@@ -57,7 +57,7 @@ async function settle(admin: Admin, attemptId: string): Promise<Unresolved | nul
 /** What to tell the browser about an attempt that already exists. */
 function answerFor(a: Unresolved) {
   if (a.status === "open" && a.session_url) return json({ redirect: a.session_url });
-  if (a.status === "starting") return fail("payment_in_progress", 409);
+  if (UNRESOLVED.includes(a.status)) return fail("payment_in_progress", 409);   // starting, or open with no usable page
   if (a.status === "succeeded") return json({ attempt: a.id, outcome: a.outcome });
   return json({ attempt: a.id, state: a.status });                     // failed / expired: this tap is over
 }

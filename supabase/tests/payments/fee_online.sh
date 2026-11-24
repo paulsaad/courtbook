@@ -34,6 +34,7 @@ MUTANTS=(
   "M16 an extra charge proven by the provider's records is dropped|    values (a.provider, v_ref, a.id, a.payment_id, a.club_id, p_amount, v_currency, a.provider <> 'simulated',\n            'refund_due', 'extra_charge', now())\n    on conflict (provider, provider_ref) do nothing;|    select 1 where false;"
   "M17 a callback may add a charge to a paid attempt|    raise exception 'attempt_evidence_conflict';|    v_outcome := null;"
   "M18 refunding an extra charge marks the booking's fee refunded|provider_ref = c.attempt_id::text and c.reason is distinct from 'extra_charge';|provider_ref = c.attempt_id::text;"
+  "M19 a recorded reference counts as recorded whatever its evidence|  if c.amount = p_amount and c.currency = p_currency and c.attempt_id is not distinct from p_attempt then return true; end if;|  return true;"
   "M14 an unmatched charge is dropped|  insert into fee_charges (provider, provider_ref, amount, currency, collected, disposition, reason, refund_due_at)\n  values (p_provider, v_ref, p_amount, v_currency, p_provider <> 'simulated', 'refund_due', 'unmatched', now())\n  on conflict (provider, provider_ref) do nothing;|"
 )
 caught=0; total=0
