@@ -32,7 +32,18 @@ for variant in live staging; do
   removed=$(grep -o '<uses-permission android:name="[^"]*" tools:node="remove"/>' "$man" | sed 's/.*name="//; s/".*//' | sort | tr '\n' ' ')
   kept=$(grep 'uses-permission' "$man" | grep -v 'tools:node="remove"' | sed 's/.*name="//; s/".*//' | sort | tr '\n' ' ')
   echo "== $variant: Android permissions declared by the app: $kept| removed from the merged manifest: $removed"
-  chk "A1 $variant: the app itself declares only INTERNET and VIBRATE (haptics)" "$([ "$kept" = "android.permission.INTERNET android.permission.VIBRATE " ] && echo true)" "$kept"
+  # Near me (repeat-use-location): approximate location only, while the app is in use — never fine or background
+  chk "A1 $variant: the app declares only INTERNET, VIBRATE (haptics) and approximate location" "$([ "$kept" = "android.permission.ACCESS_COARSE_LOCATION android.permission.INTERNET android.permission.VIBRATE " ] && echo true)" "$kept"
+  chk "L1 $variant: precise and background location are removed even if a library adds them" \
+    "$(for p in ACCESS_FINE_LOCATION ACCESS_BACKGROUND_LOCATION; do echo "$removed" | grep -q "android.permission.$p " || echo missing; done | grep -q missing || echo true)" "$removed"
+  chk "L2 $variant: iOS asks for location only while in use, approximate by default; no background, precise or motion texts" \
+    "$(plist "$info" | python3 -c "
+import json,sys
+i=json.load(sys.stdin)
+ok = bool(i.get('NSLocationWhenInUseUsageDescription')) and i.get('NSLocationDefaultAccuracyReduced') is True \
+  and 'NSLocationAlwaysAndWhenInUseUsageDescription' not in i and 'NSLocationAlwaysUsageDescription' not in i \
+  and 'location' not in i.get('UIBackgroundModes', []) and 'NSLocationTemporaryUsageDescriptionDictionary' not in i and 'NSMotionUsageDescription' not in i
+print('true' if ok else 'false')")" "$(plist "$info" | python3 -c "import json,sys; i=json.load(sys.stdin); print({k:v for k,v in i.items() if 'Location' in k or k=='UIBackgroundModes'})")"
   chk "A1 $variant: SYSTEM_ALERT_WINDOW and external storage are removed even if a library adds them" \
     "$(for p in SYSTEM_ALERT_WINDOW READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE; do echo "$removed" | grep -q "android.permission.$p " || echo missing; done | grep -q missing || echo true)" "$removed"
   chk "N2 $variant: no Face ID usage text (the app never uses Face ID)" "$(plist "$info" | python3 -c "import json,sys; print('true' if 'NSFaceIDUsageDescription' not in json.load(sys.stdin) else 'false')")"

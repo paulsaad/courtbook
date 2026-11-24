@@ -20,7 +20,10 @@ import { bookingDays, sportName } from "../../lib/days";
 import { FavouriteHeart } from "../../components/FavouriteHeart";
 import { useSession } from "../../lib/session";
 import { rememberArea, usePlayingPrefs } from "../../lib/playing";
-import { areaKey, sameArea, type PlayingArea } from "@shared/places";
+import { areaKey, distanceLabel, sameArea, sortByDistance, type PlayingArea } from "@shared/places";
+import { locationNote } from "../../lib/nearby";
+import { useNearby } from "../../lib/deviceLocation";
+import { useClubPoints } from "../../lib/clubDirectory";
 import { color, font, radius, space } from "../../lib/theme";
 
 /**
@@ -49,11 +52,23 @@ export default function Courts() {
     setRestored(true);
     if (playing.data?.last) setArea(playing.data.last);
   }, [playing.isSuccess, playing.data, restored]);
-  const pickArea = (a: PlayingArea | null) => { setArea(a); if (userId && playing.data) rememberArea(a); };
+  const near = useNearby();
+  const nearOn = near.state.status === "on";
+  // M14 review B: Near me shows every club in Lebanon, nearest first. The area the player was browsing (or the one
+  // restored from their account, even if it arrives after Near me came on) never narrows it; it is kept, and comes
+  // back when Near me is turned off. Choosing an area chip turns Near me off, including one still asking.
+  const browseArea = nearOn ? null : area;
+  const pickArea = (a: PlayingArea | null) => { near.turnOff(); setArea(a); if (userId && playing.data) rememberArea(a); };
+  const points = useClubPoints(nearOn);
   const saved = playing.data?.areas ?? [];
-  const q = useDaySlots(date, sport, area);
+  const q = useDaySlots(date, sport, browseArea);
   const clubs = useMemo(() => clubsFromSlots(q.data ?? []), [q.data]);
-  const open = clubs.filter((c) => c.starts.length > 0);
+  const free = clubs.filter((c) => c.starts.length > 0);
+  // Near me: nearest first by straight-line distance; clubs without a map point keep their order after the others
+  const open = nearOn && near.state.status === "on" && points.data
+    ? sortByDistance(free, points.data, near.state.point).map(({ item, km }) => ({ ...item, km }))
+    : free.map((c) => ({ ...c, km: null as number | null }));
+  const note = locationNote(near.state);
   const covers = useClubCovers(open.map((c) => c.id));
 
   return (
@@ -72,16 +87,22 @@ export default function Courts() {
         </ScrollView>
         {userId && playing.data && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} testID="area-chips">
-            <Chip label="All Lebanon" selected={area === null} onPress={() => pickArea(null)} />
-            {saved.map((a) => <Chip key={areaKey(a)} label={a.label ?? a.governorate} selected={sameArea(a, area)} onPress={() => pickArea(a)} />)}
-            {area && !saved.some((a) => sameArea(a, area)) && <Chip label={area.label ?? "Last area"} selected onPress={() => pickArea(area)} />}
+            <Chip label="All Lebanon" selected={!nearOn && area === null} onPress={() => pickArea(null)} />
+            {saved.map((a) => <Chip key={areaKey(a)} label={a.label ?? a.governorate} selected={!nearOn && sameArea(a, area)} onPress={() => pickArea(a)} />)}
+            {area && !saved.some((a) => sameArea(a, area)) && <Chip label={area.label ?? "Last area"} selected={!nearOn} onPress={() => pickArea(area)} />}
             <Chip label={saved.length ? "Edit areas" : "Add your areas"} onPress={() => router.push("/areas")} icon={<Icon name="pin" size={16} color={color.cedar} />} />
           </ScrollView>
         )}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+          <Chip label={near.busy ? "Finding you…" : "Near me"} selected={nearOn} disabled={near.busy} testID="near-me"
+                onPress={() => void near.toggle()} icon={<Icon name="compass" size={16} color={nearOn ? color.onDark : color.cedar} />} />
+        </ScrollView>
+        {note ? <Text variant="secondary" style={{ paddingHorizontal: space.lg }} testID="near-note">{note}</Text> : null}
         <DateStrip days={days} selected={date} onSelect={setDate} />
       </View>
 
       <View style={styles.summary}>
+        {q.isSuccess && nearOn && <Text variant="secondary">Nearest first · straight-line distances</Text>}
         {q.isSuccess && (
           <Text variant="label">
             {open.length === 0 ? "No free courts" : `${open.length} ${open.length === 1 ? "club" : "clubs"} with free times`}
@@ -98,7 +119,7 @@ export default function Courts() {
         <Empty title="Nothing free that day" body="Try another day or another sport." />
       ) : (
         <View style={styles.list}>
-          {open.map((c) => <ClubCard key={c.id} club={c} date={date} sport={sport} cover={covers.data?.get(c.id) ?? null} userId={userId} />)}
+          {open.map((c) => <ClubCard key={c.id} club={c} date={date} sport={sport} cover={covers.data?.get(c.id) ?? null} userId={userId} km={c.km} />)}
         </View>
       )}
     </ScrollView>
@@ -111,7 +132,8 @@ export default function Courts() {
  */
 export const PRICE_BESIDE_NAME_MAX_SCALE = 1.3;
 
-export function ClubCard({ club, date, sport, cover, userId = null }: { club: ClubDay; date: string; sport: string | null; cover: string | null; userId?: string | null }) {
+export function ClubCard({ club, date, sport, cover, userId = null, km = null }: { club: ClubDay; date: string; sport: string | null; cover: string | null; userId?: string | null; km?: number | null }) {
+  const dist = km != null ? distanceLabel(km) : null;
   const { fontScale } = useWindowDimensions();
   const stacked = fontScale > PRICE_BESIDE_NAME_MAX_SCALE;
   const go = (at?: string) =>
@@ -127,7 +149,7 @@ export function ClubCard({ club, date, sport, cover, userId = null }: { club: Cl
     <View style={styles.card}>
       {/* the heart sits beside the card's button, not inside it: VoiceOver reads a button as one element */}
       <View style={styles.cardTopRow}>
-      <Pressable accessibilityRole="button" accessibilityLabel={[club.name, club.town, courts, from !== null ? `from ${from} dollars an hour` : null].filter(Boolean).join(", ")} onPress={() => go()} style={[styles.cardTop, { flex: 1 }]}>
+      <Pressable accessibilityRole="button" accessibilityLabel={[club.name, dist?.a11y, club.town, courts, from !== null ? `from ${from} dollars an hour` : null].filter(Boolean).join(", ")} onPress={() => go()} style={[styles.cardTop, { flex: 1 }]}>
         <View style={styles.thumb}>
           {cover ? (
             <Image source={{ uri: cover }} style={styles.thumbImg} contentFit="cover" transition={fade(150)} accessible={false} />
@@ -144,7 +166,7 @@ export function ClubCard({ club, date, sport, cover, userId = null }: { club: Cl
             )}
           </View>
           <Text variant="secondary">
-            {[club.town, courts].filter(Boolean).join(" · ")}
+            {[dist?.text, club.town, courts].filter(Boolean).join(" · ")}
           </Text>
           {club.isDemo && <Text style={styles.demo}>Demo club — not a real venue</Text>}
         </View>
