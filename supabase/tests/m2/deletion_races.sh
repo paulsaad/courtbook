@@ -7,6 +7,11 @@
 #   PSQL="sudo -u postgres psql" bash supabase/tests/m2/deletion_races.sh
 set -u
 cd "$(dirname "$0")/../../.."
+# Superseded once 0086 is in the database: 0086 replaces 0079's request-and-wait deletion, and these 0079 checks were
+# ported to it (supabase/tests/m86/ported_0079_tests.sql, ported_deletion_races.sh), where they run instead.
+if [ "$(${PSQL:-psql} -At -d courtbook_test -c "select to_regclass('public.deletion_worker') is not null" 2>/dev/null)" = t ]; then
+  echo "SKIP  0086 is applied: this 0079 suite is superseded by supabase/tests/m86/ported_* (run those)"; echo "RESULT: SKIP (superseded)"; exit 0
+fi
 PSQL=${PSQL:-psql}
 SRC=courtbook_test; DB=courtbook_m2_race
 oks=0; fails=0
