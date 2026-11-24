@@ -111,6 +111,7 @@ export const ERRORS: Record<string, string> = {
   bad_peaks: "Check the peak times: each needs a start before its end, and a price.",
   bad_price: "Enter a price of $0 or more.",
   court_has_bookings: "This court still has upcoming bookings. Move or cancel them first, then deactivate it.",
+  prices_incomplete: "Players would see times with no price. Add a price for those times first (Prices → Add), then change the hours or the price.",
   not_payable: "This booking is no longer waiting for payment.",
   not_pending: "Only a pending request can be approved.",
   match_full: "This match just filled up.",
