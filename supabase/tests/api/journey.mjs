@@ -35,7 +35,7 @@ await q("update clubs set payment_mode = 'at_desk', cancel_cutoff_hours = 6 wher
 const COURT = await one("insert into courts (club_id, name, sport, sort) values ($1, 'Journey 1', 'padel', 950) returning id", [CLUB]);
 const COURT2 = await one("insert into courts (club_id, name, sport, sort) values ($1, 'Journey 2', 'padel', 951) returning id", [CLUB]);
 // a club in the same district that is NOT published (hidden): never offered to players
-const HIDDEN = await one(`insert into clubs (name, slug, town_id) values ('Hidden Batroun Club', 'zz-hidden-journey', (select town_id from clubs where id = $1)) returning id`, [CLUB]);
+const HIDDEN = await one(`insert into clubs (name, slug, town_id, active) values ('Hidden Batroun Club', 'zz-hidden-journey', (select town_id from clubs where id = $1), false) returning id`, [CLUB]);
 await q("insert into courts (club_id, name, sport) values ($1, 'Hidden 1', 'padel')", [HIDDEN]);
 const GOV = await one("select d.governorate_code from clubs c join towns t on t.id = c.town_id join districts d on d.code = t.district_code where c.id = $1", [CLUB]);
 const DIST = await one("select t.district_code from clubs c join towns t on t.id = c.town_id where c.id = $1", [CLUB]);
@@ -50,15 +50,19 @@ const discovery = async (client, date, extra = {}) => {      // website Courts p
   return { error, rows: data ?? [] };
 };
 const offered = async (client, date, court, startIso) => (await discovery(client, date)).rows.some((r) => r.court_id === court && iso(r.start_at) === startIso && r.free_minutes >= 60);
-const occupancy = async (client) => {                         // club page grid (website PlayerGrid / club page)
-  const { data } = await client.from("occupancy").select("id, court_id, start_at, end_at, status, mine, kind").eq("club_id", CLUB).lt("start_at", iso(await at(5, "00:00"))).gt("end_at", iso(await at(4, "00:00")));
+/** The club page's grid: signed-out visitors read public_occupancy, signed-in players occupancy (src/app/club/[slug]/page.tsx). */
+const occupancy = async (client, day = 4) => {
+  const view = client === anon ? "public_occupancy" : "occupancy";
+  const { data, error } = await client.from(view).select(view === "occupancy" ? "id, court_id, start_at, end_at, status, mine, kind" : "court_id, start_at, end_at, kind")
+    .eq("club_id", CLUB).lt("start_at", iso(await at(day + 1, "00:00"))).gt("end_at", iso(await at(day, "00:00")));
+  if (error) throw new Error(`club page read failed: ${error.message}`);
   return data ?? [];
 };
 const busyAt = (occ, court, startIso) => occ.some((o) => o.court_id === court && new Date(o.start_at) <= new Date(startIso) && new Date(o.end_at) > new Date(startIso));
-const staffDay = async (client) => {                          // website staff calendar (DayCalendar's own query, contacts, payments)
+const staffDay = async (client, day = 4) => {                          // website staff calendar (DayCalendar's own query, contacts, payments)
   const { data, error } = await client.from("bookings").select(STAFF_BOOKING_COLUMNS).eq("club_id", CLUB)
     .or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`).not("court_id", "is", null)
-    .lt("start_at", iso(await at(5, "00:00"))).gt("end_at", iso(await at(4, "00:00"))).order("start_at");
+    .lt("start_at", iso(await at(day + 1, "00:00"))).gt("end_at", iso(await at(day, "00:00"))).order("start_at");
   if (error) return { error, rows: [] };
   const { data: contacts } = await client.rpc("club_booking_contacts", { p_club: CLUB, p_bookings: data.map((b) => b.id) });
   const by = new Map((contacts ?? []).map((c) => [c.booking_id, c]));
@@ -129,7 +133,7 @@ const moneyWithoutBooking = () => one(`select count(*)::int from payments p join
   const c1 = await confirm(p.id, "sim-ok-1", p.total_usd);
   const after = await row(ok1.value.bookingId);
   rep("B1 normal confirmation: booking confirmed, payment paid, calendar says 'paid in the app'", c1.data === "confirmed" && after.status === "confirmed" && after.payment === "paid"
-    && settlement((await staffDay(staff)).rows.find((x) => x.id === ok1.value.bookingId) ?? {}) === "paid_in_app", { c1, after });
+    && settlement((await staffDay(staff, 5)).rows.find((x) => x.id === ok1.value.bookingId) ?? { source: "app", payments: undefined }) === "paid_in_app", { c1, after });
   const dup = await confirm(p.id, "sim-ok-1", p.total_usd);
   rep("B2 a duplicate callback (same receipt) answers already_paid and changes nothing", dup.data === "already_paid" && (await row(ok1.value.bookingId)).payment === "paid");
   const other = await confirm(p.id, "sim-ok-2", p.total_usd);
@@ -149,7 +153,7 @@ const moneyWithoutBooking = () => one(`select count(*)::int from payments p join
   s = await H("12:00"); e = await H("13:00");
   const ex = await hold(p1, COURT, s, e);
   await expire(ex.value.bookingId);
-  rep("B6 an expired hold no longer blocks the slot for others (discovery offers it, club page free)", await offered(anon, D2, COURT, iso(s)) && !busyAt((await anon.from("occupancy").select("court_id,start_at,end_at").eq("club_id", CLUB)).data ?? [], COURT, iso(s)));
+  rep("B6 an expired hold no longer blocks the slot for others (discovery offers it, club page free)", await offered(anon, D2, COURT, iso(s)) && !busyAt(await occupancy(anon, 5), COURT, iso(s)));
   const exp = await pay(ex.value.bookingId);
   const late = await confirm(exp.id, "sim-late-free", exp.total_usd);
   rep("B7 payment after the hold expired, slot still free: the booking is confirmed (0090)", late.data === "confirmed" && (await row(ex.value.bookingId)).status === "confirmed", late);
@@ -217,7 +221,7 @@ const D3 = await DAY(6), S = (hhmm) => at(6, hhmm);
     const b = r.data ? await row(r.data) : null;
     made[label] = { id: r.data, s, e };
     rep(`C1 a ${label} booking is committed: confirmed, the club's price, NO CourtBook fee, no payment`, !r.error && b?.status === "confirmed" && b.source === "staff" && b.fee === 0 && b.payment === null && b.price > 0, r.error?.message ?? b);
-    rep(`C2 ...player-facing availability changes at once (discovery and club page)`, !(await offered(anon, D3, COURT, iso(s))) && busyAt(((await anon.from("occupancy").select("court_id,start_at,end_at").eq("club_id", CLUB)).data ?? []), COURT, iso(s)));
+    rep(`C2 ...player-facing availability changes at once (discovery and club page)`, !(await offered(anon, D3, COURT, iso(s))) && busyAt((await occupancy(anon, 6)), COURT, iso(s)));
     asApp(p1);
     const tryIt = await reserve(newAttempt({ mode: "at_desk", clubId: CLUB, courtId: COURT, start: new Date(s), end: e }));
     rep(`C3 ...and a player cannot reserve that time`, tryIt.kind === "refused", tryIt);
@@ -256,13 +260,13 @@ section("2D the same reservation seen from every surface");
   const s = await at(7, "18:00"), e = await at(7, "19:00"), D = await DAY(7);
   const before = await discovery(anon, D);                                  // a page loaded before the booking (stale)
   rep("D1 before: free in website/app discovery, on the club page, in the calendar", before.rows.some((r) => r.court_id === COURT && iso(r.start_at) === iso(s))
-    && !busyAt(((await anon.from("occupancy").select("court_id,start_at,end_at").eq("club_id", CLUB)).data ?? []), COURT, iso(s)) && !(await staffDayFor(7)).some((x) => x.court_id === COURT && iso(x.start_at) === iso(s)));
+    && !busyAt((await occupancy(anon, 7)), COURT, iso(s)) && !(await staffDayFor(7)).some((x) => x.court_id === COURT && iso(x.start_at) === iso(s)));
   asApp(p2);
   const r = await reserve(newAttempt({ mode: "at_desk", clubId: CLUB, courtId: COURT, start: new Date(s), end: new Date(e) }));
   const views = {
     discovery_web: !(await offered(anon, D, COURT, iso(s))),
     discovery_app_signed_in: !(await offered(p1, D, COURT, iso(s))),
-    club_page: busyAt(((await p1.from("occupancy").select("court_id,start_at,end_at").eq("club_id", CLUB)).data ?? []), COURT, iso(s)),
+    club_page: busyAt(await occupancy(p1, 7), COURT, iso(s)),
     staff_calendar: (await staffDayFor(7)).some((x) => x.id === r.value?.bookingId && x.status === "confirmed"),
     booker_agenda: (await agenda(p2)).some((x) => x.id === r.value?.bookingId && x.status === "confirmed"),
     database: (await row(r.value.bookingId)).status === "confirmed",
@@ -278,7 +282,7 @@ section("2D the same reservation seen from every surface");
   const cx = await p2.rpc("cancel_booking", { p_booking: r.value.bookingId });
   const viewsAfter = {
     discovery: await offered(anon, D, COURT, iso(s)),
-    club_page: !busyAt(((await p1.from("occupancy").select("court_id,start_at,end_at").eq("club_id", CLUB)).data ?? []), COURT, iso(s)),
+    club_page: !busyAt(await occupancy(p1, 7), COURT, iso(s)),
     staff_calendar: !(await staffDayFor(7)).some((x) => x.id === r.value.bookingId),
     agenda_status: (await agenda(p2)).find((x) => x.id === r.value.bookingId)?.status !== "confirmed",
   };
