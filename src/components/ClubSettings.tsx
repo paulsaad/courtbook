@@ -9,7 +9,7 @@ import ClubPhotos from "@/components/ClubPhotos";
 import ClubVenue, { type VenueRow } from "@/components/ClubVenue";
 import type { ClubMedia } from "@/lib/media";
 import { friendlyError } from "@/lib/types";
-import { clubPoint, pointFromMapLink } from "@/lib/places";
+import { clubPoint, linkWithoutPoint, pointFromMapLink } from "@/lib/places";
 import type { Governorate, Sport, Town, TownWithArea } from "@/lib/geo";
 
 type ClubRow = {
@@ -25,6 +25,7 @@ type StaffRow = { profile_id: string; name: string | null; email: string };
 type CoachReq = { coach_id: string; name: string | null; sports: string[]; price_usd: number; status: string };
 
 const DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 // min-h-11 on phones: a select's height comes from the font, and Linux Chrome renders these at 43 px (GitHub, W1).
 const input = "min-h-11 min-w-0 rounded-xl border border-grid bg-white px-3 py-2.5 text-base outline-none focus:border-action sm:min-h-0";
 /** Text buttons in lists: a 44 px tap height on phones (W1), unchanged from 640 px. */
@@ -231,6 +232,7 @@ function Location({ f, setF, areas, town, busy, save }: { f: Settings; setF: Set
           const p = pointFromMapLink(e.target.value);
           setF({ ...f, location: e.target.value, ...(p ? { lat: String(p.lat), lng: String(p.lng) } : {}) });
         }} /></label>
+      <MapLinkNote link={f.location} hasPoint={f.lat.trim() !== "" && f.lng.trim() !== ""} />
       {(() => {
         const p = clubPoint(f.lat.trim() === "" ? null : f.lat, f.lng.trim() === "" ? null : f.lng);
         const half = (f.lat.trim() === "") !== (f.lng.trim() === "");
@@ -267,10 +269,10 @@ function Courts({ clubId, courts, sports, busy, run }: { clubId: string; courts:
       </ul>
       <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); run(() => createClient().from("courts").insert({ club_id: clubId, name: name.trim(), sport, surface: surface.trim() || null, sort: courts.length + 1 }), () => { setName(""); setSurface(""); }); }}>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <input className={`${input} flex-1`} placeholder="Court name" required value={name} onChange={(e) => setName(e.target.value)} />
-          <select className={input} value={sport} onChange={(e) => setSport(e.target.value)}>{sports.map((s) => <option key={s.code} value={s.code}>{s.name_en}</option>)}</select>
+          <input aria-label="Court name" className={`${input} flex-1`} placeholder="Court name" required value={name} onChange={(e) => setName(e.target.value)} />
+          <select aria-label="Sport" className={input} value={sport} onChange={(e) => setSport(e.target.value)}>{sports.map((s) => <option key={s.code} value={s.code}>{s.name_en}</option>)}</select>
         </div>
-        <input className={input} placeholder="Surface (optional)" value={surface} onChange={(e) => setSurface(e.target.value)} />
+        <input aria-label="Surface (optional)" className={input} placeholder="Surface (optional)" value={surface} onChange={(e) => setSurface(e.target.value)} />
         <button disabled={busy} className="rounded-xl border border-grid py-2.5">Add court</button>
       </form>
     </section>
@@ -298,16 +300,16 @@ function Prices({ clubId, courts, rules, busy, run }: { clubId: string; courts: 
       </ul>
       <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); run(() => createClient().from("price_rules").insert({ club_id: clubId, court_id: f.court || null, weekday_mask: f.mask, start_time: f.start, end_time: f.end, price_usd: Number(f.price), label: f.label.trim() || null }), () => setF({ ...f, price: "", label: "" })); }}>
         <div className="flex flex-wrap gap-2">
-          <input className={`${input} min-w-[8rem] flex-1`} type="time" step={1800} value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} />
-          <input className={`${input} min-w-[8rem] flex-1`} type="time" step={1800} value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} />
-          <input className={`${input} w-24`} inputMode="decimal" placeholder="$/h" required value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} />
+          <input aria-label="Price from" className={`${input} min-w-[8rem] flex-1`} type="time" step={1800} value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} />
+          <input aria-label="Price until" className={`${input} min-w-[8rem] flex-1`} type="time" step={1800} value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} />
+          <input aria-label="Price per hour in dollars" className={`${input} w-24`} inputMode="decimal" placeholder="$/h" required value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} />
         </div>
         <div className="flex gap-1">
-          {DAYS.map((d, i) => <button type="button" key={d} onClick={() => toggleDay(i)} className={`min-h-11 flex-1 rounded-lg border py-1.5 text-xs sm:min-h-0 ${f.mask & (1 << i) ? "border-ink bg-ink text-white" : "border-grid"}`}>{d}</button>)}
+          {DAYS.map((d, i) => <button type="button" key={d} aria-label={DAY_NAMES[i]} aria-pressed={!!(f.mask & (1 << i))} onClick={() => toggleDay(i)} className={`min-h-11 flex-1 rounded-lg border py-1.5 text-xs sm:min-h-0 ${f.mask & (1 << i) ? "border-ink bg-ink text-white" : "border-grid"}`}>{d}</button>)}
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <select className={`${input} flex-1`} value={f.court} onChange={(e) => setF({ ...f, court: e.target.value })}><option value="">All courts</option>{courts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-          <input className={`${input} flex-1`} placeholder="Label (peak…)" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
+          <select aria-label="Which courts" className={`${input} flex-1`} value={f.court} onChange={(e) => setF({ ...f, court: e.target.value })}><option value="">All courts</option>{courts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+          <input aria-label="Label (optional)" className={`${input} flex-1`} placeholder="Label (peak…)" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
         </div>
         <button disabled={busy} className="rounded-xl border border-grid py-2.5">Add price rule</button>
       </form>
@@ -364,5 +366,20 @@ function Coaches({ clubId, coaches, busy, run }: { clubId: string; coaches: Coac
         ))}
       </ul>
     </section>
+  );
+}
+
+/** Onboarding audit (24 Nov): a pasted share link usually has no map point, and nothing used to say so. The link is
+ *  still saved (players can open it); the exact point needs the long link, or the two numbers. */
+export function MapLinkNote({ link, hasPoint }: { link: string; hasPoint: boolean }) {
+  const kind = linkWithoutPoint(link);
+  if (!kind || hasPoint) return null;
+  return (
+    <p role="status" className="rounded-lg bg-sand-soft px-3 py-2 text-xs">
+      {kind === "short" ? "This is a short share link, which doesn't include the map point. " : "This link doesn't include the map point. "}
+      Open it in Google Maps on a computer and copy the long address from the browser&apos;s address bar (it contains
+      numbers like @34.2553,35.6586), then paste that here. Or long-press the entrance in Google Maps on a phone and
+      copy the two numbers into Latitude and Longitude.
+    </p>
   );
 }
