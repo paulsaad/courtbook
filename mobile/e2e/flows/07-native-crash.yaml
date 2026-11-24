@@ -1,0 +1,18 @@
+# M5 crash privacy: a real native crash (Sentry.nativeCrash) after breadcrumbs carrying synthetic
+# personal data. The native SDK builds this report itself (the app's beforeSend does not run) and
+# sends it on the next launch, so the app is started again and left running long enough to send it.
+appId: app.courtbook.mobile.staging
+---
+- launchApp
+- runFlow: _dismiss-anr.yaml
+- extendedWaitUntil: { visible: "Book a court", timeout: 120000 }
+- tapOn: "Profile"
+- scrollUntilVisible: { element: "Crash the app (native test)" }
+- tapOn: "Crash the app (native test)"
+- extendedWaitUntil: { notVisible: "Crash the app (native test)", timeout: 15000 }
+- runFlow:
+    when: { visible: "Close app" }
+    commands: [ { tapOn: "Close app" } ]
+- launchApp: { stopApp: true }
+- runFlow: _dismiss-anr.yaml
+- extendedWaitUntil: { visible: "Book a court", timeout: 120000 }

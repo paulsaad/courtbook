@@ -5,6 +5,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { hhmm } from "@shared/time";
 import { Text } from "../../components/Text";
 import { Chip } from "../../components/Chip";
+import { Icon } from "../../components/Icon";
 import { DateStrip } from "../../components/DateStrip";
 import { SportMark, SPORTS } from "../../components/SportMark";
 import { CourtLines } from "../../components/CourtLines";
@@ -16,11 +17,20 @@ import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { clubsFromSlots, type ClubDay } from "../../lib/courts";
 import { BEIRUT, useDaySlots } from "../../lib/queries";
 import { bookingDays, sportName } from "../../lib/days";
+import { FavouriteHeart } from "../../components/FavouriteHeart";
+import { useSession } from "../../lib/session";
+import { rememberArea, usePlayingPrefs } from "../../lib/playing";
+import { areaKey, distanceLabel, sameArea, sortByDistance, type PlayingArea } from "@shared/places";
+import { locationNote } from "../../lib/nearby";
+import { useNearby } from "../../lib/deviceLocation";
+import { useAreaList, useClubPoints } from "../../lib/clubDirectory";
 import { color, font, radius, space } from "../../lib/theme";
 
 /**
  * Courts: which clubs have free times on a day, compared without opening each one (approved
  * design 2). Reads club_day_slots, the same function as the website; visitors can browse.
+ * Signed in (0088): the player's saved areas are one-tap chips, and the area they browsed last — on any device — is
+ * where the tab opens. Hearts save favourite clubs (0087).
  */
 export default function Courts() {
   const days = useMemo(() => bookingDays(BEIRUT), []);
@@ -31,9 +41,39 @@ export default function Courts() {
   useEffect(() => {
     if (p.sport && (SPORTS as readonly string[]).includes(p.sport)) setSport(p.sport);
   }, [p.sport]);
-  const q = useDaySlots(date, sport);
+  const session = useSession();
+  const userId = session.status === "signed-in" ? session.session.user.id : null;
+  const playing = usePlayingPrefs(userId);
+  const [area, setArea] = useState<PlayingArea | null>(null);
+  const [restored, setRestored] = useState(false);
+  // open where the player last browsed (their account's last area), once
+  useEffect(() => {
+    if (restored || !playing.isSuccess) return;
+    setRestored(true);
+    if (playing.data?.last) setArea(playing.data.last);
+  }, [playing.isSuccess, playing.data, restored]);
+  const near = useNearby();
+  const nearOn = near.state.status === "on";
+  // M14 review B: Near me shows every club in Lebanon, nearest first. The area the player was browsing (or the one
+  // restored from their account, even if it arrives after Near me came on) never narrows it; it is kept, and comes
+  // back when Near me is turned off. Choosing an area chip turns Near me off, including one still asking.
+  const browseArea = nearOn ? null : area;
+  const pickArea = (a: PlayingArea | null) => { near.turnOff(); setArea(a); if (userId && playing.data) rememberArea(a); };
+  const points = useClubPoints(nearOn);
+  // Visitors (no account, nothing saved): the governorates as one-tap chips, so refusing location still leaves a
+  // way to narrow the list (spec addendum R2). Not remembered anywhere.
+  const govs = useAreaList(!userId);
+  const saved = playing.data?.areas ?? [];
+  const q = useDaySlots(date, sport, browseArea);
   const clubs = useMemo(() => clubsFromSlots(q.data ?? []), [q.data]);
-  const open = clubs.filter((c) => c.starts.length > 0);
+  const free = clubs.filter((c) => c.starts.length > 0);
+  // Near me: nearest first by straight-line distance; clubs without a map point keep their order after the others
+  // "Nearest first" is only said when the list really is sorted: the club points may still be loading or have failed
+  const sorted = nearOn && near.state.status === "on" && !!points.data;
+  const open = sorted && near.state.status === "on" && points.data
+    ? sortByDistance(free, points.data, near.state.point).map(({ item, km }) => ({ ...item, km }))
+    : free.map((c) => ({ ...c, km: null as number | null }));
+  const note = locationNote(near.state);
   const covers = useClubCovers(open.map((c) => c.id));
 
   return (
@@ -50,10 +90,39 @@ export default function Courts() {
             <Chip key={s} tone="sport" label={sportName(s)} selected={sport === s} onPress={() => setSport(s)} icon={<SportMark sport={s} size={20} />} />
           ))}
         </ScrollView>
+        {userId && playing.data && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} testID="area-chips">
+            <Chip label="All Lebanon" selected={!nearOn && area === null} onPress={() => pickArea(null)} />
+            {saved.map((a) => <Chip key={areaKey(a)} label={a.label ?? a.governorate} selected={!nearOn && sameArea(a, area)} onPress={() => pickArea(a)} />)}
+            {area && !saved.some((a) => sameArea(a, area)) && <Chip label={area.label ?? "Last area"} selected={!nearOn} onPress={() => pickArea(area)} />}
+            <Chip label={saved.length ? "Edit areas" : "Add your areas"} onPress={() => router.push("/areas")} icon={<Icon name="pin" size={16} color={color.cedar} />} />
+          </ScrollView>
+        )}
+        {!userId && govs.data && govs.data.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} testID="visitor-area-chips">
+            <Chip label="All Lebanon" selected={!nearOn && area === null} onPress={() => pickArea(null)} />
+            {govs.data.map((g) => {
+              const a: PlayingArea = { governorate: g.code, district: null, town: null, label: g.name_en };
+              return <Chip key={g.code} label={g.name_en} selected={!nearOn && sameArea(a, area)} onPress={() => pickArea(a)} />;
+            })}
+          </ScrollView>
+        )}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+          <Chip label={near.busy ? "Finding you…" : "Near me"} selected={nearOn} disabled={near.busy} testID="near-me"
+                onPress={() => void near.toggle()} icon={<Icon name="compass" size={16} color={nearOn ? color.onDark : color.cedar} />} />
+        </ScrollView>
+        {note ? <Text variant="secondary" style={{ paddingHorizontal: space.lg }} testID="near-note">{note}</Text> : null}
         <DateStrip days={days} selected={date} onSelect={setDate} />
       </View>
 
       <View style={styles.summary}>
+        {q.isSuccess && sorted && <Text variant="secondary">Nearest first · straight-line distances</Text>}
+        {nearOn && points.isError && !points.data && (
+          <View style={styles.pointsError} testID="points-error">
+            <Text variant="secondary" style={{ flexShrink: 1 }}>Couldn't load club locations, so the list isn't sorted by distance.</Text>
+            <Pressable accessibilityRole="button" onPress={() => void points.refetch()} style={styles.more}><Text style={styles.moreText}>Try again</Text></Pressable>
+          </View>
+        )}
         {q.isSuccess && (
           <Text variant="label">
             {open.length === 0 ? "No free courts" : `${open.length} ${open.length === 1 ? "club" : "clubs"} with free times`}
@@ -70,7 +139,7 @@ export default function Courts() {
         <Empty title="Nothing free that day" body="Try another day or another sport." />
       ) : (
         <View style={styles.list}>
-          {open.map((c) => <ClubCard key={c.id} club={c} date={date} sport={sport} cover={covers.data?.get(c.id) ?? null} />)}
+          {open.map((c) => <ClubCard key={c.id} club={c} date={date} sport={sport} cover={covers.data?.get(c.id) ?? null} userId={userId} km={c.km} />)}
         </View>
       )}
     </ScrollView>
@@ -83,7 +152,8 @@ export default function Courts() {
  */
 export const PRICE_BESIDE_NAME_MAX_SCALE = 1.3;
 
-export function ClubCard({ club, date, sport, cover }: { club: ClubDay; date: string; sport: string | null; cover: string | null }) {
+export function ClubCard({ club, date, sport, cover, userId = null, km = null }: { club: ClubDay; date: string; sport: string | null; cover: string | null; userId?: string | null; km?: number | null }) {
+  const dist = km != null ? distanceLabel(km) : null;
   const { fontScale } = useWindowDimensions();
   const stacked = fontScale > PRICE_BESIDE_NAME_MAX_SCALE;
   const go = (at?: string) =>
@@ -97,7 +167,9 @@ export function ClubCard({ club, date, sport, cover }: { club: ClubDay; date: st
   const more = club.starts.length - shown.length;
   return (
     <View style={styles.card}>
-      <Pressable accessibilityRole="button" accessibilityLabel={[club.name, club.town, courts, from !== null ? `from ${from} dollars an hour` : null].filter(Boolean).join(", ")} onPress={() => go()} style={styles.cardTop}>
+      {/* the heart sits beside the card's button, not inside it: VoiceOver reads a button as one element */}
+      <View style={styles.cardTopRow}>
+      <Pressable accessibilityRole="button" accessibilityLabel={[club.name, dist?.a11y, club.town, courts, from !== null ? `from ${from} dollars an hour` : null].filter(Boolean).join(", ")} onPress={() => go()} style={[styles.cardTop, { flex: 1 }]}>
         <View style={styles.thumb}>
           {cover ? (
             <Image source={{ uri: cover }} style={styles.thumbImg} contentFit="cover" transition={fade(150)} accessible={false} />
@@ -114,11 +186,13 @@ export function ClubCard({ club, date, sport, cover }: { club: ClubDay; date: st
             )}
           </View>
           <Text variant="secondary">
-            {[club.town, courts].filter(Boolean).join(" · ")}
+            {[dist?.text, club.town, courts].filter(Boolean).join(" · ")}
           </Text>
           {club.isDemo && <Text style={styles.demo}>Demo club — not a real venue</Text>}
         </View>
       </Pressable>
+      {userId ? <FavouriteHeart clubId={club.id} clubName={club.name} userId={userId} /> : null}
+      </View>
       <View style={styles.times}>
         {shown.map((s) => (
           <Pressable key={s} accessibilityRole="button" accessibilityLabel={`${hhmm(s, club.timezone)} at ${club.name}`} onPress={() => go(s)} style={styles.time}>
@@ -137,6 +211,7 @@ export function ClubCard({ club, date, sport, cover }: { club: ClubDay; date: st
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: color.ground },
+  cardTopRow: { flexDirection: "row", alignItems: "flex-start" },
   filters: { backgroundColor: color.card, borderBottomWidth: 1, borderBottomColor: color.line, paddingTop: space.md, paddingBottom: space.md, gap: space.md },
   chips: { gap: 8, paddingHorizontal: 20 },
   summary: { paddingHorizontal: 20, paddingTop: space.lg, gap: 4 },
@@ -154,6 +229,7 @@ const styles = StyleSheet.create({
   times: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 12, alignItems: "center" },
   time: { minHeight: 44, minWidth: 64, paddingHorizontal: 10, borderRadius: 12, borderWidth: 1.5, borderColor: color.cedar, alignItems: "center", justifyContent: "center" },
   timeText: { fontFamily: font.score, fontSize: 18, color: color.cedarDeep },
+  pointsError: { flexDirection: "row", alignItems: "center", gap: 8 },
   more: { minHeight: 44, justifyContent: "center", paddingHorizontal: 8 },
   moreText: { fontFamily: font.semibold, fontSize: 15, color: color.cedarDeep },
 });

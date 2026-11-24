@@ -8,6 +8,10 @@ import type { Governorate, Sport } from "@/lib/geo";
 import { EMPTY, readPrefs, writePrefs, type Prefs } from "@/lib/prefs";
 import { shiftDate } from "@/lib/time";
 import AreaPicker from "@/components/AreaPicker";
+import { SavedAreaChips } from "@/components/SavedAreas";
+import FavouriteHeart, { FavouriteMessage } from "@/components/FavouriteHeart";
+import { areaFromPrefs, prefsFromArea, usePlaying } from "@/lib/playing";
+import { clubPoint, coarsen, distanceLabel, sortByDistance, type LatLng, type PlayingArea } from "@/lib/places";
 import { IconSearch } from "@/components/Icons";
 import BookSheet, { type SheetClub } from "./BookSheet";
 
@@ -20,7 +24,27 @@ type Resume = { at: string; court: string; dur: number | null } | null;
 type Sheet = { club: SheetClub; at: string; courts: { id: string; name: string; free: number }[]; courtId: string; minutes: number | null };
 
 const TZ = "Asia/Beirut";
-const reqKey = (d: string, q: string, p: Prefs) => `${d}|${q}|${p.gov ?? ""}|${p.district ?? ""}|${p.sport ?? ""}`;
+const reqKey = (d: string, q: string, p: Prefs) => `${d}|${q}|${p.gov ?? ""}|${p.district ?? ""}|${p.sport ?? ""}`;   // a town narrows the district's answer on the page
+
+/**
+ * Near me (website). The position is read only when the player taps "Near me" (or, when they chose it before and the
+ * browser already allows it, without asking again). It is rounded to about 1 km, kept in this page's memory, and never
+ * sent anywhere: distances are computed here against the clubs' public map points. Only the choice is remembered.
+ */
+type Near = { status: "off" | "locating" | "on" | "denied" | "unavailable"; origin: LatLng | null };
+const NEAR_KEY = "cb_near";
+const rememberNear = (on: boolean) => { try { if (on) localStorage.setItem(NEAR_KEY, "1"); else localStorage.removeItem(NEAR_KEY); } catch {} };
+const nearChosen = () => { try { return localStorage.getItem(NEAR_KEY) === "1"; } catch { return false; } };
+function locate(): Promise<LatLng | "denied" | "unavailable"> {
+  return new Promise((resolve) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) { resolve("unavailable"); return; }
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve(coarsen({ lat: p.coords.latitude, lng: p.coords.longitude })),
+      (e) => resolve(e.code === 1 ? "denied" : "unavailable"),
+      { enableHighAccuracy: false, timeout: 8_000, maximumAge: 10 * 60_000 },
+    );
+  });
+}
 
 export default function CourtsDay({ areas, sports, today, date: initialDate, query: initialQuery, initial, initialError, signedIn, resume }: {
   areas: Governorate[]; sports: Sport[]; today: string; date: string; query: string; initial: DaySlot[]; initialError: boolean; signedIn: boolean; resume: Resume;
@@ -39,14 +63,61 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
   const [showAll, setShowAll] = useState<Record<string, boolean>>({});
   const stripRef = useRef<HTMLDivElement>(null);
   const sportName = (code: string) => sports.find((s) => s.code === code)?.name_en ?? code;
+  const playing = usePlaying(signedIn);
+  const [fromAccount, setFromAccount] = useState(false);
+  const [near, setNear] = useState<Near>({ status: "off", origin: null });
+  // M14 review B (same rule as the app): while Near me is on, the area being browsed never narrows the list; it is
+  // kept and comes back when Near me is turned off. Choosing an area turns Near me off, and a location answer that
+  // arrives after that (or after Near me was turned off) is dropped.
+  const nearSeq = useRef(0);
+  const nearOn = near.status === "on";
+  const view: Prefs = nearOn ? { ...prefs, gov: null, district: null, town: null, townName: null } : prefs;
+  const [points, setPoints] = useState<Map<string, LatLng> | null>(null);
+  // the club points could not be read: the list is then not sorted, and must not say "Nearest first"
+  const [pointsFailed, setPointsFailed] = useState(false);
   const days = Array.from({ length: 15 }, (_, i) => shiftDate(today, i));
   const dayOf = (d: string) => new Date(`${d}T12:00:00+02:00`);
 
-  const key = reqKey(date, query, prefs);
+  const key = reqKey(date, query, view);
   const rows: DaySlot[] | null | undefined = result.key === key ? result.rows : undefined;   // undefined = loading, null = failed
   const loading = rows === undefined;
 
   useEffect(() => { const t = setTimeout(() => { setPrefs(readPrefs()); setLoaded(true); }, 0); return () => clearTimeout(t); }, []);
+  // the account's last area wins over this browser's, once (0088: the player may come from another device)
+  useEffect(() => {
+    if (fromAccount || !loaded || !playing.prefs) return;
+    const t = setTimeout(() => {
+      setFromAccount(true);
+      const last = playing.prefs?.last ?? null;
+      if (last && !query) setPrefs((p) => { const n = { ...p, ...prefsFromArea(last) }; writePrefs(n); return n; });
+    }, 0);
+    return () => clearTimeout(t);
+  }, [playing.prefs, loaded, fromAccount, query]);
+  // "Near me" chosen before: resume only if the browser already allows it (never a prompt on load)
+  useEffect(() => {
+    if (!loaded || !nearChosen() || typeof navigator === "undefined" || !navigator.permissions) return;
+    let alive = true;
+    const mine = ++nearSeq.current;
+    navigator.permissions.query({ name: "geolocation" as PermissionName }).then((st) => {
+      if (!alive || st.state !== "granted" || mine !== nearSeq.current) return;
+      setNear({ status: "locating", origin: null });
+      locate().then((r) => { if (alive && mine === nearSeq.current) setNear(typeof r === "string" ? { status: r, origin: null } : { status: "on", origin: r }); });
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [loaded]);
+  // the clubs' public map points, once, when Near me is on
+  useEffect(() => {
+    if (near.status !== "on" || points || pointsFailed) return;
+    let alive = true;
+    createClient().from("clubs").select("id, lat, lng").eq("active", true).then(({ data, error }) => {
+      if (!alive) return;
+      if (error || !data) { setPointsFailed(true); return; }
+      const m = new Map<string, LatLng>();
+      for (const r of (data ?? []) as { id: string; lat: unknown; lng: unknown }[]) { const p = clubPoint(r.lat, r.lng); if (p) m.set(r.id, p); }
+      setPoints(m);
+    });
+    return () => { alive = false; };
+  }, [near.status, points, pointsFailed]);
   useEffect(() => { stripRef.current?.querySelector<HTMLElement>("[data-on=true]")?.scrollIntoView({ inline: "center", block: "nearest" }); }, [date]);
   // keep the address bar honest without a navigation (refresh lands on the same day)
   useEffect(() => {
@@ -64,7 +135,7 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
     let alive = true;
     (async () => {
       setBusy(true);
-      const { data, error } = await createClient().rpc("club_day_slots", { p_date: date, p_sport: prefs.sport, p_governorate: prefs.gov, p_district: prefs.district, p_query: query.trim() || null });
+      const { data, error } = await createClient().rpc("club_day_slots", { p_date: date, p_sport: view.sport, p_governorate: view.gov, p_district: view.district, p_query: query.trim() || null });
       if (!alive) return;
       setBusy(false);
       setResult({ key, rows: error ? null : (data as DaySlot[]) });
@@ -75,7 +146,24 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
   // any change of day / area / sport / search closes an open booking panel
   useEffect(() => { const t = setTimeout(() => setSheet(null), 0); return () => clearTimeout(t); }, [key]);
 
-  const update = (p: Prefs) => { setPrefs(p); writePrefs(p); };
+  const update = (p: Prefs) => {
+    if (p.gov !== prefs.gov || p.district !== prefs.district || p.town !== prefs.town) {
+      playing.rememberArea(p);
+      if (near.status !== "off") { nearSeq.current++; setNear({ status: "off", origin: null }); rememberNear(false); }   // an area replaces Near me
+    }
+    setPrefs(p); writePrefs(p);
+  };
+  const pickArea = (a: PlayingArea | null) => update({ ...prefs, ...prefsFromArea(a) });
+  const startNear = async () => {
+    if (near.status === "on") { nearSeq.current++; setNear({ status: "off", origin: null }); rememberNear(false); return; }
+    const mine = ++nearSeq.current;
+    setNear({ status: "locating", origin: null });
+    const r = await locate();
+    if (mine !== nearSeq.current) return;   // an area was chosen meanwhile: stay off
+    if (typeof r === "string") { setNear({ status: r, origin: null }); rememberNear(false); return; }
+    rememberNear(true);
+    setNear({ status: "on", origin: r });   // the area is kept (not cleared, not sent to the account); `view` ignores it
+  };
 
   // group by club → distinct start times → courts free at that time
   const clubs = useMemo(() => {
@@ -90,8 +178,11 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
       list.push({ id: r.court_id, name: r.court_name, free: r.free_minutes });
       c.times.set(r.start_at, list);
     }
-    return [...m.values()];
-  }, [rows]);
+    // a saved town narrows its district's answer (club_day_slots filters by district; the town by name)
+    const list = [...m.values()].filter((c) => !view.townName || c.town === view.townName);
+    if (near.status !== "on" || !near.origin || !points) return list.map((c) => ({ ...c, km: null as number | null }));
+    return sortByDistance(list.map((c) => ({ ...c, id: c.club.id })), points, near.origin).map(({ item, km }) => ({ ...item, km }));
+  }, [rows, view.townName, near, points]);
   const sportsPresent = useMemo(() => new Set((rows ?? []).flatMap((r) => r.sports)), [rows]);
   const chips = sports.filter((s) => sportsPresent.has(s.code) || s.code === prefs.sport || (prefs.sport === null && sportsPresent.size === 0));
 
@@ -119,8 +210,21 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
     <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-3xl flex-col">
       <div className="flex items-center justify-between px-5 pt-12">
         <div className="text-[13px] font-bold uppercase tracking-wider text-muted">{formatInTimeZone(dayOf(date), TZ, "MMM yyyy")}</div>
-        <AreaPicker areas={areas} value={{ gov: prefs.gov, district: prefs.district }} onChange={(a) => update({ ...prefs, gov: a.gov, district: a.district })} />
+        <AreaPicker areas={areas} value={{ gov: view.gov, district: view.district }} onChange={(a) => update({ ...prefs, gov: a.gov, district: a.district, town: null, townName: null })} />
       </div>
+      <div className="flex items-center gap-2 overflow-x-auto px-5 pt-1">
+        <button type="button" onClick={startNear} aria-pressed={near.status === "on"} disabled={near.status === "locating"} className={`chip shrink-0 ${near.status === "on" ? "chip-on" : ""}`}>
+          {near.status === "locating" ? "Finding you…" : "Near me"}
+        </button>
+        {view.townName && <span className="shrink-0 text-[13px] text-muted">Town: {view.townName}</span>}
+      </div>
+      {(near.status === "denied" || near.status === "unavailable") && (
+        <p className="mx-5 mt-2 rounded-xl bg-sand-soft px-3 py-2 text-sm">
+          {near.status === "denied" ? "Location is off for CourtBook in this browser. Choose an area instead, or allow location and tap Near me again." : "Couldn't find your location. Choose an area instead."}
+        </p>
+      )}
+      <div className="pt-2"><SavedAreaChips prefs={playing.prefs} govs={areas} current={areaFromPrefs(prefs)} none={nearOn} onPick={pickArea} /></div>
+      <FavouriteMessage signedIn={signedIn} />
       <div ref={stripRef} className="flex gap-1 overflow-x-auto px-3 pb-3 pt-3">
         {days.map((d) => {
           const on = d === date;
@@ -146,6 +250,13 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
         {typed && <button type="button" onClick={() => { setTyped(""); setQuery(""); }} aria-label="Clear" className="px-1 text-muted">✕</button>}
       </form>
       {query && <div className="px-5 pt-2 text-[13px] text-muted">Showing clubs matching “{query}”</div>}
+      {near.status === "on" && points && <div className="px-5 pt-2 text-[13px] text-muted">Nearest first. Distances are straight-line, not by road.</div>}
+      {near.status === "on" && pointsFailed && (
+        <p className="mx-5 mt-2 flex items-center justify-between gap-2 rounded-xl bg-sand-soft px-3 py-2 text-sm">
+          Couldn&apos;t load club locations, so the list isn&apos;t sorted by distance.
+          <button type="button" onClick={() => setPointsFailed(false)} className="shrink-0 font-semibold underline">Try again</button>
+        </p>
+      )}
       {notice && <p className="mx-5 mt-3 flex items-center justify-between rounded-xl bg-sand-soft px-3 py-2 text-sm">{notice}<button onClick={() => setNotice(null)} aria-label="Dismiss" className="px-1 text-muted">✕</button></p>}
 
       <div className={`flex flex-col gap-3.5 px-5 pb-28 pt-3.5 ${busy || loading ? "opacity-60" : ""}`}>
@@ -158,7 +269,8 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
           const shown = all ? times : times.slice(0, 6);
           return (
             <article key={c.club.id} className="card overflow-hidden">
-              <Link href={`/club/${c.club.slug}?date=${date}`} className="flex items-center gap-3 p-4">
+              <div className="flex items-center pr-2">
+              <Link href={`/club/${c.club.slug}?date=${date}`} className="flex min-w-0 flex-1 items-center gap-3 p-4">
                 <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-turf-soft text-sm font-extrabold text-turf" aria-hidden="true">{c.club.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}</span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[17px] font-bold leading-tight">{c.club.name}</div>
@@ -167,10 +279,12 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
                   {c.is_demo && (
                     <span className="mt-0.5 inline-block rounded-full bg-sand-soft px-2 py-0.5 text-[11px] font-semibold text-sand">Fictional demo club</span>
                   )}
-                  <div className="text-sm text-muted">{[c.town, c.district].filter(Boolean).join(" · ") || "Lebanon"}{c.price_from != null ? ` · from $${Number(c.price_from).toFixed(0)}/h` : ""}{!prefs.sport && c.sports.length > 1 ? ` · ${c.sports.map(sportName).join(", ")}` : ""}</div>
+                  <div className="text-sm text-muted">{c.km != null && <span aria-label={distanceLabel(c.km).a11y}>{distanceLabel(c.km).text} · </span>}{[c.town, c.district].filter(Boolean).join(" · ") || "Lebanon"}{c.price_from != null ? ` · from $${Number(c.price_from).toFixed(0)}/h` : ""}{!prefs.sport && c.sports.length > 1 ? ` · ${c.sports.map(sportName).join(", ")}` : ""}</div>
                 </div>
                 <span className="text-muted">›</span>
               </Link>
+              <FavouriteHeart clubId={c.club.id} clubName={c.club.name} slug={c.club.slug} signedIn={signedIn} />
+              </div>
               <div className="flex flex-wrap gap-2 border-t border-grid bg-[#fafaf8] px-4 py-3.5">
                 {shown.map((at) => (
                   <button key={at} disabled={loading} onClick={() => setSheet({ club: c.club, at, courts: c.times.get(at)!, courtId: c.times.get(at)![0].id, minutes: null })} className="min-w-[72px] rounded-xl bg-turf-soft px-3 py-3 text-[15px] font-bold text-turf-deep disabled:opacity-50">{formatInTimeZone(new Date(at), c.club.timezone, "HH:mm")}</button>

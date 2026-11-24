@@ -79,6 +79,7 @@ function RootLayout() {
               <Stack.Screen name="match/[id]" options={{ title: "Game" }} />
               <Stack.Screen name="activity" options={{ title: "Activity" }} />
               <Stack.Screen name="help" options={{ title: "Help & Feedback" }} />
+              <Stack.Screen name="areas" options={{ title: "Where I play" }} />
               <Stack.Screen name="e2e-games" options={{ title: "" }} />
             </Stack>
             <AgeGate />

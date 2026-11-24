@@ -21,7 +21,7 @@ describe("club info", () => {
   });
 
   test("maps: the pin first, then the club's link, else nothing", () => {
-    expect(mapsUrl({ lat: "34.255", lng: 35.66, location_url: "https://maps.app/x" })).toBe("https://www.google.com/maps/search/?api=1&query=34.255,35.66");
+    expect(mapsUrl({ lat: "34.255", lng: 35.66, location_url: "https://maps.app/x" })).toBe("https://www.google.com/maps/dir/?api=1&destination=34.255,35.66");   // a route, from the exact point
     expect(mapsUrl({ lat: null, lng: null, location_url: "https://maps.app/x" })).toBe("https://maps.app/x");
     expect(mapsUrl({ lat: null, lng: 35, location_url: "" })).toBeNull();
   });

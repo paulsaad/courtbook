@@ -1,0 +1,14 @@
+# M5 crash privacy: the test build sends a report carrying synthetic personal data in every channel
+# (lib/crash.ts sendPrivacyProbe). check_report.py --probe checks what left the phone; what Sentry
+# received is checked there (docs/m5/crash-privacy.md). The app must keep working afterwards.
+appId: app.courtbook.mobile.staging
+---
+- launchApp
+- runFlow: _dismiss-anr.yaml
+- extendedWaitUntil: { visible: "Book a court", timeout: 120000 }
+- tapOn: "Profile"
+- scrollUntilVisible: { element: "Send a privacy probe report" }
+- tapOn: "Send a privacy probe report"
+- extendedWaitUntil: { visible: "Privacy probe sent", timeout: 10000 }
+- tapOn: "Courts"
+- extendedWaitUntil: { visible: "All sports", timeout: 30000 }

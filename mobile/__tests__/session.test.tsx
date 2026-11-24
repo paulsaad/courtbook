@@ -3,10 +3,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Text } from "react-native";
 
 type Listener = (event: string, session: unknown) => void;
-const mockAuth = { listener: null as Listener | null, initial: null as unknown };
+const mockAuth = { listener: null as Listener | null, initial: null as unknown, deletion: null as unknown, signOut: jest.fn(async (..._a: unknown[]) => ({ error: null })), rpc: jest.fn(async (..._a: unknown[]) => ({ data: null as unknown, error: null })) };
 jest.mock("../lib/supabase", () => ({
   supabase: {
+    rpc: (...a: unknown[]) => mockAuth.rpc(...a),
     auth: {
+      signOut: (...a: unknown[]) => mockAuth.signOut(...a),
       getSession: jest.fn(async () => ({ data: { session: mockAuth.initial } })),
       onAuthStateChange: jest.fn((cb: Listener) => {
         mockAuth.listener = cb;
@@ -76,5 +78,40 @@ describe("SessionProvider clears cached user data on every auth change", () => {
     const { emit, cached } = await mount(null);
     await emit("SIGNED_IN", session("a"));
     expect(cached()).toBeUndefined();
+  });
+});
+
+describe("SessionProvider signs out an account closed elsewhere (M2, 0086)", () => {
+  beforeEach(() => {
+    mockAuth.signOut.mockClear();
+    mockAuth.rpc.mockReset();
+    mockAuth.rpc.mockImplementation(async () => ({ data: mockAuth.deletion, error: null }));
+  });
+  it("cold start with a session for a closed account → signed out on this device", async () => {
+    mockAuth.deletion = { status: "closed", closed: true };
+    await mount(session("u1"));
+    await act(async () => {});
+    expect(mockAuth.rpc).toHaveBeenCalledWith("my_account_deletion", {});
+    expect(mockAuth.signOut).toHaveBeenCalledWith({ scope: "local" });
+  });
+  it("an open account is left alone; a token refresh for the same person asks nothing", async () => {
+    mockAuth.deletion = null;
+    const { emit } = await mount(session("u1"));
+    await act(async () => {});
+    expect(mockAuth.rpc).toHaveBeenCalledTimes(1);
+    await emit("TOKEN_REFRESHED", session("u1"));
+    expect(mockAuth.rpc).toHaveBeenCalledTimes(1);
+    expect(mockAuth.signOut).not.toHaveBeenCalled();
+  });
+  it("signed out: nothing is asked", async () => {
+    await mount(null);
+    await act(async () => {});
+    expect(mockAuth.rpc).not.toHaveBeenCalled();
+  });
+  it("the check failing (offline, before 0079) changes nothing", async () => {
+    mockAuth.rpc.mockImplementation(async () => { throw new TypeError("Network request failed"); });
+    await mount(session("u1"));
+    await act(async () => {});
+    expect(mockAuth.signOut).not.toHaveBeenCalled();
   });
 });

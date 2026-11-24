@@ -652,7 +652,9 @@ select count(*) > 0 from club_discovery(null, null, null, 'bat');
 select count(*) > 0 from club_discovery(null, null, null, 'البترون');
 EOF
 } | $PSQL -d $DB 2>&1 | filter
-$PSQL -q -d $DB -c "update clubs set open_time='00:00', close_time='24:00', slot_minutes=30, min_booking_minutes=30, max_booking_minutes=180 where slug='other'; delete from price_rules where club_id=(select id from clubs where slug='other');"
+# a published club with no prices at all is now refused (0092 §4, prices_incomplete); this fixture builds that state on
+# purpose for the price_from-null check, so it sets the coverage guard aside for these two statements only
+$PSQL -q -d $DB -c "begin; alter table clubs disable trigger clubs_prices_stay_complete; alter table price_rules disable trigger price_rules_stay_complete; update clubs set open_time='00:00', close_time='24:00', slot_minutes=30, min_booking_minutes=30, max_booking_minutes=180 where slug='other'; delete from price_rules where club_id=(select id from clubs where slug='other'); alter table clubs enable trigger clubs_prices_stay_complete; alter table price_rules enable trigger price_rules_stay_complete; commit;"
 { as_user $P1; cat <<EOF
 \echo '80. next_free_slot (other club, open 24h, 30-min grid): slot found, on grid, >= now ; no price rules -> price_from null  [fails only if Beirut time >= 23:25]'
 select start_at >= now() and extract(minute from start_at at time zone 'Asia/Beirut')::int % 30 = 0 from next_free_slot((select id from clubs where slug='other'));
@@ -1514,12 +1516,13 @@ check service "AN0 fixture: a 1 h desk booking" "select count(*) from bookings w
 fails_with $ADMIN "AN1 moving it to 30 min (club minimum 1 h) is refused" "select move_booking('$MB','$COURT3', $(at13 09:00), $(at13 09:30));" bad_duration
 fails_with $ADMIN "AN2 moving it to 4 h (club maximum 3 h) is refused" "select move_booking('$MB','$COURT3', $(at13 09:00), $(at13 13:00));" bad_duration
 check service "AN3 ...and it is unchanged" "select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'-'||to_char(end_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='$MB';" "09:00-10:00"
-check $ADMIN "AN4 a new length within the limits is accepted (1 h 30)" "select move_booking('$MB','$COURT3', $(at13 11:00), $(at13 12:30))::text || 'ok';" ok
+# 0091: a new length changes a walk-in's price, so it is moved with the confirmed new price (move_booking_priced)
+check $ADMIN "AN4 a new length within the limits is accepted (1 h 30)" "select 'ok' from (select move_booking_priced('$MB','$COURT3', $(at13 11:00), $(at13 12:30), quote_price('$COURT3', $(at13 11:00), $(at13 12:30)))) x;" ok
 $PSQL -q -d $DB -c "update clubs set min_booking_minutes = 120 where id='$CLUB';" >/dev/null
-check $ADMIN "AN5 after the club raises its minimum to 2 h, the booking can still move at its existing length" "select move_booking('$MB','$COURT2', $(at13 14:00), $(at13 15:30))::text || 'ok';" ok
-fails_with $ADMIN "AN6 ...but not to another length below the new minimum" "select move_booking('$MB','$COURT2', $(at13 14:00), $(at13 15:00));" bad_duration
+check $ADMIN "AN5 after the club raises its minimum to 2 h, the booking can still move at its existing length" "select 'ok' from (select move_booking_priced('$MB','$COURT2', $(at13 14:00), $(at13 15:30), quote_price('$COURT2', $(at13 14:00), $(at13 15:30)))) x;" ok
+fails_with $ADMIN "AN6 ...but not to another length below the new minimum" "select move_booking_priced('$MB','$COURT2', $(at13 14:00), $(at13 15:00), quote_price('$COURT2', $(at13 14:00), $(at13 15:00)));" bad_duration
 $PSQL -q -d $DB -c "update clubs set min_booking_minutes = 60 where id='$CLUB';" >/dev/null
-fails_with $ADMIN "AN7 the slot trigger still refuses an off-grid move" "select move_booking('$MB','$COURT2', $(at13 14:10), $(at13 15:40));" not_on_grid
+fails_with $ADMIN "AN7 the slot trigger still refuses an off-grid move" "select move_booking_priced('$MB','$COURT2', $(at13 14:10), $(at13 15:40), (select price_usd from bookings where id='$MB'));" not_on_grid
 
 echo "--- AL. every migration from 0041 can be applied twice"
 # What this asserts: re-application raises no error. It does NOT assert that a second application

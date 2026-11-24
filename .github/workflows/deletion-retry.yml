@@ -1,0 +1,60 @@
+# M2 (0086), R1: automatic deletion retries (option B of docs/ops/m2-deletion-retry-activation.md).
+#
+# INACTIVE UNTIL ACTIVATED. GitHub runs `schedule:` only from the default branch (main), and each target runs only when
+# BOTH its URL variable and its secret are set (Settings → Secrets and variables → Actions). Today neither exists, so a
+# run — scheduled or by hand — calls nothing and says so.
+#
+# Targets (each independent; set only the one being activated):
+#   production: variable DELETION_RETRY_URL          + secret CRON_SECRET          (the production site's
+#               /api/internal/deletions/retry; the production domain is not behind Vercel login)
+#   staging:    variable DELETION_RETRY_URL_STAGING  + secret CRON_SECRET_STAGING  + secret VERCEL_BYPASS_STAGING
+#               (staging previews are behind Vercel login; the bypass is Vercel's "Protection Bypass for Automation"
+#               secret, a separate decision)
+#
+# What a run does: one POST, bearer secret in the header, no checkout, no repository permissions. The route answers
+# counts only. Every successful run records the worker heartbeat in the database; the app offers one-step account
+# deletion only while that heartbeat is under an hour old (close_my_account → processing_unavailable otherwise), so if
+# this stops, app deletions pause safely (the website keeps working) instead of piling up unprocessed.
+# A failing run fails the workflow: GitHub emails the person who last changed this schedule.
+name: Deletion retries
+
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"   # every 15 min, off the hour (GitHub delays runs at :00)
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: deletion-retry
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [production, staging]
+    steps:
+      - name: Call the retry route (${{ matrix.target }})
+        env:
+          TARGET: ${{ matrix.target }}
+          URL: ${{ matrix.target == 'production' && vars.DELETION_RETRY_URL || vars.DELETION_RETRY_URL_STAGING }}
+          SECRET: ${{ matrix.target == 'production' && secrets.CRON_SECRET || secrets.CRON_SECRET_STAGING }}
+          BYPASS: ${{ matrix.target == 'staging' && secrets.VERCEL_BYPASS_STAGING || '' }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$SECRET" ]; then
+            echo "$TARGET: not activated (URL variable or secret not set); nothing called."; exit 0
+          fi
+          case "$URL" in https://*/api/internal/deletions/retry) ;; *) echo "::error::$TARGET: URL must be https://<site>/api/internal/deletions/retry"; exit 1;; esac
+          if [ "$TARGET" = staging ] && [ -z "$BYPASS" ]; then
+            echo "::error::staging: VERCEL_BYPASS_STAGING is not set (staging is behind Vercel login)"; exit 1
+          fi
+          hdr=(-H "Authorization: Bearer $SECRET")
+          [ -n "$BYPASS" ] && hdr+=(-H "x-vercel-protection-bypass: $BYPASS")
+          code=$(curl -sS -o /tmp/out.json -w '%{http_code}' --max-time 90 -X POST "${hdr[@]}" "$URL")
+          # the answer is counts only (no account ids); print it for the run log
+          echo "$TARGET: HTTP $code $(head -c 400 /tmp/out.json)"
+          [ "$code" = 200 ]

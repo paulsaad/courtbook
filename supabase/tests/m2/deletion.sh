@@ -10,6 +10,11 @@ PSQL=${PSQL:-psql}
 DB=courtbook_test
 MIGRATION=${MIGRATION:-supabase/migrations/0079_account_deletion.sql}
 TESTS=supabase/tests/m2/deletion_tests.sql
+# Superseded once 0086 is in the database: 0086 replaces 0079's request-and-wait deletion, and these 0079 checks were
+# ported to it (supabase/tests/m86/ported_0079_tests.sql, ported_deletion_races.sh), where they run instead.
+if [ "$($PSQL -At -d courtbook_test -c "select to_regclass('public.deletion_worker') is not null" 2>/dev/null)" = t ]; then
+  echo "SKIP  0086 is applied: this 0079 suite is superseded by supabase/tests/m86/ported_* (run those)"; echo "RESULT: SKIP (superseded)"; exit 0
+fi
 where=$($PSQL -At -d $DB -c "select current_database()||'@'||coalesce(host(inet_server_addr()),'local-socket')" 2>/dev/null)
 case "$where" in courtbook_test@local-socket|courtbook_test@127.0.0.1|courtbook_test@::1) ;;
   *) echo "refusing: connected to '$where', expected the local courtbook_test replica"; exit 2;; esac

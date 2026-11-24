@@ -13,7 +13,7 @@ export default async function ClubMatches({ params }: { params: Promise<{ slug: 
   if (!user) redirect(`/login?next=/club/${slug}/matches`);
   const gate = await playerGatePath(supabase, user.id, `/club/${slug}/matches`, "this club");
   if (gate) redirect(gate);
-  const { data: club } = loaded(await supabase.from("clubs").select("id, name, slug, timezone, open_time, close_time, slot_minutes, location_url, town_id, is_demo").eq("slug", slug).single(), "this club");
+  const { data: club } = loaded(await supabase.from("clubs").select("id, name, slug, timezone, open_time, close_time, slot_minutes, location_url, town_id, is_demo, lat, lng").eq("slug", slug).single(), "this club");
   if (!club) notFound();
   const [{ data: rows }, { data: myBookings }, head, { data: clubSports }, { data: sportRows }] = allLoaded(await Promise.all([
     supabase.rpc("match_board", { p_club: club.id, p_days: 14 }),
@@ -25,7 +25,7 @@ export default async function ClubMatches({ params }: { params: Promise<{ slug: 
   const sportsHere = ((sportRows ?? []) as { code: string; name_en: string }[]).filter((s) => ((clubSports ?? []) as string[]).includes(s.code));
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col">
-      <ClubHeader club={head} tab="/matches" />
+      <ClubHeader club={head} tab="/matches" signedIn={!!user} />
       <div className="mx-auto flex w-full max-w-md flex-col gap-5 p-5 pb-24">
       <MatchBoard club={club} rows={(rows ?? []) as MatchRow[]} sports={sportsHere} myBookings={(myBookings ?? []) as unknown as { id: string; start_at: string; end_at: string; courts: { name: string } | null }[]} />
       </div>

@@ -161,7 +161,7 @@ reset role;
 -- ===== booking rules worth pinning =====
 update bookings set hold_expires_at = now() - interval '1 minute' where id = (select booking_id from h);
 set role authenticated; select set_config('request.jwt.claim.sub', '$SA', false) \\g /dev/null
-do \$\$ begin perform move_booking((select id from w), (select id from courts where name = 'Padel 1'), $(AT 2 18:00), $(AT 2 19:30));
+do \$\$ begin perform move_booking_priced((select id from w), (select id from courts where name = 'Padel 1'), $(AT 2 18:00), $(AT 2 19:30), quote_price((select id from courts where name = 'Padel 1'), $(AT 2 18:00), $(AT 2 19:30)));   -- 0091: confirmed price
   insert into r select 'BOOK1 a staff move onto an expired (unswept) hold succeeds and the hold is expired', (select status from bookings where id = (select booking_id from h)) = 'expired', 'pass', '';
 exception when others then insert into r values ('BOOK1 a staff move onto an expired (unswept) hold succeeds and the hold is expired', false, 'pass', sqlerrm); end \$\$;
 do \$\$ begin perform staff_book((select id from clubs where slug = 'batroun'), (select id from courts where name = 'Padel 2'), $(AT -1 10:00), $(AT -1 11:00), 'Past', null);
@@ -220,7 +220,7 @@ report "RACE1 desk walk-in vs player hold, same slot: one booking, the other tol
 WB=$(as "$SA" "select staff_book($CLUBQ, $(K 'Padel 2'), $(AT 7 10:00), $(AT 7 11:30), 'To move', null);" | q | grep -E '^[0-9a-f-]{36}$')
 as "$P2" "begin; select booking_id from hold_slot($CLUBQ, $(K 'Padel 3'), $(AT 7 18:00), $(AT 7 19:30), gen_random_uuid()); select pg_sleep(1.5); commit;" | q > /tmp/aud_r2a.log &
 sleep 0.5
-as "$SA" "select move_booking('$WB', $(K 'Padel 3'), $(AT 7 18:00), $(AT 7 19:30));" | q > /tmp/aud_r2b.log
+as "$SA" "select move_booking_priced('$WB', $(K 'Padel 3'), $(AT 7 18:00), $(AT 7 19:30), quote_price($(K 'Padel 3'), $(AT 7 18:00), $(AT 7 19:30)));" | q > /tmp/aud_r2b.log   # 0091: confirmed price
 wait
 n=$(active_at 'Padel 3' "$(AT 7 18:00)" "$(AT 7 19:30)"); e=$(errof /tmp/aud_r2b.log)
 still=$(q -c "select court_id = $(K 'Padel 2') and status = 'confirmed' from bookings where id = '$WB'")
@@ -228,7 +228,7 @@ report "RACE2 staff move vs player hold into one slot: one booking; the moved bo
 
 # R3: a player cancels while staff move the same booking
 CB=$(as "$SA" "select staff_book($CLUBQ, $(K 'Padel 2'), $(AT 8 10:00), $(AT 8 11:00), 'Both', null);" | q | grep -E '^[0-9a-f-]{36}$')
-as "$SA" "begin; select move_booking('$CB', $(K 'Padel 3'), $(AT 8 12:00), $(AT 8 13:00)); select pg_sleep(1.5); commit;" | q > /tmp/aud_r3a.log &
+as "$SA" "begin; select move_booking_priced('$CB', $(K 'Padel 3'), $(AT 8 12:00), $(AT 8 13:00), quote_price($(K 'Padel 3'), $(AT 8 12:00), $(AT 8 13:00))); select pg_sleep(1.5); commit;" | q > /tmp/aud_r3a.log &   # 0091
 sleep 0.5
 as "$SA" "select cancel_booking('$CB', true);" | q > /tmp/aud_r3b.log
 wait

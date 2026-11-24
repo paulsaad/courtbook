@@ -14,7 +14,7 @@ import { Segmented } from "../../components/Segmented";
 import { Icon } from "../../components/Icon";
 import { badgeText, unreadCount, useActivity } from "../../lib/activity";
 import { FAULT_LABEL, currentFault, faultsAvailable, setFault, subscribeFault, type Fault } from "../../lib/testFaults";
-import { sendTestReport } from "../../lib/crash";
+import { E2E_PROBES, crashNatively, sendPrivacyProbe, sendTestReport } from "../../lib/crash";
 import { useSafety } from "../../lib/safety";
 import { BlockedPlayers } from "../../components/BlockedPlayers";
 import { DeleteAccount } from "../../components/DeleteAccount";
@@ -49,6 +49,7 @@ export default function Profile() {
   ];
   const fault = useSyncExternalStore(subscribeFault, currentFault);
   const [reportSent, setReportSent] = useState(false);
+  const [probeSent, setProbeSent] = useState(false);
   const name = useProfileName(session.status === "signed-in" ? session.session.user.id : null);
   const email = session.status === "signed-in" ? session.session.user.email ?? null : null;
   const shownName = name.data?.trim() || null;
@@ -82,6 +83,14 @@ export default function Profile() {
         </View>
       )}
       {session.status === "signed-in" ? <ActivityLink /> : null}
+      {session.status === "signed-in" ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="Where I play" onPress={() => router.push("/areas")}
+                   style={({ pressed }) => [styles.card, styles.activity, pressed && { opacity: 0.85 }]} testID="profile-areas">
+          <Icon name="pin" size={22} color={color.cedarDeep} />
+          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.activityText}>Where I play</Text>
+          <Icon name="chevronRight" size={20} color={color.muted} />
+        </Pressable>
+      ) : null}
       <Pressable accessibilityRole="button" accessibilityLabel="Help & Feedback" onPress={() => router.push("/help")}
                  style={({ pressed }) => [styles.card, styles.activity, pressed && { opacity: 0.85 }]} testID="profile-help">
         <Icon name="info" size={22} color={color.cedarDeep} />
@@ -139,6 +148,17 @@ export default function Profile() {
               variant="secondary"
               onPress={() => { sendTestReport(); setReportSent(true); }}
             />
+            {E2E_PROBES && (
+              <>
+                {/* Emulator test builds only (M5 crash privacy): synthetic personal data, which must not reach Sentry. */}
+                <Button
+                  label={probeSent ? "Privacy probe sent" : "Send a privacy probe report"}
+                  variant="secondary"
+                  onPress={() => { sendPrivacyProbe(); setProbeSent(true); }}
+                />
+                <Button label="Crash the app (native test)" variant="secondary" onPress={crashNatively} />
+              </>
+            )}
           </View>
         </>
       )}

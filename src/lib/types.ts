@@ -32,6 +32,42 @@ export type Booking = {
   player_name?: string | null;
   /** staff only: guest phone, or the player's own, from club_booking_contacts */
   contact_phone?: string | null;
+  /** staff only: the booking's CourtBook payment, if any. None for desk walk-ins and for app bookings at a club
+   *  that takes payment at its desk (book_at_desk) — the desk collects those. */
+  payments?: { status: string } | { status: string }[] | null;   // one-to-one (unique booking_id): an object or null
+};
+
+/** What the staff calendar reads for each booking. The payment is read separately (paymentsByBooking), so a
+ *  failed payment read never hides the bookings themselves. */
+export const STAFF_BOOKING_COLUMNS = "id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id, price_usd, fee_usd, hold_expires_at";
+
+export type Settlement = "awaiting" | "paid_in_app" | "at_desk" | "refund_owed" | "not_paid" | "unknown";
+/**
+ * How the desk settles a booking, from the booking's verified CourtBook payment record only (review 24 Nov: never
+ * inferred from the service fee).
+ *   payments === undefined → the payment read failed or was not made: "unknown" (never "paid in the app")
+ *   payments === null      → no CourtBook payment exists: a walk-in, or an app booking at a desk-payment club
+ */
+export function settlement(b: Pick<Booking, "status" | "source" | "payments">): Settlement {
+  if (b.source !== "app") return "at_desk";                 // desk walk-ins never carry a CourtBook payment
+  if (b.payments === undefined) return "unknown";
+  const list = Array.isArray(b.payments) ? b.payments : b.payments ? [b.payments] : [];
+  if (list.length === 0) return b.status === "pending" ? "unknown" : "at_desk";   // a hold always has a payment row
+  const st = list[0].status;
+  if (st === "paid") return "paid_in_app";
+  if (st === "pending") return "awaiting";
+  if (st === "refund_due" || st === "refunded") return "refund_owed";
+  return "not_paid";                                         // failed, expired
+}
+
+/** The desk's words for each settlement (Today, Week and the booking panel use the same words). */
+export const SETTLEMENT_TEXT: Record<Settlement, string> = {
+  awaiting: "awaiting payment in the app",
+  paid_in_app: "paid in the app",
+  at_desk: "take payment at the desk, not through CourtBook",
+  refund_owed: "payment being refunded, not collected",
+  not_paid: "not paid — take payment at the desk",
+  unknown: "payment status not loaded — check Payments before taking money",
 };
 
 export type Block = { id: string; court_id: string; start_at: string; end_at: string; reason: string | null };
@@ -44,6 +80,9 @@ export const ERRORS: Record<string, string> = {
   bad_amount: "Enter an amount greater than zero.",
   bad_method: "Choose a payment method from the list.",
   slot_taken: "That slot was just taken.",
+  price_confirmation_needed: "This change alters the price. Reload the page and confirm the new price.",
+  price_changed: "The price changed since it was shown. Check the new price and confirm again.",
+  paid_length_change: "This booking was paid in the app, so its length can't change. Cancel it (the refund follows the club's rules) and book the new length.",
   block_overlaps_booking: "There is a booking in that range. Cancel or move it first.",
   overlaps_existing_block: "That range is already blocked.",
   no_overlapping_blocks: "That range is already blocked.",
@@ -66,6 +105,13 @@ export const ERRORS: Record<string, string> = {
   simulated_demo_only: "Simulated payment is only for demo clubs. A real club takes payment at its desk.",
   no_price_rule: "No price set for this time. Ask the club.",
   price_rule_overlap: "Overlaps an existing rule for the same courts and days. Delete or narrow one of them.",
+  prices_exist: "This club already has whole-club prices. Tick 'Replace the current whole-club prices' to replace them.",
+  peaks_overlap: "Two peak times overlap on the same day. Make them follow each other instead.",
+  peak_outside_hours: "A peak time must be within the club's opening hours.",
+  bad_peaks: "Check the peak times: each needs a start before its end, and a price.",
+  bad_price: "Enter a price of $0 or more.",
+  court_has_bookings: "This court still has upcoming bookings. Move or cancel them first, then deactivate it.",
+  prices_incomplete: "Players would see times with no price. Add a price for those times first (Prices → Add), then change the hours or the price.",
   not_payable: "This booking is no longer waiting for payment.",
   not_pending: "Only a pending request can be approved.",
   match_full: "This match just filled up.",

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { allLoaded, loaded } from "@/lib/load";
 import { loadClubHead } from "@/lib/clubHead";
+import { directionsUrl } from "@/lib/places";
 import ClubHeader from "../ClubHeader";
 import { FACILITIES } from "@/components/facilities";
 import { feeSummary } from "@/lib/fees";
@@ -12,6 +13,7 @@ const fmtDur = (m: number) => (m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 
 export default async function ClubInfo({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();   // only decides whether the heart offers sign-in
   const { data: club } = loaded(await supabase.from("clubs")
     .select("id, name, slug, open_time, close_time, location_url, town_id, slot_minutes, min_booking_minutes, max_booking_minutes, cancel_cutoff_hours, hold_minutes, booking_window_days, service_fee_usd, payment_mode, lat, lng, description, arrival_notes, address, has_parking, has_changing_rooms, has_showers, has_equipment_rental, has_cafe, has_floodlights, has_drinking_water, is_demo")
     .eq("slug", slug).eq("active", true).single(), "this club");
@@ -25,7 +27,7 @@ export default async function ClubInfo({ params }: { params: Promise<{ slug: str
   const contactRes = await supabase.from("clubs").select("contact_phone, contact_email").eq("id", club.id).single();
   const contact = contactRes.error && /contact_(phone|email)|42703/.test(`${contactRes.error.code} ${contactRes.error.message}`)
     ? null : (loaded(contactRes, "this club").data as { contact_phone: string | null; contact_email: string | null } | null);
-  const maps = club.lat != null && club.lng != null ? `https://www.google.com/maps?q=${club.lat},${club.lng}` : club.location_url;
+  const maps = directionsUrl(club.lat, club.lng, club.location_url);
   const row = "flex justify-between gap-4 py-2 text-sm";
   // A club that takes payment at its desk charges no booking fee; the page must not promise one.
   const fees = feeSummary(club.payment_mode, club.service_fee_usd);
@@ -40,7 +42,7 @@ export default async function ClubInfo({ params }: { params: Promise<{ slug: str
   const hasNot = facilities.filter(([, v]) => v === false);
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col">
-      <ClubHeader club={head} tab="/info" />
+      <ClubHeader club={head} tab="/info" signedIn={!!user} />
       <div className="mx-auto flex w-full max-w-md flex-col gap-4 p-4">
         {club.description && (
           <section className="rounded-2xl border border-grid bg-white px-4 py-3">
@@ -95,7 +97,7 @@ export default async function ClubInfo({ params }: { params: Promise<{ slug: str
           {(rules ?? []).map((r, i) => <div key={i} className={row}><span>{r.start_time.slice(0, 5)}–{r.end_time.slice(0, 5)}{r.label ? ` · ${r.label}` : ""}{r.court_id ? " · one court" : ""}</span><span>${Number(r.price_usd).toFixed(0)}</span></div>)}
           {(rules ?? []).length === 0 && <p className="py-2 text-sm text-muted">Prices shown when you pick a slot.</p>}
         </section>
-        {maps && <a href={maps} target="_blank" rel="noreferrer" className="rounded-2xl border border-grid bg-white px-4 py-3 text-center text-sm text-action">Open in Maps</a>}
+        {maps && <a href={maps} target="_blank" rel="noreferrer" className="rounded-2xl border border-grid bg-white px-4 py-3 text-center text-sm text-action">Directions</a>}
       </div>
     </main>
   );

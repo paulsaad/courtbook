@@ -30,11 +30,14 @@ export const SAFE_MESSAGES = {
   mediaPublishUnknown: "media: publish state unknown",
   mediaRemoveUnknown: "media: removal state unknown",
   paymentLookup: "payment: lookup failed",
+  accountCloseFailed: "account: closing failed",
+  deletionStepFailed: "account: deletion step failed",
+  deletionNeedsAttention: "account: deletion needs attention",
   testServer: "CourtBook monitoring test (server)",
   testBrowser: "CourtBook monitoring test (browser)",
 } as const;
 export type SafeMessageKey = keyof typeof SAFE_MESSAGES;
-export type Area = "booking" | "auth" | "media" | "payment" | "page" | "test";
+export type Area = "booking" | "auth" | "media" | "payment" | "page" | "test" | "account";
 
 /** Fake personal data for the staging test: none of it may ever appear in a Sentry event. */
 export const PRIVACY_PROBE = "privacy probe: Jana Probe, probe@example.invalid, +961 70 123 456, code 482913";
@@ -67,12 +70,12 @@ export function safeText(text: unknown, exceptionType?: string): string {
 
 /** Every page and route of the website (src/app). Kept in step with the folders by monitoring.routes.test.ts. */
 export const ROUTES = [
-  "/", "/admin", "/admin/clubs/[slug]", "/admin/deletions", "/admin/monitoring", "/admin/payments", "/admin/reports", "/age",
-  "/api/admin/delete-account", "/api/club-media", "/api/health", "/api/monitoring/test", "/api/notify/email", "/api/pay/simulate", "/api/payments.csv",
+  "/", "/account-closed", "/admin", "/admin/clubs/[slug]", "/admin/deletions", "/admin/monitoring", "/admin/payments", "/admin/reports", "/age",
+  "/api/account/close", "/api/admin/delete-account", "/api/club-media", "/api/internal/deletions/retry", "/api/health", "/api/monitoring/test", "/api/notify/email", "/api/pay/simulate", "/api/payments.csv",
   "/auth/callback", "/auth/signout", "/bookings", "/bookings/[id]", "/club/[slug]", "/club/[slug]/coaches",
   "/club/[slug]/info", "/club/[slug]/matches", "/coach", "/coaches", "/coaches/[id]", "/courts", "/delete-account", "/levels", "/login",
-  "/matches/[id]", "/me", "/notifications", "/pay/[id]", "/play", "/profile", "/staff", "/staff/[slug]",
-  "/staff/[slug]/payments", "/staff/[slug]/settings",
+  "/matches/[id]", "/me", "/notifications", "/pay/[id]", "/play", "/privacy", "/profile", "/staff", "/staff/[slug]",
+  "/staff/[slug]/payments", "/staff/[slug]/settings", "/terms",
   // files served by the app itself
   "/favicon.ico", "/icon.png", "/manifest.webmanifest",
 ] as const;
@@ -207,7 +210,7 @@ const CONTEXT_NAMES: Record<"browser" | "os" | "runtime", Set<string>> = {
   runtime: new Set(["node", "edge", "vercel-edge", "browser"]),
 };
 const CONTEXT_VERSION = /^v?\d{1,6}(?:\.\d{1,6}){0,3}(?:[-+][A-Za-z0-9._]{1,40})?$/;
-const AREAS = new Set<string>(["booking", "auth", "media", "payment", "page", "test"]);
+const AREAS = new Set<string>(["booking", "auth", "media", "payment", "page", "test", "account"]);
 
 const ok = <T>(v: unknown, test: (x: string) => boolean): T | undefined =>
   typeof v === "string" && test(v) ? (v as T) : undefined;

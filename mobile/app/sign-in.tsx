@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { sendCodeError, verifyCodeError } from "@shared/authText";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import * as AppleAuthentication from "expo-apple-authentication";
@@ -51,7 +52,7 @@ export default function SignIn() {
     const { error } = await supabase.auth.signInWithOtp({ email: email.trim() });
     setBusy(false);
     if (error) {
-      setError(error.message.includes("rate") ? "Too many requests. Wait a minute and try again." : error.message);
+      setError(sendCodeError(error));
       return;
     }
     setCode("");
@@ -64,7 +65,7 @@ export default function SignIn() {
     const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token: cleanCode(code), type: "email" });
     setBusy(false);
     if (error) {
-      setError("That code is wrong or expired. Check the latest email, or request a new one.");
+      setError(verifyCodeError(error));
       return;
     }
     finish();

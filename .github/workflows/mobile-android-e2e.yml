@@ -16,9 +16,9 @@ on:
         options: [android, ios]
         default: android
       suite:
-        description: "android only: full = every flow, size and audit; m3-screens = sign in, then Find a game and the Game screen in every state at three text sizes (no booking flows); m3-actions = game actions end to end on staging (ask/decline, join/leave, accept/decline, cancelled court); booking-text = booking screens at 360dp x2.0 only (screenshots, Reserve reachable, unresolved recovery); m3-post-chat = post a game, edit it, chat (staging)"
+        description: "android only: full = every flow, size and audit; m3-screens = sign in, then Find a game and the Game screen in every state at three text sizes (no booking flows); m3-actions = game actions end to end on staging (ask/decline, join/leave, accept/decline, cancelled court); booking-text = booking screens at 360dp x2.0 only (screenshots, Reserve reachable, unresolved recovery); m3-post-chat = post a game, edit it, chat (staging); crash-privacy = privacy probe report and a native crash with synthetic personal data, checked on the way out (M5)"
         type: choice
-        options: [full, m3-screens, m3-actions, booking-text, m3-post-chat]
+        options: [full, m3-screens, m3-actions, booking-text, m3-post-chat, crash-privacy]
         default: full
 
 # One staging-changing run at a time across BOTH workflows that change shared staging data (the demo
@@ -146,6 +146,8 @@ jobs:
           [ -d mobile/e2e/out ] || exit 0
           mkdir -p /tmp/shots && find mobile/e2e/out ~/.maestro/tests -name '*.png' -exec cp --backup=numbered {} /tmp/shots/ \; 2>/dev/null || true
           cp mobile/e2e/out/a11y.txt /tmp/shots/ 2>/dev/null || true
+          # a suite without screenshots (crash-privacy) leaves the screenshots branch as it is
+          [ -n "$(ls -A /tmp/shots)" ] || { echo "no screenshots in this suite; e2e-screenshots branch left unchanged"; exit 0; }
           cd /tmp/shots && git init -q && git checkout -q -b e2e-screenshots
           git -c user.name=e2e -c user.email=e2e@courtbook.test add -A
           git -c user.name=e2e -c user.email=e2e@courtbook.test commit -q -m "Android test screenshots, run ${{ github.run_id }} (${{ github.sha }})"
