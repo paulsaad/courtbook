@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { allLoaded, loaded } from "@/lib/load";
 import PaymentsDashboard, { type Balance, type PaymentRow, type RefundRow, type Summary } from "@/components/PaymentsDashboard";
 import WorkNav from "@/components/WorkNav";
+import FeeRefunds, { type FeeRefundRow } from "@/components/FeeRefunds";
 
 export default async function AdminPayments({ searchParams }: { searchParams: Promise<{ month?: string; club?: string }> }) {
   const { month: qMonth, club: qClub } = await searchParams;
@@ -13,10 +14,11 @@ export default async function AdminPayments({ searchParams }: { searchParams: Pr
   if (!me?.roles?.includes("admin")) return <main className="p-6">Admins only.</main>;
 
   const month = qMonth && /^\d{4}-\d{2}$/.test(qMonth) ? qMonth : new Date().toISOString().slice(0, 7);
-  const [{ data: summary }, { data: refunds }, { data: balances }] = allLoaded(await Promise.all([
+  const [{ data: summary }, { data: refunds }, { data: balances }, { data: feeRefunds }] = allLoaded(await Promise.all([
     supabase.rpc("payments_summary", { p_month: `${month}-01` }),
     supabase.rpc("refunds_due"),
     supabase.rpc("club_balances"),
+    supabase.rpc("fee_refunds_due"),
   ]), "the payments");
   const clubId = qClub ?? ((summary ?? []) as Summary[])[0]?.club_id ?? null;
   const { data: rows } = clubId ? loaded(await supabase.rpc("payments_list", { p_club: clubId, p_month: `${month}-01` }), "the payments") : { data: null };
@@ -24,6 +26,7 @@ export default async function AdminPayments({ searchParams }: { searchParams: Pr
   return (
     <>
     <WorkNav area="admin" active="payments" />
+    <div className="mx-auto max-w-2xl px-5 pt-5"><FeeRefunds rows={(feeRefunds ?? []) as FeeRefundRow[]} /></div>
     <PaymentsDashboard month={month} summary={(summary ?? []) as Summary[]} refunds={(refunds ?? []) as RefundRow[]} rows={rows as PaymentRow[] | null} clubId={clubId} balances={(balances ?? []) as Balance[]} isAdmin backHref="/admin" title="Payments" basePath="/admin/payments" />
     </>
   );

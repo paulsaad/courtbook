@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/client";
  *
  *  'simulated'  hold the slot, then pay in the app  -> go to /pay/<booking>
  *  'at_desk'    confirmed on the spot, paid at the club -> go to /bookings/<booking>
+ *  'fee_online' hold the slot, pay CourtBook's booking fee in the app -> /pay/<booking>; the court is paid at the
+ *               club. A $0 fee is confirmed on the spot with no payment (hold_slot returns no payment) -> /bookings
  *
  *  The token makes a retry idempotent: the same token can only ever produce one booking, so a
  *  flaky connection or an impatient second tap cannot take two courts. It is generated once per
@@ -31,7 +33,9 @@ export async function reserve(opts: {
     p_club: opts.clubId, p_court: opts.courtId, p_start: opts.start.toISOString(), p_end: opts.end.toISOString(),
   });
   if (error) return { ok: false, message: error.message, code: error.code };
-  const row = (Array.isArray(data) ? data[0] : data) as { booking_id: string };
+  const row = (Array.isArray(data) ? data[0] : data) as { booking_id: string; payment_id: string | null };
+  // no payment: a $0 fee at a fee_online club, confirmed already (0093)
+  if (!row.payment_id) return { ok: true, value: { bookingId: row.booking_id, href: `/bookings/${row.booking_id}?new=1` } };
   return { ok: true, value: { bookingId: row.booking_id, href: `/pay/${row.booking_id}` } };
 }
 

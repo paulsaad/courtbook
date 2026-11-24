@@ -10,6 +10,7 @@ import { explainBookingError } from "@/lib/report";
 import { type Club, type Court } from "@/lib/types";
 import { readPrefs } from "@/lib/prefs";
 import { newToken, reserve as reserveSlot } from "@/lib/reserve";
+import { reserveText } from "@/lib/fees";
 import { useDialog } from "@/components/useDialog";
 
 export type Occ = { id?: string | null; court_id: string; start_at: string; end_at: string; status?: string; mine?: boolean; kind: "booking" | "block" };
@@ -226,7 +227,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
         </div>
       </div>
 
-      {pick && (
+      {pick && (() => { const sheetText = reserveText(club.payment_mode ?? null, club.service_fee_usd, quote.state === "ok" ? quote.value : null, club.hold_minutes, club.cancel_cutoff_hours); return (
         <div ref={dialogRef} role="dialog" aria-modal="false" aria-label="Book this time" className="sheet-enter fixed inset-x-0 bottom-0 z-30 mx-auto max-w-lg rounded-t-2xl border-t border-grid bg-white px-5 pb-8 pt-4 shadow-2xl lg:inset-x-auto lg:bottom-6 lg:right-6 lg:w-[420px] lg:rounded-2xl lg:border">
           {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
           <div className="flex items-baseline justify-between">
@@ -243,16 +244,16 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
             <p className="mt-4 flex items-center justify-between rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{quote.message}{quote.message.startsWith("Could") && <button onClick={() => { setQuote({ state: "loading" }); setQuoteTick((n) => n + 1); }} className="font-medium underline">Retry</button>}</p>
           ) : (
             <div className="mt-4 flex items-center justify-between text-sm">
-              <span className="text-muted">Court {quote.state === "ok" ? `$${quote.value.toFixed(2)}` : "…"} + booking fee ${Number(club.service_fee_usd).toFixed(2)}</span>
-              <span className="text-lg font-semibold">{quote.state === "ok" ? `$${(quote.value + Number(club.service_fee_usd)).toFixed(2)}` : "…"}</span>
+              <span className="text-muted">{sheetText.label}</span>
+              <span className="text-lg font-semibold">{sheetText.amount}</span>
             </div>
           )}
           <button disabled={busy || quote.state !== "ok" || !known || slots < minSlots || slots > maxSlotsHere} onClick={reserve} className="mt-3 w-full rounded-xl bg-action py-3.5 font-medium text-white disabled:opacity-50">
-            {busy ? "Reserving…" : signedIn ? "Reserve and pay" : "Sign in to reserve"}
+            {busy ? "Reserving…" : signedIn ? sheetText.button : "Sign in to reserve"}
           </button>
-          <p className="mt-2 text-center text-xs text-muted">Slot is held for {club.hold_minutes} minutes while you pay. Free cancellation up to {club.cancel_cutoff_hours} h before.</p>
+          <p className="mt-2 text-center text-xs text-muted">{sheetText.note}</p>
         </div>
-      )}
+      ); })()}
     </>
   );
 }

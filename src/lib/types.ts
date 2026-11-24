@@ -34,14 +34,14 @@ export type Booking = {
   contact_phone?: string | null;
   /** staff only: the booking's CourtBook payment, if any. None for desk walk-ins and for app bookings at a club
    *  that takes payment at its desk (book_at_desk) — the desk collects those. */
-  payments?: { status: string } | { status: string }[] | null;   // one-to-one (unique booking_id): an object or null
+  payments?: { status: string; kind?: string } | { status: string; kind?: string }[] | null;   // one-to-one (unique booking_id): an object or null
 };
 
 /** What the staff calendar reads for each booking. The payment is read separately (paymentsByBooking), so a
  *  failed payment read never hides the bookings themselves. */
 export const STAFF_BOOKING_COLUMNS = "id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id, price_usd, fee_usd, hold_expires_at";
 
-export type Settlement = "awaiting" | "paid_in_app" | "at_desk" | "refund_owed" | "not_paid" | "unknown";
+export type Settlement = "awaiting" | "paid_in_app" | "at_desk" | "refund_owed" | "not_paid" | "unknown" | "fee_awaiting" | "fee_paid" | "fee_refund";
 /**
  * How the desk settles a booking, from the booking's verified CourtBook payment record only (review 24 Nov: never
  * inferred from the service fee).
@@ -54,6 +54,13 @@ export function settlement(b: Pick<Booking, "status" | "source" | "payments">): 
   const list = Array.isArray(b.payments) ? b.payments : b.payments ? [b.payments] : [];
   if (list.length === 0) return b.status === "pending" ? "unknown" : "at_desk";   // a hold always has a payment row
   const st = list[0].status;
+  // M12.1: at a fee_online club only CourtBook's booking fee goes through the app; the court is ALWAYS taken at the desk
+  if (list[0].kind === "fee_only") {
+    if (st === "paid") return "fee_paid";
+    if (st === "pending") return "fee_awaiting";
+    if (st === "refund_due" || st === "refunded") return "fee_refund";
+    return "not_paid";
+  }
   if (st === "paid") return "paid_in_app";
   if (st === "pending") return "awaiting";
   if (st === "refund_due" || st === "refunded") return "refund_owed";
@@ -68,6 +75,9 @@ export const SETTLEMENT_TEXT: Record<Settlement, string> = {
   refund_owed: "payment being refunded, not collected",
   not_paid: "not paid — take payment at the desk",
   unknown: "payment status not loaded — check Payments before taking money",
+  fee_awaiting: "court due at the desk · player still paying the CourtBook booking fee",
+  fee_paid: "court due at the desk · CourtBook booking fee paid online",
+  fee_refund: "CourtBook is refunding its booking fee — nothing for the desk to do",
 };
 
 export type Block = { id: string; court_id: string; start_at: string; end_at: string; reason: string | null };
@@ -113,6 +123,22 @@ export const ERRORS: Record<string, string> = {
   court_has_bookings: "This court still has upcoming bookings. Move or cancel them first, then deactivate it.",
   prices_incomplete: "Players would see times with no price. Add a price for those times first (Prices → Add), then change the hours or the price.",
   not_payable: "This booking is no longer waiting for payment.",
+  // M12.1 fee payments (0093)
+  hold_expired: "The time to pay has run out. Pick the slot again if it is still free.",
+  attempts_exhausted: "No more payment tries for this hold. Pick the slot again if it is still free.",
+  payment_in_progress: "Your payment is already starting. Wait a moment, then reload the page.",
+  payments_not_configured: "Online payment isn't available at the moment. Try again later or book at the club's desk.",
+  gateway_error: "The payment provider didn't respond. You were not charged. Try again.",
+  payment_start_failed: "Payment couldn't start. Try again.",
+  payment_record_failed: "We couldn't confirm the payment yet. Reload the page in a moment.",
+  use_payment_attempts: "Reload the page and pay again.",
+  courtbook_fee_refund: "This is CourtBook's booking fee: CourtBook refunds it. Nothing to do at the desk.",
+  refund_amount_mismatch: "Enter exactly the amount that was charged.",
+  reference_required: "Enter the provider's refund reference.",
+  already_refunded: "This refund was already recorded with another reference.",
+  refund_reference_used: "That refund reference is already recorded for another charge.",
+  bad_payment_mode: "Choose a payment mode from the list.",
+  bad_fee: "Enter the fee in dollars with at most two decimals (for example 1 or 0.50).",
   not_pending: "Only a pending request can be approved.",
   match_full: "This match just filled up.",
   match_closed: "This match is no longer open.",
