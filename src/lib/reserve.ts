@@ -29,8 +29,9 @@ export async function reserve(opts: {
     const row = (Array.isArray(data) ? data[0] : data) as { booking_id: string };
     return { ok: true, value: { bookingId: row.booking_id, href: `/bookings/${row.booking_id}?new=1` } };
   }
+  // the token goes to hold_slot too (since 0065): without it a retry after a lost answer would take a second hold
   const { data, error } = await supabase.rpc("hold_slot", {
-    p_club: opts.clubId, p_court: opts.courtId, p_start: opts.start.toISOString(), p_end: opts.end.toISOString(),
+    p_club: opts.clubId, p_court: opts.courtId, p_start: opts.start.toISOString(), p_end: opts.end.toISOString(), p_token: opts.token,
   });
   if (error) return { ok: false, message: error.message, code: error.code };
   const row = (Array.isArray(data) ? data[0] : data) as { booking_id: string; payment_id: string | null };

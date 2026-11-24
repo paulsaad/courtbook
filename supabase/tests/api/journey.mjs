@@ -8,8 +8,10 @@
 //     --import ./supabase/tests/api/register.mjs supabase/tests/api/journey.mjs
 //   bash supabase/tests/api/stop.sh
 import { createRequire } from "node:module";
+import { randomUUID } from "node:crypto";
 import { API_URL, API_DB, asAnon, asService, asUser } from "./lib.mjs";
 import { newAttempt, reserve, findByToken } from "../../../mobile/lib/reserve.ts";
+import { reserve as webReserve } from "../../../src/lib/reserve.ts";
 import { STAFF_BOOKING_COLUMNS, settlement, SETTLEMENT_TEXT } from "../../../src/lib/types.ts";
 import { paymentsByBooking } from "../../../src/lib/staffPayments.ts";
 const require = createRequire(import.meta.url);
@@ -290,6 +292,33 @@ section("2B-fee court at the desk, CourtBook fee online (fee_online): grants, RL
   rep("BF11 a $0 fee through the API: confirmed at once, no payment row", z.kind === "reserved" && z.value.confirmed !== false
     && (await row(z.value.bookingId)).status === "confirmed" && Number(await one("select count(*) from payments where booking_id = $1", [z.value.bookingId])) === 0, z);
   await q("update clubs set service_fee_usd = 1 where id = $1", [CLUB]);
+  // the WEBSITE's reservation (src/lib/reserve.ts) with its answer lost after the database committed: the page retries
+  // with the attempt's token and must get the same booking, never a second hold (review of PR #34, blocker 1)
+  const webLost = async (label, client, court, s, e) => {
+    asApp(client);
+    const token = randomUUID();
+    const args = { mode: "fee_online", clubId: CLUB, courtId: court, start: new Date(s), end: new Date(e), token };
+    await fault({ match: "rpc/hold_slot", mode: "lose_response", count: 1 });
+    const first = await webReserve(args);
+    const second = await webReserve(args);
+    await fault({ clear: true });
+    const n = Number(await one("select count(*) from bookings where client_token = $1", [token]));
+    const live = Number(await one("select count(*) from bookings where court_id = $1 and start_at = $2 and status in ('pending','confirmed')", [court, s]));
+    return { first, second, n, live, payments: Number(await one("select count(*) from payments p join bookings b on b.id = p.booking_id where b.client_token = $1", [token])) };
+  };
+  const w1 = await webLost("fee", p1, COURT, await F("16:00"), await F("17:00"));
+  rep("BF13 website, fee_online: the answer is lost, the retry with the same token gets the SAME hold (one booking, one payment)",
+    !w1.first.ok && w1.second.ok && w1.second.value.href.startsWith("/pay/") && w1.n === 1 && w1.live === 1 && w1.payments === 1, w1);
+  await q("update clubs set service_fee_usd = 0 where id = $1", [CLUB]);
+  const w0 = await webLost("zero", p2, COURT, await F("18:00"), await F("19:00"));
+  await q("update clubs set service_fee_usd = 1 where id = $1", [CLUB]);
+  rep("BF14 website, $0 fee: the retry gets the same confirmed booking and goes to it, with no payment row",
+    !w0.first.ok && w0.second.ok && w0.second.value.href === `/bookings/${w0.second.value.bookingId}?new=1` && w0.n === 1 && w0.live === 1 && w0.payments === 0, w0);
+  await q("update clubs set payment_mode = 'simulated' where id = $1", [CLUB]);
+  const ws = await webLost("sim", p1, COURT2, await F("19:00"), await F("20:00"));
+  await q("update clubs set payment_mode = 'fee_online' where id = $1", [CLUB]);
+  rep("BF15 website, in-app (simulated) club: the same, one hold", !ws.first.ok && ws.second.ok && ws.n === 1 && ws.live === 1, ws);
+
   rep("BF12 never: money taken without a booking or a refund owed (whole database)", (await moneyWithoutBooking()) === 0);
 }
 
