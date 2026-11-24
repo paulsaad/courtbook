@@ -83,10 +83,10 @@ begin
   if b.status <> 'confirmed' then raise exception 'not_confirmed'; end if;
   if b.court_id is null then raise exception 'not_a_court_booking'; end if;
   if p_start >= p_end then raise exception 'bad_range'; end if;
-  if b.end_at <= now() then raise exception 'booking_ended'; end if;
-  if p_start < now() and not (p_start = b.start_at and p_end > now()) then
-    raise exception 'move_into_past';
-  end if;
+  if b.end_at <= now() then raise exception 'booking_ended'; end if;                                -- 0071
+  if p_start < now() and not (p_start = b.start_at and p_end > now()) then                           -- 0071
+    raise exception 'move_into_past';                                                                -- 0071
+  end if;                                                                                            -- 0071
   if not exists (select 1 from courts where id = p_court and club_id = b.club_id and active) then
     raise exception 'court_not_found';
   end if;

@@ -32,6 +32,8 @@ insert into price_rules (club_id, court_id, weekday_mask, start_time, end_time, 
 SQL
 if [ -n "${CONTROL:-}" ]; then
   grep -v -- '-- 0071' supabase/migrations/0071_staff_past_times.sql | $FT -d courtbook_fixes_time -v ON_ERROR_STOP=1 >/dev/null || exit 1
+  # 0091 carries the same guard lines (marked "-- 0071") in move_booking_priced, which the moves now use
+  grep -v -- '-- 0071' supabase/migrations/0091_walk_in_price_follows_move.sql | $FT -d courtbook_fixes_time -v ON_ERROR_STOP=1 >/dev/null || exit 1
   echo "CONTROL: 0071 guard lines removed"
 fi
 stop
@@ -51,10 +53,14 @@ grant execute on function pg_temp.err(text), pg_temp.l(text) to public;
 create function pg_temp.walk(court text, s timestamptz, e timestamptz, who text) returns text language sql as $f$
   select pg_temp.err(format('select staff_book((select id from clubs where slug = %L), (select id from courts where name = %L), %L, %L, %L, null)',
                             'batroun', court, s, e, who)) $f$;
+-- 0091: a walk-in's move may change its price, so the desk confirms the new price (move_booking_priced); the
+-- expected price is the club's price for the target (null if it has none, then the move's own checks answer)
+create function pg_temp.qp(court text, s timestamptz, e timestamptz) returns numeric language plpgsql as $f$
+begin return quote_price((select id from courts where name = court), s, e); exception when others then return null; end $f$;
 create function pg_temp.mv(who text, court text, s timestamptz, e timestamptz) returns text language sql as $f$
-  select pg_temp.err(format('select move_booking((select id from bookings where guest_name = %L), (select id from courts where name = %L), %L, %L)',
-                            who, court, s, e)) $f$;
-grant execute on function pg_temp.walk(text, timestamptz, timestamptz, text), pg_temp.mv(text, text, timestamptz, timestamptz) to public;
+  select pg_temp.err(format('select move_booking_priced((select id from bookings where guest_name = %L), (select id from courts where name = %L), %L, %L, %s)',
+                            who, court, s, e, coalesce(pg_temp.qp(court, s, e)::text, 'null'))) $f$;
+grant execute on function pg_temp.walk(text, timestamptz, timestamptz, text), pg_temp.mv(text, text, timestamptz, timestamptz), pg_temp.qp(text, timestamptz, timestamptz) to public;
 -- chk(id, what happened, what should happen): each action runs once, its result is the detail
 create function pg_temp.chk(id text, got text, expected text) returns void language sql as $f$
   insert into r values (id, got = expected, got) $f$;
