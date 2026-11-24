@@ -214,7 +214,77 @@ describe("GET|POST /api/internal/deletions/retry", () => {
       delete_account_data: (a) => a.p_subject === ME ? { error: { message: "staff_role" } } : {},
       deletions_needing_attention: () => ({ data: [] }),
     };
-    expect(await (await retry.GET(req(`Bearer ${SECRET}`))).json()).toMatchObject({ done: 1, failed: 1 });
+    const res = await retry.GET(req(`Bearer ${SECRET}`));
+    // both records were attempted, and the run is reported as failed to the scheduler (review 24 Nov, PR #31)
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body).toEqual({ done: 1, held: 0, skipped: 0, failed: 1, lease_lost: 0, remaining: 0, alerts: 0, promoted: 0, error: "run_incomplete", problems: ["records_failed"] });
+    expect(JSON.stringify(body)).not.toContain(ME);
+    // the retry logic is unchanged: the heartbeat is still recorded with the plain counts, and the failed record is
+    // left for the next run (only the done one was deleted)
+    expect(calls.find((c) => c.fn === "record_deletion_worker_run")?.args).toEqual({ p_counts: { done: 1, held: 0, skipped: 0, failed: 1, lease_lost: 0, remaining: 0, alerts: 0, promoted: 0 } });
+    expect(calls.filter((c) => c.fn === "auth.delete").map((c) => c.args)).toEqual([{ id: OTHER }]);
+  });
+  it("a record whose processing throws counts as failed → 500, the next record still runs", async () => {
+    process.env.CRON_SECRET = SECRET;
+    let n = 0;
+    serviceRpc = {
+      deletions_due: () => ({ data: [ME, OTHER] }),
+      claim_deletion: () => { if (n++ === 0) throw new TypeError("fetch failed"); return { data: { claimed: true, token: "t", status: "closed", held_reason: null, banned: true, cancellations_done: false } }; },
+      deletions_needing_attention: () => ({ data: [] }),
+    };
+    const res = await retry.GET(req(`Bearer ${SECRET}`));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ done: 1, failed: 1, problems: ["records_failed"] });
+    expect(calls.map((c) => c.fn)).toContain("record_deletion_worker_run");
+  });
+  it("the heartbeat failing → 500 (problems: heartbeat), after the records were processed", async () => {
+    process.env.CRON_SECRET = SECRET;
+    serviceRpc.deletions_due = () => ({ data: [OTHER] });
+    serviceRpc.record_deletion_worker_run = () => ({ error: { message: "x", code: "42501" } });
+    const res = await retry.GET(req(`Bearer ${SECRET}`));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ done: 1, held: 0, skipped: 0, failed: 0, lease_lost: 0, remaining: 0, alerts: 0, promoted: 0, error: "run_incomplete", problems: ["heartbeat"] });
+    expect(calls.filter((c) => c.fn === "auth.delete").map((c) => c.args)).toEqual([{ id: OTHER }]);
+    expect(reported).toEqual([["deletionStepFailed", "account", { code: "42501" }]]);
+  });
+  it("the attention check failing → 500 (problems: attention_check); the heartbeat is still recorded", async () => {
+    process.env.CRON_SECRET = SECRET;
+    serviceRpc.deletions_needing_attention = () => ({ error: { message: "x", code: "57014" } });
+    const res = await retry.GET(req(`Bearer ${SECRET}`));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ failed: 0, alerts: 0, error: "run_incomplete", problems: ["attention_check"] });
+    expect(calls.map((c) => c.fn)).toContain("record_deletion_worker_run");
+    expect(reported).toEqual([["deletionStepFailed", "account", { code: "57014" }]]);
+  });
+  it("an alert that cannot be marked → 500 (problems: alert_marking, once); the other alerts are still raised", async () => {
+    process.env.CRON_SECRET = SECRET;
+    const A = "d8600000-0000-4000-8000-00000000000a", B = "d8600000-0000-4000-8000-00000000000b";
+    serviceRpc.deletions_needing_attention = () => ({ data: [{ subject_id: A, reason: "stuck" }, { subject_id: B, reason: "held" }, { subject_id: ME, reason: "stuck" }] });
+    serviceRpc.mark_deletion_alerted = (a) => a.p_subject === ME ? {} : { error: { message: "x" } };
+    const res = await retry.GET(req(`Bearer ${SECRET}`));
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body).toMatchObject({ alerts: 1, problems: ["alert_marking"] });
+    expect(reported.length).toBe(3);
+    expect(JSON.stringify(body)).not.toMatch(/d8600000/);
+  });
+  it("held, skipped and lease-lost records and records left for the next run are not failures → 200", async () => {
+    process.env.CRON_SECRET = SECRET;
+    const LOST = "d8600000-0000-4000-8000-00000000000c";
+    serviceRpc = {
+      deletions_due: () => ({ data: [ME, OTHER, LOST] }),
+      claim_deletion: (a) => a.p_subject === ME ? { data: { claimed: false, reason: "busy" } }
+        : a.p_subject === OTHER ? { data: { claimed: true, token: "t", status: "held", held_reason: "admin_role", banned: true, cancellations_done: true } }
+        : { data: { claimed: true, token: "t", status: "closed", held_reason: null, banned: true, cancellations_done: false } },
+      // another run took LOST over: its first bookkeeping call says the lease is gone
+      record_deletion_step: (a) => a.p_subject === LOST ? { error: { message: "lease_lost" } } : {},
+      deletions_needing_attention: () => ({ data: [] }),
+    };
+    const res = await retry.GET(req(`Bearer ${SECRET}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ done: 0, held: 1, skipped: 1, failed: 0, lease_lost: 1, remaining: 0, alerts: 0, promoted: 0 });
   });
   it("a failing run records no heartbeat (so the app's one-step closing pauses)", async () => {
     process.env.CRON_SECRET = SECRET;
@@ -227,6 +297,17 @@ describe("GET|POST /api/internal/deletions/retry", () => {
     serviceRpc.promote_due_requests = () => ({ error: { message: "x", code: "57014" } });
     expect((await retry.GET(req(`Bearer ${SECRET}`))).status).toBe(500);
     expect(calls.map((c) => c.fn)).toEqual(["promote_due_requests"]);
+  });
+  it("records left over when the time budget runs out are not a failure → 200 (picked up next run)", async () => {
+    process.env.CRON_SECRET = SECRET;
+    serviceRpc.deletions_due = () => ({ data: [OTHER, ME] });
+    let t = 0;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => (t++ === 0 ? 0 : 45_000));   // past the 40 s budget after the start
+    try {
+      const res = await retry.GET(req(`Bearer ${SECRET}`));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ failed: 0, remaining: 2 });
+    } finally { now.mockRestore(); }
   });
   it("the due list failing → 500, reported by code", async () => {
     process.env.CRON_SECRET = SECRET;
