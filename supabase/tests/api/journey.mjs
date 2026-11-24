@@ -41,7 +41,7 @@ const GOV = await one("select d.governorate_code from clubs c join towns t on t.
 const DIST = await one("select t.district_code from clubs c join towns t on t.id = c.town_id where c.id = $1", [CLUB]);
 const DAY = (d) => one(`select (current_date + ${d})::text`);
 const at = (d, hhmm) => one(`select (((current_date + ${d})::timestamp + $1::time) at time zone 'Asia/Beirut')`, [hhmm]);
-const D1 = await DAY(4), T10 = await at(4, "10:00"), T11 = await at(4, "11:00"), T12 = await at(4, "12:00"), T13 = await at(4, "13:00");
+const D1 = await DAY(4), T10 = await at(4, "10:00"), T11 = await at(4, "11:00");
 const iso = (d) => new Date(d).toISOString();
 
 // the same reads each surface makes
