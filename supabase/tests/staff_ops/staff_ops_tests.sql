@@ -2,7 +2,7 @@
 -- rights by club, moves and cancellations, blocks and whole-club closure. ONE transaction, rolled back.
 \set ON_ERROR_STOP 1
 begin;
--- CONTROL (psql -v control=1): move_booking as it was before 0091, to show O8–O10 see the defect
+-- CONTROL (psql -v control=1): move_booking as it was before 0091 (no quote_move, no confirmed price), to show the move checks see the defect
 \if :{?control}
 \i supabase/migrations/0071_staff_past_times.sql
 \endif
@@ -46,7 +46,7 @@ select pg_temp.keep('w1', pg_temp.r(pg_temp.u(1), format('select staff_book(%L,%
 insert into t select 'O1 the desk enters a phone booking: confirmed, priced by the club, no CourtBook fee, no payment row',
   b.status = 'confirmed' and b.source = 'staff' and b.price_usd = quote_price(pg_temp.c(1), pg_temp.at(2,'10:00'), pg_temp.at(2,'11:00')) and b.fee_usd = 0
   and not exists (select 1 from payments p where p.booking_id = b.id) and b.guest_name = 'Phone: Rami' and b.guest_phone = '03 123 456',
-  pg_temp.got('w1') from bookings b where b.id::text = pg_temp.got('w1');
+  pg_temp.got('w1') from (select 1) one left join bookings b on b.id::text = pg_temp.got('w1');
 select pg_temp.keep('w1_again', pg_temp.r(pg_temp.u(1), format('select staff_book(%L,%L,%L,%L,''WhatsApp: Joe'',null)::text', pg_temp.club(), pg_temp.c(1), pg_temp.at(2,'10:30'), pg_temp.at(2,'11:30'))));
 insert into t values ('O2 the same court at an overlapping time is refused (slot_taken)', pg_temp.got('w1_again') = 'ERR slot_taken', pg_temp.got('w1_again'));
 select pg_temp.keep('hold_over', pg_temp.r(pg_temp.u(3), format('select booking_id::text from hold_slot(%L,%L,%L,%L)', pg_temp.club(), pg_temp.c(1), pg_temp.at(2,'10:00'), pg_temp.at(2,'11:00'))));
@@ -81,38 +81,86 @@ insert into t values ('O7 a player can do none of the desk''s actions, nor write
   concat_ws(' | ', pg_temp.got('p_book'), pg_temp.got('p_block'), pg_temp.got('p_move'), pg_temp.got('p_insert')));
 
 -- ---------------------------------------------------------------- moves and their price (0091)
-select pg_temp.keep('mv_long', pg_temp.r(pg_temp.u(1), format('select move_booking(%L,%L,%L,%L)::text', pg_temp.got('w1'), pg_temp.c(1), pg_temp.at(2,'10:00'), pg_temp.at(2,'12:00'))));
-insert into t select 'O8 a walk-in stretched from 1 h to 2 h is priced for 2 h (was: kept the 1 h price)',
-  pg_temp.got('mv_long') = 'ok' and b.price_usd = quote_price(pg_temp.c(1), pg_temp.at(2,'10:00'), pg_temp.at(2,'12:00')) and b.price_usd = 2 * quote_price(pg_temp.c(1), pg_temp.at(2,'10:00'), pg_temp.at(2,'11:00')),
-  pg_temp.got('mv_long') || ' price=' || b.price_usd from bookings b where b.id::text = pg_temp.got('w1');
-select pg_temp.keep('mv_peak', pg_temp.r(pg_temp.u(1), format('select move_booking(%L,%L,%L,%L)::text', pg_temp.got('w1'), pg_temp.c(1), pg_temp.at(2,'19:00'), pg_temp.at(2,'21:00'))));
-insert into t select 'O9 moved into the peak hours, the walk-in takes the peak price; the fee stays 0',
-  pg_temp.got('mv_peak') = 'ok' and b.price_usd = quote_price(pg_temp.c(1), pg_temp.at(2,'19:00'), pg_temp.at(2,'21:00')) and b.price_usd = 80 and b.fee_usd = 0,
-  pg_temp.got('mv_peak') || ' price=' || b.price_usd from bookings b where b.id::text = pg_temp.got('w1');
-select pg_temp.keep('mv_court', pg_temp.r(pg_temp.u(1), format('select move_booking(%L,%L,%L,%L)::text', pg_temp.got('w1'), pg_temp.c(2), pg_temp.at(2,'19:00'), pg_temp.at(2,'21:00'))));
+create function pg_temp.mv(who int, bk text, court uuid, s timestamptz, e timestamptz, expected numeric default null) returns text language sql as $$
+  select pg_temp.r(pg_temp.u(who), case when expected is null and false then '' else
+    format('select move_booking_priced(%L,%L,%L,%L,%s)::text', bk, court, s, e, coalesce(expected::text, 'null')) end) $$;
+create function pg_temp.q(who int, bk text, court uuid, s timestamptz, e timestamptz) returns text language sql as $$
+  select pg_temp.r(pg_temp.u(who), format('select quote_move(%L,%L,%L,%L)::text', bk, court, s, e)) $$;
+create function pg_temp.j(k text) returns jsonb language sql as $$ select case when pg_temp.got(k) ~ '^\{' then pg_temp.got(k)::jsonb end $$;
+create function pg_temp.price(bk text) returns numeric language sql as $$ select price_usd from bookings where id::text = bk $$;
+create function pg_temp.span(bk text) returns text language sql as $$ select court_id || ' ' || start_at || ' ' || end_at from bookings where id::text = bk $$;
+
+select pg_temp.keep('span0', pg_temp.span(pg_temp.got('w1')));
+select pg_temp.keep('mv_old', pg_temp.r(pg_temp.u(1), format('select move_booking(%L,%L,%L,%L)::text', pg_temp.got('w1'), pg_temp.c(1), pg_temp.at(2,'10:00'), pg_temp.at(2,'12:00'))));
+insert into t values ('O8a the older move call cannot change a price without showing it: refused, nothing moved',
+  pg_temp.got('mv_old') = 'ERR price_confirmation_needed' and pg_temp.span(pg_temp.got('w1')) = pg_temp.got('span0') and pg_temp.price(pg_temp.got('w1')) = 20,
+  pg_temp.got('mv_old'));
+select pg_temp.keep('q_long', pg_temp.q(1, pg_temp.got('w1'), pg_temp.c(1), pg_temp.at(2,'10:00'), pg_temp.at(2,'12:00')));
+insert into t values ('O8b the desk is shown the old and new price first (quote_move: walk-in reprice $20 → $40)',
+  pg_temp.j('q_long') = '{"current": 20.00, "new": 40.00, "kind": "reprice"}'::jsonb, pg_temp.got('q_long'));
+select pg_temp.keep('mv_wrong', pg_temp.mv(1, pg_temp.got('w1'), pg_temp.c(1), pg_temp.at(2,'10:00'), pg_temp.at(2,'12:00'), 30));
+insert into t values ('O8c a move confirmed at a price that is no longer right is refused (price_changed), nothing moved',
+  pg_temp.got('mv_wrong') = 'ERR price_changed' and pg_temp.span(pg_temp.got('w1')) = pg_temp.got('span0'), pg_temp.got('mv_wrong'));
+select pg_temp.keep('mv_long', pg_temp.mv(1, pg_temp.got('w1'), pg_temp.c(1), pg_temp.at(2,'10:00'), pg_temp.at(2,'12:00'), 40));
+insert into t select 'O8 confirmed at $40: the walk-in is stretched to 2 h and priced for 2 h; the fee stays 0',
+  pg_temp.got('mv_long') !~ '^ERR' and b.price_usd = 40 and b.price_usd = quote_price(pg_temp.c(1), pg_temp.at(2,'10:00'), pg_temp.at(2,'12:00')) and b.fee_usd = 0,
+  pg_temp.got('mv_long') || ' price=' || b.price_usd from (select 1) one left join bookings b on b.id::text = pg_temp.got('w1');
+select pg_temp.keep('mv_peak', pg_temp.mv(1, pg_temp.got('w1'), pg_temp.c(1), pg_temp.at(2,'19:00'), pg_temp.at(2,'21:00'), quote_price(pg_temp.c(1), pg_temp.at(2,'19:00'), pg_temp.at(2,'21:00'))));
+insert into t select 'O9 moved into the peak hours (confirmed), the walk-in takes the peak price',
+  pg_temp.got('mv_peak') !~ '^ERR' and b.price_usd = 80 and b.fee_usd = 0,
+  pg_temp.got('mv_peak') || ' price=' || b.price_usd from (select 1) one left join bookings b on b.id::text = pg_temp.got('w1');
+select pg_temp.keep('mv_court', pg_temp.mv(1, pg_temp.got('w1'), pg_temp.c(2), pg_temp.at(2,'19:00'), pg_temp.at(2,'21:00'), quote_price(pg_temp.c(2), pg_temp.at(2,'19:00'), pg_temp.at(2,'21:00'))));
 insert into t select 'O10 moved to a court without the peak rule, the price follows that court',
-  pg_temp.got('mv_court') = 'ok' and b.price_usd = quote_price(pg_temp.c(2), pg_temp.at(2,'19:00'), pg_temp.at(2,'21:00')) and b.court_id = pg_temp.c(2),
-  pg_temp.got('mv_court') || ' price=' || b.price_usd from bookings b where b.id::text = pg_temp.got('w1');
--- an app booking (at a club taking app payments) keeps the price the player agreed and paid
+  pg_temp.got('mv_court') !~ '^ERR' and b.price_usd = quote_price(pg_temp.c(2), pg_temp.at(2,'19:00'), pg_temp.at(2,'21:00')) and b.court_id = pg_temp.c(2),
+  pg_temp.got('mv_court') || ' price=' || b.price_usd from (select 1) one left join bookings b on b.id::text = pg_temp.got('w1');
+select pg_temp.keep('x_quote', pg_temp.q(2, pg_temp.got('w1'), pg_temp.c(2), pg_temp.at(2,'19:00'), pg_temp.at(2,'20:00')));
+select pg_temp.keep('x_priced', pg_temp.mv(2, pg_temp.got('w1'), pg_temp.c(2), pg_temp.at(2,'19:00'), pg_temp.at(2,'20:00'), 20));
+insert into t values ('O10b another club''s desk can neither quote nor move', pg_temp.got('x_quote') = 'ERR forbidden' and pg_temp.got('x_priced') = 'ERR forbidden', pg_temp.got('x_quote') || ' | ' || pg_temp.got('x_priced'));
+
+-- an app booking PAID through CourtBook: the amount is never changed
 update clubs set payment_mode = 'simulated' where id = pg_temp.club();
 select pg_temp.keep('app', pg_temp.r(pg_temp.u(4), format('select booking_id::text from hold_slot(%L,%L,%L,%L)', pg_temp.club(), pg_temp.c(1), pg_temp.at(3,'10:00'), pg_temp.at(3,'11:00'))));
 set local role service_role;
 do $$ begin perform confirm_payment(p.id, 'ops-ref-1', p.total_usd) from payments p where p.booking_id::text = (select v from kept where k = 'app'); end $$;
 reset role;
-select pg_temp.keep('app_price', (select price_usd::text from bookings where id::text = pg_temp.got('app')));
+select pg_temp.keep('app_price', pg_temp.price(pg_temp.got('app'))::text);
+select pg_temp.keep('q_app_peak', pg_temp.q(1, pg_temp.got('app'), pg_temp.c(1), pg_temp.at(3,'19:00'), pg_temp.at(3,'20:00')));
 select pg_temp.keep('mv_app', pg_temp.r(pg_temp.u(1), format('select move_booking(%L,%L,%L,%L)::text', pg_temp.got('app'), pg_temp.c(1), pg_temp.at(3,'19:00'), pg_temp.at(3,'20:00'))));
-insert into t select 'O11 an app booking moved into the peak keeps the price the player paid',
-  pg_temp.got('mv_app') = 'ok' and b.price_usd::text = pg_temp.got('app_price') and b.start_at = pg_temp.at(3,'19:00'),
-  pg_temp.got('mv_app') || ' price=' || b.price_usd || ' was ' || pg_temp.got('app_price') from bookings b where b.id::text = pg_temp.got('app');
+insert into t select 'O11 a paid app booking moved into the peak (same length) keeps the price the player paid',
+  pg_temp.got('mv_app') = 'ok' and pg_temp.j('q_app_peak')->>'kind' = 'same' and b.price_usd::text = pg_temp.got('app_price') and b.start_at = pg_temp.at(3,'19:00'),
+  pg_temp.got('mv_app') || ' ' || pg_temp.got('q_app_peak') from (select 1) one left join bookings b on b.id::text = pg_temp.got('app');
+select pg_temp.keep('q_app_long', pg_temp.q(1, pg_temp.got('app'), pg_temp.c(1), pg_temp.at(3,'19:00'), pg_temp.at(3,'21:00')));
+select pg_temp.keep('mv_app_long', pg_temp.mv(1, pg_temp.got('app'), pg_temp.c(1), pg_temp.at(3,'19:00'), pg_temp.at(3,'21:00'), pg_temp.got('app_price')::numeric));
+insert into t values ('O11b a paid app booking''s LENGTH cannot change (the amount taken would no longer match): quoted refused, move refused',
+  pg_temp.j('q_app_long')->>'kind' = 'refused' and pg_temp.got('mv_app_long') = 'ERR paid_length_change'
+  and (select end_at from bookings where id::text = pg_temp.got('app')) = pg_temp.at(3,'20:00'),
+  pg_temp.got('q_app_long') || ' | ' || pg_temp.got('mv_app_long'));
 update clubs set payment_mode = 'at_desk' where id = pg_temp.club();
+
+-- an app booking at a club that takes payment at its desk (book_at_desk: no payment row)
+select pg_temp.keep('desk', pg_temp.r(pg_temp.u(3), format('select booking_id::text from book_at_desk(%L,%L,%L,gen_random_uuid())', pg_temp.c(1), pg_temp.at(4,'14:00'), pg_temp.at(4,'15:00'))));
+select pg_temp.keep('desk_q_same', pg_temp.q(1, pg_temp.got('desk'), pg_temp.c(1), pg_temp.at(4,'19:00'), pg_temp.at(4,'20:00')));
+select pg_temp.keep('desk_mv_same', pg_temp.r(pg_temp.u(1), format('select move_booking(%L,%L,%L,%L)::text', pg_temp.got('desk'), pg_temp.c(1), pg_temp.at(4,'19:00'), pg_temp.at(4,'20:00'))));
+insert into t select 'O12a a desk-paid app booking moved (same length, into the peak) keeps the price the player saw',
+  pg_temp.got('desk') !~ '^ERR' and pg_temp.j('desk_q_same')->>'kind' = 'same' and pg_temp.got('desk_mv_same') = 'ok' and b.price_usd = 20 and b.fee_usd = 0,
+  concat_ws(' | ', pg_temp.got('desk'), pg_temp.got('desk_q_same'), pg_temp.got('desk_mv_same'), b.price_usd) from (select 1) one left join bookings b on b.id::text = pg_temp.got('desk');
+select pg_temp.keep('desk_q_long', pg_temp.q(1, pg_temp.got('desk'), pg_temp.c(1), pg_temp.at(4,'19:00'), pg_temp.at(4,'21:00')));
+select pg_temp.keep('desk_mv_old', pg_temp.r(pg_temp.u(1), format('select move_booking(%L,%L,%L,%L)::text', pg_temp.got('desk'), pg_temp.c(1), pg_temp.at(4,'19:00'), pg_temp.at(4,'21:00'))));
+insert into t values ('O12b its LENGTH change needs the player''s agreement: quoted as agreement $20 → $80; never changed silently',
+  pg_temp.j('desk_q_long') = '{"current": 20.00, "new": 80.00, "kind": "agreement"}'::jsonb and pg_temp.got('desk_mv_old') = 'ERR price_confirmation_needed' and pg_temp.price(pg_temp.got('desk')) = 20,
+  pg_temp.got('desk_q_long') || ' | ' || pg_temp.got('desk_mv_old'));
+select pg_temp.keep('desk_mv_agreed', pg_temp.mv(1, pg_temp.got('desk'), pg_temp.c(1), pg_temp.at(4,'19:00'), pg_temp.at(4,'21:00'), 80));
+insert into t select 'O12c with the agreed amount confirmed, the length and the price change together',
+  pg_temp.got('desk_mv_agreed') !~ '^ERR' and b.price_usd = 80 and b.end_at = pg_temp.at(4,'21:00') and b.fee_usd = 0,
+  pg_temp.got('desk_mv_agreed') from (select 1) one left join bookings b on b.id::text = pg_temp.got('desk');
 
 -- ---------------------------------------------------------------- cancellations
 select pg_temp.keep('cx', pg_temp.r(pg_temp.u(1), format('select cancel_booking(%L)::text', pg_temp.got('w1'))));
-insert into t select 'O12 the desk cancels a walk-in: cancelled, the time is free again, no money moves',
+insert into t select 'O13 the desk cancels a walk-in: cancelled, the time is free again, no money moves',
   pg_temp.got('cx') = 'ok' and b.status = 'cancelled' and not exists (select 1 from payments where booking_id = b.id),
-  pg_temp.got('cx') from bookings b where b.id::text = pg_temp.got('w1');
+  pg_temp.got('cx') from (select 1) one left join bookings b on b.id::text = pg_temp.got('w1');
 select pg_temp.keep('rebook', pg_temp.r(pg_temp.u(1), format('select staff_book(%L,%L,%L,%L,''Next caller'',null)::text', pg_temp.club(), pg_temp.c(2), pg_temp.at(2,'19:00'), pg_temp.at(2,'20:00'))));
-insert into t values ('O13 ...and the next caller can have that time', pg_temp.got('rebook') !~ '^ERR', pg_temp.got('rebook'));
+insert into t values ('O13b ...and the next caller can have that time', pg_temp.got('rebook') !~ '^ERR', pg_temp.got('rebook'));
 
 -- ---------------------------------------------------------------- blocks and whole-club closure
 select pg_temp.keep('blk', pg_temp.r(pg_temp.u(1), format('select staff_block(%L,%L,%L,%L,''Lights repair'')::text', pg_temp.club(), pg_temp.c(1), pg_temp.at(4,'10:00'), pg_temp.at(4,'12:00'))));
@@ -130,6 +178,6 @@ insert into t values ('O16 closing a free day closes every active court of the c
   and pg_temp.r(pg_temp.u(1), format('select staff_book(%L,%L,%L,%L,''X'',null)::text', pg_temp.club(), pg_temp.c(2), pg_temp.at(8,'10:00'), pg_temp.at(8,'11:00'))) like 'ERR %',
   pg_temp.got('close_ok'));
 
-select case when pass then 'ok   ' else 'FAIL ' end || id || case when pass then '' else '  [' || coalesce(detail, '') || ']' end from t order by length(split_part(id, ' ', 1)), id;
-select format('%s checks, %s failed', count(*), count(*) filter (where not pass)) from t;
+select case when coalesce(pass, false) then 'ok   ' else 'FAIL ' end || id || case when coalesce(pass, false) then '' else '  [' || coalesce(detail, '') || ']' end from t order by length(split_part(id, ' ', 1)), id;
+select format('%s checks, %s failed', count(*), count(*) filter (where not coalesce(pass, false))) from t;
 rollback;

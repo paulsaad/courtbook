@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { dayBounds, todayIn } from "@/lib/time";
 import { loaded } from "@/lib/load";
+import { paymentsByBooking } from "@/lib/staffPayments";
 import { STAFF_BOOKING_COLUMNS, type Block, type Booking, type Club, type Court } from "@/lib/types";
 import DayCalendar from "./DayCalendar";
 import WorkNav from "@/components/WorkNav";
@@ -80,11 +81,11 @@ export default async function StaffClubPage({
     (data as { booking_id: string; name: string | null; phone: string | null }[] | null)
       ?.forEach((c) => contacts.set(c.booking_id, { name: c.name, phone: c.phone }));
   }
-  const bookingsWithNames: Booking[] = (bookings ?? []).map((b) => ({
+  const bookingsWithNames: Booking[] = await paymentsByBooking(supabase as never, (bookings ?? []).map((b) => ({
     ...b,
     player_name: contacts.get(b.id)?.name ?? null,
     contact_phone: contacts.get(b.id)?.phone ?? null,
-  }));
+  })) as Booking[]);
 
   return (
     <>
