@@ -8,7 +8,7 @@ import { friendlyError } from "@/lib/types";
 /** M8 (0081): what the database says this club still needs before players can see and book it. */
 export type ReadinessRow = { item: string; ok: boolean; detail: string | null };
 const LABEL: Record<string, string> = {
-  name: "Name", location: "Town and address (or map link)", contact: "Contact phone", hours: "Opening hours",
+  name: "Name", location: "Town, address or map link, and the exact map point", contact: "Contact phone", hours: "Opening hours",
   courts: "Courts", prices: "A price for every court, day and start time", prices_unambiguous: "No overlapping prices",
   staff: "A desk account (staff)", payment: "Payment at the desk",
 };
