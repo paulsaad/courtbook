@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import type { Session } from "@supabase/supabase-js";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "./supabase";
+import { signOutIfClosed } from "./accountClosing";
 
 export type SessionState =
   | { status: "loading" }
@@ -42,9 +43,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     function apply(session: Session | null) {
       if (!alive) return;
       const next = session?.user.id ?? null;
-      if (cacheOwnerChanged(owner.current, next)) queryClient.clear();
+      const previous = owner.current;
+      if (cacheOwnerChanged(previous, next)) queryClient.clear();
       owner.current = next;
       setState(session ? { status: "signed-in", session } : { status: "signed-out" });
+      // M2 (0086): an account closed on another device is signed out here too (cold start or sign-in), not only when
+      // its refresh fails. Only when the person changes, so a token refresh asks nothing.
+      if (next && next !== previous) {
+        void Promise.resolve()
+          .then(() => signOutIfClosed((fn, a) => supabase.rpc(fn, a), (o) => supabase.auth.signOut(o)))
+          .catch(() => {});
+      }
     }
 
     supabase.auth.getSession().then(({ data }) => apply(data.session));

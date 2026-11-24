@@ -233,7 +233,8 @@ for f in 0076_staff_block 0077_blocks_through_functions; do
   [ -z "$e" ] && ok "R1 $f re-applies" || bad "R1 $f" "$e"
 done
 expect_err $DESK   "R2 after re-applying: direct insert still refused with 'reload'" "$(di $CLUB $C1 "$(b 8 10:00)" "$(b 8 11:00)")" "Reload the page"
-expect     owner   "R3 triggers on blocks"                                    "select string_agg(tgname, ', ' order by tgname) from pg_trigger where tgrelid='blocks'::regclass and not tgisinternal;" "blocks_booking_check, blocks_direct_insert_refused"
+# 0086 adds its account lock-out trigger to every table (checked by its own suite, close_tests E1)
+expect     owner   "R3 triggers on blocks"                                    "select string_agg(tgname, ', ' order by tgname) from pg_trigger where tgrelid='blocks'::regclass and not tgisinternal and tgname <> 'closed_account_lockout';" "blocks_booking_check, blocks_direct_insert_refused"
 
 echo "--- rollbacks (0077 first, then 0076)"
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/live/0077_rollback.sql >/dev/null 2>&1 && ok "K1 0077 rollback runs" || bad "K1" "failed"
