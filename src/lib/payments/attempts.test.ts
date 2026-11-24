@@ -73,7 +73,7 @@ describe("sweepOpenAttempts", () => {
     const s = await sweepOpenAttempts(db, p, { minAgeSeconds: 120, maxAgeHours: 48, limit: 50 });
     expect(calls[0]).toEqual({ fn: "attempts_to_check", args: { p_min_age: "120 seconds", p_max_age: "48 hours", p_limit: 50 } });
     expect(recorded).toEqual([A1, A3]);
-    expect(s).toEqual({ checked: 2, outcomes: { late: 1, expired: 1 }, failures: {} });
+    expect(s).toEqual({ checked: 2, skipped: 1, outcomes: { late: 1, expired: 1 }, failures: {} });
   });
   it("running it twice asks twice; the database decides it is the same charge (already_recorded)", async () => {
     let n = 0;
@@ -91,6 +91,6 @@ describe("sweepOpenAttempts", () => {
   });
   it("a provider outage is counted, not thrown", async () => {
     const { db } = fakeDb((fn) => (fn === "attempts_to_check" ? { data: [{ attempt_id: A1, provider: "whish" }] } : {}));
-    expect(await sweepOpenAttempts(db, provider({ [A1]: "throw" }), { minAgeSeconds: 0, maxAgeHours: 1, limit: 1 })).toEqual({ checked: 1, outcomes: {}, failures: { provider_unavailable: 1 } });
+    expect(await sweepOpenAttempts(db, provider({ [A1]: "throw" }), { minAgeSeconds: 0, maxAgeHours: 1, limit: 1 })).toEqual({ checked: 1, skipped: 0, outcomes: {}, failures: { provider_unavailable: 1 } });
   });
 });

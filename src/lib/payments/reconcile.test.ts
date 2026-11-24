@@ -30,7 +30,7 @@ describe("reconcileCharges", () => {
   });
   it("conflicting evidence is counted as a conflict, never as an outcome", async () => {
     const answers = ["charge_evidence_conflict", "attempt_evidence_conflict", "duplicate_provider_ref", "permission denied for function x"];
-    const { rpc } = db(() => ({ error: { message: answers.shift()! } }));
+    const { rpc } = db((fn) => (fn === "record_reconciliation_issue" ? { data: "i" } : { error: { message: answers.shift()! } }));
     const charges = [1, 2, 3, 4].map((n) => ({ externalRef: A1, providerRef: `G-${n}`, amount: 1, currency: "USD" }));
     expect(await reconcileCharges(rpc, new FakeGateway(), charges)).toEqual({ seen: 4, outcomes: {}, conflicts: 3, failures: { record_failed: 1 } });
   });
@@ -42,28 +42,90 @@ describe("reconcileCharges", () => {
 });
 
 describe("runPaymentReconciliation", () => {
-  it("sweeps, then reconciles the provider's list; a clean run has no problems", async () => {
-    const g = new FakeGateway(() => 0);
-    const { rpc, calls } = db((fn) => (fn === "attempts_to_check" ? { data: [] } : { data: "already_recorded" }));
-    g.foreignCharge();
-    const s = await runPaymentReconciliation(rpc, g, { now: new Date(0) });
-    expect(calls.map((c) => c.fn)).toEqual(["attempts_to_check", "reconcile_provider_charge"]);
+  const NOW = new Date("2026-12-01T12:00:00Z");
+  const clean: { other_provider_attempts: number; overdue_attempts: number; oldest_unresolved: string | null; open_issues: number; reconciled_until: string | null } =
+    { other_provider_attempts: 0, overdue_attempts: 0, oldest_unresolved: null, open_issues: 0, reconciled_until: new Date(NOW.getTime() - 15 * 60_000).toISOString() };
+  const world = (over: Partial<typeof clean> = {}, extra: Record<string, (a: Record<string, unknown>) => { data?: unknown; error?: { message: string } | null }> = {}) =>
+    db((fn, args) => (extra[fn]?.(args) ?? (fn === "payment_reconciliation_health" ? { data: [{ ...clean, ...over }] } : fn === "attempts_to_check" ? { data: [] } : { data: "unmatched" })));
+
+  it("a clean, complete run: sweep, health, one window from the watermark minus the overlap to now, watermark moved; no problems", async () => {
+    const g = new FakeGateway(() => NOW.getTime());
+    const { rpc, calls } = world();
+    const s = await runPaymentReconciliation(rpc, g, { now: NOW });
+    expect(calls.map((c) => c.fn)).toEqual(["attempts_to_check", "payment_reconciliation_health", "advance_reconciliation_watermark"]);
+    expect(g.listCalls).toEqual([{ since: NOW.getTime() - 75 * 60_000, until: NOW.getTime() }]);
+    expect(calls[2].args).toEqual({ p_provider: "whish", p_until: NOW.toISOString() });
     expect(s.problems).toEqual([]);
   });
-  it("a conflict, an unreadable list or an unreadable sweep list are problems", async () => {
-    const g = new FakeGateway(() => 0);
-    g.foreignCharge();
-    let s = await runPaymentReconciliation(db((fn) => (fn === "attempts_to_check" ? { data: [] } : { error: { message: "charge_evidence_conflict" } })).rpc, g);
-    expect(s.problems).toEqual(["conflicts"]);
-    g.listDown = true;
-    s = await runPaymentReconciliation(db(() => ({ error: { message: "boom" } })).rpc, g);
-    expect(s.problems).toEqual(["sweep_list", "charge_list"]);
+  it("REVIEW 1: running out of the time budget is a problem ('incomplete'), in the sweep and in the charge list", async () => {
+    const g = new FakeGateway(() => NOW.getTime());
+    g.foreignCharge(1, "USD", NOW.getTime() - 60_000);
+    const rows = [{ attempt_id: A1, provider: "whish", created_at: NOW.toISOString() }];
+    const s = await runPaymentReconciliation(world({}, { attempts_to_check: () => ({ data: rows }) }).rpc, g, { now: NOW, budgetMs: -1 });
+    expect(s.problems).toEqual(expect.arrayContaining(["incomplete", "reconciliation_behind"]));
+    expect(s.window?.advanced).toBe(false);                                 // the window is read again next run
   });
-  it("a provider without a charge list: sweep only", async () => {
-    const g = new FakeGateway(() => 0);
+  it("REVIEW 2: the charge list is read from the watermark, at most one window a run; behind = a problem until caught up", async () => {
+    const g = new FakeGateway(() => NOW.getTime());
+    const old = new Date(NOW.getTime() - 5 * 24 * 3_600_000).toISOString();
+    const s = await runPaymentReconciliation(world({ reconciled_until: old }).rpc, g, { now: NOW });
+    expect(g.listCalls[0]).toEqual({ since: new Date(old).getTime() - 3_600_000, until: new Date(old).getTime() - 3_600_000 + 24 * 3_600_000 });
+    expect(s.window?.advanced).toBe(true);
+    expect(s.problems).toEqual(["reconciliation_behind"]);
+  });
+  it("REVIEW 2: first run ever starts 48 h back; a failed window does not move the watermark", async () => {
+    const g = new FakeGateway(() => NOW.getTime());
+    let s = await runPaymentReconciliation(world({ reconciled_until: null }).rpc, g, { now: NOW });
+    expect(g.listCalls[0].since).toBe(NOW.getTime() - 48 * 3_600_000);
+    g.foreignCharge(1, "USD", NOW.getTime() - 60_000);
+    const { rpc, calls } = world({}, { reconcile_provider_charge: () => ({ error: { message: "permission denied" } }) });
+    s = await runPaymentReconciliation(rpc, g, { now: NOW });
+    expect(calls.map((c) => c.fn)).not.toContain("advance_reconciliation_watermark");
+    expect(s.problems).toEqual(expect.arrayContaining(["reconcile_failures", "reconciliation_behind"]));
+  });
+  it("REVIEW 2: overdue unresolved attempts and unresolved issues are problems on every run; every unresolved attempt is swept, however old", async () => {
+    const g = new FakeGateway(() => NOW.getTime());
+    const { rpc, calls } = world({ overdue_attempts: 2, open_issues: 1 });
+    const s = await runPaymentReconciliation(rpc, g, { now: NOW });
+    expect(s.problems).toEqual(expect.arrayContaining(["overdue_attempts", "open_issues"]));
+    expect(calls.find((c) => c.fn === "attempts_to_check")?.args.p_max_age).toBe(`${24 * 365 * 10} hours`);
+  });
+  it("REVIEW 2: a conflict is kept as an issue (record_reconciliation_issue) and reported", async () => {
+    const g = new FakeGateway(() => NOW.getTime());
+    g.foreignCharge(1, "USD", NOW.getTime() - 60_000);
+    const { rpc, calls } = world({}, { reconcile_provider_charge: () => ({ error: { message: "charge_evidence_conflict" } }) });
+    const s = await runPaymentReconciliation(rpc, g, { now: NOW });
+    expect(calls.find((c) => c.fn === "record_reconciliation_issue")?.args).toMatchObject({ p_provider: "whish", p_code: "charge_evidence_conflict", p_amount: 1, p_currency: "USD" });
+    expect(s.problems).toEqual(["conflicts"]);
+  });
+  it("REVIEW 2: a conflict a person already resolved, seen again in a later window, is counted but not raised again", async () => {
+    const g = new FakeGateway(() => NOW.getTime());
+    g.foreignCharge(1, "USD", NOW.getTime() - 60_000);
+    const { rpc } = world({}, { reconcile_provider_charge: () => ({ error: { message: "charge_evidence_conflict" } }), record_reconciliation_issue: () => ({ data: "resolved" }) });
+    const s = await runPaymentReconciliation(rpc, g, { now: NOW });
+    expect([s.reconcile?.conflicts, s.reconcile?.outcomes, s.problems]).toEqual([0, { resolved_conflict: 1 }, []]);
+  });
+  it("REVIEW 4: attempts of another provider than the runner's are a problem, never skipped silently", async () => {
+    const sim = new FakeGateway(() => NOW.getTime(), "simulated");
+    const rows = [{ attempt_id: A1, provider: "whish", created_at: NOW.toISOString() }];
+    let s = await runPaymentReconciliation(world({ other_provider_attempts: 1 }, { attempts_to_check: () => ({ data: rows }) }).rpc, sim, { now: NOW });
+    expect([s.sweep.skipped, s.problems]).toEqual([1, ["provider_mismatch"]]);
+    s = await runPaymentReconciliation(world({ other_provider_attempts: 3 }).rpc, sim, { now: NOW });   // resolved ones too, if recent
+    expect(s.problems).toEqual(["provider_mismatch"]);
+  });
+  it("health or lists unreadable: problems; without the watermark the charge list waits", async () => {
+    const g = new FakeGateway(() => NOW.getTime());
+    const s = await runPaymentReconciliation(db(() => ({ error: { message: "boom" } })).rpc, g, { now: NOW });
+    expect(s.problems).toEqual(expect.arrayContaining(["health", "sweep_list", "incomplete"]));
+    expect(g.listCalls).toEqual([]);
+    g.listDown = true;
+    expect((await runPaymentReconciliation(world().rpc, g, { now: NOW })).problems).toEqual(expect.arrayContaining(["charge_list", "reconciliation_behind"]));
+  });
+  it("a provider without a charge list: sweep and health only", async () => {
+    const g = new FakeGateway(() => NOW.getTime());
     (g as { listCharges?: unknown }).listCharges = undefined;
-    const s = await runPaymentReconciliation(db(() => ({ data: [] })).rpc, g);
-    expect([s.reconcile, s.problems]).toEqual([null, []]);
+    const s = await runPaymentReconciliation(world().rpc, g, { now: NOW });
+    expect([s.reconcile, s.window, s.problems]).toEqual([null, null, []]);
   });
 });
 

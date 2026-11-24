@@ -30,10 +30,12 @@ export function paymentCode(error: { message?: string } | null | undefined, fall
 
 /**
  * How long a provider may say it has never heard of an attempt before we stop treating that as "not yet" (M12.2).
- * After it, the attempt is recorded as expired, so the player can try again within the hold. Safe because money is
+ * After it, the attempt is recorded as expired. This is LONGER than the 10-minute hold: an attempt the provider never
+ * received keeps its own hold from taking another attempt, so that player cannot pay again on that hold; the hold
+ * ends at its own deadline as usual, the slot is free, and a new hold gets its own attempts at once
+ * (supabase/tests/api/gateway.mjs G3). Not shortened without the provider's verified behaviour. Safe because money is
  * never inferred from silence: if a charge for that reference ever appears (status or the provider's charge list),
  * record_attempt_result still records it — a success after "expired" is recorded and, the hold being gone, owed back.
- * Longer than any payment page lifetime we plan for; to confirm per provider before activation.
  */
 export const UNKNOWN_GRACE_MINUTES = 30;
 
@@ -70,7 +72,8 @@ async function record(admin: Rpc, args: Record<string, unknown>): Promise<Record
   return { ok: true, outcome: String(res.data) };
 }
 
-export type SweepSummary = { checked: number; outcomes: Record<string, number>; failures: Record<string, number> };
+/** `skipped`: open attempts of another provider than this runner's — never silently ignored (the run reports them). */
+export type SweepSummary = { checked: number; skipped: number; outcomes: Record<string, number>; failures: Record<string, number> };
 
 /**
  * The sweeper: attempts still open after `minAgeSeconds` (the player never came back, the callback never came, or it
@@ -79,7 +82,7 @@ export type SweepSummary = { checked: number; outcomes: Record<string, number>; 
  */
 export async function sweepOpenAttempts(admin: Rpc, provider: PaymentProvider,
   opts: { minAgeSeconds: number; maxAgeHours: number; limit: number; now?: Date; deadline?: number }): Promise<SweepSummary> {
-  const summary: SweepSummary = { checked: 0, outcomes: {}, failures: {} };
+  const summary: SweepSummary = { checked: 0, skipped: 0, outcomes: {}, failures: {} };
   const { data, error } = await admin.rpc("attempts_to_check", {
     p_min_age: `${Math.max(0, Math.floor(opts.minAgeSeconds))} seconds`,
     p_max_age: `${Math.max(1, Math.floor(opts.maxAgeHours))} hours`,
@@ -87,7 +90,7 @@ export async function sweepOpenAttempts(admin: Rpc, provider: PaymentProvider,
   });
   if (error || !Array.isArray(data)) { summary.failures.list = 1; return summary; }
   for (const row of data as { attempt_id: string; provider: string; created_at?: string }[]) {
-    if (row.provider !== provider.name) continue;
+    if (row.provider !== provider.name) { summary.skipped++; continue; }
     if (opts.deadline !== undefined && Date.now() > opts.deadline) { summary.failures.out_of_time = (summary.failures.out_of_time ?? 0) + 1; break; }
     summary.checked++;
     const r = await verifyAndRecord(admin, provider, row.attempt_id, { createdAt: row.created_at, now: opts.now });

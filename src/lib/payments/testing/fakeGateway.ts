@@ -14,13 +14,14 @@ import { PaymentStartRefused } from "../provider";
  *  - an outage of the status or list API.
  * Time comes from `clock` so tests can move it.
  */
-type Page = { attemptId: string; created: number; amount: number; currency: string; state: "open" | "paid" | "failed"; charges: ProviderCharge[] };
+type Charge = ProviderCharge & { at: number };   // when the gateway took it (its own list is filtered by this)
+type Page = { attemptId: string; created: number; amount: number; currency: string; state: "open" | "paid" | "failed"; charges: Charge[] };
 export type StartMode = "ok" | "refused" | "timeout_after_create" | "timeout_before_create";
 
 export class FakeGateway implements PaymentProvider {
   readonly name: ProviderName;
   pages = new Map<string, Page>();
-  foreign: ProviderCharge[] = [];
+  foreign: Charge[] = [];
   nextStart: StartMode[] = [];
   statusDown = false;
   listDown = false;
@@ -49,14 +50,25 @@ export class FakeGateway implements PaymentProvider {
     const p = this.pages.get(attemptId);
     if (!p) throw new Error("no such page");
     if (p.state === "open" && this.expired(p)) throw new Error("page expired");
-    const charge = { externalRef: attemptId, providerRef: `G-${++this.seq}`, amount: opts.amount ?? p.amount, currency: opts.currency ?? p.currency };
+    const charge = { externalRef: attemptId, providerRef: `G-${++this.seq}`, amount: opts.amount ?? p.amount, currency: opts.currency ?? p.currency, at: this.clock() };
     p.charges.push(charge);
     p.state = "paid";
     return charge;
   }
   decline(attemptId: string) { const p = this.pages.get(attemptId); if (p) p.state = "failed"; }
   /** A charge in the gateway's list whose reference is not one of ours. */
-  foreignCharge(amount = 1, currency = "USD"): ProviderCharge { const c = { externalRef: `X-${++this.seq}`, providerRef: `G-${this.seq}`, amount, currency }; this.foreign.push(c); return c; }
+  foreignCharge(amount = 1, currency = "USD", at = this.clock()): ProviderCharge { const c = { externalRef: `X-${++this.seq}`, providerRef: `G-${this.seq}`, amount, currency, at }; this.foreign.push(c); return c; }
+  /** Let `ms` pass at the gateway the way the database tests let it pass: everything it holds moves into the past. */
+  shiftBack(ms: number) {
+    for (const p of this.pages.values()) { p.created -= ms; for (const c of p.charges) c.at -= ms; }
+    for (const c of this.foreign) c.at -= ms;
+  }
+  /** Change what the gateway's own list says about a charge it already reported (contradictory evidence). */
+  restate(providerRef: string, change: { amount?: number; currency?: string }) {
+    for (const c of [...[...this.pages.values()].flatMap((p) => p.charges), ...this.foreign]) if (c.providerRef === providerRef) Object.assign(c, change);
+  }
+  /** How many times listCharges was asked, and for which windows. */
+  listCalls: { since: number; until: number }[] = [];
 
   private expired(p: Page) { return this.clock() - p.created > this.pageMinutes * 60_000; }
 
@@ -74,8 +86,12 @@ export class FakeGateway implements PaymentProvider {
     return typeof body?.reference === "string" ? body.reference : null;
   }
 
-  async listCharges(): Promise<ProviderCharge[]> {
+  /** The gateway's own list: charges taken in [since, until). */
+  async listCharges(since: Date, until: Date): Promise<ProviderCharge[]> {
+    this.listCalls.push({ since: since.getTime(), until: until.getTime() });
     if (this.listDown) throw new Error("list API down");
-    return [...[...this.pages.values()].flatMap((p) => p.charges), ...this.foreign];
+    return [...[...this.pages.values()].flatMap((p) => p.charges), ...this.foreign]
+      .filter((c) => c.at >= since.getTime() && c.at < until.getTime())
+      .map((c) => ({ externalRef: c.externalRef, providerRef: c.providerRef, amount: c.amount, currency: c.currency }));
   }
 }
