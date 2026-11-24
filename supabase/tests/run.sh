@@ -652,7 +652,9 @@ select count(*) > 0 from club_discovery(null, null, null, 'bat');
 select count(*) > 0 from club_discovery(null, null, null, 'البترون');
 EOF
 } | $PSQL -d $DB 2>&1 | filter
-$PSQL -q -d $DB -c "update clubs set open_time='00:00', close_time='24:00', slot_minutes=30, min_booking_minutes=30, max_booking_minutes=180 where slug='other'; delete from price_rules where club_id=(select id from clubs where slug='other');"
+# a published club with no prices at all is now refused (0092 §4, prices_incomplete); this fixture builds that state on
+# purpose for the price_from-null check, so it sets the coverage guard aside for these two statements only
+$PSQL -q -d $DB -c "begin; alter table clubs disable trigger clubs_prices_stay_complete; alter table price_rules disable trigger price_rules_stay_complete; update clubs set open_time='00:00', close_time='24:00', slot_minutes=30, min_booking_minutes=30, max_booking_minutes=180 where slug='other'; delete from price_rules where club_id=(select id from clubs where slug='other'); alter table clubs enable trigger clubs_prices_stay_complete; alter table price_rules enable trigger price_rules_stay_complete; commit;"
 { as_user $P1; cat <<EOF
 \echo '80. next_free_slot (other club, open 24h, 30-min grid): slot found, on grid, >= now ; no price rules -> price_from null  [fails only if Beirut time >= 23:25]'
 select start_at >= now() and extract(minute from start_at at time zone 'Asia/Beirut')::int % 30 = 0 from next_free_slot((select id from clubs where slug='other'));
