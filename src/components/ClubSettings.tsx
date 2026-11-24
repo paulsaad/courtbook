@@ -75,7 +75,7 @@ export default function ClubSettings({ club, courts, rules, staff, coaches, isAd
       {readiness && <Contact club={club} busy={busy} run={run} />}
       <Hours f={f} setF={setF} busy={busy} save={save} />
       <Courts clubId={club.id} courts={courts} sports={sports} busy={busy} run={run} />
-      <Prices clubId={club.id} courts={courts} rules={rules} busy={busy} run={run} />
+      <Prices clubId={club.id} courts={courts} rules={rules} busy={busy} run={run} open={f.open} close={f.close} />
       <Coaches clubId={club.id} coaches={coaches} busy={busy} run={run} />
       {isAdmin && <Staff clubId={club.id} staff={staff} busy={busy} run={run} />}
     </main>
@@ -253,6 +253,7 @@ function Location({ f, setF, areas, town, busy, save }: { f: Settings; setF: Set
 
 function Courts({ clubId, courts, sports, busy, run }: { clubId: string; courts: CourtRow[]; sports: Sport[]; busy: boolean; run: Run }) {
   const [name, setName] = useState("");
+  const [confirmOff, setConfirmOff] = useState<string | null>(null);
   const [sport, setSport] = useState(sports[0]?.code ?? "other");
   const sportName = (code: string) => sports.find((s) => s.code === code)?.name_en ?? code;
   const [surface, setSurface] = useState("");
@@ -263,10 +264,23 @@ function Courts({ clubId, courts, sports, busy, run }: { clubId: string; courts:
         {courts.map((c) => (
           <li key={c.id} className="flex items-center justify-between py-2 text-sm">
             <div><span className={c.active ? "" : "text-muted line-through"}>{c.name}</span> <span className="text-muted">· {sportName(c.sport)}{c.surface ? ` · ${c.surface}` : ""}</span></div>
-            <button disabled={busy} onClick={() => run(() => createClient().from("courts").update({ active: !c.active }).eq("id", c.id))} className={`${textBtn} text-action`}>{c.active ? "Deactivate" : "Activate"}</button>
+            {c.active && confirmOff === c.id ? (
+              <span className="flex items-center gap-3">
+                <button disabled={busy} onClick={() => run(() => createClient().from("courts").update({ active: false }).eq("id", c.id), () => setConfirmOff(null))} className={`${textBtn} font-semibold text-danger`}>Deactivate {c.name}</button>
+                <button disabled={busy} onClick={() => setConfirmOff(null)} className={textBtn}>Keep</button>
+              </span>
+            ) : (
+              <button disabled={busy} onClick={() => (c.active ? setConfirmOff(c.id) : run(() => createClient().from("courts").update({ active: true }).eq("id", c.id)))} className={`${textBtn} text-action`}>{c.active ? "Deactivate" : "Activate"}</button>
+            )}
           </li>
         ))}
       </ul>
+      {confirmOff && (
+        <p role="alert" className="rounded-xl bg-sand-soft p-3 text-sm">
+          Players will no longer see this court, and it leaves the calendar. A court with upcoming bookings can&apos;t be
+          deactivated: move or cancel them first.
+        </p>
+      )}
       <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); run(() => createClient().from("courts").insert({ club_id: clubId, name: name.trim(), sport, surface: surface.trim() || null, sort: courts.length + 1 }), () => { setName(""); setSurface(""); }); }}>
         <div className="flex flex-col gap-2 sm:flex-row">
           <input aria-label="Court name" className={`${input} flex-1`} placeholder="Court name" required value={name} onChange={(e) => setName(e.target.value)} />
@@ -279,8 +293,9 @@ function Courts({ clubId, courts, sports, busy, run }: { clubId: string; courts:
   );
 }
 
-function Prices({ clubId, courts, rules, busy, run }: { clubId: string; courts: CourtRow[]; rules: RuleRow[]; busy: boolean; run: Run }) {
+function Prices({ clubId, courts, rules, busy, run, open, close }: { clubId: string; courts: CourtRow[]; rules: RuleRow[]; busy: boolean; run: Run; open: string; close: string }) {
   const [f, setF] = useState({ label: "", start: "08:00", end: "17:00", price: "", court: "", mask: 127 });
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const toggleDay = (i: number) => setF({ ...f, mask: f.mask ^ (1 << i) });
   const daysOf = (mask: number) => (mask === 127 ? "every day" : DAYS.filter((_, i) => mask & (1 << i)).join(" "));
   return (
@@ -294,10 +309,24 @@ function Prices({ clubId, courts, rules, busy, run }: { clubId: string; courts: 
               <div>{hhmm(r.start_time)}–{hhmm(r.end_time)} · <b>${Number(r.price_usd).toFixed(2)}</b>/h {r.label && <span className="text-muted">· {r.label}</span>}</div>
               <div className="text-xs text-muted">{daysOf(r.weekday_mask)} · {r.court_id ? courts.find((c) => c.id === r.court_id)?.name : "all courts"}</div>
             </div>
-            <button disabled={busy} onClick={() => run(() => createClient().from("price_rules").delete().eq("id", r.id))} className={`${textBtn} text-danger`}>Delete</button>
+            {confirmDelete === r.id ? (
+              <span className="flex items-center gap-3">
+                <button disabled={busy} onClick={() => run(() => createClient().from("price_rules").delete().eq("id", r.id), () => setConfirmDelete(null))} className={`${textBtn} font-semibold text-danger`}>Delete this price</button>
+                <button disabled={busy} onClick={() => setConfirmDelete(null)} className={textBtn}>Keep</button>
+              </span>
+            ) : (
+              <button disabled={busy} onClick={() => setConfirmDelete(r.id)} className={`${textBtn} text-danger`} aria-label={`Delete the price ${hhmm(r.start_time)}–${hhmm(r.end_time)}`}>Delete</button>
+            )}
           </li>
         ))}
       </ul>
+      {confirmDelete && (
+        <p role="alert" className="rounded-xl bg-sand-soft p-3 text-sm">
+          Deleting a price can leave times players cannot book (the checklist will say which). Bookings already made keep
+          their price.
+        </p>
+      )}
+      <OnePrice clubId={clubId} hasWholeClub={rules.some((r) => !r.court_id)} busy={busy} run={run} open={open} close={close} />
       <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); run(() => createClient().from("price_rules").insert({ club_id: clubId, court_id: f.court || null, weekday_mask: f.mask, start_time: f.start, end_time: f.end, price_usd: Number(f.price), label: f.label.trim() || null }), () => setF({ ...f, price: "", label: "" })); }}>
         <div className="flex flex-wrap gap-2">
           <input aria-label="Price from" className={`${input} min-w-[8rem] flex-1`} type="time" step={1800} value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} />
@@ -314,6 +343,56 @@ function Prices({ clubId, courts, rules, busy, run }: { clubId: string; courts: 
         <button disabled={busy} className="rounded-xl border border-grid py-2.5">Add price rule</button>
       </form>
     </section>
+  );
+}
+
+/** 0092: one price for all opening hours, with optional peak times; the database writes rules that never overlap.
+ *  Existing whole-club prices are replaced only when the desk ticks it on purpose. */
+export function OnePrice({ clubId, hasWholeClub, busy, run, open, close }: { clubId: string; hasWholeClub: boolean; busy: boolean; run: Run; open: string; close: string }) {
+  const [base, setBase] = useState("");
+  const [peaks, setPeaks] = useState<{ start: string; end: string; price: string; days: number }[]>([]);
+  const [replace, setReplace] = useState(false);
+  const DAY_SHORT = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+  const setPeak = (i: number, p: Partial<(typeof peaks)[number]>) => setPeaks(peaks.map((x, j) => (j === i ? { ...x, ...p } : x)));
+  return (
+    <form className="flex flex-col gap-2 rounded-xl bg-paper p-3" aria-labelledby="one-price"
+      onSubmit={(e) => {
+        e.preventDefault();
+        run(() => createClient().rpc("set_club_base_prices", {
+          p_club: clubId, p_base: Number(base), p_replace: replace,
+          p_peaks: peaks.map((p) => ({ start: p.start, end: p.end, price: Number(p.price), days: p.days })),
+        }), () => { setBase(""); setPeaks([]); setReplace(false); });
+      }}>
+      <h3 id="one-price" className="text-sm font-medium">Quick set-up: one price for all opening hours ({open}–{close})</h3>
+      <label className="flex items-center justify-between gap-3 text-sm">Price per hour ($)
+        <input className={`${input} w-24 text-right`} inputMode="decimal" required value={base} onChange={(e) => setBase(e.target.value)} />
+      </label>
+      {peaks.map((p, i) => (
+        <fieldset key={i} className="flex flex-col gap-2 rounded-lg border border-grid p-2">
+          <legend className="px-1 text-xs text-muted">Peak time {i + 1}</legend>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <input aria-label={`Peak ${i + 1} from`} className={`${input} min-w-[7rem] flex-1`} type="time" step={1800} value={p.start} onChange={(e) => setPeak(i, { start: e.target.value })} />
+            <input aria-label={`Peak ${i + 1} until`} className={`${input} min-w-[7rem] flex-1`} type="time" step={1800} value={p.end} onChange={(e) => setPeak(i, { end: e.target.value })} />
+            <input aria-label={`Peak ${i + 1} price per hour in dollars`} className={`${input} w-24`} inputMode="decimal" placeholder="$/h" required value={p.price} onChange={(e) => setPeak(i, { price: e.target.value })} />
+          </div>
+          <div className="flex gap-1">
+            {DAY_SHORT.map((d, k) => (
+              <button type="button" key={d} aria-label={`Peak ${i + 1} on ${DAY_NAMES[k]}`} aria-pressed={!!(p.days & (1 << k))} onClick={() => setPeak(i, { days: p.days ^ (1 << k) })}
+                className={`min-h-11 flex-1 rounded-lg border py-1.5 text-xs sm:min-h-0 ${p.days & (1 << k) ? "border-ink bg-ink text-white" : "border-grid"}`}>{d}</button>
+            ))}
+          </div>
+          <button type="button" onClick={() => setPeaks(peaks.filter((_, j) => j !== i))} className={`${textBtn} self-start text-sm`}>Remove this peak</button>
+        </fieldset>
+      ))}
+      {peaks.length < 6 && <button type="button" onClick={() => setPeaks([...peaks, { start: "18:00", end: close === "24:00" ? "23:30" : close, price: "", days: 127 }])} className={`${textBtn} self-start text-sm text-action`}>Add a peak time</button>}
+      {hasWholeClub && (
+        <label className="flex items-start gap-3 text-sm">
+          <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} className="mt-1 h-4 w-4" />
+          <span>Replace the current whole-club prices listed above. A court&apos;s own prices are kept.</span>
+        </label>
+      )}
+      <button disabled={busy || (hasWholeClub && !replace)} className={primary}>Set prices</button>
+    </form>
   );
 }
 
