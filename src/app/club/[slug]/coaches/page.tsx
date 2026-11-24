@@ -12,14 +12,14 @@ export default async function ClubCoaches({ params }: { params: Promise<{ slug: 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?next=/club/${slug}/coaches`);
-  const { data: club } = loaded(await supabase.from("clubs").select("id, name, slug, open_time, close_time, location_url, town_id, is_demo").eq("slug", slug).single(), "this club");
+  const { data: club } = loaded(await supabase.from("clubs").select("id, name, slug, open_time, close_time, location_url, town_id, is_demo, lat, lng").eq("slug", slug).single(), "this club");
   if (!club) notFound();
   const [{ data }, head] = allLoaded(await Promise.all([supabase.rpc("coaches_at_club", { p_club: club.id }), loadClubHead(supabase, club)]), "this club's coaches");
   const coaches = (data ?? []) as CoachRow[];
 
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col">
-      <ClubHeader club={head} tab="/coaches" />
+      <ClubHeader club={head} tab="/coaches" signedIn={!!user} />
       <div className="mx-auto flex w-full max-w-md flex-col gap-5 p-5">
       {coaches.length === 0 && <p className="text-muted">No coaches listed here yet.</p>}
       <ul className="flex flex-col gap-3">

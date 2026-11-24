@@ -3,7 +3,7 @@ import type { ClubHead } from "@/app/club/[slug]/ClubHeader";
 import { allLoaded } from "./load";
 
 /** Header data for the club pages: town, sports (from active courts), price band. */
-export async function loadClubHead(supabase: SupabaseClient, club: { id: string; name: string; slug: string; open_time: string; close_time: string; location_url: string | null; town_id: string | null; is_demo?: boolean | null }): Promise<ClubHead> {
+export async function loadClubHead(supabase: SupabaseClient, club: { id: string; name: string; slug: string; open_time: string; close_time: string; location_url: string | null; town_id: string | null; is_demo?: boolean | null; lat?: number | string | null; lng?: number | string | null }): Promise<ClubHead> {
   // a failed read throws (W1, audit B2): an empty price band or sport list would misdescribe the club
   const [{ data: town }, { data: sports }, { data: rules }, { data: sportRows }] = allLoaded(await Promise.all([
     club.town_id ? supabase.from("towns").select("name_en, districts(name_en)").eq("id", club.town_id).single() : Promise.resolve({ data: null }),
@@ -15,6 +15,7 @@ export async function loadClubHead(supabase: SupabaseClient, club: { id: string;
   const prices = ((rules ?? []) as { price_usd: number }[]).map((r) => Number(r.price_usd));
   const t = town as unknown as { name_en: string; districts: { name_en: string } | null } | null;
   return {
+    id: club.id, lat: club.lat ?? null, lng: club.lng ?? null,
     name: club.name, slug: club.slug, open_time: club.open_time, close_time: club.close_time, location_url: club.location_url,
     town: t?.name_en ?? null, district: t?.districts?.name_en ?? null,
     sports: ((sports ?? []) as string[]).map((c) => names.get(c) ?? c),

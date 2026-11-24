@@ -22,7 +22,7 @@ export default function DeleteAccountInfo() {
         <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm">
           <li>Sign in with the email address on your account.</li>
           <li>Open <b>Profile</b> and choose <b>Delete my account</b>.</li>
-          <li>Confirm. You can cancel the request until it is processed.</li>
+          <li>Confirm. Your account is closed at once and you are signed out. This cannot be undone.</li>
         </ol>
         <p className="mt-3 text-sm"><Link href="/profile" className="font-semibold text-turf">Go to your profile</Link></p>
       </section>
@@ -39,8 +39,8 @@ export default function DeleteAccountInfo() {
       <section className="card p-4">
         <h2 className="font-bold">What happens</h2>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-          <li>We aim to process requests within 30 days. Once your account is deleted, signing in with your email starts a new, empty account.</li>
-          <li><b>Deleted:</b> your name, phone number, email sign-in, playing levels and sports, coach profile, chat messages,
+          <li>We aim to finish deleting your data within 30 days of your request. Once your account is deleted, signing in with your email starts a new, empty account.</li>
+          <li><b>Deleted:</b> your name, phone number, email sign-in, playing levels and sports, favourite clubs and saved playing areas, coach profile, chat messages,
             notifications and blocked-player list. You are taken out of the games you joined.</li>
           <li><b>Cancelled:</b> your upcoming bookings, under the club’s normal cancellation rules, and the games you organise
             (their players are told).</li>
