@@ -238,6 +238,47 @@ select pg_temp.keep('rc_sweep', pg_temp.s($$select count(*)::text from attempts_
 insert into t values ('R4 the sweeper''s list holds the attempts still open, and only those',
   pg_temp.got('rc_sweep')::int = (select count(*) from payment_attempts where status in ('starting', 'open')), pg_temp.got('rc_sweep'));
 
+-- review of PR #34, correction 4: the provider's own records prove a second, distinct charge on an attempt already paid
+select pg_temp.keep('x_extra', pg_temp.s(format('select reconcile_provider_charge(''simulated'', %L, ''R-1-second'', 1.00, ''USD'')', pg_temp.aid('rc_a'))));
+select pg_temp.keep('x_extra_again', pg_temp.s(format('select reconcile_provider_charge(''simulated'', %L, ''R-1-second'', 1.00, ''USD'')', pg_temp.aid('rc_a'))));
+insert into t select 'R5 a second, distinct charge the provider''s records prove on a paid attempt is recorded and owed back; the booking, the payment and the attempt''s own charge are untouched; once only',
+  pg_temp.got('x_extra') = 'extra_charge' and pg_temp.got('x_extra_again') = 'already_recorded'
+  and b.status = 'confirmed' and p.status = 'paid' and p.provider_ref = pg_temp.aid('rc_a')::text and a.provider_ref = 'R-1' and a.outcome = 'confirmed'
+  and pg_temp.charges(p.id) = 'kept,refund_due:extra_charge'
+  and (select attempt_id from fee_charges where provider_ref = 'R-1-second') = pg_temp.aid('rc_a'),
+  pg_temp.got('x_extra') || ' / ' || pg_temp.got('x_extra_again') || ' ' || pg_temp.charges(p.id)
+from (select 1) one left join bookings b on b.id = pg_temp.bk('rc_h') left join payments p on p.booking_id = b.id left join payment_attempts a on a.id = pg_temp.aid('rc_a');
+select pg_temp.keep('x_cb', pg_temp.res(pg_temp.aid('rc_a'), 'succeeded', 'R-1-third', 1.00, 'USD'));
+select pg_temp.keep('x_amt', pg_temp.s(format('select reconcile_provider_charge(''simulated'', %L, ''R-1-second'', 5.00, ''USD'')', pg_temp.aid('rc_a'))));
+insert into t values ('R6 a callback (or anything posing as the provider) still cannot add a charge to a paid attempt; records contradicting a recorded charge are still refused',
+  pg_temp.got('x_cb') = 'ERR attempt_evidence_conflict' and pg_temp.got('x_amt') = 'ERR charge_evidence_conflict'
+  and pg_temp.charges(pg_temp.py('rc_h')) = 'kept,refund_due:extra_charge', pg_temp.got('x_cb') || ' / ' || pg_temp.got('x_amt'));
+
+-- review of PR #34, corrections 2 and 3: one unresolved attempt at a time; a provider timeout is not a failure
+select pg_temp.keep('u_h', pg_temp.hold(15, 3, 4, '10:00', '11:00'));
+select pg_temp.keep('u_a1', pg_temp.att(15, pg_temp.py('u_h'), 70));          -- the provider call then times out: no answer
+select pg_temp.keep('u_a2', pg_temp.att(15, pg_temp.py('u_h'), 71));          -- a second tap, new key
+select pg_temp.keep('u_a1_same', pg_temp.att(15, pg_temp.py('u_h'), 70));     -- the first tap retried, same key
+select pg_temp.keep('u_listed', pg_temp.s(format($$select count(*)::text from attempts_to_check(interval '-1 minute', interval '1 day', 200) where attempt_id = %L$$, pg_temp.aid('u_a1'))));
+insert into t select 'U1 while an attempt is unresolved (provider timed out: still ''starting''), a new attempt is refused; the same tap gets the same attempt; the sweeper keeps asking about it',
+  pg_temp.got('u_a2') = 'ERR attempt_in_progress' and pg_temp.aid('u_a1_same') = pg_temp.aid('u_a1') and a.status = 'starting' and pg_temp.got('u_listed') = '1'
+  and (select count(*) from payment_attempts where payment_id = pg_temp.py('u_h')) = 1,
+  concat_ws(' / ', pg_temp.got('u_a2'), pg_temp.got('u_listed'), a.status)
+from (select 1) one left join payment_attempts a on a.id = pg_temp.aid('u_a1');
+-- the provider HAD created the session and the player paid; the callback was lost; the sweeper asks: confirmed
+select pg_temp.keep('u_sweep', pg_temp.res(pg_temp.aid('u_a1'), 'succeeded', 'U-timeout-1', 1.00, 'USD'));
+insert into t select 'U2 money taken on an attempt whose start timed out and whose callback was lost is found by asking the provider: the booking is confirmed',
+  pg_temp.got('u_sweep') = 'confirmed' and b.status = 'confirmed' and pg_temp.charges(pg_temp.py('u_h')) = 'kept', pg_temp.got('u_sweep')
+from (select 1) one left join bookings b on b.id = pg_temp.bk('u_h');
+select pg_temp.keep('u2_h', pg_temp.hold(16, 4, 4, '10:00', '11:00'));
+select pg_temp.keep('u2_a1', pg_temp.att(16, pg_temp.py('u2_h'), 72));
+select pg_temp.keep('u2_open', pg_temp.s(format('select open_payment_attempt(%L, ''https://pay.example/u2'', ''s'')', pg_temp.aid('u2_a1'))));
+select pg_temp.keep('u2_a2', pg_temp.att(16, pg_temp.py('u2_h'), 73));
+select pg_temp.keep('_u2_exp', pg_temp.res(pg_temp.aid('u2_a1'), 'expired'));
+select pg_temp.keep('u2_a3', pg_temp.att(16, pg_temp.py('u2_h'), 74));
+insert into t values ('U3 an open payment page blocks a second attempt too; once the provider says it expired, the next attempt is made',
+  pg_temp.got('u2_a2') = 'ERR attempt_in_progress' and split_part(pg_temp.got('u2_a3'), '|', 2) = '2', pg_temp.got('u2_a2') || ' / ' || pg_temp.got('u2_a3'));
+
 -- ------------------------------------------------------------------------------------------------ C cancellations (D1)
 -- real money from here (Whish), so refunds can be completed
 do $$ begin perform set_config('app.payment_provider', 'whish', true); end $$;
@@ -275,10 +316,11 @@ select pg_temp.keep('c_club_x2', pg_temp.r(pg_temp.u(29), format('select cancel_
 insert into t values ('C5 cancelling again creates no second refund', pg_temp.got('c_club_x2') = 'ERR not_confirmed' and pg_temp.charges(pg_temp.py('c_club')) = 'refund_due:club_cancelled', pg_temp.got('c_club_x2'));
 -- account deletion: a confirmed fee-only booking, plus a duplicate charge already owed back
 select pg_temp.keep('c_del', pg_temp.hold(14, 6, 6, '10:00', '11:00'));
-select pg_temp.keep('c_del_a', pg_temp.att(14, pg_temp.py('c_del'), 64));
-select pg_temp.keep('c_del_dup_a', pg_temp.att(14, pg_temp.py('c_del'), 65));
+select pg_temp.keep('c_del_dup_a', pg_temp.att(14, pg_temp.py('c_del'), 64));
+select pg_temp.keep('_c_del_exp', pg_temp.res(pg_temp.aid('c_del_dup_a'), 'expired'));                     -- given up on (no answer)
+select pg_temp.keep('c_del_a', pg_temp.att(14, pg_temp.py('c_del'), 65));
 select pg_temp.keep('c_del_ok', pg_temp.res(pg_temp.aid('c_del_a'), 'succeeded', 'C-del', 1.00, 'USD'));
-select pg_temp.keep('c_del_dup', pg_temp.res(pg_temp.aid('c_del_dup_a'), 'succeeded', 'C-del-dup', 1.00, 'USD'));
+select pg_temp.keep('c_del_dup', pg_temp.res(pg_temp.aid('c_del_dup_a'), 'succeeded', 'C-del-dup', 1.00, 'USD'));   -- it had taken the money after all
 select pg_temp.keep('c_del_req', pg_temp.r(pg_temp.u(14), $$select request_account_deletion('web')->>'status'$$));
 select pg_temp.keep('c_del_run', pg_temp.s(format('select delete_account_data(%L)->>''refunds_due''', pg_temp.u(14))));
 insert into t select 'C6 account deletion cancels like the player: the fee is kept; the duplicate charge already owed back stays owed back',
@@ -324,6 +366,15 @@ insert into t values ('F5 a refund is recorded once: the same entry again is a n
   concat_ws(' / ', pg_temp.got('f_again'), pg_temp.got('f_again2'), pg_temp.got('f_reuse')));
 select pg_temp.keep('f_kept', pg_temp.r(pg_temp.u(30), format('select complete_fee_refund(%L, 1.00, ''provider_portal'', ''WR-9'')', (select id from fee_charges where payment_id = pg_temp.py('c_far') order by disposition limit 1))));
 select pg_temp.keep('f_sim', pg_temp.r(pg_temp.u(30), format('select complete_fee_refund(%L, 0.75, ''provider_portal'', ''WR-8'')', (select id from fee_charges where provider_ref = 'W-amt-1' limit 1))));
+select pg_temp.keep('f_extra_h', pg_temp.paid(17, 6, 7, '10:00', '11:00', 80, 'X-own'));
+select pg_temp.keep('f_extra', pg_temp.s(format('select reconcile_provider_charge(''whish'', %L, ''X-second'', 1.00, ''USD'')',
+  (select id from payment_attempts where payment_id = pg_temp.py('f_extra_h') limit 1))));
+select pg_temp.keep('_f_extra_cx', pg_temp.r(pg_temp.u(29), format('select cancel_booking(%L, true)::text', pg_temp.bk('f_extra_h'))));   -- the attempt's own charge owed back too
+select pg_temp.keep('f_extra_done', pg_temp.r(pg_temp.u(30), format('select complete_fee_refund(%L, 1.00, ''provider_portal'', ''WR-X2'')', (select id from fee_charges where provider_ref = 'X-second'))));
+insert into t select 'F7 refunding an extra charge does not mark the booking''s own fee refunded (it is still owed)',
+  pg_temp.got('f_extra') = 'extra_charge' and pg_temp.got('f_extra_done') = 'refunded' and p.status = 'refund_due'
+  and pg_temp.charges(p.id) = 'refund_due:club_cancelled,refunded:extra_charge', concat_ws(' / ', pg_temp.got('f_extra'), pg_temp.got('f_extra_done'), p.status, pg_temp.charges(p.id))
+from (select 1) one left join payments p on p.id = pg_temp.py('f_extra_h');
 insert into t values ('F6 a kept fee cannot be "refunded"; simulated money is never refunded',
   pg_temp.got('f_kept') = 'ERR not_refund_due' and pg_temp.got('f_sim') = 'ERR never_collected', pg_temp.got('f_kept') || ' / ' || pg_temp.got('f_sim'));
 
@@ -334,7 +385,7 @@ insert into t values ('V1 a fee-only booking prices a move like an unpaid app bo
 
 -- ------------------------------------------------------------------------------------------------ I invariants over everything above
 insert into t select 'I1 every successful attempt has exactly one charge, and every attempt-linked charge comes from a successful attempt',
-  not exists (select 1 from payment_attempts a where a.status = 'succeeded' and (select count(*) from fee_charges c where c.attempt_id = a.id) <> 1)
+  not exists (select 1 from payment_attempts a where a.status = 'succeeded' and (select count(*) from fee_charges c where c.attempt_id = a.id and c.reason is distinct from 'extra_charge') <> 1)
   and not exists (select 1 from fee_charges c join payment_attempts a on a.id = c.attempt_id where a.status <> 'succeeded'), null;
 insert into t select 'I2 a fee-only payment is paid exactly when it has one kept charge; no booking ever has two kept charges',
   not exists (select 1 from payments p where p.kind = 'fee_only' and (p.status = 'paid') <> exists (select 1 from fee_charges c where c.payment_id = p.id and c.disposition = 'kept'))
@@ -347,12 +398,14 @@ insert into t select 'I4 no fee-only payment row for $0, and no payment row for 
   and not exists (select 1 from bookings b join payments p on p.booking_id = b.id where b.source = 'app' and b.fee_usd = 0 and b.club_id = pg_temp.club()), null;
 insert into t select 'I5 money in = kept + owed back + refunded, charge by charge (nothing dropped)',
   (select count(*) from fee_charges) = (select count(*) from fee_charges where disposition in ('kept', 'refund_due', 'refunded'))
-  and (select count(*) from payment_attempts where status = 'succeeded') + (select count(*) from fee_charges where reason = 'unmatched') = (select count(*) from fee_charges), null;
+  and (select count(*) from payment_attempts where status = 'succeeded') + (select count(*) from fee_charges where reason in ('unmatched', 'extra_charge')) = (select count(*) from fee_charges), null;
+insert into t select 'I7 never two unresolved attempts on one payment',
+  not exists (select payment_id from payment_attempts where status in ('starting', 'open') group by payment_id having count(*) > 1), null;
 insert into t select 'I6 still exactly one live booking per slot (no overlap on any court)',
   not exists (select 1 from bookings a join bookings b on a.court_id = b.court_id and a.id < b.id and a.status in ('confirmed', 'pending') and b.status in ('confirmed', 'pending') and a.period && b.period), null;
 
 -- every check above produced its row (a check reading a row that a mistake removed must fail, not vanish)
-insert into t select 'Z1 all 51 checks ran', (select count(*) from t) = 51, (select count(*) from t)::text;
+insert into t select 'Z1 all 58 checks ran', (select count(*) from t) = 58, (select count(*) from t)::text;
 
 select case when coalesce(pass, false) then 'ok   ' else 'FAIL ' end || id || case when coalesce(pass, false) then '' else '  [' || coalesce(detail, '') || ']' end from t order by left(id, 1), (regexp_replace(split_part(id, ' ', 1), '\D', '', 'g'))::int;
 select format('%s checks, %s failed', count(*), count(*) filter (where not coalesce(pass, false))) from t;

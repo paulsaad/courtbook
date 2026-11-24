@@ -15,6 +15,7 @@ export type FeeRefundRow = {
 const REASON: Record<string, string> = {
   club_cancelled: "club cancelled", not_confirmed: "paid after the hold ended", duplicate: "paid twice",
   wrong_amount: "wrong amount", wrong_currency: "wrong currency", unmatched: "not matched to any booking",
+  extra_charge: "charged again on the same payment",
 };
 
 /**

@@ -9,11 +9,15 @@
 --      confirms at once and writes NO payment row (hard criterion 2), exactly like 'at_desk'.
 --   2. payment_attempts: one row per request to a provider. Its id is the external reference sent to the provider,
 --      so it is never reused (a reused Whish reference replays the old request). At most three per hold; the hold's
---      deadline is never extended. A failed or expired attempt ends only the attempt, never the hold.
+--      deadline is never extended. A failed or expired attempt ends only the attempt, never the hold. Only one attempt
+--      may be unresolved ('starting' or 'open') at a time: a provider that timed out may still have taken the money, so
+--      the attempt stays unresolved until the provider's own status says what happened.
 --   3. fee_charges: one row per successful charge, whatever happened to the booking. A charge is either 'kept'
 --      (exactly one per paid payment, enforced by a unique index), or owed back ('refund_due' → 'refunded'). Wrong
 --      amount, wrong currency, a second success, a success after the hold ended, or a charge nobody can match: all
---      recorded, all owed back (hard criterion 1). One refund per charge, structurally.
+--      recorded, all owed back (hard criterion 1). One refund per charge, structurally. A second, distinct charge that
+--      the provider's own transaction records prove against an attempt already paid is recorded too ('extra_charge'),
+--      owed back, without touching the booking (reconcile_provider_charge only; a callback cannot add one).
 --   4. record_attempt_result is the only way a fee-only payment becomes paid. It takes the same locks as every other
 --      path (club → court → booking → payment, then attempt, then charge) and is idempotent: a repeated callback,
 --      return-page check or reconciliation of the same charge changes nothing.
@@ -73,7 +77,7 @@ create table if not exists fee_charges (
   id               uuid primary key default gen_random_uuid(),
   provider         text not null check (provider in ('simulated', 'whish', 'areeba')),
   provider_ref     text not null,
-  attempt_id       uuid unique references payment_attempts(id),  -- null only for a charge nobody could match
+  attempt_id       uuid references payment_attempts(id),         -- null only for a charge nobody could match
   payment_id       uuid references payments(id),
   club_id          uuid references clubs(id),
   amount           numeric(8,2) not null check (amount > 0),
@@ -81,7 +85,7 @@ create table if not exists fee_charges (
   collected        boolean not null,                             -- false only for the simulated provider
   received_at      timestamptz not null default now(),
   disposition      text not null check (disposition in ('kept', 'refund_due', 'refunded')),
-  reason           text check (reason in ('club_cancelled', 'not_confirmed', 'duplicate', 'wrong_amount', 'wrong_currency', 'unmatched')),
+  reason           text check (reason in ('club_cancelled', 'not_confirmed', 'duplicate', 'wrong_amount', 'wrong_currency', 'unmatched', 'extra_charge')),
   refund_due_at    timestamptz,
   refunded_at      timestamptz,
   refunded_by      uuid references profiles(id) on delete set null,
@@ -96,6 +100,8 @@ create table if not exists fee_charges (
   check ((disposition = 'refunded') = (refunded_at is not null and refund_method is not null and refund_reference is not null and refund_amount is not null)),
   check (refund_amount is null or refund_amount = amount)
 );
+-- one charge per attempt as the attempt's own result; any further, distinct charge on it is an 'extra_charge' (owed back)
+create unique index if not exists fee_charges_one_per_attempt on fee_charges (attempt_id) where reason is distinct from 'extra_charge';
 -- one kept charge per payment: a booking can never be confirmed by two charges
 create unique index if not exists fee_charges_one_kept on fee_charges (payment_id) where disposition = 'kept';
 -- one provider refund can settle only one charge
@@ -305,6 +311,11 @@ begin
   if b.hold_expires_at is null or b.hold_expires_at <= now() then raise exception 'hold_expired'; end if;
   select count(*) into v_n from payment_attempts where payment_id = p.id;
   if v_n >= 3 then raise exception 'attempts_exhausted'; end if;
+  -- review of PR #34: never two unresolved attempts at once. An attempt still 'starting' or 'open' may yet take the
+  -- money (a provider timeout is not a refusal); the server asks the provider about it first (/api/pay/start).
+  if exists (select 1 from payment_attempts where payment_id = p.id and status in ('starting', 'open')) then
+    raise exception 'attempt_in_progress';
+  end if;
 
   insert into payment_attempts (payment_id, club_id, attempt_no, request_key, provider, amount_usd, currency)
   values (p.id, p.club_id, v_n + 1, p_request, p.provider, p.total_usd, p.currency)
@@ -394,10 +405,13 @@ begin
     raise exception 'evidence_incomplete';
   end if;
   if a.status = 'succeeded' then
-    if a.provider_ref = v_ref and exists (select 1 from fee_charges c where c.attempt_id = a.id and c.amount = p_amount and c.currency = v_currency) then
+    if a.provider_ref = v_ref and exists (select 1 from fee_charges c where c.attempt_id = a.id and c.reason is distinct from 'extra_charge'
+                                          and c.amount = p_amount and c.currency = v_currency) then
       return 'already_recorded';
     end if;
-    raise exception 'attempt_evidence_conflict';   -- the provider now says something else about the same charge
+    -- the provider (or someone posing as it) now says something else about the same attempt: refused here. Only the
+    -- provider's own transaction records, through reconcile_provider_charge, may add a second charge to it.
+    raise exception 'attempt_evidence_conflict';
   end if;
   if exists (select 1 from fee_charges where provider = a.provider and provider_ref = v_ref) then
     raise exception 'duplicate_provider_ref';      -- one provider charge cannot pay for two attempts
@@ -453,7 +467,9 @@ end $$;
 create or replace function reconcile_provider_charge(p_provider text, p_external_ref text, p_provider_ref text,
                                                      p_amount numeric, p_currency text)
 returns text language plpgsql security definer set search_path = public as $$
-declare v_attempt uuid; c fee_charges%rowtype; n int; v_ref text := btrim(p_provider_ref); v_currency text := upper(btrim(p_currency));
+declare
+  v_attempt uuid; c fee_charges%rowtype; n int; v_ref text := btrim(p_provider_ref); v_currency text := upper(btrim(p_currency));
+  a payment_attempts%rowtype; v_court uuid;
 begin
   if p_provider is null or p_provider not in ('simulated', 'whish', 'areeba') then raise exception 'bad_provider'; end if;
   if v_ref is null or v_ref = '' or p_amount is null or p_amount <= 0 or v_currency is null or v_currency = '' then
@@ -465,8 +481,28 @@ begin
     raise exception 'charge_evidence_conflict';
   end if;
   begin v_attempt := btrim(p_external_ref)::uuid; exception when invalid_text_representation then v_attempt := null; end;
-  if v_attempt is not null and exists (select 1 from payment_attempts where id = v_attempt and provider = p_provider) then
-    return record_attempt_result(v_attempt, 'succeeded', v_ref, p_amount, v_currency);
+  select * into a from payment_attempts where id = v_attempt and provider = p_provider;
+  if found then
+    -- club → court → booking → payment → attempt, then decide on the locked attempt
+    perform 1 from clubs where id = a.club_id for share;
+    select bk.court_id into v_court from payments py join bookings bk on bk.id = py.booking_id where py.id = a.payment_id;
+    if v_court is not null then perform 1 from courts where id = v_court for update; end if;
+    perform 1 from bookings where id = (select booking_id from payments where id = a.payment_id) for update;
+    perform 1 from payments where id = a.payment_id for update;
+    select * into a from payment_attempts where id = v_attempt for update;
+    if a.status <> 'succeeded' then
+      return record_attempt_result(v_attempt, 'succeeded', v_ref, p_amount, v_currency);
+    end if;
+    -- The attempt already has its charge, and the provider's own records show another, distinct one on it (a
+    -- different provider reference). That money was taken too: recorded and owed back in full. The booking, the
+    -- payment and the attempt's own charge are left exactly as they are.
+    insert into fee_charges (provider, provider_ref, attempt_id, payment_id, club_id, amount, currency, collected,
+                             disposition, reason, refund_due_at)
+    values (a.provider, v_ref, a.id, a.payment_id, a.club_id, p_amount, v_currency, a.provider <> 'simulated',
+            'refund_due', 'extra_charge', now())
+    on conflict (provider, provider_ref) do nothing;
+    get diagnostics n = row_count;
+    return case when n = 1 then 'extra_charge' else 'already_recorded' end;
   end if;
   insert into fee_charges (provider, provider_ref, amount, currency, collected, disposition, reason, refund_due_at)
   values (p_provider, v_ref, p_amount, v_currency, p_provider <> 'simulated', 'refund_due', 'unmatched', now())
@@ -686,7 +722,7 @@ begin
   where id = c.id;
   -- the payment row follows when this charge is the one it stands for
   update payments set status = 'refunded', refunded_at = now()
-  where id = c.payment_id and status = 'refund_due' and provider_ref = c.attempt_id::text;
+  where id = c.payment_id and status = 'refund_due' and provider_ref = c.attempt_id::text and c.reason is distinct from 'extra_charge';
   return 'refunded';
 exception when unique_violation then raise exception 'refund_reference_used';
 end $$;

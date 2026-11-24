@@ -55,6 +55,16 @@ export type AttemptStatus =
 
 export type ProviderName = "simulated" | "whish" | "areeba";
 
+/**
+ * startAttempt throws this ONLY when the provider definitely refused to create the payment (it answered, and said no).
+ * Anything else — a timeout, a dropped connection, a 5xx, an unreadable answer — is NOT a failure: the provider may
+ * have created the payment page anyway, and the player may pay it. Such an attempt stays unresolved and is settled
+ * by asking attemptStatus (review of PR #34).
+ */
+export class PaymentStartRefused extends Error {
+  constructor(public readonly reason: string) { super("payment start refused"); this.name = "PaymentStartRefused"; }
+}
+
 export interface PaymentProvider {
   readonly name: ProviderName;
   start(input: StartPaymentInput): Promise<StartPaymentResult>;
@@ -62,6 +72,7 @@ export interface PaymentProvider {
   verify(paymentId: string, providerRef: string | null): Promise<VerifyResult>;
   refund(providerRef: string, totalUsd: number): Promise<{ ok: boolean; reason?: string }>;
 
+  /** Throws PaymentStartRefused for a definite refusal; any other throw means the outcome is unknown. */
   startAttempt(input: StartAttemptInput): Promise<StartAttemptResult>;
   /** The provider's own answer about an attempt, asked server to server. */
   attemptStatus(attemptId: string): Promise<AttemptStatus>;

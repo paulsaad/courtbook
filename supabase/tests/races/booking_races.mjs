@@ -12,7 +12,8 @@
 //   I5 an expired or failed hold never blocks a later booking of the same slot (checked by booking it afterwards).
 // FEE=1 (M12.1, 0093): the same scenarios 1–5 at a club in 'fee_online' mode (court paid at the desk, $1 fee online
 // through provider-verified attempts), then the fee-only races F6–F11 instead of 6–9, with four more invariants:
-//   I6 every successful attempt has exactly one charge; I7 a fee-only payment is paid exactly when it has one kept charge
+//   I6 every successful attempt has exactly one charge of its own (an extra charge proven by the provider's records is
+//   separate), and never two unresolved attempts on one payment; I7 a fee-only payment is paid exactly when it has one kept charge
 //   (never two); I8 every confirmed fee-only booking has its kept charge; I9 no charge refunded twice, none without a
 //   successful attempt or an unmatched record.
 // Env: DB (connection string of the scratch database), PG_MODULE (folder holding node_modules/pg).
@@ -94,7 +95,8 @@ async function invariants(label) {
     + (select count(*) from bookings b where b.source = 'staff' and (b.fee_usd <> 0 or exists (select 1 from payments p where p.booking_id = b.id)))`);
   const bad = { i1: Number(i1), i2: Number(i2), i3: Number(i3), i4: Number(i4) };
   if (FEE) {
-    bad.i6 = Number(await one(`select count(*) from payment_attempts a where (a.status = 'succeeded') <> exists (select 1 from fee_charges c where c.attempt_id = a.id)`));
+    bad.i6 = Number(await one(`select count(*) from payment_attempts a where (a.status = 'succeeded') <> ((select count(*) from fee_charges c where c.attempt_id = a.id and c.reason is distinct from 'extra_charge') = 1)`))
+      + Number(await one(`select count(*) from (select payment_id from payment_attempts where status in ('starting','open') group by 1 having count(*) > 1) d`));
     bad.i7 = Number(await one(`select count(*) from payments p where p.kind = 'fee_only' and (p.status = 'paid') <> ((select count(*) from fee_charges c where c.payment_id = p.id and c.disposition = 'kept') = 1)`))
       + Number(await one(`select count(*) from (select payment_id from fee_charges where disposition = 'kept' group by payment_id having count(*) > 1) d`));
     bad.i8 = Number(await one(`select count(*) from bookings b join payments p on p.booking_id = b.id where p.kind = 'fee_only' and b.status = 'confirmed'
@@ -333,11 +335,14 @@ async function feeRaces() {
     rep(`F8 the same success twice at once${mode === "sim" ? " (callback + reconciliation)" : ""} [${mode}]: confirmed once, one charge`,
       JSON.stringify(answers) === JSON.stringify(["already_recorded", "confirmed"]) && (await charges(h.payment_id)) === "kept", `${JSON.stringify(answers)} ${await charges(h.payment_id)}`);
   }
-  // F8b. two different attempts both succeed at once
+  // F8b. two different attempts both succeed at once (the first had been given up on as expired: only one attempt may
+  //      be unresolved at a time, so this is the only way two can be live with the provider)
   for (const mode of MODES) {
     const court = await newCourt();
     const h = await holdAs(P1, court);
-    const a1 = await attempt(P1, h.payment_id), a2 = await attempt(P1, h.payment_id);
+    const a1 = await attempt(P1, h.payment_id);
+    await solo("service", "select record_attempt_result($1, 'expired')", [a1]);
+    const a2 = await attempt(P1, h.payment_id);
     const [ra, rb] = await race(mode, result(a1, `F8b-1-${mode}-${court}`), result(a2, `F8b-2-${mode}-${court}`));
     const answers = [out(ra), out(rb)].sort();
     rep(`F8b two attempts succeed at once [${mode}]: one confirms, the other is a duplicate owed back`,
@@ -375,7 +380,7 @@ async function feeRaces() {
   }
   await invariants("F10");
 
-  // F11. four "pay" taps at once with different keys, and two with the same key
+  // F11. four "pay" taps at once with different keys (a page reloaded, two tabs), and two with the same key
   {
     const court = await newCourt();
     const h = await holdAs(P1, court);
@@ -383,8 +388,8 @@ async function feeRaces() {
     const keys = [newKey(), newKey(), newKey(), newKey()];
     const rs = await Promise.all(sessions.map((s, i) => s.run("select attempt_no from start_payment_attempt($1, $2)", [h.payment_id, keys[i]]).then(async (r) => { await s.end(); return r; })));
     const made = Number(await one("select count(*) from payment_attempts where payment_id = $1", [h.payment_id]));
-    rep("F11 four simultaneous attempts: at most three are made, the fourth is refused", made === 3 && rs.filter((r) => !r.ok && /attempts_exhausted/.test(r.err)).length === 1,
-      `made=${made} ${rs.map(short).join(" | ")}`);
+    rep("F11 four simultaneous taps with different keys: ONE attempt is made, the other three are refused (attempt_in_progress)",
+      made === 1 && rs.filter((r) => !r.ok && /attempt_in_progress/.test(r.err)).length === 3, `made=${made} ${rs.map(short).join(" | ")}`);
     const court2 = await newCourt();
     const h2 = await holdAs(P2, court2);
     const k = newKey();
@@ -392,6 +397,35 @@ async function feeRaces() {
     const made2 = Number(await one("select count(*) from payment_attempts where payment_id = $1", [h2.payment_id]));
     rep("F11 the same request twice at once: one attempt, both answers name it", ra.ok && rb.ok && made2 === 1 && ra.rows[0].attempt_id === rb.rows[0].attempt_id,
       `${short(ra)} | ${short(rb)} made=${made2}`);
+  }
+  // F12. a tap while the first attempt's provider call is still running (delayed provider): refused, never a second
+  //      attempt; once the provider answers "expired", the next tap gets attempt 2
+  for (const mode of MODES) {
+    const court = await newCourt();
+    const h = await holdAs(P2, court);
+    const a1 = await attempt(P2, h.payment_id);                                    // 'starting': the provider has not answered
+    const [ra, rb] = await race(mode, [P2, "select attempt_no from start_payment_attempt($1, $2)", [h.payment_id, newKey()]],
+      ["service", "select open_payment_attempt($1, 'https://pay.example/slow', 's') as r", [a1]]);
+    const made = Number(await one("select count(*) from payment_attempts where payment_id = $1", [h.payment_id]));
+    await solo("service", "select record_attempt_result($1, 'expired')", [a1]);
+    const next = await solo(P2, "select attempt_no from start_payment_attempt($1, $2)", [h.payment_id, newKey()]);
+    rep(`F12 a second tap while the provider is slow [${mode}]: refused, one attempt; after the provider says expired, attempt 2`,
+      !ra.ok && /attempt_in_progress/.test(ra.err) && rb.ok && made === 1 && next.ok && next.rows[0].attempt_no === 2, `${short(ra)} | ${short(rb)} made=${made} next=${short(next)}`);
+  }
+  // F13. the provider's transaction records and its callback race on the same unpaid attempt with two different charges
+  for (const mode of MODES) {
+    const court = await newCourt();
+    const h = await holdAs(P1, court);
+    const a = await attempt(P1, h.payment_id);
+    const [ra, rb] = await race(mode, result(a, `F13-cb-${mode}-${court}`),
+      ["service", "select reconcile_provider_charge('simulated', $1, $2, 1, 'USD') as r", [a, `F13-rec-${mode}-${court}`]]);
+    const st = await state(h.booking_id); const ch = await charges(h.payment_id);
+    // callback first: confirmed, then the records' second charge is an extra charge owed back.
+    // records first: confirmed by them, then the callback's different charge is refused (a callback cannot add one).
+    const okA = out(ra) === "confirmed" && out(rb) === "extra_charge";
+    const okB = out(rb) === "confirmed" && !ra.ok && /attempt_evidence_conflict/.test(ra.err);
+    rep(`F13 provider records versus callback, two charges on one attempt [${mode}]: confirmed once, never two kept charges`,
+      (okA || okB) && st.booking === "confirmed" && (ch === "kept,refund_due:extra_charge" || ch === "kept"), `${out(ra)} | ${out(rb)} | ${ch}`);
   }
   await invariants("F11");
 }

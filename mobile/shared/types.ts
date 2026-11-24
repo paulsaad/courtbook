@@ -126,7 +126,9 @@ export const ERRORS: Record<string, string> = {
   // M12.1 fee payments (0093)
   hold_expired: "The time to pay has run out. Pick the slot again if it is still free.",
   attempts_exhausted: "No more payment tries for this hold. Pick the slot again if it is still free.",
-  payment_in_progress: "Your payment is already starting. Wait a moment, then reload the page.",
+  payment_in_progress: "Your payment is already under way. If you paid, it will show here shortly; otherwise tap Pay again in a moment.",
+  payment_uncertain: "The payment provider didn't answer in time. You may have been charged: tap Pay again to check — you won't be charged twice.",
+  attempt_in_progress: "Your payment is already under way. Tap Pay again in a moment.",
   payments_not_configured: "Online payment isn't available at the moment. Try again later or book at the club's desk.",
   gateway_error: "The payment provider didn't respond. You were not charged. Try again.",
   payment_start_failed: "Payment couldn't start. Try again.",

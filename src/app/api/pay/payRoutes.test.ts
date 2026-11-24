@@ -10,9 +10,11 @@ type Call = { client: "user" | "service"; fn: string; args?: unknown };
 type Answer = { data?: unknown; error?: { message: string; code?: string } | null };
 let calls: Call[];
 let user: { id: string } | null;
-let userRpc: Record<string, Answer>;
+let userRpc: Record<string, Answer | Answer[]>;
 let serviceRpc: Record<string, (args: Record<string, unknown>) => Answer>;
-let attemptRow: { status: string; session_url: string | null } | null;
+let attemptRow: { id?: string; status: string; session_url: string | null; outcome?: string | null } | null;
+let attemptReads: Array<typeof attemptRow>;     // successive reads of one attempt (each read takes the next; the last repeats)
+let unresolvedRow: Record<string, unknown> | null;
 let paymentLookup: Answer;
 const reported: Array<[string, string, unknown]> = [];
 
@@ -20,14 +22,24 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     auth: { getUser: async () => ({ data: { user } }) },
-    rpc: async (fn: string, args?: unknown) => { calls.push({ client: "user", fn, args }); return { data: null, error: null, ...(userRpc[fn] ?? {}) }; },
+    rpc: async (fn: string, args?: unknown) => {
+      calls.push({ client: "user", fn, args });
+      const a = userRpc[fn];
+      return { data: null, error: null, ...(Array.isArray(a) ? (a.length > 1 ? a.shift() : a[0]) : (a ?? {})) };
+    },
     from: () => ({ select: () => ({ eq: () => ({ eq: () => ({ single: async () => paymentLookup }) }) }) }),
   }),
 }));
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     rpc: async (fn: string, args: Record<string, unknown>) => { calls.push({ client: "service", fn, args }); return { data: null, error: null, ...(serviceRpc[fn]?.(args) ?? {}) }; },
-    from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: attemptRow, error: null }) }) }) }),
+    from: () => {
+      const chain: Record<string, unknown> = {};
+      for (const m of ["select", "eq", "in", "order", "limit"]) chain[m] = () => chain;
+      chain.single = async () => ({ data: attemptReads.length > 1 ? attemptReads.shift() : (attemptReads[0] ?? attemptRow), error: null });
+      chain.maybeSingle = async () => ({ data: unresolvedRow, error: null });
+      return chain;
+    },
   }),
 }));
 vi.mock("@/lib/report", () => ({ report: async (k: string, a: string, d: unknown) => { reported.push([k, a, d]); } }));
@@ -45,6 +57,7 @@ vi.mock("@/lib/payments", () => ({
   providerNamed: (n: string) => (n === provider.name ? provider : null),
 }));
 
+const { PaymentStartRefused } = await import("@/lib/payments/provider");
 const start = await import("./start/route");
 const callback = await import("./callback/[provider]/route");
 const simulate = await import("./simulate/route");
@@ -61,7 +74,7 @@ const serviceCalls = () => calls.filter((c) => c.client === "service").map((c) =
 
 let logSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
-  calls = []; user = { id: ME }; userRpc = {}; serviceRpc = {}; attemptRow = null; reported.length = 0;
+  calls = []; user = { id: ME }; userRpc = {}; serviceRpc = {}; attemptRow = null; attemptReads = []; unresolvedRow = null; reported.length = 0;
   paymentLookup = { data: null, error: null };
   provider.name = "whish";
   provider.startAttempt = vi.fn(async () => ({ kind: "redirect", url: "https://pay.whish.example/s/1", session: "S-1" }));
@@ -106,15 +119,33 @@ describe("POST /api/pay/start", () => {
     expect(provider.startAttempt).not.toHaveBeenCalled();
     expect(serviceCalls()).toEqual(["abandon_payment_attempt"]);
   });
-  it("a provider that fails to start: attempt closed, a fixed code, nothing of the provider's text", async () => {
+  it("a provider that definitely refused: attempt closed, a final fixed code, nothing of the provider's text", async () => {
     userRpc.start_payment_attempt = attempt({ attempt_no: 2 });
-    provider.startAttempt = vi.fn(async () => { throw new Error("upstream 500: merchant secret abc"); });
+    provider.startAttempt = vi.fn(async () => { throw new PaymentStartRefused("merchant secret abc"); });
     const res = await start.POST(post("/api/pay/start", { paymentId: PAY, requestKey: KEY }));
-    expect(res.status).toBe(502);
-    const body = await res.json();
-    expect(body).toEqual({ error: "gateway_error", attemptsLeft: 1 });
+    expect([res.status, await res.json()]).toEqual([502, { error: "gateway_error", final: true, attemptsLeft: 1 }]);
     expect(serviceCalls()).toEqual(["abandon_payment_attempt"]);
   });
+  it("a provider TIMEOUT is not a failure: the attempt is left unresolved for the provider's status, the browser keeps its key", async () => {
+    userRpc.start_payment_attempt = attempt();
+    provider.startAttempt = vi.fn(async () => { throw new Error("The operation was aborted due to timeout"); });
+    const res = await start.POST(post("/api/pay/start", { paymentId: PAY, requestKey: KEY }));
+    expect([res.status, await res.json()]).toEqual([502, { error: "payment_uncertain", final: false }]);
+    expect(serviceCalls()).toEqual([]);                                 // not abandoned: still 'starting', still swept
+    expect(reported).toEqual([["paymentProvider", "payment", { code: "start_unknown" }]]);
+  });
+  it("...the same tap retried later: the provider is ASKED (not called again); the session it had created was paid: confirmed", async () => {
+    userRpc.start_payment_attempt = attempt({ already: true, status: "starting" });
+    attemptReads = [{ id: ATT, status: "starting", session_url: null }, { id: ATT, status: "starting", session_url: null }, { id: ATT, status: "starting", session_url: null },
+      { id: ATT, status: "starting", session_url: null }, { id: ATT, status: "starting", session_url: null }, { id: ATT, status: "starting", session_url: null },
+      { id: ATT, status: "succeeded", session_url: null, outcome: "confirmed" }];
+    provider.attemptStatus = vi.fn(async () => ({ state: "succeeded", evidence: { providerRef: "W-late", amount: 1, currency: "USD" } }));
+    serviceRpc.record_attempt_result = () => ({ data: "confirmed" });
+    const res = await start.POST(post("/api/pay/start", { paymentId: PAY, requestKey: KEY }));
+    expect(await res.json()).toEqual({ attempt: ATT, outcome: "confirmed" });
+    expect(provider.startAttempt).not.toHaveBeenCalled();
+    expect(calls.find((c) => c.fn === "record_attempt_result")?.args).toEqual({ p_attempt: ATT, p_result: "succeeded", p_provider_ref: "W-late", p_amount: 1, p_currency: "USD" });
+  }, 10_000);
   it("an http payment page is never handed to the player", async () => {
     userRpc.start_payment_attempt = attempt();
     provider.startAttempt = vi.fn(async () => ({ kind: "redirect", url: "http://pay.whish.example/s/1", session: "S" }));
@@ -130,11 +161,11 @@ describe("POST /api/pay/start", () => {
     for (const [code, status] of [["hold_expired", 409], ["attempts_exhausted", 409], ["not_found", 404], ["not_payable", 409]] as const) {
       userRpc.start_payment_attempt = { error: { message: code } };
       const res = await start.POST(post("/api/pay/start", { paymentId: PAY, requestKey: KEY }));
-      expect([res.status, await res.json()]).toEqual([status, { error: code }]);
+      expect([res.status, await res.json()]).toEqual([status, { error: code, final: true }]);
     }
     userRpc.start_payment_attempt = { error: { message: 'relation "payment_attempts" violates … Key (id)=(secret)', code: "23505" } };
     const res = await start.POST(post("/api/pay/start", { paymentId: PAY, requestKey: KEY }));
-    expect([res.status, await res.json()]).toEqual([500, { error: "payment_start_failed" }]);
+    expect([res.status, await res.json()]).toEqual([500, { error: "payment_start_failed", final: false }]);
     expect(reported).toEqual([["paymentStart", "payment", { code: "23505" }]]);
   });
   it("simulated (demo clubs): the immediate result is recorded through the same database function", async () => {
@@ -146,11 +177,55 @@ describe("POST /api/pay/start", () => {
     expect(await res.json()).toEqual({ attempt: ATT, outcome: "confirmed" });
     expect(calls.find((c) => c.fn === "record_attempt_result")?.args).toEqual({ p_attempt: ATT, p_result: "succeeded", p_provider_ref: `SIM-${ATT}`, p_amount: 1, p_currency: "USD" });
   });
-  it("only the simulated provider may succeed immediately", async () => {
+  it("only the simulated provider may succeed immediately; a real one claiming it is neither trusted nor dropped (left to its status)", async () => {
     provider.startAttempt = vi.fn(async () => ({ kind: "immediate", evidence: { providerRef: "X", amount: 1, currency: "USD" } }));
     userRpc.start_payment_attempt = attempt();
-    expect((await start.POST(post("/api/pay/start", { paymentId: PAY, requestKey: KEY }))).status).toBe(502);
-    expect(serviceCalls()).toEqual(["abandon_payment_attempt"]);
+    const res = await start.POST(post("/api/pay/start", { paymentId: PAY, requestKey: KEY }));
+    expect([res.status, await res.json()]).toEqual([502, { error: "payment_uncertain", final: false }]);
+    expect(serviceCalls()).toEqual([]);
+  });
+
+  describe("another attempt is unresolved (review of PR #34, blocker 2)", () => {
+    const inProgress = { error: { message: "attempt_in_progress" } };
+    const OPEN = "0b000000-0000-4000-8000-0000000000dd";
+    it("still open at the provider: the player is sent back to THAT payment page; no new attempt", async () => {
+      userRpc.start_payment_attempt = [inProgress];
+      unresolvedRow = { id: OPEN, status: "open", session_url: "https://pay.whish.example/s/0", outcome: null, provider: "whish" };
+      attemptReads = [{ id: OPEN, status: "open", session_url: "https://pay.whish.example/s/0" }];
+      const res = await start.POST(post("/api/pay/start", { paymentId: PAY, requestKey: KEY }));
+      expect(await res.json()).toEqual({ redirect: "https://pay.whish.example/s/0" });
+      expect(provider.attemptStatus).toHaveBeenCalledWith(OPEN);
+      expect(provider.startAttempt).not.toHaveBeenCalled();
+      expect(calls.filter((c) => c.fn === "start_payment_attempt")).toHaveLength(1);
+    });
+    it("still starting and the provider cannot say: 'in progress', not final, no new attempt", async () => {
+      userRpc.start_payment_attempt = [inProgress];
+      unresolvedRow = { id: OPEN, status: "starting", session_url: null, outcome: null, provider: "whish" };
+      attemptReads = [{ id: OPEN, status: "starting", session_url: null }];
+      provider.attemptStatus = vi.fn(async () => { throw new Error("timeout"); });
+      const res = await start.POST(post("/api/pay/start", { paymentId: PAY, requestKey: KEY }));
+      expect([res.status, await res.json()]).toEqual([409, { error: "payment_in_progress", final: false }]);
+      expect(provider.startAttempt).not.toHaveBeenCalled();
+    });
+    it("the provider says it expired: recorded, and only then the next attempt is started", async () => {
+      userRpc.start_payment_attempt = [inProgress, attempt({ attempt_no: 2 })];
+      unresolvedRow = { id: OPEN, status: "open", session_url: "https://pay.whish.example/s/0", outcome: null, provider: "whish" };
+      attemptReads = [{ id: OPEN, status: "expired", session_url: "https://pay.whish.example/s/0" }];
+      provider.attemptStatus = vi.fn(async () => ({ state: "expired" }));
+      const res = await start.POST(post("/api/pay/start", { paymentId: PAY, requestKey: KEY }));
+      expect(await res.json()).toEqual({ redirect: "https://pay.whish.example/s/1" });
+      expect(calls.map((c) => c.fn)).toEqual(["start_payment_attempt", "record_attempt_result", "start_payment_attempt", "open_payment_attempt"]);
+      expect(calls.find((c) => c.fn === "record_attempt_result")?.args).toEqual({ p_attempt: OPEN, p_result: "expired" });
+    });
+    it("the provider says it was paid: the outcome is shown, no new attempt", async () => {
+      userRpc.start_payment_attempt = [inProgress];
+      unresolvedRow = { id: OPEN, status: "open", session_url: "https://pay.whish.example/s/0", outcome: null, provider: "whish" };
+      attemptReads = [{ id: OPEN, status: "succeeded", session_url: null, outcome: "confirmed" }];
+      provider.attemptStatus = vi.fn(async () => ({ state: "succeeded", evidence: { providerRef: "W-0", amount: 1, currency: "USD" } }));
+      serviceRpc.record_attempt_result = () => ({ data: "confirmed" });
+      expect(await (await start.POST(post("/api/pay/start", { paymentId: PAY, requestKey: KEY }))).json()).toEqual({ attempt: OPEN, outcome: "confirmed" });
+      expect(provider.startAttempt).not.toHaveBeenCalled();
+    });
   });
   it("an attempt written for another provider than this deployment's is closed, not guessed at", async () => {
     userRpc.start_payment_attempt = attempt({ provider: "areeba" });

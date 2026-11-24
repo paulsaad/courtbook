@@ -83,6 +83,12 @@ describe("sweepOpenAttempts", () => {
     const two = await sweepOpenAttempts(db, p, { minAgeSeconds: 60, maxAgeHours: 24, limit: 10 });
     expect([one.outcomes, two.outcomes]).toEqual([{ confirmed: 1 }, { already_recorded: 1 }]);
   });
+  it("an attempt whose start timed out (still 'starting') and whose callback was lost is found and confirmed by the sweeper", async () => {
+    const { db, calls } = fakeDb((fn, args) => (fn === "attempts_to_check" ? { data: [{ attempt_id: A1, provider: "whish", status: "starting" }] } : { data: args.p_result === "succeeded" ? "confirmed" : "?" }));
+    const s = await sweepOpenAttempts(db, provider({ [A1]: { state: "succeeded", evidence: { providerRef: "W-t", amount: 1, currency: "USD" } } }), { minAgeSeconds: 60, maxAgeHours: 24, limit: 10 });
+    expect(s.outcomes).toEqual({ confirmed: 1 });
+    expect(calls[1].args).toEqual({ p_attempt: A1, p_result: "succeeded", p_provider_ref: "W-t", p_amount: 1, p_currency: "USD" });
+  });
   it("a provider outage is counted, not thrown", async () => {
     const { db } = fakeDb((fn) => (fn === "attempts_to_check" ? { data: [{ attempt_id: A1, provider: "whish" }] } : {}));
     expect(await sweepOpenAttempts(db, provider({ [A1]: "throw" }), { minAgeSeconds: 0, maxAgeHours: 1, limit: 1 })).toEqual({ checked: 1, outcomes: {}, failures: { provider_unavailable: 1 } });

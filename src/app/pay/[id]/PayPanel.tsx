@@ -58,10 +58,13 @@ export default function PayPanel(p: Props) {
     } catch {
       setBusy(false); setError("No connection. Tap Pay again: you will not be charged twice."); return;
     }
-    const json = (await res.json().catch(() => ({}))) as { outcome?: string; error?: string; redirect?: string; state?: string };
+    const json = (await res.json().catch(() => ({}))) as { outcome?: string; error?: string; redirect?: string; state?: string; final?: boolean };
     if (json.redirect) { window.location.href = json.redirect; return; }
-    setRequestKey(null);                                   // this tap is finished: the next tap is a new attempt
     if (json.outcome === "confirmed" || json.outcome === "already_recorded") { router.replace(`/bookings/${p.bookingId}?new=1`); return; }
+    // The key is forgotten only once this tap's outcome is known: a finished attempt (outcome / state) or a refusal the
+    // server marks final. "In progress", "uncertain" or an unreadable answer keep it, so the next tap asks about the
+    // SAME attempt instead of starting another (review of PR #34).
+    if (json.outcome || json.state || json.final === true) setRequestKey(null);
     setBusy(false);
     if (!res.ok) { setError(friendlyError(json.error ?? "Payment failed.")); router.refresh(); return; }
     router.refresh();                                      // shows what happened to this attempt (attemptNotice)
