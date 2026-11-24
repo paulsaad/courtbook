@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, within } from "@testing-library/react";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import PrivacyPage, { metadata as privacyMeta } from "./privacy/page";
 import TermsPage, { metadata as termsMeta } from "./terms/page";
 import DeleteAccountInfo from "./delete-account/page";
@@ -100,11 +100,11 @@ describe("M5 legal pages: public, structured, honest about what is not final", (
     expect(list?.querySelectorAll("mark[data-pending]").length).toBe(0);
   });
 
-  it("location (review, 23 Nov): no GPS or device location is requested; the Sentry-derived location stays disclosed", () => {
+  it("location (review 23 Nov; Near me 24 Nov): never precise, never sent; the Sentry-derived location stays disclosed", () => {
     const { container } = render(<PrivacyPage />);
     const t = (container.querySelector("#not-collected")?.closest("section")?.textContent ?? "").replace(/\s+/g, " ");
     expect(t).not.toMatch(/We do not use your location/);                    // contradicted by the Sentry location
-    expect(t).toMatch(/do not ask for your phone’s GPS or device location, in the app or on the website/);
+    expect(t).toMatch(/never ask for your precise location or track it in the background, and your position never reaches us/);
     expect(t).toMatch(/approximate location \(country and city\) that Sentry works out/);
   });
 
@@ -154,10 +154,20 @@ describe("M5 privacy policy: what it says is absent stays absent in the code", (
   const appJson = JSON.parse(readFileSync("mobile/app.json", "utf8")).expo;
   const deps = [...Object.keys(web.dependencies ?? {}), ...Object.keys(app.dependencies ?? {})];
 
-  it("“We do not ask for … GPS or device location”: no location library in the app, no location request on the website", () => {
-    expect(deps.filter((d) => /location|geoloc/i.test(d))).toEqual([]);
-    for (const f of ["src/components/Discover.tsx", "src/components/HomeClient.tsx", "src/app/courts/page.tsx"]) {
-      expect(readFileSync(f, "utf8")).not.toMatch(/geolocation/);
+  it("“never precise, never in the background”: only expo-location, approximate and foreground; the website asks for low accuracy only", () => {
+    expect(deps.filter((d) => /location|geoloc/i.test(d)).filter((d) => d !== "expo-location")).toEqual([]);
+    if (deps.includes("expo-location")) {
+      expect(appJson.android?.blockedPermissions).toEqual(expect.arrayContaining(["android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_BACKGROUND_LOCATION"]));
+      const plugin = (appJson.plugins ?? []).find((p: unknown) => Array.isArray(p) && p[0] === "expo-location") as [string, Record<string, unknown>] | undefined;
+      expect(plugin?.[1]).toMatchObject({ isIosBackgroundLocationEnabled: false, isAndroidBackgroundLocationEnabled: false, locationAlwaysPermission: false, locationFullAccuracyPermission: false });
+    }
+    const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(`${d}/${e.name}`) : /\.tsx?$/.test(e.name) && !/\.test\./.test(e.name) ? [`${d}/${e.name}`] : []);
+    for (const f of walk("src")) {
+      const code = readFileSync(f, "utf8");
+      if (/getCurrentPosition|watchPosition/.test(code)) {
+        expect(code, f).not.toMatch(/watchPosition|enableHighAccuracy:\s*true/);
+        expect(code, f).toMatch(/enableHighAccuracy:\s*false/);
+      }
     }
   });
 
