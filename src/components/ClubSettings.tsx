@@ -9,6 +9,7 @@ import ClubPhotos from "@/components/ClubPhotos";
 import ClubVenue, { type VenueRow } from "@/components/ClubVenue";
 import type { ClubMedia } from "@/lib/media";
 import { friendlyError } from "@/lib/types";
+import { clubPoint, pointFromMapLink } from "@/lib/places";
 import type { Governorate, Sport, Town, TownWithArea } from "@/lib/geo";
 
 type ClubRow = {
@@ -224,8 +225,25 @@ function Location({ f, setF, areas, town, busy, save }: { f: Settings; setF: Set
         <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">Latitude<input className={input} inputMode="decimal" placeholder="34.2553" value={f.lat} onChange={(e) => setF({ ...f, lat: e.target.value })} /></label>
         <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">Longitude<input className={input} inputMode="decimal" placeholder="35.6586" value={f.lng} onChange={(e) => setF({ ...f, lng: e.target.value })} /></label>
       </div>
-      <label className="flex flex-col gap-1 text-sm">Map link<input className={input} placeholder="https://maps.google.com/…" value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} /></label>
-      <p className="text-xs text-muted">Players find the club by area and town. Coordinates are optional (used for distance later).</p>
+      <label className="flex flex-col gap-1 text-sm">Map link<input className={input} placeholder="https://maps.google.com/…" value={f.location}
+        onChange={(e) => {
+          // pasting the link of the exact spot fills the map point (staff correct a location without typing numbers)
+          const p = pointFromMapLink(e.target.value);
+          setF({ ...f, location: e.target.value, ...(p ? { lat: String(p.lat), lng: String(p.lng) } : {}) });
+        }} /></label>
+      {(() => {
+        const p = clubPoint(f.lat.trim() === "" ? null : f.lat, f.lng.trim() === "" ? null : f.lng);
+        const half = (f.lat.trim() === "") !== (f.lng.trim() === "");
+        return (
+          <p className="text-xs text-muted">
+            The exact map point is what players&apos; Directions and &ldquo;Near me&rdquo; use, and a club needs it to be published. Paste the Google Maps
+            link of the entrance (long form, with the numbers) and the point fills in.{" "}
+            {p ? <a className="inline-flex min-h-11 items-center font-semibold text-action underline" href={`https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`} target="_blank" rel="noreferrer">Check the point on the map</a>
+              : half ? <span className="text-danger">Enter both latitude and longitude, or neither.</span>
+              : f.lat.trim() !== "" ? <span className="text-danger">That point is outside Lebanon.</span> : null}
+          </p>
+        );
+      })()}
       <button disabled={busy} onClick={save} className={primary}>Save</button>
     </section>
   );

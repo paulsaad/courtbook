@@ -5,6 +5,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { hhmm } from "@shared/time";
 import { Text } from "../../components/Text";
 import { Chip } from "../../components/Chip";
+import { Icon } from "../../components/Icon";
 import { DateStrip } from "../../components/DateStrip";
 import { SportMark, SPORTS } from "../../components/SportMark";
 import { CourtLines } from "../../components/CourtLines";
@@ -16,11 +17,17 @@ import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { clubsFromSlots, type ClubDay } from "../../lib/courts";
 import { BEIRUT, useDaySlots } from "../../lib/queries";
 import { bookingDays, sportName } from "../../lib/days";
+import { FavouriteHeart } from "../../components/FavouriteHeart";
+import { useSession } from "../../lib/session";
+import { rememberArea, usePlayingPrefs } from "../../lib/playing";
+import { areaKey, sameArea, type PlayingArea } from "@shared/places";
 import { color, font, radius, space } from "../../lib/theme";
 
 /**
  * Courts: which clubs have free times on a day, compared without opening each one (approved
  * design 2). Reads club_day_slots, the same function as the website; visitors can browse.
+ * Signed in (0088): the player's saved areas are one-tap chips, and the area they browsed last — on any device — is
+ * where the tab opens. Hearts save favourite clubs (0087).
  */
 export default function Courts() {
   const days = useMemo(() => bookingDays(BEIRUT), []);
@@ -31,7 +38,20 @@ export default function Courts() {
   useEffect(() => {
     if (p.sport && (SPORTS as readonly string[]).includes(p.sport)) setSport(p.sport);
   }, [p.sport]);
-  const q = useDaySlots(date, sport);
+  const session = useSession();
+  const userId = session.status === "signed-in" ? session.session.user.id : null;
+  const playing = usePlayingPrefs(userId);
+  const [area, setArea] = useState<PlayingArea | null>(null);
+  const [restored, setRestored] = useState(false);
+  // open where the player last browsed (their account's last area), once
+  useEffect(() => {
+    if (restored || !playing.isSuccess) return;
+    setRestored(true);
+    if (playing.data?.last) setArea(playing.data.last);
+  }, [playing.isSuccess, playing.data, restored]);
+  const pickArea = (a: PlayingArea | null) => { setArea(a); if (userId && playing.data) rememberArea(a); };
+  const saved = playing.data?.areas ?? [];
+  const q = useDaySlots(date, sport, area);
   const clubs = useMemo(() => clubsFromSlots(q.data ?? []), [q.data]);
   const open = clubs.filter((c) => c.starts.length > 0);
   const covers = useClubCovers(open.map((c) => c.id));
@@ -50,6 +70,14 @@ export default function Courts() {
             <Chip key={s} tone="sport" label={sportName(s)} selected={sport === s} onPress={() => setSport(s)} icon={<SportMark sport={s} size={20} />} />
           ))}
         </ScrollView>
+        {userId && playing.data && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} testID="area-chips">
+            <Chip label="All Lebanon" selected={area === null} onPress={() => pickArea(null)} />
+            {saved.map((a) => <Chip key={areaKey(a)} label={a.label ?? a.governorate} selected={sameArea(a, area)} onPress={() => pickArea(a)} />)}
+            {area && !saved.some((a) => sameArea(a, area)) && <Chip label={area.label ?? "Last area"} selected onPress={() => pickArea(area)} />}
+            <Chip label={saved.length ? "Edit areas" : "Add your areas"} onPress={() => router.push("/areas")} icon={<Icon name="pin" size={16} color={color.cedar} />} />
+          </ScrollView>
+        )}
         <DateStrip days={days} selected={date} onSelect={setDate} />
       </View>
 
@@ -70,7 +98,7 @@ export default function Courts() {
         <Empty title="Nothing free that day" body="Try another day or another sport." />
       ) : (
         <View style={styles.list}>
-          {open.map((c) => <ClubCard key={c.id} club={c} date={date} sport={sport} cover={covers.data?.get(c.id) ?? null} />)}
+          {open.map((c) => <ClubCard key={c.id} club={c} date={date} sport={sport} cover={covers.data?.get(c.id) ?? null} userId={userId} />)}
         </View>
       )}
     </ScrollView>
@@ -83,7 +111,7 @@ export default function Courts() {
  */
 export const PRICE_BESIDE_NAME_MAX_SCALE = 1.3;
 
-export function ClubCard({ club, date, sport, cover }: { club: ClubDay; date: string; sport: string | null; cover: string | null }) {
+export function ClubCard({ club, date, sport, cover, userId = null }: { club: ClubDay; date: string; sport: string | null; cover: string | null; userId?: string | null }) {
   const { fontScale } = useWindowDimensions();
   const stacked = fontScale > PRICE_BESIDE_NAME_MAX_SCALE;
   const go = (at?: string) =>
@@ -97,7 +125,9 @@ export function ClubCard({ club, date, sport, cover }: { club: ClubDay; date: st
   const more = club.starts.length - shown.length;
   return (
     <View style={styles.card}>
-      <Pressable accessibilityRole="button" accessibilityLabel={[club.name, club.town, courts, from !== null ? `from ${from} dollars an hour` : null].filter(Boolean).join(", ")} onPress={() => go()} style={styles.cardTop}>
+      {/* the heart sits beside the card's button, not inside it: VoiceOver reads a button as one element */}
+      <View style={styles.cardTopRow}>
+      <Pressable accessibilityRole="button" accessibilityLabel={[club.name, club.town, courts, from !== null ? `from ${from} dollars an hour` : null].filter(Boolean).join(", ")} onPress={() => go()} style={[styles.cardTop, { flex: 1 }]}>
         <View style={styles.thumb}>
           {cover ? (
             <Image source={{ uri: cover }} style={styles.thumbImg} contentFit="cover" transition={fade(150)} accessible={false} />
@@ -119,6 +149,8 @@ export function ClubCard({ club, date, sport, cover }: { club: ClubDay; date: st
           {club.isDemo && <Text style={styles.demo}>Demo club — not a real venue</Text>}
         </View>
       </Pressable>
+      {userId ? <FavouriteHeart clubId={club.id} clubName={club.name} userId={userId} /> : null}
+      </View>
       <View style={styles.times}>
         {shown.map((s) => (
           <Pressable key={s} accessibilityRole="button" accessibilityLabel={`${hhmm(s, club.timezone)} at ${club.name}`} onPress={() => go(s)} style={styles.time}>
@@ -137,6 +169,7 @@ export function ClubCard({ club, date, sport, cover }: { club: ClubDay; date: st
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: color.ground },
+  cardTopRow: { flexDirection: "row", alignItems: "flex-start" },
   filters: { backgroundColor: color.card, borderBottomWidth: 1, borderBottomColor: color.line, paddingTop: space.md, paddingBottom: space.md, gap: space.md },
   chips: { gap: 8, paddingHorizontal: 20 },
   summary: { paddingHorizontal: 20, paddingTop: space.lg, gap: 4 },

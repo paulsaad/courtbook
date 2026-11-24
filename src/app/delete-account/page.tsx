@@ -40,7 +40,7 @@ export default function DeleteAccountInfo() {
         <h2 className="font-bold">What happens</h2>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
           <li>We aim to finish deleting your data within 30 days of your request. Once your account is deleted, signing in with your email starts a new, empty account.</li>
-          <li><b>Deleted:</b> your name, phone number, email sign-in, playing levels and sports, coach profile, chat messages,
+          <li><b>Deleted:</b> your name, phone number, email sign-in, playing levels and sports, favourite clubs and saved playing areas, coach profile, chat messages,
             notifications and blocked-player list. You are taken out of the games you joined.</li>
           <li><b>Cancelled:</b> your upcoming bookings, under the club’s normal cancellation rules, and the games you organise
             (their players are told).</li>
