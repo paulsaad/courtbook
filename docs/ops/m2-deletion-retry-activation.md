@@ -93,6 +93,11 @@ schedules only from `main`, so the file does nothing until merged.
 - GitHub may delay scheduled runs by several minutes. The 1-hour heartbeat window tolerates that.
 - If runs stop, app deletions pause; they do not pile up.
 - A failed run (any status but 200) fails the workflow. GitHub emails the person who last changed the schedule.
+- The route answers 200 only for a fully successful run. A record that failed, a failed alert check or alert marking,
+  or a heartbeat that could not be recorded gives 500 with the counts and `problems` (codes only). This changes
+  nothing else: failed records are retried next run and the heartbeat is recorded as before (review 24 Nov, PR #31).
+- The staging workflow calls only the exact `courtbook-staging` address written in the workflow file; any other
+  `DELETION_RETRY_URL_STAGING` stops the run before a secret is sent (review 24 Nov, PR #31).
 
 ## Turning it off
 
