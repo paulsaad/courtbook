@@ -57,7 +57,11 @@ export async function reconcileCharges(admin: Rpc, provider: PaymentProvider, ch
 }
 
 export type Health = { other_provider_attempts: number; overdue_attempts: number; oldest_unresolved: string | null; open_issues: number; reconciled_until: string | null };
+/** `coverage` (M12.3): "full" when the provider's own charge list was read this run; "attempts_only" when the provider
+ *  offers no such list — then a charge that reached the provider without one of our attempts (a second charge on a
+ *  page, a foreign reference) cannot be found by CourtBook at all. Reported on every run, never hidden. */
 export type RunSummary = {
+  coverage: "full" | "attempts_only";
   health: Health | null; sweep: SweepSummary; reconcile: ReconcileSummary | null;
   window: { since: string; until: string; advanced: boolean } | null; problems: string[];
 };
@@ -89,6 +93,7 @@ export async function runPaymentReconciliation(admin: Rpc, provider: PaymentProv
   if (sweep.failures.out_of_time) problems.add("incomplete");
   if (Object.keys(sweep.failures).some((k) => k !== "list" && k !== "out_of_time")) problems.add("sweep_failures");
   if (sweep.skipped > 0) problems.add("provider_mismatch");
+  if (sweep.more) problems.add("sweep_backlog");                       // M12.3: more were waiting than one run asks about
 
   // health after the sweep: what is still unresolved once every attempt has been asked about
   let health: Health | null = null;
@@ -131,5 +136,5 @@ export async function runPaymentReconciliation(admin: Rpc, provider: PaymentProv
       if (!window.advanced || until.getTime() < now.getTime()) problems.add("reconciliation_behind");
     }
   }
-  return { health, sweep, reconcile, window, problems: [...problems] };
+  return { coverage: provider.listCharges ? "full" : "attempts_only", health, sweep, reconcile, window, problems: [...problems] };
 }

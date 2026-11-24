@@ -71,7 +71,7 @@ describe("sweepOpenAttempts", () => {
     });
     const p = provider({ [A1]: { state: "succeeded", evidence: { providerRef: "W-9", amount: 1, currency: "USD" } }, [A3]: { state: "expired" } });
     const s = await sweepOpenAttempts(db, p, { minAgeSeconds: 120, maxAgeHours: 48, limit: 50 });
-    expect(calls[0]).toEqual({ fn: "attempts_to_check", args: { p_min_age: "120 seconds", p_max_age: "48 hours", p_limit: 50 } });
+    expect(calls[0]).toEqual({ fn: "attempts_to_check", args: { p_min_age: "120 seconds", p_max_age: "48 hours", p_limit: 51 } });   // one more than the limit: is there a backlog? (M12.3)
     expect(recorded).toEqual([A1, A3]);
     expect(s).toEqual({ checked: 2, skipped: 1, outcomes: { late: 1, expired: 1 }, failures: {} });
   });
@@ -88,6 +88,22 @@ describe("sweepOpenAttempts", () => {
     const s = await sweepOpenAttempts(db, provider({ [A1]: { state: "succeeded", evidence: { providerRef: "W-t", amount: 1, currency: "USD" } } }), { minAgeSeconds: 60, maxAgeHours: 24, limit: 10 });
     expect(s.outcomes).toEqual({ confirmed: 1 });
     expect(calls[1].args).toEqual({ p_attempt: A1, p_result: "succeeded", p_provider_ref: "W-t", p_amount: 1, p_currency: "USD" });
+  });
+  it("M12.3: more waiting than the limit → only `limit` are asked about, and `more` says the run is not complete", async () => {
+    const rows = [A1, A2, A3].map((id) => ({ attempt_id: id, provider: "whish" }));
+    const { db, calls } = fakeDb((fn, args) => (fn === "attempts_to_check" ? { data: rows.slice(0, Number(args.p_limit)) } : { data: "pending" }));
+    const s = await sweepOpenAttempts(db, provider({ [A1]: { state: "pending" }, [A2]: { state: "pending" }, [A3]: { state: "pending" } }), { minAgeSeconds: 0, maxAgeHours: 1, limit: 2 });
+    expect(calls[0].args.p_limit).toBe(3);
+    expect(s.checked).toBe(2);
+    expect(s.more).toBe(true);
+    const exact = await sweepOpenAttempts(fakeDb((fn) => (fn === "attempts_to_check" ? { data: rows.slice(0, 2) } : { data: "pending" })).db,
+      provider({ [A1]: { state: "pending" }, [A2]: { state: "pending" } }), { minAgeSeconds: 0, maxAgeHours: 1, limit: 2 });
+    expect(exact.more).toBeUndefined();
+  });
+  it("M12.3: an attempt the provider could not answer for is still marked as checked now ('pending'), so the queue moves on", async () => {
+    const { db, calls } = fakeDb((fn) => (fn === "attempts_to_check" ? { data: [{ attempt_id: A1, provider: "whish" }] } : { data: "pending" }));
+    await sweepOpenAttempts(db, provider({ [A1]: "throw" }), { minAgeSeconds: 0, maxAgeHours: 1, limit: 5 });
+    expect(calls.slice(1)).toEqual([{ fn: "record_attempt_result", args: { p_attempt: A1, p_result: "pending" } }]);
   });
   it("a provider outage is counted, not thrown", async () => {
     const { db } = fakeDb((fn) => (fn === "attempts_to_check" ? { data: [{ attempt_id: A1, provider: "whish" }] } : {}));

@@ -9,7 +9,8 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ rpc: async 
 vi.mock("@/lib/report", () => ({ report: async (...a: unknown[]) => { reported.push(a); } }));
 const { FakeGateway } = await import("@/lib/payments/testing/fakeGateway");
 const gateway = new FakeGateway(() => Date.now());
-vi.mock("@/lib/payments", () => ({ getProvider: () => gateway }));
+let configProblem: string | null = null;
+vi.mock("@/lib/payments", () => ({ getProvider: () => gateway, paymentConfigProblem: () => configProblem }));
 const route = await import("./route");
 
 const SECRET = "s".repeat(40);
@@ -35,9 +36,18 @@ describe("GET /api/internal/payments/sweep", () => {
     const res = await route.GET(req(`Bearer ${SECRET}`));
     const body = await res.json();
     expect(res.status).toBe(200);
-    expect(body).toEqual({ checked: 1, skipped: 0, outcomes: { pending: 1 }, sweepFailures: {}, health: { otherProviderAttempts: 0, overdueAttempts: 0, openIssues: 0 },
+    expect(body).toEqual({ coverage: "full", checked: 1, skipped: 0, outcomes: { pending: 1 }, sweepFailures: {}, health: { otherProviderAttempts: 0, overdueAttempts: 0, openIssues: 0 },
       window: { advanced: true }, charges: { seen: 1, outcomes: { unmatched: 1 }, conflicts: 0, failures: {} } });
     expect(JSON.stringify(body)).not.toMatch(/0d000000|G-\d|X-\d/);
+  });
+  it("M12.3: an incoherent payment configuration is a problem on every run, by code (500), even when everything else is clean", async () => {
+    answers.attempts_to_check = () => ({ data: [] });
+    configProblem = "provider_unknown";
+    try {
+      const res = await route.GET(req(`Bearer ${SECRET}`));
+      expect([res.status, (await res.json()).problems]).toEqual([500, ["config_provider_unknown"]]);
+      expect(reported).toContainEqual(["paymentReconcile", "payment", { code: "config_provider_unknown" }]);
+    } finally { configProblem = null; }
   });
   it("a conflict: 500 with the problem code, and an alert with a fixed message", async () => {
     answers.reconcile_provider_charge = () => ({ error: { message: "charge_evidence_conflict" } });
