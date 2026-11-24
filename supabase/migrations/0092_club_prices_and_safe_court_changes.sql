@@ -16,6 +16,13 @@
 --    calendar shows active courts only, so those bookings would vanish from the desk while players still hold
 --    them. Nothing is cancelled: the desk moves or cancels them first (no cascading cancellation without a
 --    business decision).
+--    Race (review 24 Nov): the booking functions check that the court is active BEFORE they lock it, so a booking
+--    that starts while a deactivation is uncommitted would pass that check, wait for the lock, and be written onto
+--    a court that is now inactive. bookings_need_active_court re-reads the court under a row lock when a booking
+--    becomes live (new, or moved to another court) and refuses 'court_not_found' if it is inactive. Together with
+--    courts_keep_booked_active this holds in both orders: a live future booking never coexists with an inactive
+--    court. A pending hold being confirmed by its payment is exempt: the court could not be deactivated while the
+--    hold existed, and a refused payment confirmation would leave money unrecorded.
 -- 4. A published club keeps a price for every start time it offers (review 24 Nov). Players are shown every free
 --    start time between opening and closing, and quote_price refuses a time without a price, so a gap reads as a
 --    bookable slot that cannot be booked. Unpublished clubs were already covered: the checklist item 'prices'
@@ -121,6 +128,22 @@ end $$;
 drop trigger if exists courts_keep_booked_active on courts;
 create trigger courts_keep_booked_active before update of active on courts for each row execute function courts_keep_booked_active();
 
+
+create or replace function bookings_need_active_court() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.court_id is null or new.status not in ('confirmed', 'pending') or new.end_at <= now() then return new; end if;
+  if tg_op = 'UPDATE' and new.court_id = old.court_id and old.status in ('confirmed', 'pending') then return new; end if;
+  -- waits for an uncommitted deactivation of this court, then sees its result (read committed: a new snapshot)
+  if not exists (select 1 from courts where id = new.court_id and active for share) then
+    raise exception 'court_not_found';
+  end if;
+  return new;
+end $$;
+revoke all on function bookings_need_active_court() from public;
+drop trigger if exists bookings_need_active_court on bookings;
+create trigger bookings_need_active_court before insert or update of court_id, status on bookings
+  for each row execute function bookings_need_active_court();
 
 -- ------------------------------------------------------------------ 4. a published club stays fully priced
 create or replace function club_prices_stay_complete() returns trigger
