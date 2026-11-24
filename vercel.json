@@ -1,3 +1,10 @@
 {
-  "regions": ["fra1"]
+  "regions": ["fra1"],
+  "schedules": {
+    "deletion-retry": {
+      "schedule": "7,22,37,52 * * * *",
+      "path": "/api/internal/deletions/retry",
+      "requestMethod": "GET"
+    }
+  }
 }

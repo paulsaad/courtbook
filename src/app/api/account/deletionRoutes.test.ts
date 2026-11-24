@@ -30,6 +30,17 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }));
 vi.mock("@/lib/report", () => ({ report: async (k: string, a: string, d: unknown) => { reported.push([k, a, d]); } }));
+/** Sentry cron check-ins sent by the retry route (src/lib/deletion/monitor.ts). */
+const checkIns: Array<{ checkIn: Record<string, unknown>; config?: unknown }> = [];
+let sentryThrows = false;
+vi.mock("@sentry/nextjs", () => ({
+  captureCheckIn: (checkIn: Record<string, unknown>, config?: unknown) => {
+    if (sentryThrows) throw new Error("sdk broken");
+    checkIns.push({ checkIn, config });
+    return "ci-1";
+  },
+  flush: async () => true,
+}));
 
 const close = await import("./close/route");
 const retry = await import("../internal/deletions/retry/route");
@@ -58,6 +69,7 @@ function happyService() {
 }
 beforeEach(() => {
   calls = []; user = { id: ME }; userRpc = {}; signOut = vi.fn(async () => ({ error: null })); reported.length = 0;
+  checkIns.length = 0; sentryThrows = false;
   happyService();
   delete process.env.CRON_SECRET;
 });
@@ -164,6 +176,7 @@ describe("GET|POST /api/internal/deletions/retry", () => {
       expect(res.status).toBe(503);
     }
     expect(calls).toEqual([]);
+    expect(checkIns).toEqual([]);   // unconfigured: no check-in (the monitor reports it as missed)
   });
   it("a CRON_SECRET shorter than 32 characters counts as not configured", async () => {
     process.env.CRON_SECRET = "short-secret";
@@ -177,11 +190,13 @@ describe("GET|POST /api/internal/deletions/retry", () => {
       expect((await retry.GET(req(h))).status).toBe(401);
     }
     expect(calls).toEqual([]);
+    expect(checkIns).toEqual([]);   // unauthenticated callers never reach the monitor
   });
   it("a signed-in person's cookie session is not enough (the route never reads it)", async () => {
     process.env.CRON_SECRET = SECRET;
     const r = new Request(`${SITE}/api/internal/deletions/retry`, { headers: { cookie: "sb-access-token=x", origin: SITE } });
     expect((await retry.GET(r)).status).toBe(401);
+    expect(checkIns).toEqual([]);
   });
   it("authorised: processes the due list from the database (not from the request), raises alerts, answers counts only", async () => {
     process.env.CRON_SECRET = SECRET;
@@ -302,12 +317,64 @@ describe("GET|POST /api/internal/deletions/retry", () => {
     process.env.CRON_SECRET = SECRET;
     serviceRpc.deletions_due = () => ({ data: [OTHER, ME] });
     let t = 0;
-    const now = vi.spyOn(Date, "now").mockImplementation(() => (t++ === 0 ? 0 : 45_000));   // past the 40 s budget after the start
+    // the first two readings are the monitor's start and the run's start; every later one is past the 40 s budget
+    const now = vi.spyOn(Date, "now").mockImplementation(() => (t++ < 2 ? 0 : 45_000));
     try {
       const res = await retry.GET(req(`Bearer ${SECRET}`));
       expect(res.status).toBe(200);
       expect(await res.json()).toMatchObject({ failed: 0, remaining: 2 });
     } finally { now.mockRestore(); }
+  });
+  describe("Sentry cron monitor (deletion-schedule)", () => {
+    const statuses = () => checkIns.map((c) => c.checkIn.status);
+    it("an authorised successful run: in_progress with the monitor config, then ok with the same check-in id", async () => {
+      process.env.CRON_SECRET = SECRET;
+      serviceRpc.deletions_due = () => ({ data: [OTHER] });
+      const res = await retry.GET(req(`Bearer ${SECRET}`));
+      expect(res.status).toBe(200);
+      expect(statuses()).toEqual(["in_progress", "ok"]);
+      expect(checkIns[0].checkIn).toEqual({ monitorSlug: "deletion-retry", status: "in_progress" });
+      expect(checkIns[0].config).toEqual({
+        schedule: { type: "crontab", value: "7,22,37,52 * * * *" }, checkinMargin: 20, maxRuntime: 2,
+        timezone: "Etc/UTC", failureIssueThreshold: 1, recoveryThreshold: 1,
+      });
+      expect(checkIns[1].checkIn).toMatchObject({ checkInId: "ci-1", monitorSlug: "deletion-retry", status: "ok" });
+      expect(typeof checkIns[1].checkIn.duration).toBe("number");
+      // nothing about accounts or counts goes to the monitor
+      expect(JSON.stringify(checkIns)).not.toMatch(/d8600000|done|failed/);
+    });
+    it("an incomplete run (500, problems) → error", async () => {
+      process.env.CRON_SECRET = SECRET;
+      serviceRpc.record_deletion_worker_run = () => ({ error: { message: "x", code: "42501" } });
+      expect((await retry.GET(req(`Bearer ${SECRET}`))).status).toBe(500);
+      expect(statuses()).toEqual(["in_progress", "error"]);
+    });
+    it("a run that fails early (promotion) → error", async () => {
+      process.env.CRON_SECRET = SECRET;
+      serviceRpc.promote_due_requests = () => ({ error: { message: "x", code: "57014" } });
+      expect((await retry.GET(req(`Bearer ${SECRET}`))).status).toBe(500);
+      expect(statuses()).toEqual(["in_progress", "error"]);
+    });
+    it("an exception inside the run → error check-in, and the exception still reaches Next.js", async () => {
+      process.env.CRON_SECRET = SECRET;
+      serviceRpc.promote_due_requests = () => { throw new TypeError("fetch failed"); };
+      await expect(retry.GET(req(`Bearer ${SECRET}`))).rejects.toThrow("fetch failed");
+      expect(statuses()).toEqual(["in_progress", "error"]);
+    });
+    it("POST is monitored the same way", async () => {
+      process.env.CRON_SECRET = SECRET;
+      expect((await retry.POST(req(`Bearer ${SECRET}`, "POST"))).status).toBe(200);
+      expect(statuses()).toEqual(["in_progress", "ok"]);
+    });
+    it("a broken Sentry SDK never changes the run or its answer", async () => {
+      process.env.CRON_SECRET = SECRET;
+      sentryThrows = true;
+      serviceRpc.deletions_due = () => ({ data: [OTHER] });
+      const res = await retry.GET(req(`Bearer ${SECRET}`));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ done: 1, failed: 0 });
+      expect(calls.map((c) => c.fn)).toContain("record_deletion_worker_run");
+    });
   });
   it("the due list failing → 500, reported by code", async () => {
     process.env.CRON_SECRET = SECRET;
