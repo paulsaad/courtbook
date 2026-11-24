@@ -175,6 +175,9 @@ export async function startFeePayment(d: FlowDeps, input: { paymentId: unknown; 
  *   refund_due       money arrived but no booking came of it: it is owed back
  *   cancelled        the booking was cancelled
  * A state that is not one of these is not answered as anything paid.
+ *
+ * If any of the reads fails (the payment, its attempts, the refunds owed), the answer is 503
+ * `payment_status_unavailable` (not final): no state, no counts — never "nothing tried" or "nothing owed".
  */
 export async function feePaymentStatus(d: Pick<FlowDeps, "player" | "admin" | "provider"> & { userId: string }, input: { paymentId: unknown }): Promise<FlowResult> {
   const { paymentId } = input;
@@ -186,30 +189,43 @@ export async function feePaymentStatus(d: Pick<FlowDeps, "player" | "admin" | "p
       .eq("id", paymentId).eq("profile_id", d.userId).maybeSingle();   // the player's own: club staff may read a club's payments, not ask about them here
     return { data: data as { id: string; kind: string; status: string; booking_id: string; bookings: { status: string; hold_expires_at: string | null } } | null, error };
   };
+  // Fail closed (review of PR #37): a read that fails is never taken as "no attempts" or "no refund owed". The answer
+  // is then a temporary error that says nothing about success, failure or refunds; the app keeps its key and asks again.
+  const unavailable = async (what: string, code?: string) => {
+    await report("paymentLookup", "payment", { code: code ?? what });
+    return fail("payment_status_unavailable", 503);
+  };
   let mine = await readMine();
-  if (mine.error) { await report("paymentLookup", "payment", { code: mine.error.code }); return fail("payment_status_failed", 500); }
+  if (mine.error) return unavailable("payment", mine.error.code);
   if (!mine.data) return fail("not_found", 404);                              // not this player's (or does not exist)
   if (mine.data.kind !== "fee_only") return fail("wrong_payment_mode", 409);
 
-  const attemptsOf = async () => {
-    const { data } = await player.from("payment_attempts").select("id, status, outcome, attempt_no, provider").eq("payment_id", paymentId).order("attempt_no", { ascending: false });
-    return (data ?? []) as { id: string; status: string; outcome: string | null; attempt_no: number; provider: string }[];
+  type AttemptRead = { id: string; status: string; outcome: string | null; attempt_no: number; provider: string };
+  const attemptsOf = async (): Promise<{ rows: AttemptRead[] } | { error: string }> => {
+    const { data, error } = await player.from("payment_attempts").select("id, status, outcome, attempt_no, provider").eq("payment_id", paymentId).order("attempt_no", { ascending: false });
+    if (error || !Array.isArray(data)) return { error: error?.code ?? "attempts" };
+    return { rows: data as AttemptRead[] };
   };
-  let attempts = await attemptsOf();
-  const open = attempts.find((x) => UNRESOLVED.includes(x.status));
+  let read = await attemptsOf();
+  if ("error" in read) return unavailable("attempts", read.error);
+  const open = read.rows.find((x) => UNRESOLVED.includes(x.status));
   if (open && open.provider === provider.name) {
     await settle(admin, provider, open.id);
     mine = await readMine();
-    attempts = await attemptsOf();
+    if (mine.error) return unavailable("payment", mine.error.code);
     if (!mine.data) return fail("not_found", 404);
+    read = await attemptsOf();
+    if ("error" in read) return unavailable("attempts", read.error);
   }
+  const attempts = read.rows;
   const p = mine.data!;
   const b = p.bookings;
   const latest = attempts[0] ?? null;
   const unresolved = attempts.find((x) => UNRESOLVED.includes(x.status)) ?? null;
   // refund obligations on this payment (charges are admin-only: counted here for the owner, nothing else returned)
-  const { count } = await admin.from("fee_charges").select("id", { count: "exact", head: true }).eq("payment_id", p.id).eq("disposition", "refund_due");
-  const refundsDue = count ?? 0;
+  const charges = await admin.from("fee_charges").select("id", { count: "exact", head: true }).eq("payment_id", p.id).eq("disposition", "refund_due");
+  if (charges.error || typeof charges.count !== "number") return unavailable("charges", charges.error?.code);
+  const refundsDue = charges.count;
   const holdLive = b.status === "pending" && !!b.hold_expires_at && Date.parse(b.hold_expires_at) > Date.now();
 
   const state =

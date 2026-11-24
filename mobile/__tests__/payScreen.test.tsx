@@ -5,20 +5,29 @@
  * closes (whatever happened there), the approved wording is shown, and test mode is labelled.
  */
 const mockRows: { booking: Record<string, unknown> | null; payment: Record<string, unknown> | null } = { booking: null, payment: null };
+/** Rows of other bookings, by booking id (screen switching). */
+const mockOther = new Map<string, { booking: Record<string, unknown>; payment: Record<string, unknown> }>();
+const mockParams = { current: { id: "bk-1" } as Record<string, string> };
 jest.mock("../lib/supabase", () => ({
   supabase: {
     rpc: jest.fn(async () => ({ data: null, error: null })),
     from: jest.fn((table: string) => {
       const chain: Record<string, unknown> = {};
-      for (const m of ["select", "eq"]) chain[m] = () => chain;
-      chain.maybeSingle = async () => ({ data: table === "bookings" ? mockRows.booking : mockRows.payment, error: null });
+      let id = "";
+      chain.select = () => chain;
+      chain.eq = (col: string, v: string) => { if (col === "id" || col === "booking_id") id = v; return chain; };
+      chain.maybeSingle = async () => {
+        const other = mockOther.get(id);
+        if (other) return { data: table === "bookings" ? other.booking : other.payment, error: null };
+        return { data: table === "bookings" ? mockRows.booking : mockRows.payment, error: null };
+      };
       return chain;
     }),
     auth: { onAuthStateChange: jest.fn(() => ({ data: { subscription: { unsubscribe: jest.fn() } } })), getSession: jest.fn(async () => ({ data: { session: null } })) },
   },
 }));
 const mockRouter = { push: jest.fn(), replace: jest.fn(), dismissTo: jest.fn() };
-jest.mock("expo-router", () => ({ router: { push: (...a: unknown[]) => mockRouter.push(...a), replace: (...a: unknown[]) => mockRouter.replace(...a), dismissTo: (...a: unknown[]) => mockRouter.dismissTo(...a) }, Stack: { Screen: () => null }, useLocalSearchParams: () => ({ id: "bk-1" }) }));
+jest.mock("expo-router", () => ({ router: { push: (...a: unknown[]) => mockRouter.push(...a), replace: (...a: unknown[]) => mockRouter.replace(...a), dismissTo: (...a: unknown[]) => mockRouter.dismissTo(...a) }, Stack: { Screen: () => null }, useLocalSearchParams: () => mockParams.current }));
 jest.mock("../lib/session", () => ({ useSession: () => ({ status: "signed-in", session: { user: { id: "me" } } }) }));
 jest.mock("../lib/online", () => ({ useOnline: () => true }));
 jest.mock("../lib/authRecovery", () => ({ recoverFromAuthFailure: jest.fn() }));
@@ -37,13 +46,14 @@ jest.mock("../lib/payments", () => {
     isOnline: () => true,
     now: () => 0,
   });
-  return { FEE_PAYMENTS_ON: true, payController: () => ctl };
+  return { FEE_PAYMENTS_ON: true, payController: () => ctl, mockStore: store };
 });
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Pay from "../app/pay/[id]";
+import PaymentReturn from "../app/payment-return";
 import { FEE_TERMS, TEST_MODE_NOTE } from "../lib/feePayment";
 
 const metrics = { frame: { x: 0, y: 0, width: 360, height: 780 }, insets: { top: 0, left: 0, right: 0, bottom: 24 } };
@@ -66,7 +76,7 @@ async function open() {
   await flush();
 }
 
-beforeEach(() => { mockServer.sent = []; mockServer.answers = []; mockOpen.mockClear(); mockRouter.replace.mockClear(); });
+beforeEach(() => { mockServer.sent = []; mockServer.answers = []; mockOpen.mockClear(); mockRouter.replace.mockClear(); mockParams.current = { id: "bk-1" }; mockOther.clear(); });
 
 it("a held court: the fee to pay, the court price paid at the club, the approved terms — never 'Court booked'", async () => {
   held();
@@ -130,4 +140,55 @@ it("a Model 1 (court and fee online) payment is not handled here: the website", 
   await open();
   expect(screen.getByText("Finish this booking on the website")).toBeTruthy();
   expect(mockServer.sent).toEqual([]);
+});
+
+/** The phone as the player left it: pay-1's page was opened (its key stored), then another held booking (pay-2) was
+ *  opened. Written by a real PayController into the same secure storage the screens use. */
+async function seedFirstPaymentThenAnother() {
+  const { mockStore } = jest.requireMock("../lib/payments") as { mockStore: Map<string, string> };
+  mockStore.clear();
+  const { PayController } = jest.requireActual("../lib/payController");
+  let t = 0;
+  const answers: unknown[] = [{ status: 200, body: { redirect: "https://pay.example/s/1" } }];
+  const earlier = new PayController({
+    storage: { getItem: async (k: string) => mockStore.get(k) ?? null, setItem: async (k: string, v: string) => { mockStore.set(k, v); }, removeItem: async (k: string) => { mockStore.delete(k); } },
+    post: async () => answers.shift() ?? null, newKey: () => "k-first", isOnline: () => true, now: () => (t += 1000),
+  });
+  await earlier.start("me", "bk-1", "pay-1");
+  await earlier.remember("me", "bk-2", "pay-2");
+  return mockStore;
+}
+const entriesIn = (store: Map<string, string>) =>
+  (JSON.parse([...store.values()][0]) as { entries: { paymentId: string; requestKey: string | null }[] }).entries;
+const openPage = (n = 1) => status("payment_open", { attempt: { status: "open", outcome: null, attemptNo: n }, attemptsLeft: 3 - n });
+
+it("review of PR #37 — screen switching: opening another held booking's screen keeps the first one's unresolved key, and reads (never starts) the first one", async () => {
+  const store = await seedFirstPaymentThenAnother();
+  held();
+  mockOther.set("bk-2", { booking: { ...mockRows.booking!, id: "bk-2" }, payment: { id: "pay-2", status: "pending", total_usd: 1, kind: "fee_only", provider: "whish" } });
+  mockParams.current = { id: "bk-2" };
+  mockServer.answers = [status("awaiting_payment"), openPage()];
+  await open();
+  await flush();
+  expect(mockServer.sent.map((x) => `${x.path}:${x.body.paymentId}`)).toEqual(["/api/native/pay/status:pay-2", "/api/native/pay/status:pay-1"]);
+  expect(entriesIn(store).find((e) => e.paymentId === "pay-1")?.requestKey).toBe("k-first");
+  expect(entriesIn(store).find((e) => e.paymentId === "pay-2")?.requestKey).toBeNull();
+});
+
+it("review of PR #37 — returning from the first payment page after visiting another booking (the app restarted): the unresolved payment is reopened, not the newer one", async () => {
+  await seedFirstPaymentThenAnother();
+  await render(<PaymentReturn />);
+  await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith({ pathname: "/pay/[id]", params: { id: "bk-1" } }));
+});
+
+it("review of PR #37 — reopening the first booking after visiting another: Continue payment repeats its stored key (the same attempt)", async () => {
+  const store = await seedFirstPaymentThenAnother();
+  held();
+  mockServer.answers = [openPage(), status("awaiting_payment"), { status: 200, body: { redirect: "https://pay.example/s/1" } }, openPage()];
+  await open();
+  await flush();
+  await act(async () => { fireEvent.press(screen.getByTestId("pay-primary")); });
+  await flush();
+  expect(mockServer.sent.filter((x) => x.path.endsWith("/start")).map((x) => x.body)).toEqual([{ paymentId: "pay-1", requestKey: "k-first" }]);
+  expect(entriesIn(store).map((e) => e.paymentId).sort()).toEqual(["pay-1", "pay-2"]);
 });

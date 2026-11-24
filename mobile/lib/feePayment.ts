@@ -121,6 +121,8 @@ export function readStatus(httpStatus: number, body: unknown): StatusAnswer {
       refundsDue: Math.max(0, Number(s.refundsDue) || 0),
     } };
   }
+  // the server could not read the payment's records right now: says nothing about the payment (review of PR #37)
+  if (body.error === "payment_status_unavailable") return { kind: "unknown" };
   if (typeof body.error === "string" && /^[a-z_]{1,40}$/.test(body.error)) return { kind: "refused", error: body.error };
   return { kind: "unknown" };
 }

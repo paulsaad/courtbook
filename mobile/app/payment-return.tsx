@@ -14,7 +14,7 @@ export default function PaymentReturn() {
   useEffect(() => {
     if (session.status === "loading") return;
     if (session.status !== "signed-in") { router.replace("/sign-in"); return; }
-    void payController().load(session.session.user.id).then((s) => {
+    void payController().toRecover(session.session.user.id).then((s) => {
       if (s) router.replace({ pathname: "/pay/[id]", params: { id: s.bookingId } });
       else router.replace("/bookings");
     });

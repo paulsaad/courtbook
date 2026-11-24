@@ -83,6 +83,8 @@ describe("B2/B3: reading the server's answers — a redirect is never proof, unk
     expect(readStatus(200, { ...status(), state: "paid" })).toEqual({ kind: "unknown" });
     expect(readStatus(200, { ...status(), state: undefined })).toEqual({ kind: "unknown" });
     expect(readStatus(404, { error: "not_found", final: true })).toEqual({ kind: "refused", error: "not_found" });
+    // the server could not read the records (review of PR #37): unknown, never a refusal or a state
+    expect(readStatus(503, { error: "payment_status_unavailable", final: false })).toEqual({ kind: "unknown" });
     expect(readStatus(401, {})).toEqual({ kind: "auth" });
     expect(readStatus(200, { ...status(), attemptsLeft: 99 })).toMatchObject({ status: { attemptsLeft: 3 } });
   });
@@ -113,7 +115,7 @@ function phone() {
   const store = new Map<string, string>();
   const sent: Array<{ path: string; body: Record<string, string> }> = [];
   let answers: Array<{ status: number; body: unknown } | null | (() => Promise<{ status: number; body: unknown } | null>)> = [];
-  let n = 0;
+  let n = 0, clock = 0;
   const env = { online: true, storageFails: false };
   const deps: PayDeps = {
     storage: {
@@ -124,9 +126,17 @@ function phone() {
     post: async (path, body) => { sent.push({ path, body }); const a = answers.shift(); return typeof a === "function" ? a() : (a ?? null); },
     newKey: () => `key-${++n}`,
     isOnline: () => env.online,
-    now: () => 1_000,
+    now: () => (clock += 1_000),
   };
   return { store, sent, deps, env, answer: (...a: typeof answers) => { answers = a; } };
+}
+
+/** The request key stored on the phone for one payment of one account (undefined: no entry at all). */
+function storedKey(store: Map<string, string>, user: string, payment: string): string | null | undefined {
+  const raw = store.get(paymentStorageKey(user));
+  if (!raw) return undefined;
+  const e = (JSON.parse(raw).entries as { paymentId: string; requestKey: string | null }[]).find((x) => x.paymentId === payment);
+  return e ? e.requestKey : undefined;
 }
 
 describe("C1–C3: recovery on the phone", () => {
@@ -137,7 +147,7 @@ describe("C1–C3: recovery on the phone", () => {
     const c = new PayController(ph.deps);
     ph.answer(null);                                                       // answer lost
     expect(await c.start(U, B, P)).toEqual({ kind: "unknown" });
-    expect(JSON.parse(ph.store.get(paymentStorageKey(U))!).requestKey).toBe("key-1");
+    expect(storedKey(ph.store, U, P)).toBe("key-1");
     ph.answer({ status: 200, body: { redirect: "https://pay.example/s/1" } });
     await c.start(U, B, P);
     expect(ph.sent.map((s) => s.body.requestKey)).toEqual(["key-1", "key-1"]);
@@ -148,7 +158,7 @@ describe("C1–C3: recovery on the phone", () => {
     ph.answer(null);
     await new PayController(ph.deps).start(U, B, P);
     const after = new PayController(ph.deps);                              // a new process
-    expect((await after.load(U))?.bookingId).toBe(B);
+    expect((await after.toRecover(U))?.bookingId).toBe(B);
     ph.answer({ status: 200, body: { redirect: "https://pay.example/s/1" } });
     await after.start(U, B, P);
     expect(ph.sent.map((s) => s.body.requestKey)).toEqual(["key-1", "key-1"]);
@@ -193,7 +203,7 @@ describe("C1–C3: recovery on the phone", () => {
     await c.check(U, P);
     await c.check(U, P);
     expect(ph.sent.map((s) => s.path)).toEqual(["/api/native/pay/start", "/api/native/pay/status", "/api/native/pay/status"]);
-    expect(JSON.parse(ph.store.get(paymentStorageKey(U))!).requestKey).toBe("key-1");   // kept: the attempt is unresolved
+    expect(storedKey(ph.store, U, P)).toBe("key-1");   // kept: the attempt is unresolved
   });
 
   it("a failed attempt drops the key, so the next tap is a new attempt (if tries remain)", async () => {
@@ -212,7 +222,7 @@ describe("C1–C3: recovery on the phone", () => {
     const c = new PayController(ph.deps);
     ph.answer({ status: 409, body: { error: "hold_expired", final: true } }, { status: 200, body: status({ state: "hold_expired" }) });
     await c.start(U, B, P);
-    expect(JSON.parse(ph.store.get(paymentStorageKey(U))!).requestKey).toBeNull();
+    expect(storedKey(ph.store, U, P)).toBeNull();
     await c.check(U, P);
     expect(ph.store.has(paymentStorageKey(U))).toBe(false);
   });
@@ -222,14 +232,14 @@ describe("C1–C3: recovery on the phone", () => {
     const c = new PayController(ph.deps);
     ph.answer(null);
     await c.start(U, B, P);
-    expect(await c.load("user-b")).toBeNull();
+    expect(await c.entries("user-b")).toEqual([]);
     ph.answer(null);
     await c.start("user-b", "booking-2", "payment-2");
-    expect(JSON.parse(ph.store.get(paymentStorageKey("user-b"))!).requestKey).toBe("key-2");
-    expect(JSON.parse(ph.store.get(paymentStorageKey(U))!).requestKey).toBe("key-1");
+    expect(storedKey(ph.store, "user-b", "payment-2")).toBe("key-2");
+    expect(storedKey(ph.store, U, P)).toBe("key-1");
     // a stored record naming another user (tampered or copied) is not believed
     ph.store.set(paymentStorageKey("user-c"), ph.store.get(paymentStorageKey(U))!);
-    expect(await c.load("user-c")).toBeNull();
+    expect(await c.entries("user-c")).toEqual([]);
   });
 
   it("no token, key or payment id ever goes into a URL", async () => {
@@ -239,6 +249,93 @@ describe("C1–C3: recovery on the phone", () => {
     await c.start(U, B, P);
     await c.check(U, P);
     expect(ph.sent.map((s) => s.path)).toEqual(["/api/native/pay/start", "/api/native/pay/status"]);
+  });
+});
+
+describe("C (review of PR #37): another booking's payment never replaces an unresolved one", () => {
+  const U = "user-a";
+  const redirect = (n: number) => ({ status: 200, body: { redirect: `https://pay.example/s/${n}` } });
+  const st = (state: string) => ({ status: 200, body: status({ state: state as PaymentStatus["state"] }) });
+  const starts = (ph: ReturnType<typeof phone>) => ph.sent.filter((s) => s.path.endsWith("/start")).map((s) => `${s.body.paymentId}:${s.body.requestKey}`);
+
+  it("screen switching: opening (and paying) another booking keeps the first payment's unresolved key; going back reuses it", async () => {
+    const ph = phone();
+    const c = new PayController(ph.deps);
+    await c.remember(U, "b1", "p1");
+    ph.answer(null);                                                       // p1: answer lost — outcome unknown
+    await c.start(U, "b1", "p1");
+    await c.remember(U, "b2", "p2");                                       // the player opens another booking's screen
+    expect(storedKey(ph.store, U, "p1")).toBe("key-1");
+    expect(storedKey(ph.store, U, "p2")).toBeNull();
+    ph.answer(redirect(2));
+    await c.start(U, "b2", "p2");
+    expect(storedKey(ph.store, U, "p1")).toBe("key-1");
+    ph.answer(redirect(1));
+    await c.start(U, "b1", "p1");                                          // back to the first: the SAME attempt
+    expect(starts(ph)).toEqual(["p1:key-1", "p2:key-2", "p1:key-1"]);
+  });
+
+  it("reopening the app after visiting another booking: both are remembered, and the unresolved one is recovered first", async () => {
+    const ph = phone();
+    const c = new PayController(ph.deps);
+    ph.answer(redirect(1));
+    await c.start(U, "b1", "p1");                                          // p1's page is open
+    await c.remember(U, "b2", "p2");                                       // p2 opened later, never paid
+    const reopened = new PayController(ph.deps);                           // the app is killed and reopened
+    expect((await reopened.entries(U)).map((e) => e.paymentId).sort()).toEqual(["p1", "p2"]);
+    expect((await reopened.toRecover(U))?.bookingId).toBe("b1");          // the payment-return link opens p1, not the newer p2
+  });
+
+  it("returning from p1's payment page after visiting p2: p1's answer changes only p1", async () => {
+    const ph = phone();
+    const c = new PayController(ph.deps);
+    ph.answer(redirect(1));
+    await c.start(U, "b1", "p1");
+    await c.remember(U, "b2", "p2");
+    ph.answer(st("confirmed"));
+    await c.check(U, "p1");
+    expect(storedKey(ph.store, U, "p1")).toBeUndefined();                  // ended at the server: tidied away
+    expect(storedKey(ph.store, U, "p2")).toBeNull();                        // untouched
+  });
+
+  it("other payments are removed only after the server says they ended — reads only, and an unknown answer keeps them", async () => {
+    const ph = phone();
+    const c = new PayController(ph.deps);
+    ph.answer(null, redirect(3));
+    await c.start(U, "b1", "p1");                                          // unknown
+    await c.start(U, "b3", "p3");                                          // page open
+    await c.remember(U, "b2", "p2");
+    ph.sent.length = 0;
+    ph.answer(null, st("payment_open"));                                  // p1: no answer; p3: still open
+    await c.settleOthers(U, "p2");
+    expect(ph.sent.every((s) => s.path.endsWith("/status"))).toBe(true);
+    expect(storedKey(ph.store, U, "p1")).toBe("key-1");
+    expect(storedKey(ph.store, U, "p3")).toBe("key-2");
+    ph.answer({ status: 503, body: { error: "payment_status_unavailable", final: false } }, st("hold_expired"));
+    await c.settleOthers(U, "p2");
+    expect(storedKey(ph.store, U, "p1")).toBe("key-1");                    // a temporary server error establishes nothing
+    expect(storedKey(ph.store, U, "p3")).toBeUndefined();                  // ended: removed
+    expect(storedKey(ph.store, U, "p2")).toBeNull();
+  });
+
+  it("two screens writing at once never lose an entry", async () => {
+    const ph = phone();
+    const c = new PayController(ph.deps);
+    ph.answer(null);
+    await Promise.all([c.start(U, "b1", "p1"), c.remember(U, "b2", "p2"), c.remember(U, "b3", "p3"), c.remember(U, "b2", "p2")]);
+    expect((await c.entries(U)).map((e) => e.paymentId).sort()).toEqual(["p1", "p2", "p3"]);
+    expect(storedKey(ph.store, U, "p1")).toBe("key-1");
+  });
+
+  it("releasing one hold forgets only that payment", async () => {
+    const ph = phone();
+    const c = new PayController(ph.deps);
+    ph.answer(null);
+    await c.start(U, "b1", "p1");
+    await c.remember(U, "b2", "p2");
+    await c.forget(U, "p2");
+    expect(storedKey(ph.store, U, "p1")).toBe("key-1");
+    expect(storedKey(ph.store, U, "p2")).toBeUndefined();
   });
 });
 

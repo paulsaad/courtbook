@@ -78,7 +78,9 @@ export default function Pay() {
   // the first look, and recovery: this account remembers which payment it is in the middle of
   useEffect(() => {
     if (!userId || !b || !paymentId) return;
-    void ctl.remember(userId, b.id, paymentId).then(() => check(true));
+    // remember this payment WITHOUT replacing any other one this account has open; then look, and read where the
+    // others stand (the ones that ended are tidied away, the rest stay remembered)
+    void ctl.remember(userId, b.id, paymentId).then(() => check(true)).then(() => ctl.settleOthers(userId, paymentId));
   }, [userId, b?.id, paymentId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // coming back to the app (from the payment page, from another app, after a long time away) → ask again

@@ -21,7 +21,7 @@ provider (Whish is a stub), and nothing has run on a phone.
 | Path | Who | What |
 | --- | --- | --- |
 | `POST /api/native/pay/start` `{paymentId, requestKey}` | `Authorization: Bearer <Supabase access token>` | Same engine as the website's `/api/pay/start` (`src/lib/payments/startFlow.ts`). Answers `{redirect}` / `{attempt,outcome}` / `{attempt,state}` / `{error,final}` |
-| `POST /api/native/pay/status` `{paymentId}` | same | Asks the provider about an unresolved attempt, then returns `state` (confirmed, awaiting_payment, payment_open, checking, hold_expired, refund_due, cancelled), attempts left, refunds due. Never starts or retries |
+| `POST /api/native/pay/status` `{paymentId}` | same | Asks the provider about an unresolved attempt, then returns `state` (confirmed, awaiting_payment, payment_open, checking, hold_expired, refund_due, cancelled), attempts left, refunds due. Never starts or retries. **Fails closed:** if the payment, its attempts or the refunds owed cannot be read, the answer is 503 `payment_status_unavailable` (not final) with no state and no counts |
 | `GET /pay/app-return` | anyone | Static. Reads and records nothing; links to `PAYMENT_APP_SCHEME://payment-return` |
 
 - The token is checked with Supabase Auth (`auth.getUser(token)`). The database client then acts as that player (RLS,
@@ -61,6 +61,10 @@ already installed.
 
 ## 4. Recovery rules (C1–C3)
 
+- **One entry per payment, per account** (review of PR #37). Opening another booking's payment screen adds its own
+  entry and never replaces another. An entry is removed only when the server says that payment ended (confirmed,
+  hold ended, refund due, cancelled) or its hold was released. A temporary server error or no answer changes nothing.
+  The `payment-return` link reopens the payment with an unresolved key first.
 - **One request key per unresolved tap.** It is stored per account before sending. The same key always returns the
   same attempt (0093), so a double tap, a lost answer or a tap after the app was killed cannot start a second payment.
 - **When the key is dropped:**
@@ -80,12 +84,12 @@ already installed.
 
 | Suite | Count | Where |
 | --- | --- | --- |
-| Native routes (mocked DB/provider) | 17 | `src/app/api/native/pay/nativeRoutes.test.ts` |
+| Native routes (mocked DB/provider) | 21 (4 fail-closed reads) | `src/app/api/native/pay/nativeRoutes.test.ts` |
 | App return, switch | 3 | `src/lib/payments/appReturn.test.ts` |
 | Whish stub refusal (H2) | 2 | `src/lib/payments/whish.test.ts` |
 | **Real database, real routes** (local PostgREST; fake gateway; fake Auth token check) | 33 | `supabase/tests/api/native.mjs` (`SCRIPT=native.mjs bash supabase/tests/api/journey.sh`) |
-| App rules and recovery | 36 | `mobile/__tests__/feePayment.test.ts` |
-| Payment screen | 6 | `mobile/__tests__/payScreen.test.tsx` |
+| App rules and recovery | 43 (6 screen-switching and recovery-record cases) | `mobile/__tests__/feePayment.test.ts` |
+| Payment screen | 9 (3 screen switching, restart, return after another booking) | `mobile/__tests__/payScreen.test.tsx` |
 
 Regression on this branch:
 - **Website:** vitest all pass.

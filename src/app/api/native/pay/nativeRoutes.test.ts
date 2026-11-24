@@ -24,6 +24,8 @@ let getUserTokens: string[];
 let paymentRow: Record<string, unknown> | null;     // what the payments table holds for PAY
 let attemptRows: Array<Record<string, unknown>>;
 let refundCount: number;
+let failRead: { payments?: boolean; attempts?: boolean | "second"; charges?: boolean | "null-count" };
+let attemptReadsDone: number;
 const reported: Array<[string, string, unknown]> = [];
 
 vi.mock("server-only", () => ({}));
@@ -47,11 +49,17 @@ vi.mock("@supabase/supabase-js", () => ({
         chain.maybeSingle = async () => {
           calls.push({ client: "player", what: `read ${table}`, args: { ...filters } });
           // the real table: the row exists for its owner only when the route asks for profile_id = owner
+          if (table === "payments" && failRead.payments) return { data: null, error: { message: "timeout", code: "57014" } };
           const row = table === "payments" && paymentRow && filters.id === PAY && filters.profile_id === paymentRow.profile_id ? paymentRow : null;
           return { data: row, error: null };
         };
         chain.then = (res: (a: Answer) => unknown) => {
           calls.push({ client: "player", what: `read ${table}`, args: { ...filters } });
+          if (table === "payment_attempts") {
+            attemptReadsDone++;
+            const fails = failRead.attempts === true || (failRead.attempts === "second" && attemptReadsDone >= 2);
+            if (fails) return Promise.resolve({ data: null, error: { message: "connection reset", code: "08006" } }).then(res);
+          }
           return Promise.resolve({ data: table === "payment_attempts" ? attemptRows : [], error: null }).then(res);
         };
         return chain;
@@ -67,7 +75,12 @@ vi.mock("@/lib/supabase/admin", () => ({
       for (const m of ["select", "eq", "in", "order", "limit"]) chain[m] = () => chain;
       chain.single = async () => ({ data: { id: ATT, status: "open", session_url: "https://pay.whish.example/s/1", outcome: null }, error: null });
       chain.maybeSingle = async () => ({ data: null, error: null });
-      chain.then = (res: (a: Answer) => unknown) => { calls.push({ client: "service", what: `count ${table}` }); return Promise.resolve({ data: null, error: null, count: refundCount }).then(res); };
+      chain.then = (res: (a: Answer) => unknown) => {
+        calls.push({ client: "service", what: `count ${table}` });
+        if (failRead.charges === true) return Promise.resolve({ data: null, error: { message: "timeout", code: "57014" }, count: null }).then(res);
+        if (failRead.charges === "null-count") return Promise.resolve({ data: null, error: null, count: null }).then(res);
+        return Promise.resolve({ data: null, error: null, count: refundCount }).then(res);
+      };
       return chain;
     },
   }),
@@ -102,6 +115,7 @@ const pay = (over: Record<string, unknown> = {}, booking: Record<string, unknown
 let logSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   calls = []; userRpc = {}; clientsMade = []; getUserTokens = []; paymentRow = null; attemptRows = []; refundCount = 0; reported.length = 0;
+  failRead = {}; attemptReadsDone = 0;
   provider.name = "whish";
   provider.startAttempt = vi.fn(async () => ({ kind: "redirect", url: "https://pay.whish.example/s/1", session: "S-1" }));
   provider.attemptStatus = vi.fn(async () => ({ state: "pending" }));
@@ -269,6 +283,55 @@ describe("POST /api/native/pay/status", () => {
     refundCount = 0;
     paymentRow = pay({ status: "failed" }, { status: "cancelled", hold_expires_at: null });
     expect((await (await ask()).json()).state).toBe("cancelled");
+  });
+
+  describe("fails closed when a financial read fails (review of PR #37)", () => {
+    const UNAVAILABLE = { error: "payment_status_unavailable", final: false };
+    const noClaims = (b: Record<string, unknown>) => {
+      for (const k of ["state", "attemptsLeft", "refundsDue", "attempt", "paymentStatus", "bookingStatus"]) expect(b).not.toHaveProperty(k);
+    };
+
+    it("the attempts cannot be read: a temporary error — not 'three tries left', not 'awaiting payment'", async () => {
+      paymentRow = pay();
+      failRead.attempts = true;
+      const r = await ask();
+      const b = await r.json();
+      expect(r.status).toBe(503);
+      expect(b).toEqual(UNAVAILABLE);
+      noClaims(b);
+      expect(provider.attemptStatus).not.toHaveBeenCalled();
+      expect(reported).toContainEqual(["paymentLookup", "payment", { code: "08006" }]);
+    });
+
+    it("the attempts cannot be re-read after asking the provider: still a temporary error, never a guessed state", async () => {
+      paymentRow = pay();
+      attemptRows = [{ id: ATT, status: "open", outcome: null, attempt_no: 1, provider: "whish" }];
+      failRead.attempts = "second";
+      const r = await ask();
+      expect(r.status).toBe(503);
+      expect(await r.json()).toEqual(UNAVAILABLE);
+      expect(provider.attemptStatus).toHaveBeenCalledWith(ATT);      // the provider's answer is still recorded
+    });
+
+    it("the refunds owed cannot be read: a temporary error — not 'nothing owed', even with money arrived and no booking", async () => {
+      for (const mode of [true, "null-count"] as const) {
+        failRead.charges = mode;
+        paymentRow = pay({ status: "refund_due" }, { status: "expired", hold_expires_at: past() });
+        const r = await ask();
+        const b = await r.json();
+        expect(r.status).toBe(503);
+        expect(b).toEqual(UNAVAILABLE);
+        noClaims(b);
+      }
+    });
+
+    it("the payment itself cannot be read: the same temporary error (not 404, not 500)", async () => {
+      paymentRow = pay();
+      failRead.payments = true;
+      const r = await ask();
+      expect(r.status).toBe(503);
+      expect(await r.json()).toEqual(UNAVAILABLE);
+    });
   });
 
   it("never starts, retries or records anything itself apart from the provider's answer", async () => {
