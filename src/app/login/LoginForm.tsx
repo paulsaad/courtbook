@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { sendCodeError, verifyCodeError } from "@/lib/authText";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Cedar } from "@/components/Brand";
@@ -45,7 +46,7 @@ export default function LoginForm() {
     // Code only: the email carries a code and no sign-in link (live and staging templates), so no
     // emailRedirectTo. /auth/callback stays for Google.
     const { error } = await createClient().auth.signInWithOtp({ email: email.trim() });
-    if (error) { void reportAuthError("authCodeSend", error); setState("idle"); setError(error.message.includes("rate") ? "Too many requests. Wait a minute and try again." : error.message); return; }
+    if (error) { void reportAuthError("authCodeSend", error); setState("idle"); setError(sendCodeError(error)); return; }
     setState("sent"); setCooldown(COOLDOWN_S); setCode("");
   }
 
@@ -54,7 +55,7 @@ export default function LoginForm() {
     setVerifying(true); setError(null);
     const { error } = await createClient().auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email" });
     setVerifying(false);
-    if (error) { void reportAuthError("authCodeCheck", error); setError("That code is wrong or expired. Check the latest email, or request a new one."); return; }
+    if (error) { void reportAuthError("authCodeCheck", error); setError(verifyCodeError(error)); return; }
     router.replace(safeNext); router.refresh();
   }
 

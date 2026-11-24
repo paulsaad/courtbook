@@ -28,6 +28,8 @@ with checks(part, item, ok, detail) as (
     true, (select count(*)::text from bookings where status = 'pending' and hold_expires_at < now())
   union all select 2, 'upcoming desk walk-ins (0091: a move that changes their price needs the desk to confirm it)',
     true, (select count(*)::text from bookings where source = 'staff' and status = 'confirmed' and start_at > now())
+  union all select 2, 'upcoming bookings on courts already switched off (hidden from the staff calendar; 0092 stops new cases, these need the desk)',
+    true, (select count(*)::text from bookings b join courts c on c.id = b.court_id where not c.active and b.status in ('confirmed', 'pending') and b.end_at > now())
   union all select 2, 'public tables that 0086 gives the account lock-out trigger',
     true, (select count(*)::text from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r','p') and c.relname <> 'account_deletions')
 )

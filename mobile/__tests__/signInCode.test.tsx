@@ -80,3 +80,26 @@ describe("sign-in screen, code step", () => {
     expect(screen.queryByText(/link/i)).toBeNull();
   });
 });
+
+describe("sign-in screen, failures say what happened (Mission 3A)", () => {
+  beforeEach(() => { mockSignInWithOtp.mockReset().mockImplementation(async () => ({ error: null })); mockVerifyOtp.mockReset().mockImplementation(async () => ({ error: null })); });
+
+  it("a dropped connection while checking the code is not called a wrong code", async () => {
+    mockVerifyOtp.mockImplementation(async () => ({ error: { name: "AuthRetryableFetchError", status: 0, message: "Network request failed" } }) as never);
+    await toCodeStep();
+    await fireEvent.changeText(screen.getByTestId("code"), "87654321");
+    await fireEvent.press(screen.getByTestId("verify"));
+    expect(await screen.findByText("Couldn't reach CourtBook. Check your connection and try again.")).toBeTruthy();
+    expect(screen.queryByText(/wrong or expired/)).toBeNull();
+    expect(screen.getByTestId("code")).toBeTruthy();   // still on the code step, code kept
+  });
+  it("a failed send shows plain wording, never Supabase's server text, and stays on the email step", async () => {
+    mockSignInWithOtp.mockImplementation(async () => ({ error: { status: 500, message: "Error sending magic link email" } }) as never);
+    await render(<SignIn />);
+    await fireEvent.changeText(screen.getByTestId("email"), "player@example.com");
+    await fireEvent.press(screen.getByText("Email me a code"));
+    expect(await screen.findByText("We couldn't send the code just now. Try again in a minute.")).toBeTruthy();
+    expect(screen.queryByText(/magic link/)).toBeNull();
+    expect(screen.queryByTestId("code")).toBeNull();
+  });
+});
