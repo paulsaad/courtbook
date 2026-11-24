@@ -19,7 +19,9 @@ import { useClubInfo } from "../../lib/clubInfo";
 import { animate } from "../../lib/motion";
 import { PendingReservationBanner } from "../../components/PendingReservation";
 import { clubsFromSlots, durationLabel, durationOptions, partOfDay, sameInstant, tilesFor } from "../../lib/courts";
-import { BEIRUT, money, tilePriceLabel, useClubMode, useDaySlots, useQuote, useTilePrices } from "../../lib/queries";
+import { BEIRUT, money, tilePriceLabel, useActiveHold, useClubPayment, useDaySlots, useQuote, useTilePrices } from "../../lib/queries";
+import { FEE_PAYMENTS_ON } from "../../lib/payments";
+import { afterReserve, reservableInApp } from "../../lib/feePayment";
 import { useSession } from "../../lib/session";
 import { useReservation } from "../../lib/reservation";
 import { joinParts, timeRange, unit } from "../../lib/panelText";
@@ -67,14 +69,20 @@ export default function Club() {
   const session = useSession();
   const online = useOnline();
   const queryClient = useQueryClient();
-  const mode = useClubMode(club?.id ?? null);
+  const clubPay = useClubPayment(club?.id ?? null);
+  const mode = { data: clubPay.data?.mode, isPending: clubPay.isPending, isSuccess: clubPay.isSuccess };
+  const activeHold = useActiveHold(session.status === "signed-in");
   const res = useReservation({
     clubId: p.id ?? null,
-    onReserved: (bookingId) => {
-      haptic.success();
+    onReserved: (bookingId, status) => {
       void queryClient.invalidateQueries({ queryKey: ["my-agenda"] });
       void queryClient.invalidateQueries({ queryKey: ["day-slots"] });
-      router.replace({ pathname: "/booking/[id]", params: { id: bookingId, new: "1" } });
+      void queryClient.invalidateQueries({ queryKey: ["active-hold"] });
+      // M12.4: only a confirmed booking shows "Court booked"; a held court goes to its payment screen
+      const next = afterReserve(status);
+      if (next === "booking-new") haptic.success();
+      if (next === "pay") router.replace({ pathname: "/pay/[id]", params: { id: bookingId } });
+      else router.replace({ pathname: "/booking/[id]", params: next === "booking-new" ? { id: bookingId, new: "1" } : { id: bookingId } });
     },
   });
   // While a reservation is in flight or unconfirmed, nothing the player sent can change.
@@ -143,7 +151,7 @@ export default function Club() {
   const isDemo = club?.isDemo ?? infoClub?.is_demo ?? false;
 
   function onReserve() {
-    if (!tile || !court || !dur || !club || locked || res.blockedBy) return;
+    if (!tile || !court || !dur || !club || locked || res.blockedBy || reserveBtn.disabled) return;
     if (session.status !== "signed-in") {
       router.push({ pathname: "/sign-in" });
       return;
@@ -155,9 +163,14 @@ export default function Club() {
   }
 
   const atDesk = mode.data === "at_desk";
+  // M12.4 fee_online (this build pays in the app): a $0 fee confirms at once like the desk; a fee needs payment.
+  const feeClub = mode.data === "fee_online" && reservableInApp(mode.data, FEE_PAYMENTS_ON) && clubPay.data?.fee != null;
+  const fee = feeClub ? clubPay.data!.fee! : 0;
+  const held = !!activeHold.data && res.phase === "idle";
   const reserveBtn = reserveButton({
     phase: res.phase, signedIn: session.status === "signed-in", online, blocked: !!res.blockedBy,
-    modePending: mode.isPending, atDesk, priceKnown: shown !== null && shown.price !== null, // the panel renders only when shown exists
+    modePending: mode.isPending, atDesk: atDesk || (feeClub && fee === 0), feeOnline: feeClub && fee > 0, held,
+    priceKnown: shown !== null && shown.price !== null, // the panel renders only when shown exists
   });
   const groups = groupTiles(tiles, club?.timezone ?? BEIRUT);
   const tz = club?.timezone ?? res.pending?.timezone ?? BEIRUT;
@@ -288,13 +301,20 @@ export default function Club() {
                 ) : (
                   <Text variant="caption">Getting price…</Text>
                 )}
-                <Text variant="caption">{atDesk ? "pay at the club" : "court price"}</Text>
+                <Text variant="caption">{atDesk || feeClub ? "pay at the club" : "court price"}</Text>
               </View>
             </View>
             {res.problem ? (
               <Text style={res.phase === "idle" && !res.blockedBy ? styles.problem : styles.pending} accessibilityRole="alert" accessibilityLiveRegion="polite">{res.problem}</Text>
-            ) : atDesk ? (
+            ) : held && session.status === "signed-in" ? (
+              <View style={{ gap: 8 }}>
+                <Text variant="caption">You have a court on hold waiting for its booking fee. Pay or release it before reserving another.</Text>
+                <Button label="Go to held booking" variant="secondary" onPress={() => router.push({ pathname: "/pay/[id]", params: { id: activeHold.data!.booking_id } })} />
+              </View>
+            ) : atDesk || (feeClub && fee === 0) ? (
               <Text variant="caption">Nothing is charged in the app.{cutoff !== null ? ` Free cancellation up to ${cutoff} h before.` : ""}</Text>
+            ) : feeClub ? (
+              <Text variant="caption">{`Court price paid at the club. CourtBook booking fee ${money(fee)}, paid online to confirm — the court is held for 10 minutes while you pay. The fee is not refunded if you cancel; it is refunded if the club cancels or your booking cannot be confirmed.`}</Text>
             ) : mode.isSuccess ? (
               <Text variant="caption">This club takes payment in the app. That arrives in the next update — reserve it on the website for now.</Text>
             ) : null}

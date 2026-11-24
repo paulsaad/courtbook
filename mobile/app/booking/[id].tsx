@@ -18,6 +18,7 @@ import { durationLabel } from "../../lib/courts";
 import { sportName } from "../../lib/days";
 import { useCancellation } from "../../lib/cancel";
 import { GAME_WRITES_AVAILABLE } from "../../lib/gameActions";
+import { feeCancelNote, feeLine } from "../../lib/feePayment";
 import { color, font, radius, space } from "../../lib/theme";
 
 /**
@@ -35,6 +36,13 @@ export default function Booking() {
   const b = q.data;
   const atDesk = b?.club.payment_mode === "at_desk";
   const pay = usePayment(signedIn && b && !atDesk ? b.id : undefined);
+  // M12.1/M12.4 Model 2: the court is paid at the club and only the CourtBook fee online ('fee_only'). A fee_online
+  // booking with a $0 fee has no payment row at all and is shown like a desk booking. Model 1 (court and fee online,
+  // demo clubs) is unchanged.
+  const feeOnly = !atDesk && pay.data?.kind === "fee_only";
+  const deskLike = atDesk || (b?.club.payment_mode === "fee_online" && pay.isSuccess && !pay.data);
+  // until the payment row is read, nothing about money is claimed (never "Paid" for an unknown status)
+  const payKnown = atDesk || pay.isSuccess;
   const queryClient = useQueryClient();
   const cancel = useCancellation({
     bookingId: p.id,
@@ -61,10 +69,13 @@ export default function Booking() {
   const cutoffLabel = formatInTimeZone(cutoffAt, tz, "EEE d MMM HH:mm");
   const isNew = p.new === "1" && b.status === "confirmed";
   const price = Number(b.price_usd ?? 0);
+  const fee = Number(b.fee_usd ?? 0);
 
   function confirmCancel() {
-    const msg = atDesk
+    const msg = deskLike
       ? freeCancel ? "Nothing was paid through CourtBook, so there is nothing to refund." : "This is inside the cutoff — the club is expecting you, so let them know."
+      : feeOnly
+        ? `${freeCancel ? "The court was never paid through CourtBook." : "This is inside the cutoff — the club is expecting you, so let them know."} ${feeCancelNote(pay.data?.status, fee)}`
       : freeCancel ? "You will be refunded in full." : "This is inside the cutoff: the payment is not refunded.";
     Alert.alert("Cancel this booking?", msg, [
       { text: "Keep it", style: "cancel" },
@@ -84,7 +95,9 @@ export default function Booking() {
           <View style={styles.tick}><Icon name="check" size={28} color={color.onDark} strokeWidth={2.6} /></View>
           <Text variant="title">Court booked</Text>
           <Text variant="secondary">
-            {atDesk ? `Reservation confirmed. Pay ${money(price)} at the club.` : "Booked and paid."}
+            {deskLike ? `Reservation confirmed. Pay ${money(price)} at the club.`
+              : feeOnly ? `Booking fee paid. Pay ${money(price)} at the club.`
+              : payKnown ? "Booked and paid." : "Reservation confirmed."}
           </Text>
         </View>
       )}
@@ -97,8 +110,15 @@ export default function Booking() {
       >
         <TicketRow label="Club" value={b.club.name} />
         <TicketRow label="Court" value={[b.court?.name, durationLabel(minutes)].filter(Boolean).join(" · ")} />
-        {atDesk ? (
+        {!payKnown ? (
+          <TicketRow label="Payment" value={pay.isError ? "Couldn't load" : "Checking…"} note={pay.isError ? "Pull back and open the booking again" : undefined} />
+        ) : deskLike ? (
           <TicketRow label="Payment" value={`${money(price)} at the club`} note="Nothing was charged in the app" />
+        ) : feeOnly ? (
+          <>
+            <TicketRow label="Court price" value={money(price)} note="Pay at the club" />
+            <TicketRow label="CourtBook fee" value={feeLine(pay.data?.status, fee).value} note={feeLine(pay.data?.status, fee).note} />
+          </>
         ) : (
           <TicketRow
             label="Paid"
@@ -119,6 +139,9 @@ export default function Booking() {
       )}
 
       <View style={styles.actions}>
+        {feeOnly && b.status === "pending" && (
+          <Button label="Pay booking fee" testID="booking-pay" onPress={() => router.push({ pathname: "/pay/[id]", params: { id: b.id } })} />
+        )}
         {isNew && <Button label="See it in Bookings" onPress={() => router.dismissTo("/bookings")} />}
         {upcoming && directions && (
           <Button label="Directions" variant="secondary" onPress={() => void Linking.openURL(directions)} />
@@ -136,8 +159,10 @@ export default function Booking() {
       {upcoming && cancel.phase !== "uncertain" && (
         <View style={styles.cancelBox}>
           <Text variant="caption" style={{ textAlign: "center" }}>
-            {atDesk
+            {deskLike
               ? freeCancel ? `Free to cancel before ${cutoffLabel}. Nothing was paid through CourtBook.` : `Less than ${b.club.cancel_cutoff_hours} h before start — please tell the club.`
+              : feeOnly
+                ? `${freeCancel ? `Free to cancel the court before ${cutoffLabel}.` : `Less than ${b.club.cancel_cutoff_hours} h before start — please tell the club.`} ${feeCancelNote(pay.data?.status, fee)}`
               : freeCancel ? `Full refund if you cancel before ${cutoffLabel}.` : `Less than ${b.club.cancel_cutoff_hours} h before start: no refund.`}
           </Text>
           <Button
