@@ -62,7 +62,8 @@ export type ProviderName = "simulated" | "whish" | "areeba";
  * by asking attemptStatus (review of PR #34).
  */
 export class PaymentStartRefused extends Error {
-  constructor(public readonly reason: string) { super("payment start refused"); this.name = "PaymentStartRefused"; }
+  readonly reason: string;
+  constructor(reason: string) { super("payment start refused"); this.name = "PaymentStartRefused"; this.reason = reason; }
 }
 
 export interface PaymentProvider {
