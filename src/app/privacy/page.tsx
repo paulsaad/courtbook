@@ -38,6 +38,9 @@ export default function PrivacyPage() {
             nothing else about your age.</li>
           <li>When you accepted the community rules, and your choice about game alerts by email (we do not send these
             emails at present).</li>
+          <li><b>Where you play and your favourite clubs</b>, if you save them: up to 10 areas, the area you last browsed,
+            and up to 50 favourite clubs, kept on your account so they appear on every device you sign in on. You can
+            change or remove them at any time, and they are deleted with your account.</li>
         </ul>
 
         <h3 className="mt-2 font-semibold">Bookings and payments</h3>
@@ -98,15 +101,19 @@ export default function PrivacyPage() {
         <ul className="list-disc space-y-1 pl-5">
           <li>The app keeps your sign-in in the phone’s secure storage. The website keeps your sign-in in cookies and
             remembers the area and sport you last chose in your browser.</li>
+          <li><b>Near me</b> is optional. Only when you tap it, the app or the website asks your phone or browser for your
+            approximate position, rounds it to about a kilometre and uses it on your device to sort clubs by distance.
+            It is never sent to us or stored; we only remember, on your device, that you chose Near me. If you say no,
+            you choose an area instead.</li>
         </ul>
       </Section>
 
       <Section id="not-collected" title="What we do not do">
         <ul className="list-disc space-y-1 pl-5">
-          <li>We do not ask for your phone’s GPS or device location, in the app or on the website. Clubs are found by the
-            area you choose, not by your device’s position. The only location information we receive is the
-            approximate location (country and city) that Sentry works out for app error reports, described under
-            “Error reports and server records”.</li>
+          <li>We never ask for your precise location or track it in the background, and your position never reaches us
+            (Near me stays on your device, see above). The only location information we receive is the approximate
+            location (country and city) that Sentry works out for app error reports, described under “Error reports and
+            server records”.</li>
           <li>The app does not ask for access to your contacts, photos, camera or microphone.</li>
           <li>We show no advertising, use no advertising or analytics trackers, do not track you across other apps or
             websites, and do not sell information about you.</li>
