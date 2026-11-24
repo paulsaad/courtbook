@@ -64,7 +64,7 @@ export function safeText(v: unknown): string {
  * token) becomes ":id". Tests keep these lists in step with the code; a name missing here is only shown as ":id".
  */
 export const ROUTE_SEGMENTS = new Set([
-  "activity", "booking", "bookings", "chat", "club", "courts", "design-preview", "e2e-games", "edit", "game", "games",
+  "activity", "areas", "booking", "bookings", "chat", "club", "courts", "design-preview", "e2e-games", "edit", "game", "games",
   "help", "match", "post", "profile", "sign-in",
 ]);
 export const API_SEGMENTS = new Set([
@@ -74,6 +74,9 @@ export const API_SEGMENTS = new Set([
   "bookings", "club_media", "clubs", "courts", "match_messages", "matches", "notifications", "payments", "price_rules",
   "profiles", "sports", "towns",
   // RPCs
+  // M2 (0086) and M14 (0087–0089), added when #14 met #18/#19 in the release candidate
+  "close_my_account", "club_discovery", "dismiss_areas_question", "my_favourite_clubs", "my_playing_prefs",
+  "set_club_favourite", "set_last_area", "set_playing_areas",
   "accept_community_rules", "areas", "block_player", "book_at_desk", "booking_match", "cancel_account_deletion",
   "cancel_booking", "club_day_slots", "confirm_age", "delete_match_message", "hold_slot", "mark_notifications_read",
   "match_board", "match_detail", "match_messages_list", "match_participants", "my_account_deletion",
