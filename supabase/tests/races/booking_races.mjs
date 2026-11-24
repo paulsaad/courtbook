@@ -10,6 +10,11 @@
 //      no-show or cancelled (a late cancellation keeps the money); an expired or failed booking holds no paid money;
 //   I4 at most one payment row per booking; desk walk-ins have no payment row and no CourtBook fee;
 //   I5 an expired or failed hold never blocks a later booking of the same slot (checked by booking it afterwards).
+// FEE=1 (M12.1, 0093): the same scenarios 1–5 at a club in 'fee_online' mode (court paid at the desk, $1 fee online
+// through provider-verified attempts), then the fee-only races F6–F11 instead of 6–9, with four more invariants:
+//   I6 every successful attempt has exactly one charge; I7 a fee-only payment is paid exactly when it has one kept charge
+//   (never two); I8 every confirmed fee-only booking has its kept charge; I9 no charge refunded twice, none without a
+//   successful attempt or an unmatched record.
 // Env: DB (connection string of the scratch database), PG_MODULE (folder holding node_modules/pg).
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -24,7 +29,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ------------------------------------------------------------------ fixtures
 const CLUB = await one("select id from clubs where slug = 'batroun'");
-await q("update clubs set payment_mode = 'simulated', cancel_cutoff_hours = 6 where id = $1", [CLUB]);
+const FEE = process.env.FEE === "1";
+await q("update clubs set payment_mode = $2, service_fee_usd = 1, cancel_cutoff_hours = 6 where id = $1", [CLUB, FEE ? "fee_online" : "simulated"]);
+// fee_online applies the club's cap on upcoming bookings (as at the desk); these scenarios confirm many for one player
+if (FEE) await q("update clubs set max_upcoming_bookings = 20 where id = $1", [CLUB]);
+console.log(`mode: ${FEE ? "fee_online (M12.1)" : "simulated (Model 1)"}`);
 const U = (n) => `f0000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const P1 = U(1), P2 = U(2), S1 = U(3), S2 = U(4), X = U(5);   // two players, two desk staff of this club, staff of another
 await q(`insert into auth.users (id, phone) values ($1,'+96170000001'),($2,'+96170000002'),($3,'+96170000003'),($4,'+96170000004'),($5,'+96170000005') on conflict do nothing`, [P1, P2, S1, S2, X]);
@@ -84,7 +93,17 @@ async function invariants(label) {
   const i4 = await one(`select (select count(*) from (select booking_id from payments group by booking_id having count(*) > 1) d)
     + (select count(*) from bookings b where b.source = 'staff' and (b.fee_usd <> 0 or exists (select 1 from payments p where p.booking_id = b.id)))`);
   const bad = { i1: Number(i1), i2: Number(i2), i3: Number(i3), i4: Number(i4) };
-  rep(`${label}: invariants I1–I4 hold`, Object.values(bad).every((v) => v === 0), JSON.stringify(bad));
+  if (FEE) {
+    bad.i6 = Number(await one(`select count(*) from payment_attempts a where (a.status = 'succeeded') <> exists (select 1 from fee_charges c where c.attempt_id = a.id)`));
+    bad.i7 = Number(await one(`select count(*) from payments p where p.kind = 'fee_only' and (p.status = 'paid') <> ((select count(*) from fee_charges c where c.payment_id = p.id and c.disposition = 'kept') = 1)`))
+      + Number(await one(`select count(*) from (select payment_id from fee_charges where disposition = 'kept' group by payment_id having count(*) > 1) d`));
+    bad.i8 = Number(await one(`select count(*) from bookings b join payments p on p.booking_id = b.id where p.kind = 'fee_only' and b.status = 'confirmed'
+      and not exists (select 1 from fee_charges c where c.payment_id = p.id and c.disposition = 'kept')`));
+    bad.i9 = Number(await one(`select count(*) from fee_charges c where (c.attempt_id is null and c.reason is distinct from 'unmatched')
+      or (c.disposition = 'refunded' and c.refund_reference is null)`))
+      + Number(await one(`select count(*) from (select provider, refund_reference from fee_charges where refund_reference is not null group by 1, 2 having count(*) > 1) d`));
+  }
+  rep(`${label}: invariants ${FEE ? "I1–I4 and I6–I9" : "I1–I4"} hold`, Object.values(bad).every((v) => v === 0), JSON.stringify(bad));
 }
 const liveOn = async (court) => (await q("select status, source, player_id from bookings where court_id = $1 and status in ('confirmed','pending')", [court]));
 const hold = (club, court, s, e) => ["select booking_id, payment_id, total_usd from hold_slot($1,$2,$3,$4)", [club, court, s, e]];
@@ -141,6 +160,8 @@ for (const mode of MODES) {
 }
 await invariants("S5");
 
+if (FEE) await feeRaces();
+else {
 // 6. hold expiry versus a late payment confirmation, while another player takes the slot
 for (const mode of MODES) {
   const court = await newCourt();
@@ -253,6 +274,127 @@ for (const mode of MODES) {
     `cancel=${short(cx)} due=${due} | ${short(ra)} | ${short(rb)} | ${JSON.stringify(p)}`);
 }
 await invariants("S9");
+
+}
+
+// ------------------------------------------------------------------ M12.1 fee-only races (FEE=1)
+async function feeRaces() {
+  const ADMIN = U(6);
+  await q("insert into auth.users (id, phone) values ($1,'+96170000006') on conflict do nothing", [ADMIN]);
+  await q("update profiles set roles = '{player,admin}', rules_accepted_at = now(), age_confirmed_at = now(), age_confirmed_via = 'app' where id = $1", [ADMIN]);
+  let key = 0;
+  const newKey = () => `f1a00000-0000-4000-8000-${String(++key).padStart(12, "0")}`;
+  const solo = async (who, sql, args) => { const s = await session(who); const r = await s.run(sql, args); await s.end(); return r; };
+  const holdAs = async (who, court, s = T10, e = T11) => { const r = await solo(who, ...hold(CLUB, court, s, e)); if (!r.ok) throw new Error(`hold: ${r.err}`); return r.rows[0]; };
+  const attempt = async (who, pay) => (await solo(who, "select attempt_id from start_payment_attempt($1, $2)", [pay, newKey()])).rows[0].attempt_id;
+  const result = (a, ref, amount = 1) => ["service", "select record_attempt_result($1, 'succeeded', $2, $3, 'USD') as r", [a, ref, amount]];
+  const out = (r) => (r.ok ? r.rows[0].r ?? r.rows[0].reconcile_provider_charge ?? r.rows[0].complete_fee_refund : short(r));
+  const charges = async (pay) => (await q("select disposition || coalesce(':' || reason, '') x from fee_charges where payment_id = $1 order by 1", [pay])).map((r) => r.x).join(",");
+  const state = async (bk) => (await q("select b.status as booking, p.status as payment from bookings b join payments p on p.booking_id = b.id where b.id = $1", [bk]))[0];
+
+  // F6. the hold has run out; its late success races another player taking the slot
+  for (const mode of MODES) {
+    const court = await newCourt();
+    const h = await holdAs(P1, court);
+    const a = await attempt(P1, h.payment_id);
+    await q("update bookings set hold_expires_at = now() - interval '1 minute' where id = $1", [h.booking_id]);
+    const [ra, rb] = await race(mode, result(a, `F6-${mode}-${court}`), [P2, ...hold(CLUB, court, T10, T11)]);
+    const st = await state(h.booking_id); const live = await liveOn(court);
+    const okA = out(ra) === "confirmed" && !rb.ok && st.booking === "confirmed";
+    const okB = out(ra) === "late" && rb.ok && st.booking === "expired" && st.payment === "refund_due" && (await charges(h.payment_id)) === "refund_due:not_confirmed";
+    rep(`F6 expired hold: late fee success versus a new booking [${mode}]: one owner; a late charge is recorded and owed back`, (okA || okB) && live.length === 1,
+      `${out(ra)} | ${short(rb)} | ${JSON.stringify(st)} live=${live.length}`);
+  }
+  await invariants("F6");
+
+  // F7. the player cancels the hold while the fee succeeds
+  for (const mode of MODES) {
+    const court = await newCourt();
+    const h = await holdAs(P1, court);
+    const a = await attempt(P1, h.payment_id);
+    const [ra, rb] = await race(mode, [P1, "select cancel_booking($1)", [h.booking_id]], result(a, `F7-${mode}-${court}`));
+    const st = await state(h.booking_id); const ch = await charges(h.payment_id);
+    // cancel first: the success is late (owed back). Success first: confirmed, then the player's cancellation keeps the fee.
+    const ok = ra.ok && st.booking === "cancelled" && ((out(rb) === "late" && ch === "refund_due:not_confirmed") || (out(rb) === "confirmed" && ch === "kept" && st.payment === "paid"));
+    rep(`F7 player cancels while the fee succeeds [${mode}]: the charge is always recorded (kept after a confirmed booking, owed back otherwise)`, ok,
+      `${short(ra)} | ${out(rb)} | ${JSON.stringify(st)} ${ch}`);
+  }
+  await invariants("F7");
+
+  // F8. the same success delivered twice at once (callback + return page), and callback + reconciliation
+  for (const mode of MODES) {
+    const court = await newCourt();
+    const h = await holdAs(P1, court);
+    const a = await attempt(P1, h.payment_id);
+    const ref = `F8-${mode}-${court}`;
+    const second = mode === "sim" ? ["service", "select reconcile_provider_charge('simulated', $1, $2, 1, 'USD') as r", [a, ref]] : result(a, ref);
+    const [ra, rb] = await race(mode, result(a, ref), second);
+    const answers = [out(ra), out(rb)].sort();
+    rep(`F8 the same success twice at once${mode === "sim" ? " (callback + reconciliation)" : ""} [${mode}]: confirmed once, one charge`,
+      JSON.stringify(answers) === JSON.stringify(["already_recorded", "confirmed"]) && (await charges(h.payment_id)) === "kept", `${JSON.stringify(answers)} ${await charges(h.payment_id)}`);
+  }
+  // F8b. two different attempts both succeed at once
+  for (const mode of MODES) {
+    const court = await newCourt();
+    const h = await holdAs(P1, court);
+    const a1 = await attempt(P1, h.payment_id), a2 = await attempt(P1, h.payment_id);
+    const [ra, rb] = await race(mode, result(a1, `F8b-1-${mode}-${court}`), result(a2, `F8b-2-${mode}-${court}`));
+    const answers = [out(ra), out(rb)].sort();
+    rep(`F8b two attempts succeed at once [${mode}]: one confirms, the other is a duplicate owed back`,
+      JSON.stringify(answers) === JSON.stringify(["confirmed", "duplicate"]) && (await charges(h.payment_id)) === "kept,refund_due:duplicate", `${JSON.stringify(answers)} ${await charges(h.payment_id)}`);
+  }
+  await invariants("F8");
+
+  // F9. an admin's refund completed twice at once (two tabs): recorded once
+  for (const mode of MODES) {
+    const court = await newCourt();
+    const h = await holdAs(P1, court);
+    await q("update payments set provider = 'whish' where id = $1", [h.payment_id]);   // real money
+    const a = await attempt(P1, h.payment_id);
+    await solo(...result(a, `F9-${mode}-${court}`));
+    await solo(S1, "select cancel_booking($1, true)", [h.booking_id]);                  // club-caused: owed back
+    const c = await one("select id from fee_charges where payment_id = $1", [h.payment_id]);
+    const done = (ref) => [ADMIN, "select complete_fee_refund($1, 1, 'provider_portal', $2)", [c, ref]];
+    const [ra, rb] = await race(mode, done(`WR-${mode}-${court}`), done(`WR-${mode}-${court}`));
+    const answers = [out(ra), out(rb)].sort();
+    const st = (await q("select disposition, refund_reference from fee_charges where id = $1", [c]))[0];
+    rep(`F9 a fee refund completed twice at once [${mode}]: refunded once`, JSON.stringify(answers) === JSON.stringify(["already_refunded", "refunded"]) && st.disposition === "refunded",
+      `${JSON.stringify(answers)} ${JSON.stringify(st)}`);
+  }
+  await invariants("F9");
+
+  // F10. the club cancels the hold while the fee succeeds
+  for (const mode of MODES) {
+    const court = await newCourt();
+    const h = await holdAs(P1, court);
+    const a = await attempt(P1, h.payment_id);
+    const [ra, rb] = await race(mode, [S1, "select cancel_booking($1, true)", [h.booking_id]], result(a, `F10-${mode}-${court}`));
+    const st = await state(h.booking_id); const ch = await charges(h.payment_id);
+    const ok = ra.ok && st.booking === "cancelled" && ((out(rb) === "late" && ch === "refund_due:not_confirmed") || (out(rb) === "confirmed" && ch === "refund_due:club_cancelled"));
+    rep(`F10 the club cancels while the fee succeeds [${mode}]: the fee is always owed back`, ok, `${short(ra)} | ${out(rb)} | ${JSON.stringify(st)} ${ch}`);
+  }
+  await invariants("F10");
+
+  // F11. four "pay" taps at once with different keys, and two with the same key
+  {
+    const court = await newCourt();
+    const h = await holdAs(P1, court);
+    const sessions = await Promise.all([0, 1, 2, 3].map(() => session(P1)));
+    const keys = [newKey(), newKey(), newKey(), newKey()];
+    const rs = await Promise.all(sessions.map((s, i) => s.run("select attempt_no from start_payment_attempt($1, $2)", [h.payment_id, keys[i]]).then(async (r) => { await s.end(); return r; })));
+    const made = Number(await one("select count(*) from payment_attempts where payment_id = $1", [h.payment_id]));
+    rep("F11 four simultaneous attempts: at most three are made, the fourth is refused", made === 3 && rs.filter((r) => !r.ok && /attempts_exhausted/.test(r.err)).length === 1,
+      `made=${made} ${rs.map(short).join(" | ")}`);
+    const court2 = await newCourt();
+    const h2 = await holdAs(P2, court2);
+    const k = newKey();
+    const [ra, rb] = await race("sim", [P2, "select attempt_id, already from start_payment_attempt($1, $2)", [h2.payment_id, k]], [P2, "select attempt_id, already from start_payment_attempt($1, $2)", [h2.payment_id, k]]);
+    const made2 = Number(await one("select count(*) from payment_attempts where payment_id = $1", [h2.payment_id]));
+    rep("F11 the same request twice at once: one attempt, both answers name it", ra.ok && rb.ok && made2 === 1 && ra.rows[0].attempt_id === rb.rows[0].attempt_id,
+      `${short(ra)} | ${short(rb)} made=${made2}`);
+  }
+  await invariants("F11");
+}
 
 const left = await one("select count(*) from bookings where status = 'pending' and hold_expires_at < now() - interval '1 hour'");
 void left;
