@@ -17,8 +17,10 @@
 # extra characters) before any secret is used. Changing TARGET is a reviewed change to this file.
 #
 # One POST per run; no checkout; no repository permissions; output is the HTTP status and counts (no account ids).
-# A run by hand with probe = true first checks that the route refuses callers without the bypass, without the bearer
-# secret, and with a wrong one; then makes the normal call.
+# A run by hand with probe = true first checks that the route refuses callers without the bearer secret (with and
+# without the bypass) and with a wrong one; then makes the normal call. No probe request carries the real bearer: only
+# the final call does (24 Nov, M12.4 staging plan E3 — once the staging-web alias is public, a probe request with the
+# real bearer and no bypass would reach the route and run the worker).
 # Every successful call records the worker heartbeat; the new app offers one-step deletion only while it is under an
 # hour old, so if this stops, app deletions pause (the website keeps working).
 # Turning it off: disable this workflow (Actions → Deletion retries → Disable), or delete CRON_SECRET in Vercel
@@ -85,13 +87,18 @@ jobs:
           # https only, never follows a redirect (no -L), always to TARGET; prints "status redirect-target"
           call() { curl -sS --proto '=https' --max-redirs 0 -o /tmp/out.json -w '%{http_code} %{redirect_url}' --max-time 90 -X POST "$@" "$TARGET"; }
           if [ "$PROBE" = true ]; then
-            r1=$(call -H "Authorization: Bearer $SECRET"); c1=${r1%% *}; to1=${r1#* }                   # no bypass
+            # Without the bearer secret, a request must be refused whatever the Vercel protection is:
+            #   c1  no bypass, no bearer: 401 from the route (alias public), or Vercel's own refusal while the alias is
+            #       still protected (401/403, or a redirect to Vercel login). Never 200: it carries no secret at all.
+            #   c2  bypass, no bearer: 401 from the route.
+            #   c3  bypass, wrong bearer: 401 from the route.
+            r1=$(call); c1=${r1%% *}; to1=${r1#* }                                                        # no bypass, no bearer
             c2=$(call -H "x-vercel-protection-bypass: $BYPASS" | cut -d' ' -f1)                          # no bearer
             c3=$(call -H "x-vercel-protection-bypass: $BYPASS" -H "Authorization: Bearer wrong-$RANDOM-$RANDOM-$RANDOM-$RANDOM" | cut -d' ' -f1)
-            echo "probe: without bypass HTTP $c1 (expect 401/403, or a redirect to Vercel login); without bearer HTTP $c2 (expect 401); wrong bearer HTTP $c3 (expect 401)"
+            echo "probe: no bypass and no bearer HTTP $c1 (expect 401, or Vercel login while protected); bypass without bearer HTTP $c2 (expect 401); wrong bearer HTTP $c3 (expect 401)"
             refused=false
             case "$c1" in 401|403) refused=true;; 302|303|307|308) case "$to1" in https://vercel.com/*) refused=true;; esac;; esac
-            [ "$refused" = true ] && [ "$c2" = 401 ] && [ "$c3" = 401 ] || { echo "::error::the route or Vercel protection did not refuse as expected"; exit 1; }
+            [ "$refused" = true ] && [ "$c2" = 401 ] && [ "$c3" = 401 ] || { echo "::error::a request without the bearer secret was not refused"; exit 1; }
           fi
           code=$(call -H "x-vercel-protection-bypass: $BYPASS" -H "Authorization: Bearer $SECRET" | cut -d' ' -f1)
           echo "staging: HTTP $code $(head -c 300 /tmp/out.json)"
