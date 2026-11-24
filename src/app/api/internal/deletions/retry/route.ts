@@ -2,11 +2,16 @@ import { NextResponse } from "next/server";
 import { processDeletion, serviceDeps, type Outcome } from "@/lib/deletion/pipeline";
 import { bearerMatches } from "@/lib/deletion/request";
 import { report } from "@/lib/report";
+import { finishRetryCheckIn, startRetryCheckIn } from "@/lib/deletion/monitor";
 
 /**
  * M2 (0086), R1: continues closed accounts whose processing is due (app closures, and website runs that failed part
- * way). Meant to be called on a schedule; NO SCHEDULE IS CONFIGURED (activation is a separate approval, see
- * docs/m2-deletion-retry-activation.md). Until then an admin's Retry on /admin/deletions does the same for one record.
+ * way). Called by the Vercel schedule "deletion-retry" in vercel.json (GET, Authorization: Bearer CRON_SECRET). That
+ * schedule is created INACTIVE on Preview branches and must be enabled per branch; enabling it is a separate approval.
+ * Production gets it only through a reviewed release. An admin's Retry on /admin/deletions does the same for one record.
+ *
+ * Monitoring: a run that passed the bearer check sends Sentry cron check-ins (src/lib/deletion/monitor.ts): in_progress,
+ * then ok (200) or error (any other status). Unauthenticated calls send none; a schedule that stops shows as missed.
  *
  * Caller: "Authorization: Bearer <CRON_SECRET>". With no CRON_SECRET (or one shorter than 32 characters) the route
  * answers 503 and does nothing. Takes no input: what to process comes from the database (deletions_due), never from
@@ -41,6 +46,22 @@ async function run(request: Request) {
   if (auth === "unset") return NextResponse.json({ error: "not_configured" }, { status: 503 });
   if (auth === "no") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
+  // from here on the caller is the scheduler (or a holder of the secret): monitored
+  const startedAt = Date.now();
+  const checkIn = startRetryCheckIn();
+  let res: NextResponse;
+  try {
+    res = await runAuthorised();
+  } catch (e) {
+    await finishRetryCheckIn(checkIn, 500, startedAt);
+    throw e;
+  }
+  await finishRetryCheckIn(checkIn, res.status, startedAt);
+  return res;
+}
+
+/** The run itself, unchanged by the monitoring around it. */
+async function runAuthorised(): Promise<NextResponse> {
   const deps = await serviceDeps();
   const promoted = await deps.rpc("promote_due_requests", {});
   if (promoted.error) {

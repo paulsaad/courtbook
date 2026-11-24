@@ -353,7 +353,8 @@ export const IGNORE_ERRORS: (string | RegExp)[] = [
 /** "production" | "staging" (branch m3-dev) | "preview" (other branches) | "development". */
 export function monitoringEnvironment(vercelEnv: string | undefined, gitRef: string | undefined): string {
   if (vercelEnv === "production") return "production";
-  if (vercelEnv === "preview") return gitRef === "m3-dev" ? "staging" : "preview";
+  // staging websites: m3-dev (main project, until 24 Nov) and staging-web (courtbook-staging project)
+  if (vercelEnv === "preview") return gitRef === "m3-dev" || gitRef === "staging-web" ? "staging" : "preview";
   return "development";
 }
 
