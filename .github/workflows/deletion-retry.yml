@@ -1,0 +1,98 @@
+# M2 (0086), R1: automatic deletion retries — STAGING ONLY (staging step 3, docs/ops/release-candidate-staging.md).
+#
+# Calls the staging website's /api/internal/deletions/retry every 15 minutes. Production is deliberately not a target
+# in this file: adding it later is a separate, reviewed change.
+#
+# Secrets live in the GitHub environment `staging-deletion-retry`, whose deployment branches are limited to `main`
+# (Settings → Environments). A run from any other branch, a fork or a pull request cannot read them.
+#   CRON_SECRET_STAGING          the same value as Vercel's CRON_SECRET (Preview, branch staging-web only), ≥ 32 chars
+#   VERCEL_BYPASS_STAGING        Vercel "Protection Bypass for Automation" secret (staging is behind Vercel login)
+#   DELETION_RETRY_URL_STAGING   must be exactly TARGET below (a secret, so it is masked in this public repository's logs)
+# With any of the three missing, a run calls nothing and says so.
+#
+# Destination (review 24 Nov, PR #31): the secrets are only ever sent to TARGET, the courtbook-staging project's
+# staging-web address, written in this file. It is an exact match, not a pattern: any other configured URL stops the run
+# before anything is sent, every call uses TARGET itself, and curl never follows a redirect. A regression check at the
+# start of every run proves the guard refuses near misses (other Vercel hosts, look-alike hosts, user info, http, ports,
+# extra characters) before any secret is used. Changing TARGET is a reviewed change to this file.
+#
+# One POST per run; no checkout; no repository permissions; output is the HTTP status and counts (no account ids).
+# A run by hand with probe = true first checks that the route refuses callers without the bypass, without the bearer
+# secret, and with a wrong one; then makes the normal call.
+# Every successful call records the worker heartbeat; the new app offers one-step deletion only while it is under an
+# hour old, so if this stops, app deletions pause (the website keeps working).
+# Turning it off: disable this workflow (Actions → Deletion retries → Disable), or delete CRON_SECRET in Vercel
+# (the route then answers 503 and does nothing).
+name: Deletion retries (staging)
+
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"   # every 15 min, off the hour (GitHub delays runs at :00)
+  workflow_dispatch:
+    inputs:
+      probe:
+        description: "Also check that the route refuses callers without the bypass or the bearer secret"
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: deletion-retry-staging
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    environment: staging-deletion-retry
+    steps:
+      - name: Call the staging retry route
+        env:
+          URL: ${{ secrets.DELETION_RETRY_URL_STAGING }}
+          SECRET: ${{ secrets.CRON_SECRET_STAGING }}
+          BYPASS: ${{ secrets.VERCEL_BYPASS_STAGING }}
+          PROBE: ${{ inputs.probe && 'true' || 'false' }}
+        run: |
+          # The only address this workflow may send the secrets to. Every call below uses it; the secret must equal it.
+          TARGET='https://courtbook-staging-git-staging-web-paul-bc50.vercel.app/api/internal/deletions/retry'
+          url_ok() { [ "$1" = "$TARGET" ]; }
+
+          # Regression check, before any secret is used: the guard must refuse near misses and accept TARGET.
+          host='courtbook-staging-git-staging-web-paul-bc50.vercel.app'; path='/api/internal/deletions/retry'
+          for bad in \
+            "https://courtbook-git-staging-web-paul-bc50.vercel.app$path" \
+            "https://courtbook-staging.vercel.app$path" \
+            "https://attacker.vercel.app$path" \
+            "https://$host.attacker.example$path" \
+            "https://$host@attacker.vercel.app$path" \
+            "https://user@$host$path" \
+            "http://$host$path" \
+            "https://$host:8443$path" \
+            "https://COURTBOOK-STAGING-git-staging-web-paul-bc50.vercel.app$path" \
+            "https://$host/api/internal/deletions/retry2" \
+            "https://$host/x/api/internal/deletions/retry" \
+            "$TARGET/" "$TARGET?x=1" "$TARGET#x" "$TARGET " " $TARGET" "$TARGET"$'\n' ""; do
+            if url_ok "$bad"; then echo "::error::URL guard accepted a wrong address; nothing called"; exit 1; fi
+          done
+          url_ok "$TARGET" || { echo "::error::URL guard refused the approved address; nothing called"; exit 1; }
+
+          if [ -z "$URL" ] || [ -z "$SECRET" ] || [ -z "$BYPASS" ]; then
+            echo "staging: not activated (a secret of environment staging-deletion-retry is missing); nothing called."; exit 0
+          fi
+          url_ok "$URL" || { echo "::error::DELETION_RETRY_URL_STAGING is not the approved courtbook-staging address; nothing called"; exit 1; }
+          [ ${#SECRET} -ge 32 ] || { echo "::error::CRON_SECRET_STAGING is shorter than 32 characters"; exit 1; }
+          # https only, never follows a redirect (no -L), always to TARGET; prints "status redirect-target"
+          call() { curl -sS --proto '=https' --max-redirs 0 -o /tmp/out.json -w '%{http_code} %{redirect_url}' --max-time 90 -X POST "$@" "$TARGET"; }
+          if [ "$PROBE" = true ]; then
+            r1=$(call -H "Authorization: Bearer $SECRET"); c1=${r1%% *}; to1=${r1#* }                   # no bypass
+            c2=$(call -H "x-vercel-protection-bypass: $BYPASS" | cut -d' ' -f1)                          # no bearer
+            c3=$(call -H "x-vercel-protection-bypass: $BYPASS" -H "Authorization: Bearer wrong-$RANDOM-$RANDOM-$RANDOM-$RANDOM" | cut -d' ' -f1)
+            echo "probe: without bypass HTTP $c1 (expect 401/403, or a redirect to Vercel login); without bearer HTTP $c2 (expect 401); wrong bearer HTTP $c3 (expect 401)"
+            refused=false
+            case "$c1" in 401|403) refused=true;; 302|303|307|308) case "$to1" in https://vercel.com/*) refused=true;; esac;; esac
+            [ "$refused" = true ] && [ "$c2" = 401 ] && [ "$c3" = 401 ] || { echo "::error::the route or Vercel protection did not refuse as expected"; exit 1; }
+          fi
+          code=$(call -H "x-vercel-protection-bypass: $BYPASS" -H "Authorization: Bearer $SECRET" | cut -d' ' -f1)
+          echo "staging: HTTP $code $(head -c 300 /tmp/out.json)"
+          [ "$code" = 200 ] || { echo "::error::the retry run did not succeed (HTTP $code); see the counts and problems above"; exit 1; }
