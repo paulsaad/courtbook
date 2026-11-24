@@ -1,4 +1,4 @@
-# Release candidate (0086–0091): staging rollout plan
+# Release candidate (0086–0092): staging rollout plan
 
 Status: **plan only.** Every step needs Paul's go. Staging first; live repeats the same steps later.
 
@@ -16,12 +16,13 @@ Status: **plan only.** Every step needs Paul's go. Staging first; live repeats t
 | 4 | `apply` `0087 0088 0089` with the website from #19 (+#24) | `repeat_use` behaviour on staging: the website check of areas, favourites and Near me in a browser (staging `web_accept`, after adding M14 steps); the coordinates audit (read only) | A published club loses visibility; favourites or areas readable by another account |
 | 5 | `apply` `0090` | Postcheck row "0090" ok; `api` action (booking checks through Supabase's API) PASS | Any booking check fails |
 | 6 | `apply` `0091` with the website from #23 | `rc_postcheck` all ok; `staff_ops`-equivalent desk check in a browser: walk-in, extend (price shown and confirmed), move, cancel | The calendar shows "paid in the app" for an unpaid booking, or a move changes a price without showing it |
+| 6b | `apply` `0092` with the website from #27 | Postcheck row "0092" ok ("applied"); in a browser: set one price with one peak on a club with no prices; Prices lists the expected rules; deactivating a court with an upcoming booking is refused with the plain message | A quote differs from the rules shown, or a booked court can be deactivated |
 | 7 | **App OTA to staging, JavaScript only:** #18 + #19 code **without #20**. The update workflow's fingerprint gate refuses native changes, so this needs a branch without `expo-location` | Paul's phone: one-step deletion (email code if the session is old), areas, favourites, "Not now"; the A17 retest | The gate refuses (native code slipped in), or any phone check fails: republish the previous update (`rollback-to-previous`) |
 | 8 | Native build with #20 (app version bumped, e.g. 0.4.0), staging channel | Near me: approximate only; prompt only on tap; Beirut/Batroun behaviour; `check-native-config` | Precise or background location requested |
 
 ## Rollback limits (read before step 1)
 
-- **No down migrations.** 0086–0091 are additive or redefine functions. Going back means a forward fix.
+- **No down migrations.** 0086–0092 are additive or redefine functions. Going back means a forward fix.
 - **Website:** redeploy the previous staging preview. Old pages keep working on the new database:
   - the old move call still works when the price does not change;
   - the old deletion calls still work (step 1's checks).
@@ -39,7 +40,7 @@ Status: **plan only.** Every step needs Paul's go. Staging first; live repeats t
 | What | Where | Needed by |
 | --- | --- | --- |
 | `CRON_SECRET` (Preview), `CRON_SECRET_STAGING`, `DELETION_RETRY_URL_STAGING`, Vercel bypass secret | Vercel + GitHub (Paul) | Step 3 |
-| No new variables for 0087–0091 or the website | — | — |
+| No new variables for 0087–0092 or the website | — | — |
 | App: none for the OTA; `expo-location` plugin already in `app.json` (#20) | — | Step 8 |
 
 ## Monitoring during the rollout

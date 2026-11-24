@@ -1,12 +1,14 @@
--- Release candidate 0086–0091 — PREFLIGHT. READ ONLY: one SELECT, changes nothing.
+-- Release candidate 0086–0092 — PREFLIGHT. READ ONLY: one SELECT, changes nothing.
 -- Part 1 rows must all be ok before applying; part 2 is information to note in the run log.
 with checks(part, item, ok, detail) as (
   select 1, '0085 is applied (club_readable_by_me exists)', to_regprocedure('club_readable_by_me(uuid,boolean)') is not null, ''
-  union all select 1, 'nothing of 0086–0091 is here yet (no half-applied release)',
+  union all select 1, 'nothing of 0086–0092 is here yet (no half-applied release)',
     to_regclass('public.deletion_worker') is null and to_regclass('public.club_favourites') is null and to_regclass('public.player_areas') is null
-    and to_regclass('public.player_prefs') is null and to_regprocedure('quote_move(uuid,uuid,timestamptz,timestamptz)') is null,
+    and to_regclass('public.player_prefs') is null and to_regprocedure('quote_move(uuid,uuid,timestamptz,timestamptz)') is null
+    and to_regprocedure('set_club_base_prices(uuid,numeric,jsonb,boolean)') is null,
     concat_ws(',', case when to_regclass('public.deletion_worker') is not null then 'deletion_worker' end, case when to_regclass('public.club_favourites') is not null then 'club_favourites' end,
-      case when to_regclass('public.player_areas') is not null then 'player_areas' end, case when to_regprocedure('quote_move(uuid,uuid,timestamptz,timestamptz)') is not null then 'quote_move' end)
+      case when to_regclass('public.player_areas') is not null then 'player_areas' end, case when to_regprocedure('quote_move(uuid,uuid,timestamptz,timestamptz)') is not null then 'quote_move' end,
+      case when to_regprocedure('set_club_base_prices(uuid,numeric,jsonb,boolean)') is not null then 'set_club_base_prices' end)
   union all select 1, 'account_deletions has only statuses 0086 knows (requested, cancelled, done)',
     not exists (select 1 from account_deletions where status not in ('requested', 'cancelled', 'done')),
     coalesce((select string_agg(distinct status, ',') from account_deletions where status not in ('requested', 'cancelled', 'done')), '')
