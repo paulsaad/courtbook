@@ -109,7 +109,7 @@ describe("resumeNearby (app start / screen return) never asks", () => {
   });
 });
 
-describe("enableNearby (the player tapped Use my location)", () => {
+describe("enableNearby (the player tapped Near me)", () => {
   it("asks once when undetermined; granted → on", async () => {
     const { p, calls } = provider({ perm: "undetermined", afterRequest: "granted" });
     expect((await enableNearby(p, now)).status).toBe("on");
@@ -119,7 +119,7 @@ describe("enableNearby (the player tapped Use my location)", () => {
     const { p } = provider({ perm: "undetermined", afterRequest: "denied", canAskAgain: true });
     const s = await enableNearby(p, now);
     expect(s).toEqual({ status: "denied", canAskAgain: true });
-    expect(locationNote(s)).toBe("Location is off. Choose an area instead, or tap Use my location to try again.");
+    expect(locationNote(s)).toBe("Location is off. Choose an area instead, or tap Near me to try again.");
   });
   it("blocked in Settings → no prompt shown (it can't be), note says Settings", async () => {
     const { p, calls } = provider({ perm: "denied", canAskAgain: false });
