@@ -73,10 +73,12 @@ describe("runPaymentReconciliation", () => {
     expect(s.window?.advanced).toBe(true);
     expect(s.problems).toEqual(["reconciliation_behind"]);
   });
-  it("REVIEW 2: first run ever starts 48 h back; a failed window does not move the watermark", async () => {
+  it("no verified starting point yet: the charge list is not read at all, and the run says so; a failed window does not move the watermark", async () => {
     const g = new FakeGateway(() => NOW.getTime());
-    let s = await runPaymentReconciliation(world({ reconciled_until: null }).rpc, g, { now: NOW });
-    expect(g.listCalls[0].since).toBe(NOW.getTime() - 48 * 3_600_000);
+    const first = world({ reconciled_until: null });
+    let s = await runPaymentReconciliation(first.rpc, g, { now: NOW });
+    expect([g.listCalls, s.problems, s.window]).toEqual([[], ["reconciliation_not_initialised"], null]);
+    expect(first.calls.map((c) => c.fn)).not.toContain("advance_reconciliation_watermark");
     g.foreignCharge(1, "USD", NOW.getTime() - 60_000);
     const { rpc, calls } = world({}, { reconcile_provider_charge: () => ({ error: { message: "permission denied" } }) });
     s = await runPaymentReconciliation(rpc, g, { now: NOW });

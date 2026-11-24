@@ -10,7 +10,9 @@ import { paymentCode, sweepOpenAttempts, type Rpc, type SweepSummary } from "./a
  *     is counted, never silently skipped.
  *  2. Health (0094), read after the sweep: attempts of another provider than this runner's (misconfiguration),
  *     attempts still unresolved past the overdue age, reconciliation issues nobody has resolved yet. Each is a problem.
- *  3. Charge list (if the provider offers one): read from the watermark (minus an overlap) for at most one window,
+ *  3. Charge list (if the provider offers one): never before a person has set a verified starting point
+ *     (initialise_reconciliation_watermark, 0094) — until then the run reports `reconciliation_not_initialised`.
+ *     Then read from the watermark (minus an overlap) for at most one window,
  *     reconciled charge by charge. The watermark moves forward only when the whole window was processed, so a window
  *     that failed or ran out of time is read again, and a runner that was down catches up window by window. Evidence
  *     that contradicts a recorded charge is kept as an issue until a person resolves it.
@@ -60,12 +62,17 @@ export type RunSummary = {
   window: { since: string; until: string; advanced: boolean } | null; problems: string[];
 };
 
+/**
+ * overlapMinutes and maxWindowHours are PLACEHOLDERS for provider-independent tests. Before real payments they must be
+ * chosen from the provider's verified behaviour (for Whish: how long after a charge it appears in the transaction
+ * history — the overlap must exceed that delay — and how far back the history can be read — every window and the
+ * initial starting point must stay inside that retention). Not verified for Whish yet.
+ */
 export const RECONCILE_DEFAULTS = {
   minAgeSeconds: 120,     // leave the player's own return page a moment first
   limit: 50,              // attempts asked about per run (oldest check first)
   overdueHours: 48,       // an attempt still unresolved after this needs a person
   overlapMinutes: 60,     // each charge window starts this far before the watermark (late-arriving provider records)
-  initialHours: 48,       // first ever run: how far back to start
   maxWindowHours: 24,     // at most this much of the provider's list per run; further windows on the next runs
   budgetMs: 40_000,
 };
@@ -101,10 +108,11 @@ export async function runPaymentReconciliation(admin: Rpc, provider: PaymentProv
   if (provider.listCharges) {
     if (!health) {
       problems.add("incomplete");                                     // no watermark: the charge list waits for the next run
+    } else if (!health.reconciled_until) {
+      // no verified starting point yet: nothing is read, and the run says so (500) until a person sets one
+      problems.add("reconciliation_not_initialised");
     } else {
-      const since = health.reconciled_until
-        ? new Date(new Date(health.reconciled_until).getTime() - o.overlapMinutes * 60_000)
-        : new Date(now.getTime() - o.initialHours * 3_600_000);
+      const since = new Date(new Date(health.reconciled_until).getTime() - o.overlapMinutes * 60_000);
       const until = new Date(Math.min(now.getTime(), since.getTime() + o.maxWindowHours * 3_600_000));
       window = { since: since.toISOString(), until: until.toISOString(), advanced: false };
       let charges: ProviderCharge[] | null = null;

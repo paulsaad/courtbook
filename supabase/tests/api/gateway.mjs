@@ -84,12 +84,28 @@ async function elapse(minutes) {
 }
 const HOLD = Number(await one("select hold_minutes from clubs where id = $1", [CLUB]));
 
-// ------------------------------------------------------------------ the first runs catch up from nothing (48 h back, 24 h per run)
+// ------------------------------------------------------------------ G0 the starting point (review of PR #36): never a default
 {
+  const before = gw.foreignCharge(1, "USD", Date.now() - 30 * 3_600_000);   // a charge taken long before activation
+  const r0 = await run();
+  const listed0 = gw.listCalls.length;
+  const adv = await service.rpc("advance_reconciliation_watermark", { p_provider: "whish", p_until: new Date().toISOString() });
+  const rew = await service.rpc("rewind_reconciliation_watermark", { p_provider: "whish", p_to: new Date().toISOString() });
+  rep("G0 no starting point set: the charge list is not read, the run reports reconciliation_not_initialised; nothing can move a watermark that was never set",
+    r0.problems.includes("reconciliation_not_initialised") && listed0 === 0 && /not_initialised/.test(adv.error?.message ?? "") && /not_initialised/.test(rew.error?.message ?? "")
+    && Number(await one("select count(*) from payment_reconciliation")) === 0, { r0: r0.problems, listed0, adv: adv.error?.message, rew: rew.error?.message });
+  // a person sets the verified starting point (here: 36 h ago, before that charge — so it is reconciled)
+  const from = new Date(Date.now() - 36 * 3_600_000).toISOString();
+  const init = await service.rpc("initialise_reconciliation_watermark", { p_provider: "whish", p_from: from });
+  const again = await service.rpc("initialise_reconciliation_watermark", { p_provider: "whish", p_from: new Date().toISOString() });
+  const players0 = await asUser(players[0]).rpc("initialise_reconciliation_watermark", { p_provider: "whish", p_from: from });
   const runs = [];
   for (let i = 0; i < 5; i++) { const r = await run(); runs.push(r.problems); if (!r.problems.length) break; }
-  rep("G0 first ever runs: 48 h back, at most 24 h a run (each window starts 1 h before the watermark); 'behind' on every run until caught up, then a clean run",
-    runs.length >= 2 && runs.slice(0, -1).every((p) => p.length === 1 && p[0] === "reconciliation_behind") && runs.at(-1).length === 0, runs);
+  const row = (await q("select reason from fee_charges where provider = 'whish' and provider_ref = $1", [before.providerRef]))[0];
+  rep("G0 once a person sets it: set once only (and never by a player); the runs read from it, 'behind' until caught up, and the earlier charge is reconciled",
+    !init.error && /already_initialised/.test(again.error?.message ?? "") && !!players0.error
+    && runs.slice(0, -1).every((p) => p.length === 1 && p[0] === "reconciliation_behind") && runs.at(-1).length === 0 && row?.reason === "unmatched",
+    { init: init.error?.message, again: again.error?.message, runs, row });
 }
 
 // ------------------------------------------------------------------ scenarios
@@ -261,6 +277,17 @@ const HOLD = Number(await one("select hold_minutes from clubs where id = $1", [C
   const staffTry = await asUser(players[0]).rpc("resolve_reconciliation_issue", { p_issue: issue?.id, p_resolution: "x" });
   const ok = await asUser(ADMIN).rpc("resolve_reconciliation_issue", { p_issue: issue?.id, p_resolution: "provider confirmed $1; corrected its report" });
   const r3 = await run();
+  // review of PR #36: the same provider transaction, now with yet another amount — new contradictory evidence the
+  // resolution did not cover: the issue reopens. Seen again with that same evidence after a new resolution: stays closed.
+  gw.restate(c.providerRef, { amount: 3 });
+  const r4 = await run({ overlapMinutes: 24 * 60 });
+  const reopened = (await q("select resolved_at is null as open, reopened, last_resolution, amount::float as amount from payment_reconciliation_issues where id = $1", [issue?.id]))[0];
+  await asUser(ADMIN).rpc("resolve_reconciliation_issue", { p_issue: issue?.id, p_resolution: "provider corrected again to $3, refunded" });
+  const r5 = await run({ overlapMinutes: 24 * 60 });
+  const closed = (await q("select resolved_at is not null as resolved, seen from payment_reconciliation_issues where id = $1", [issue?.id]))[0];
+  rep("G15b different evidence for a resolved provider transaction (a new amount) reopens the issue and is raised; the same evidence again after a new resolution stays resolved",
+    r4.problems.includes("conflicts") && reopened?.open && reopened?.reopened === 1 && reopened?.amount === 3 && /\$1/.test(reopened?.last_resolution ?? "")
+    && closed?.resolved && !r5.problems.includes("conflicts") && !r5.problems.includes("open_issues"), { r4: r4.problems, reopened, closed, r5: r5.problems });
   rep("G15 a conflict is kept as an issue: reported on every run (also once out of the window) until an admin resolves it; only an admin can",
     r1.problems.includes("conflicts") && r2.problems.includes("open_issues") && !r2.problems.includes("conflicts") && issue?.code === "charge_evidence_conflict"
     && /forbidden/.test(staffTry.error?.message ?? "") && ok.data === "resolved" && r3.problems.length === 0, { r1: r1.problems, r2: r2.problems, issue, r3: r3.problems });

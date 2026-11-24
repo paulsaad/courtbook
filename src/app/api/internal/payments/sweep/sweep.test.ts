@@ -47,6 +47,11 @@ describe("GET /api/internal/payments/sweep", () => {
     expect([res.status, (await res.json()).problems]).toEqual([500, ["conflicts"]]);
     expect(reported).toEqual([["paymentConflict", "payment", { code: "conflicts" }]]);
   });
+  it("no verified starting point for the charge list: 500 reconciliation_not_initialised (never a silent default)", async () => {
+    answers.payment_reconciliation_health = () => ({ data: [{ ...HEALTHY, reconciled_until: null }] });
+    const res = await route.GET(req(`Bearer ${SECRET}`));
+    expect([res.status, (await res.json()).problems]).toEqual([500, ["reconciliation_not_initialised"]]);
+  });
   it("an incomplete run (time budget) or a wrongly configured provider: 500, never a success", async () => {
     answers.payment_reconciliation_health = () => ({ data: [{ ...HEALTHY, other_provider_attempts: 2, reconciled_until: new Date().toISOString() }] });
     const res = await route.GET(req(`Bearer ${SECRET}`));
