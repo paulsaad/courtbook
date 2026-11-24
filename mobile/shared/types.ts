@@ -32,7 +32,24 @@ export type Booking = {
   player_name?: string | null;
   /** staff only: guest phone, or the player's own, from club_booking_contacts */
   contact_phone?: string | null;
+  /** staff only: the booking's CourtBook payment, if any. None for desk walk-ins and for app bookings at a club
+   *  that takes payment at its desk (book_at_desk) — the desk collects those. */
+  payments?: { status: string } | { status: string }[] | null;   // one-to-one (unique booking_id): an object or null
 };
+
+/** What the staff calendar reads for each booking (staff may read their club's payments). */
+export const STAFF_BOOKING_COLUMNS = "id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id, price_usd, fee_usd, hold_expires_at, payments(status)";
+
+/** How the desk settles a booking: still paying in the app, paid in the app, or to be paid at the desk. */
+export function settlement(b: Pick<Booking, "status" | "source" | "fee_usd" | "payments">): "awaiting" | "paid_in_app" | "at_desk" {
+  if (b.status === "pending") return "awaiting";
+  if (b.source !== "app") return "at_desk";
+  if (b.payments !== undefined) {
+    const list = Array.isArray(b.payments) ? b.payments : b.payments ? [b.payments] : [];
+    return list.some((p) => p.status === "paid") ? "paid_in_app" : "at_desk";
+  }
+  return Number(b.fee_usd ?? 0) > 0 ? "paid_in_app" : "at_desk";   // older reads without payments: an at-desk booking carries no fee
+}
 
 export type Block = { id: string; court_id: string; start_at: string; end_at: string; reason: string | null };
 

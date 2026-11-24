@@ -98,6 +98,12 @@ export function pointFromMapLink(text: string | null | undefined): LatLng | null
   }
   return null;
 }
+/** A map link was given but holds no point: a short share link (maps.app.goo.gl, goo.gl/maps) or a place name. */
+export function linkWithoutPoint(text: string | null | undefined): "short" | "other" | null {
+  const s = (text ?? "").trim();
+  if (!s || pointFromMapLink(s)) return null;
+  return /(^|\/\/)(maps\.app\.goo\.gl|goo\.gl\/maps)\//i.test(s) ? "short" : "other";
+}
 function decodeURIComponentSafe(s: string): string { try { return decodeURIComponent(s); } catch { return s; } }
 
 // ---- saved playing areas (0088) -------------------------------------------------------------------
