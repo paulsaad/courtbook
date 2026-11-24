@@ -219,6 +219,31 @@ describe("staff calendar lengths follow the club's limits (Phase 9 / 0066)", () 
   });
 });
 
+describe("how the desk settles each booking (audit 24 Nov)", () => {
+  const open = async (b: Booking) => {
+    view({ bookings: [b] });
+    await act(async () => { screen.getAllByRole("button", { name: new RegExp(b.guest_name!) })[0].click(); });
+    return screen.getByText(/\$20\.00/).textContent ?? "";
+  };
+  it("a desk walk-in: take payment at the desk", async () => {
+    expect(await open(booking("w1", "Walk In"))).toMatch(/take payment at the desk, not through CourtBook/);
+  });
+  it("an app booking at a club that takes payment at its desk (no CourtBook payment): take payment at the desk, never 'paid in the app'", async () => {
+    const text = await open({ ...booking("d1", "Desk Player"), source: "app", fee_usd: 0, payments: null });
+    expect(text).toMatch(/take payment at the desk/);
+    expect(text).not.toMatch(/paid in the app/);
+  });
+  it("an app booking paid through CourtBook: paid in the app, with the fee", async () => {
+    expect(await open({ ...booking("p1", "App Player"), source: "app", fee_usd: 1, payments: { status: "paid" } })).toMatch(/\+ \$1\.00 fee · paid in the app/);
+  });
+  it("an app booking whose payment was not taken (refund owed, expired): not shown as paid", async () => {
+    expect(await open({ ...booking("r1", "Refund Player"), source: "app", fee_usd: 1, payments: { status: "refund_due" } })).not.toMatch(/paid in the app/);
+  });
+  it("still paying: awaiting payment", async () => {
+    expect(await open({ ...booking("h1", "Holding Player"), source: "app", status: "pending", fee_usd: 1, payments: { status: "pending" } })).toMatch(/awaiting payment/);
+  });
+});
+
 describe("walk-in sheet: a block never takes the customer's name (review fix)", () => {
   const sheet = (time: string, onSave = vi.fn(), c: Club = club) => {
     render(<AddSheet club={c} court={courtA} time={time} busy={false} defaultMinutes={60} onSave={onSave} />);
