@@ -7,7 +7,7 @@
  * server. The only thing remembered between launches is the player's CHOICE to use location.
  *
  * Permission rule: nothing here asks for location on launch. `resumeNearby` only reads the current
- * permission; only `enableNearby`, called from the player's own tap on "Use my location", may ask.
+ * permission; only `enableNearby`, called from the player's own tap on "Near me", may ask.
  *
  * The device side is behind `LocationProvider` so this file needs no native dependency; the
  * expo-location adapter is added when screens are built (it is a native change: new build).
@@ -54,7 +54,7 @@ async function fix(p: LocationProvider, now: () => number): Promise<LocationStat
   }
 }
 
-/** The player tapped "Use my location": the only path that may show the system prompt. */
+/** The player tapped "Near me": the only path that may show the system prompt. */
 export async function enableNearby(p: LocationProvider, now: () => number = Date.now): Promise<LocationState> {
   let perm = await p.permission().catch(() => ({ status: "denied" as Permission, canAskAgain: false }));
   if (perm.status === "undetermined" || (perm.status === "denied" && perm.canAskAgain)) {
@@ -84,7 +84,7 @@ export function locationNote(s: LocationState): string | null {
   switch (s.status) {
     case "denied":
       return s.canAskAgain
-        ? "Location is off. Choose an area instead, or tap Use my location to try again."
+        ? "Location is off. Choose an area instead, or tap Near me to try again."
         : "Location is turned off for CourtBook in your phone's Settings. Choose an area instead.";
     case "unavailable":
       return s.reason === "services_off"

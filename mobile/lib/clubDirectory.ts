@@ -54,9 +54,9 @@ export function useClubPoints(enabled: boolean) {
 }
 
 /** Governorate → district picker (public reference data; the manual fallback to location). */
-export function useAreaList() {
+export function useAreaList(enabled = true) {
   return useQuery({
-    queryKey: directoryKeys.areas, staleTime: 24 * 3_600_000,
+    queryKey: directoryKeys.areas, staleTime: 24 * 3_600_000, enabled,
     queryFn: async () => {
       const { data, error } = await supabase.rpc("areas");
       if (error) throw error;

@@ -23,7 +23,7 @@ import { rememberArea, usePlayingPrefs } from "../../lib/playing";
 import { areaKey, distanceLabel, sameArea, sortByDistance, type PlayingArea } from "@shared/places";
 import { locationNote } from "../../lib/nearby";
 import { useNearby } from "../../lib/deviceLocation";
-import { useClubPoints } from "../../lib/clubDirectory";
+import { useAreaList, useClubPoints } from "../../lib/clubDirectory";
 import { color, font, radius, space } from "../../lib/theme";
 
 /**
@@ -60,12 +60,17 @@ export default function Courts() {
   const browseArea = nearOn ? null : area;
   const pickArea = (a: PlayingArea | null) => { near.turnOff(); setArea(a); if (userId && playing.data) rememberArea(a); };
   const points = useClubPoints(nearOn);
+  // Visitors (no account, nothing saved): the governorates as one-tap chips, so refusing location still leaves a
+  // way to narrow the list (spec addendum R2). Not remembered anywhere.
+  const govs = useAreaList(!userId);
   const saved = playing.data?.areas ?? [];
   const q = useDaySlots(date, sport, browseArea);
   const clubs = useMemo(() => clubsFromSlots(q.data ?? []), [q.data]);
   const free = clubs.filter((c) => c.starts.length > 0);
   // Near me: nearest first by straight-line distance; clubs without a map point keep their order after the others
-  const open = nearOn && near.state.status === "on" && points.data
+  // "Nearest first" is only said when the list really is sorted: the club points may still be loading or have failed
+  const sorted = nearOn && near.state.status === "on" && !!points.data;
+  const open = sorted && near.state.status === "on" && points.data
     ? sortByDistance(free, points.data, near.state.point).map(({ item, km }) => ({ ...item, km }))
     : free.map((c) => ({ ...c, km: null as number | null }));
   const note = locationNote(near.state);
@@ -93,6 +98,15 @@ export default function Courts() {
             <Chip label={saved.length ? "Edit areas" : "Add your areas"} onPress={() => router.push("/areas")} icon={<Icon name="pin" size={16} color={color.cedar} />} />
           </ScrollView>
         )}
+        {!userId && govs.data && govs.data.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} testID="visitor-area-chips">
+            <Chip label="All Lebanon" selected={!nearOn && area === null} onPress={() => pickArea(null)} />
+            {govs.data.map((g) => {
+              const a: PlayingArea = { governorate: g.code, district: null, town: null, label: g.name_en };
+              return <Chip key={g.code} label={g.name_en} selected={!nearOn && sameArea(a, area)} onPress={() => pickArea(a)} />;
+            })}
+          </ScrollView>
+        )}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           <Chip label={near.busy ? "Finding you…" : "Near me"} selected={nearOn} disabled={near.busy} testID="near-me"
                 onPress={() => void near.toggle()} icon={<Icon name="compass" size={16} color={nearOn ? color.onDark : color.cedar} />} />
@@ -102,7 +116,13 @@ export default function Courts() {
       </View>
 
       <View style={styles.summary}>
-        {q.isSuccess && nearOn && <Text variant="secondary">Nearest first · straight-line distances</Text>}
+        {q.isSuccess && sorted && <Text variant="secondary">Nearest first · straight-line distances</Text>}
+        {nearOn && points.isError && !points.data && (
+          <View style={styles.pointsError} testID="points-error">
+            <Text variant="secondary" style={{ flexShrink: 1 }}>Couldn't load club locations, so the list isn't sorted by distance.</Text>
+            <Pressable accessibilityRole="button" onPress={() => void points.refetch()} style={styles.more}><Text style={styles.moreText}>Try again</Text></Pressable>
+          </View>
+        )}
         {q.isSuccess && (
           <Text variant="label">
             {open.length === 0 ? "No free courts" : `${open.length} ${open.length === 1 ? "club" : "clubs"} with free times`}
@@ -209,6 +229,7 @@ const styles = StyleSheet.create({
   times: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 12, alignItems: "center" },
   time: { minHeight: 44, minWidth: 64, paddingHorizontal: 10, borderRadius: 12, borderWidth: 1.5, borderColor: color.cedar, alignItems: "center", justifyContent: "center" },
   timeText: { fontFamily: font.score, fontSize: 18, color: color.cedarDeep },
+  pointsError: { flexDirection: "row", alignItems: "center", gap: 8 },
   more: { minHeight: 44, justifyContent: "center", paddingHorizontal: 8 },
   moreText: { fontFamily: font.semibold, fontSize: 15, color: color.cedarDeep },
 });

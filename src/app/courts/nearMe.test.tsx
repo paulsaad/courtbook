@@ -4,12 +4,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 
 /** "Near me" on the website's Courts page: asks only on a tap, never sends the position, sorts nearest first. */
 const sent: unknown[] = [];
+const fault = { points: false };
 vi.mock("next/link", () => ({ default: ({ href, children, ...p }: { href: string; children: React.ReactNode }) => <a href={href} {...p}>{children}</a> }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
     rpc: async (fn: string, args?: unknown) => { sent.push([fn, args]); return fn === "club_day_slots" ? { data: ROWS, error: null } : { data: null, error: { code: "PGRST202", message: "Could not find the function" } }; },
-    from: (t: string) => ({ select: (cols: string) => ({ eq: async (c: string, v: unknown) => { sent.push(["from", t, cols, c, v]); return { data: [{ id: "far", lat: 34.4367, lng: 35.8497 }, { id: "near", lat: 33.8938, lng: 35.5018 }], error: null }; } }) }),
+    from: (t: string) => ({ select: (cols: string) => ({ eq: async (c: string, v: unknown) => { sent.push(["from", t, cols, c, v]); if (fault.points) return { data: null, error: { message: "network" } }; return { data: [{ id: "far", lat: 34.4367, lng: 35.8497 }, { id: "near", lat: 33.8938, lng: 35.5018 }], error: null }; } }) }),
   }),
 }));
 const CourtsDay = (await import("./CourtsDay")).default;
@@ -22,7 +23,7 @@ let getCurrentPosition: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = () => {};   // jsdom has none
-  sent.length = 0; localStorage.clear();
+  sent.length = 0; localStorage.clear(); fault.points = false;
   getCurrentPosition = vi.fn((ok: (p: unknown) => void) => ok({ coords: ME }));
   Object.defineProperty(navigator, "geolocation", { value: { getCurrentPosition }, configurable: true });
   Object.defineProperty(navigator, "permissions", { value: { query: vi.fn(async () => ({ state: "granted" })) }, configurable: true });
@@ -59,6 +60,19 @@ describe("Near me (website)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Near me" }));
     expect(await screen.findByText(/Location is off for CourtBook in this browser\. Choose an area instead/)).toBeTruthy();
     expect(localStorage.getItem("cb_near")).toBeNull();
+  });
+  it("club locations fail to load: never says nearest first, keeps the list, offers a retry that sorts", async () => {
+    fault.points = true;
+    mount();
+    await screen.findByText("Tripoli Club");
+    fireEvent.click(screen.getByRole("button", { name: "Near me" }));
+    expect(await screen.findByText(/Couldn.t load club locations, so the list isn.t sorted by distance/)).toBeTruthy();
+    expect(screen.queryByText(/Nearest first/)).toBeNull();
+    expect(names()).toEqual(["Tripoli Club", "Beirut Club"]);
+    fault.points = false;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(names()).toEqual(["Beirut Club", "Tripoli Club"]));
+    expect(screen.getByText(/Nearest first/)).toBeTruthy();
   });
   it("chosen before and already allowed: resumes without asking the player again (no prompt)", async () => {
     localStorage.setItem("cb_near", "1");
