@@ -397,7 +397,11 @@ jobs:
           echo "$out" | grep -v '^$'
           [ $rc = 0 ] && ! echo "$out" | grep -qE '^FAIL|ERROR' && echo "$out" | grep -q ' 0 failed$' \
             || { echo "::error::fee-payment suite failed"; exit 1; }
-          echo "after the run: $(psql "$DB" -At -c "select count(*) from payment_attempts") attempts, $(psql "$DB" -At -c "select count(*) from fee_charges") charges (both must be 0)"
+          # the transaction was rolled back: nothing it made may remain. Any attempt or charge here fails the step.
+          left=$(psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "select (select count(*) from payment_attempts) + (select count(*) from fee_charges) + (select count(*) from payments where kind = 'fee_only')") \
+            || { echo "::error::could not read what is left after the run"; exit 1; }
+          echo "after the run: $left attempts, fee charges and fee-only payments in the database (must be 0)"
+          [ "$left" = 0 ] || { echo "::error::$left attempts, fee charges or fee-only payments exist after the rolled-back run"; exit 1; }
       - name: M12.1 undo 0093, one transaction (m12_1_rollback)
         if: inputs.action == 'm12_1_rollback'
         env:
