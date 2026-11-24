@@ -37,11 +37,14 @@ end $$;
 reset role;
 -- 24 hours later the worker promotes it (service key)
 update account_deletions set requested_at = now() - interval '25 hours' where subject_id = 'e8600000-0000-4000-8000-0000000000c1' and status = 'requested';
-select set_config('request.jwt.claim.sub', '', true);
+-- as the retry worker calls it: the service key's claims carry no user. Both claim settings are cleared: Supabase's
+-- auth.uid() also reads request.jwt.claims (staging run 45376561069 was refused 'forbidden' while only claim.sub was)
+select set_config('request.jwt.claim.sub', '', true), set_config('request.jwt.claims', '{"role": "service_role"}', true);
 set local role service_role;
 select promote_due_requests();
 reset role;
 select set_config('request.jwt.claim.sub', 'e8600000-0000-4000-8000-0000000000c1', true);
+select set_config('request.jwt.claims', json_build_object('sub', 'e8600000-0000-4000-8000-0000000000c1', 'amr', json_build_array(json_build_object('method', 'otp', 'timestamp', extract(epoch from now() - interval '30 days')::bigint)))::text, true);
 set local role authenticated;
 do $$ begin
   insert into a select 'mine_promoted', my_account_deletion(), null;
