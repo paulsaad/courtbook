@@ -88,7 +88,7 @@ data brokers).
 | Purchases → Purchase History | Yes | Yes | App Functionality | bookings with their prices (paid at the desk today) |
 | Diagnostics → Crash Data | Yes | No | App Functionality | Sentry error reports: no account, name, email or IP; error text withheld. Native crashes also carry an installation ID and device details (§9 E2) |
 | Other Data → Other Data Types | Yes | Yes | App Functionality | 18+ answer, sports and playing level, community-rules acceptance |
-| Location → Coarse Location | **Yes, for now** | No | App Functionality | Sentry derives country and city for app error reports. The app never asks for GPS or device location. Remove this row only after the prepared Sentry change is applied **and verified** (§9 E2b) |
+| Location → Coarse Location | **Yes, for now** | No | App Functionality | Sentry derives country and city for app error reports. Remove this row only after the prepared Sentry change is applied **and verified** (§9 E2b). **Near me (M14, #20) does not add to this row:** the approximate position is used only on the phone to sort clubs and is never sent, and Apple does not count data processed only on the device as collected |
 | Health, Financial (payment) info, Sensitive info, Contacts, Browsing/Search history, Usage data, Performance data, Audio/Photos, Precise location | No | — | — | none collected |
 
 Notes:
@@ -124,7 +124,7 @@ Notes:
 | App info and performance → Crash logs | Yes | No | Analytics (to fix problems) |
 | App info and performance → Diagnostics | Yes | No | Analytics |
 | Device or other IDs | **Yes** (declared; §9 E2) | No | Analytics |
-| Location → Approximate location | **Yes, for now** (§9 E2b; derived by Sentry for error reports, never GPS) | No | Analytics |
+| Location → Approximate location | **Yes, for now** (§9 E2b; derived by Sentry for error reports) | No | Analytics |
 | Precise location, Financial (payment info), Health, Photos/videos, Audio, Files, Calendar, Contacts, Web browsing, Installed apps, Search history | No | — | — |
 
 ## 4. Age rating and target audience
@@ -158,11 +158,12 @@ Notes:
 
 | Platform | Declared | Store declaration needed |
 | --- | --- | --- |
-| Android | INTERNET, VIBRATE (normal permissions); SYSTEM_ALERT_WINDOW and external storage explicitly removed (`blockedPermissions`) | None: no sensitive or restricted permission. Target API 36 (meets the 31 Aug 2026 rule) |
-| iOS | No usage-description strings (no camera, photos, location, contacts, microphone, tracking); privacy manifest present (4 required-reason APIs, no tracking); `ITSAppUsesNonExemptEncryption = false`; Sign in with Apple capability | Export compliance: already answered "no non-exempt encryption". App Tracking Transparency: not used |
+| Android | INTERNET, VIBRATE (normal permissions); SYSTEM_ALERT_WINDOW and external storage explicitly removed (`blockedPermissions`). **From the native build that includes #20 (Near me):** ACCESS_COARSE_LOCATION, asked only when the player taps Near me; ACCESS_FINE_LOCATION and ACCESS_BACKGROUND_LOCATION blocked (`check-native-config`) | None: Play's location declaration form applies to background location, which is blocked. Target API 36 (meets the 31 Aug 2026 rule) |
+| iOS | No camera, photos, contacts, microphone or tracking strings. **From the native build that includes #20:** one location string, while in use only: "CourtBook uses your approximate location only while you use the app, to show the nearest clubs. Your location stays on your phone." Full accuracy, always and background off. Privacy manifest present (4 required-reason APIs, no tracking); `ITSAppUsesNonExemptEncryption = false`; Sign in with Apple capability | Export compliance: already answered "no non-exempt encryption". App Tracking Transparency: not used. Review notes: say that Near me is optional and an area can be chosen instead |
 | Both | No push notifications, no background location, no in-app purchases (today) | — |
 
-New native permissions or SDKs: **none added by this branch** (rule kept).
+New native permissions or SDKs: **none added by this branch** (rule kept). The location permission above arrives
+with #20 and needs a new store build; the answers in §2 and §3 stay true with it (24 Nov).
 
 ## 6. Listing metadata (draft — Paul approves wording and name)
 
