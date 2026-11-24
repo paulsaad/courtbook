@@ -4,6 +4,10 @@ import {
 } from "../lib/feePayment";
 import { PayController, paymentStorageKey, type PayDeps } from "../lib/payController";
 import { HELD_LABEL, reserveButton } from "../lib/reserveButton";
+// Node's own modules (Jest runs in Node; the app's type settings have no Node types).
+declare const require: (m: string) => any; // eslint-disable-line @typescript-eslint/no-explicit-any
+declare const __dirname: string;
+const nodeRequire = require;
 
 const status = (over: Partial<PaymentStatus> = {}): PaymentStatus => ({
   state: "awaiting_payment", bookingStatus: "pending", paymentStatus: "pending", holdExpiresAt: null, attempt: null, attemptsLeft: 3, refundsDue: 0, ...over,
@@ -291,5 +295,34 @@ describe("D: the fee on the booking screen", () => {
     expect(feeCancelNote("paid", 1)).toBe("The $1.00 booking fee is not refunded when you cancel. It is refunded if the club cancels.");
     expect(feeCancelNote("paid", 0)).toBe("There was no booking fee.");
     expect(feeCancelNote(undefined, 1)).toBe(FEE_TERMS);
+  });
+});
+
+describe("B2/G: the app carries no server or provider credential and no payment-provider logic", () => {
+  const fs = nodeRequire("fs"), path = nodeRequire("path");
+  const root = path.join(__dirname, "..");
+  const files: string[] = [];
+  (function walk(d: string) {
+    for (const f of fs.readdirSync(d)) {
+      const p = path.join(d, f);
+      if (fs.statSync(p).isDirectory()) { if (["app", "lib", "components", "shared"].includes(path.relative(root, p).split(path.sep)[0])) walk(p); }
+      else if (/\.(ts|tsx|js|json)$/.test(f)) files.push(p);
+    }
+  })(root);
+  const src = files.filter((f) => !f.includes(`${path.sep}node_modules${path.sep}`)).map((f) => [f, fs.readFileSync(f, "utf8")] as const);
+
+  it("no service-role key, cron secret or provider credential is referenced by app code", () => {
+    expect(src.length).toBeGreaterThan(50);
+    for (const [f, t] of src) expect([f, /SERVICE_ROLE|service_role|CRON_SECRET|WHISH_|PAYMENT_PROVIDER|sk_live|secret_key/i.test(t)]).toEqual([f, false]);
+  });
+  it("the app never calls a provider or the server-only payment functions itself", () => {
+    for (const [f, t] of src) {
+      expect([f, /rpc\(\s*["'](record_attempt_result|open_payment_attempt|abandon_payment_attempt|start_payment_attempt|confirm_payment|reconcile_provider_charge|complete_fee_refund)/.test(t)]).toEqual([f, false]);
+      expect([f, /whish\.money|api\.whish|areeba/i.test(t)]).toEqual([f, false]);
+    }
+  });
+  it("app.json / app.config: no new permission for payments", () => {
+    const cfg = fs.readFileSync(path.join(root, "app.config.ts"), "utf8");
+    expect(cfg).not.toMatch(/web-browser|payment/i);
   });
 });
