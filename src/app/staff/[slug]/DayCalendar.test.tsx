@@ -219,6 +219,99 @@ describe("staff calendar lengths follow the club's limits (Phase 9 / 0066)", () 
   });
 });
 
+describe("how the desk settles each booking (review 24 Nov: from the verified payment only)", () => {
+  const open = async (b: Booking) => {
+    view({ bookings: [b] });
+    await act(async () => { screen.getAllByRole("button", { name: new RegExp(b.guest_name!) })[0].click(); });
+    return screen.getByText(/\$20\.00/).closest("p")?.textContent ?? "";
+  };
+  const app = (id: string, name: string, extra: Partial<Booking>): Booking => ({ ...booking(id, name), source: "app", fee_usd: 1, ...extra });
+  it("a desk walk-in: take payment at the desk", async () => {
+    expect(await open(booking("w1", "Walk In"))).toMatch(/take payment at the desk, not through CourtBook/);
+  });
+  it("an app booking at a desk-payment club (no CourtBook payment): take payment at the desk, never 'paid in the app'", async () => {
+    const text = await open(app("d1", "Desk Player", { fee_usd: 0, payments: null }));
+    expect(text).toMatch(/take payment at the desk/);
+    expect(text).not.toMatch(/paid in the app/);
+  });
+  it("paid through CourtBook: paid in the app, with the fee", async () => {
+    expect(await open(app("p1", "App Player", { payments: { status: "paid" } }))).toMatch(/\+ \$1\.00 fee · paid in the app/);
+  });
+  it("a fee but NO payment read (missing or failed): 'payment status not loaded', never 'paid in the app'", async () => {
+    const text = await open(app("u1", "Unknown Player", { fee_usd: 1, payments: undefined }));
+    expect(text).toMatch(/payment status not loaded/);
+    expect(text).not.toMatch(/paid in the app/);
+  });
+  for (const [st, words] of [["refund_due", /being refunded, not collected/], ["refunded", /being refunded, not collected/], ["failed", /not paid — take payment at the desk/], ["expired", /not paid — take payment at the desk/]] as const) {
+    it(`payment ${st}: not shown as paid`, async () => {
+      const text = await open(app(`s-${st}`, `Player ${st}`, { payments: { status: st } }));
+      expect(text).toMatch(words);
+      expect(text).not.toMatch(/paid in the app/);
+    });
+  }
+  it("still paying: awaiting payment in the app", async () => {
+    expect(await open(app("h1", "Holding Player", { status: "pending", payments: { status: "pending" } }))).toMatch(/awaiting payment in the app/);
+  });
+});
+
+describe("moving a booking shows the old and new price first (0091)", () => {
+  const calls: Array<[string, unknown]> = [];
+  const quoteWith = (q: { current: number; new: number; kind: string } | "fail") => {
+    calls.length = 0;
+    rpcImpl = async (fn, args) => {
+      calls.push([fn, args]);
+      if (fn === "quote_move") return q === "fail" ? { data: null, error: { message: "network" } } : { data: q, error: null };
+      return { data: { price: 40 }, error: null };
+    };
+  };
+  const openMove = async (b: Booking) => {
+    view({ bookings: [b] });
+    await act(async () => { screen.getAllByRole("button", { name: new RegExp(b.guest_name!) })[0].click(); });
+    await act(async () => { screen.getByRole("button", { name: "Move" }).click(); });
+  };
+  const save = () => screen.getByRole("button", { name: /^Save move/ }) as HTMLButtonElement;
+  afterEach(() => { rpcImpl = async () => ({ data: [], error: null }); });
+
+  it("a walk-in stretched to 2 h: $20.00 → $40.00 shown, and the move is sent with $40", async () => {
+    quoteWith({ current: 20, new: 40, kind: "reprice" });
+    await openMove(booking("m1", "Stretch Me"));
+    fireEvent.change(screen.getByDisplayValue(/1 h \(current\)/), { target: { value: "4" } });
+    await waitFor(() => expect(screen.getByText(/Price changes from/).textContent).toMatch(/\$20\.00.*\$40\.00/));
+    expect(save().textContent).toBe("Save move · new price $40.00");
+    await act(async () => { save().click(); });
+    const sent = calls.find(([fn]) => fn === "move_booking_priced");
+    expect(sent?.[1]).toMatchObject({ p_booking: "m1", p_expected_price: 40 });
+    expect(calls.some(([fn]) => fn === "move_booking")).toBe(false);
+  });
+  it("an app booking paid at the desk, new length: cannot be saved until the player's agreement is ticked", async () => {
+    quoteWith({ current: 20, new: 40, kind: "agreement" });
+    await openMove({ ...booking("m2", "Desk Player"), source: "app", payments: null });
+    await waitFor(() => expect(screen.getByText(/The player agreed to pay \$40\.00/)).toBeTruthy());
+    expect(save().disabled).toBe(true);
+    await act(async () => { (screen.getByRole("checkbox") as HTMLInputElement).click(); });
+    expect(save().disabled).toBe(false);
+  });
+  it("a booking paid in the app, new length: refused with the reason, cannot be saved", async () => {
+    quoteWith({ current: 20, new: 20, kind: "refused" });
+    await openMove({ ...booking("m3", "Paid Player"), source: "app", payments: { status: "paid" } });
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/paid in the app, so its length can't change/));
+    expect(save().disabled).toBe(true);
+  });
+  it("same price: says so, and saves at that price", async () => {
+    quoteWith({ current: 20, new: 20, kind: "same" });
+    await openMove(booking("m4", "Same Price"));
+    await waitFor(() => expect(screen.getByText("Price unchanged: $20.00")).toBeTruthy());
+    expect(save().textContent).toBe("Save move");
+    expect(save().disabled).toBe(false);
+  });
+  it("the price cannot be checked: says so, and nothing can be saved", async () => {
+    quoteWith("fail");
+    await openMove(booking("m5", "No Quote"));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/Couldn't check the price/));
+    expect(save().disabled).toBe(true);
+  });
+});
+
 describe("walk-in sheet: a block never takes the customer's name (review fix)", () => {
   const sheet = (time: string, onSave = vi.fn(), c: Club = club) => {
     render(<AddSheet club={c} court={courtA} time={time} busy={false} defaultMinutes={60} onSave={onSave} />);
