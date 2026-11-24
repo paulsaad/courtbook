@@ -28,14 +28,30 @@ export function paymentCode(error: { message?: string } | null | undefined, fall
   return PAYMENT_CODES.has(m) ? m : fallback;
 }
 
+/**
+ * How long a provider may say it has never heard of an attempt before we stop treating that as "not yet" (M12.2).
+ * After it, the attempt is recorded as expired, so the player can try again within the hold. Safe because money is
+ * never inferred from silence: if a charge for that reference ever appears (status or the provider's charge list),
+ * record_attempt_result still records it — a success after "expired" is recorded and, the hold being gone, owed back.
+ * Longer than any payment page lifetime we plan for; to confirm per provider before activation.
+ */
+export const UNKNOWN_GRACE_MINUTES = 30;
+
 export type Recorded =
   | { ok: true; outcome: string }
   | { ok: false; code: "provider_unavailable" | "payment_record_failed" | string };
 
-/** Ask the provider about one attempt, then record what it says. */
-export async function verifyAndRecord(admin: Rpc, provider: PaymentProvider, attemptId: string): Promise<Recorded> {
+/** Ask the provider about one attempt, then record what it says. `createdAt`: when the attempt was made, so that a
+ *  provider that has never heard of it can be believed after UNKNOWN_GRACE_MINUTES (without it, "unknown" = pending). */
+export async function verifyAndRecord(admin: Rpc, provider: PaymentProvider, attemptId: string,
+  opts: { createdAt?: string | Date | null; now?: Date } = {}): Promise<Recorded> {
   let status;
   try { status = await provider.attemptStatus(attemptId); } catch { return { ok: false, code: "provider_unavailable" }; }
+  if (status.state === "unknown") {
+    const made = opts.createdAt ? new Date(opts.createdAt).getTime() : NaN;
+    const old = Number.isFinite(made) && (opts.now ?? new Date()).getTime() - made > UNKNOWN_GRACE_MINUTES * 60_000;
+    status = { state: old ? "expired" : "pending" } as const;
+  }
   const args = status.state === "succeeded"
     ? { p_attempt: attemptId, p_result: "succeeded", p_provider_ref: status.evidence.providerRef, p_amount: status.evidence.amount, p_currency: status.evidence.currency }
     : { p_attempt: attemptId, p_result: status.state };
@@ -61,7 +77,8 @@ export type SweepSummary = { checked: number; outcomes: Record<string, number>; 
  * was lost) are asked about again. Safe to run as often as wanted and alongside callbacks: every result goes through
  * the same idempotent function. Attempts of another provider than the configured one are left alone.
  */
-export async function sweepOpenAttempts(admin: Rpc, provider: PaymentProvider, opts: { minAgeSeconds: number; maxAgeHours: number; limit: number }): Promise<SweepSummary> {
+export async function sweepOpenAttempts(admin: Rpc, provider: PaymentProvider,
+  opts: { minAgeSeconds: number; maxAgeHours: number; limit: number; now?: Date; deadline?: number }): Promise<SweepSummary> {
   const summary: SweepSummary = { checked: 0, outcomes: {}, failures: {} };
   const { data, error } = await admin.rpc("attempts_to_check", {
     p_min_age: `${Math.max(0, Math.floor(opts.minAgeSeconds))} seconds`,
@@ -69,10 +86,11 @@ export async function sweepOpenAttempts(admin: Rpc, provider: PaymentProvider, o
     p_limit: opts.limit,
   });
   if (error || !Array.isArray(data)) { summary.failures.list = 1; return summary; }
-  for (const row of data as { attempt_id: string; provider: string }[]) {
+  for (const row of data as { attempt_id: string; provider: string; created_at?: string }[]) {
     if (row.provider !== provider.name) continue;
+    if (opts.deadline !== undefined && Date.now() > opts.deadline) { summary.failures.out_of_time = (summary.failures.out_of_time ?? 0) + 1; break; }
     summary.checked++;
-    const r = await verifyAndRecord(admin, provider, row.attempt_id);
+    const r = await verifyAndRecord(admin, provider, row.attempt_id, { createdAt: row.created_at, now: opts.now });
     const bucket = r.ok ? summary.outcomes : summary.failures;
     const key = r.ok ? r.outcome : r.code;
     bucket[key] = (bucket[key] ?? 0) + 1;
