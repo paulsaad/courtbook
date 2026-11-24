@@ -74,8 +74,8 @@ export const ROUTES = [
   "/api/account/close", "/api/admin/delete-account", "/api/club-media", "/api/internal/deletions/retry", "/api/health", "/api/monitoring/test", "/api/notify/email", "/api/pay/simulate", "/api/payments.csv",
   "/auth/callback", "/auth/signout", "/bookings", "/bookings/[id]", "/club/[slug]", "/club/[slug]/coaches",
   "/club/[slug]/info", "/club/[slug]/matches", "/coach", "/coaches", "/coaches/[id]", "/courts", "/delete-account", "/levels", "/login",
-  "/matches/[id]", "/me", "/notifications", "/pay/[id]", "/play", "/profile", "/staff", "/staff/[slug]",
-  "/staff/[slug]/payments", "/staff/[slug]/settings",
+  "/matches/[id]", "/me", "/notifications", "/pay/[id]", "/play", "/privacy", "/profile", "/staff", "/staff/[slug]",
+  "/staff/[slug]/payments", "/staff/[slug]/settings", "/terms",
   // files served by the app itself
   "/favicon.ico", "/icon.png", "/manifest.webmanifest",
 ] as const;

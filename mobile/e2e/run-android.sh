@@ -107,6 +107,24 @@ print('on screen at failure:', [x for n in nodes for x in re.findall(r'(?:text|c
   exit $status
 fi
 
+# crash-privacy (workflow input suite = crash-privacy, M5): the privacy probe (synthetic personal data
+# in every channel), checked on the way out (check_report.py --probe), then a real native crash and a
+# relaunch so the native SDK sends it. What Sentry received is read there (docs/m5/crash-privacy.md);
+# the run prints the time window and release to look for.
+if [ "${SUITE:-full}" = "crash-privacy" ]; then
+  adb logcat -c
+  echo "crash-privacy: window starts $(date -u +%FT%TZ)"
+  for f in 06-privacy-probe 07-native-crash; do
+    if (cd "$OUT" && maestro test "${envs[@]}" "../flows/$f.yaml"); then echo "flow $f: PASS"; else echo "::error::flow $f failed"; status=1; fi
+    [ "$f" = 06-privacy-probe ] && { adb logcat -d -v raw ReactNativeJS:V '*:S' > "$OUT/logcat-js.txt"; python3 e2e/check_report.py "$OUT/logcat-js.txt" --probe || status=1; }
+  done
+  sleep 45   # the native crash report is sent from the relaunched app
+  adb logcat -d -v brief Sentry:V '*:S' | grep -iE "envelope|sent|crash|error" | grep -viE "probe|person|@" | tail -40 || true
+  echo "crash-privacy: window ends $(date -u +%FT%TZ)"
+  adb logcat -d -v brief ReactNativeJS:V AndroidRuntime:E '*:F' '*:S' | tail -200 > "$OUT/logcat.txt"
+  exit $status
+fi
+
 # booking-text (workflow input suite = booking-text): only the booking screens at the one setting where
 # the Android line-height correction applies (text above the app's 1.6 cap): 360 dp at x2.0 —
 # screenshots of every main screen, the booking panel with Reserve reachable and pressed, and the
