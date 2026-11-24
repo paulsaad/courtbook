@@ -9,7 +9,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { bookingDate, clubLocalToUtc, dayBounds, hhmm, moveTarget, nextDayStart, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
 import { explainBookingError } from "@/lib/report";
-import { blockErrorText, friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
+import { blockErrorText, friendlyError, settlement, STAFF_BOOKING_COLUMNS, type Block, type Booking, type Club, type Court } from "@/lib/types";
 import { blockEndOptions, blockStartOptions, bookingSlotOptions, minToHhmm, pickSlots, type Busy } from "./durations";
 import { DESKTOP_QUERY, useDialog, useIsDesktop } from "@/components/useDialog";
 import { matchBookings, readPrefs, writePrefs } from "./findBooking";
@@ -185,7 +185,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     const supabase = createClient();
     const { dayStart, dayEnd } = dayBounds(date, club.timezone);
     const [{ data: b, error: eb }, { data: k, error: ek }] = await Promise.all([
-      supabase.from("bookings").select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id, price_usd, fee_usd, hold_expires_at")
+      supabase.from("bookings").select(STAFF_BOOKING_COLUMNS)
         .eq("club_id", club.id).or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`).not("court_id", "is", null).lt("start_at", dayEnd).gt("end_at", dayStart).order("start_at"),
       supabase.from("blocks").select("id, court_id, start_at, end_at, reason").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart),
     ]);
@@ -245,7 +245,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
       const from = dayBounds(wkStart, club.timezone).dayStart;
       const to = dayBounds(shiftDate(wkStart, 6), club.timezone).dayEnd;
       const [{ data: b, error: eb }, { data: k, error: ek }] = await Promise.all([
-        supabase.from("bookings").select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id, price_usd, fee_usd, hold_expires_at")
+        supabase.from("bookings").select(STAFF_BOOKING_COLUMNS)
           .eq("club_id", club.id).eq("court_id", weekCourt.id)
           .or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`)
           .lt("start_at", to).gt("end_at", from).order("start_at"),
@@ -1753,9 +1753,9 @@ function BookingSheet({ club, courts, booking: b, times, busy, onMove, onCancel,
           <p className="mt-1 text-sm">
             ${Number(b.price_usd).toFixed(2)}
             <span className="text-muted">
-              {b.status === "pending"
+              {settlement(b) === "awaiting"
                 ? ` + $${Number(b.fee_usd ?? 0).toFixed(2)} fee · awaiting payment`
-                : b.source === "app"
+                : settlement(b) === "paid_in_app"
                   ? ` + $${Number(b.fee_usd ?? 0).toFixed(2)} fee · paid in the app`
                   : " · take payment at the desk, not through CourtBook"}
             </span>

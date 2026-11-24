@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { dayBounds, todayIn } from "@/lib/time";
 import { loaded } from "@/lib/load";
-import type { Block, Booking, Club, Court } from "@/lib/types";
+import { STAFF_BOOKING_COLUMNS, type Block, type Booking, type Club, type Court } from "@/lib/types";
 import DayCalendar from "./DayCalendar";
 import WorkNav from "@/components/WorkNav";
 
@@ -53,7 +53,7 @@ export default async function StaffClubPage({
     supabase.from("courts").select("id, name, sport, surface, sort, active").eq("club_id", club.id).eq("active", true).order("sort"),
     supabase
       .from("bookings")
-      .select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id, price_usd, fee_usd, hold_expires_at")
+      .select(STAFF_BOOKING_COLUMNS)
       .eq("club_id", club.id)
       .or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`)
       .not("court_id", "is", null)
