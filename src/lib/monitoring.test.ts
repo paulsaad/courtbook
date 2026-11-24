@@ -358,6 +358,9 @@ describe("monitoringEnvironment", () => {
   it("names production, staging (m3-dev), other previews and local builds", () => {
     expect(monitoringEnvironment("production", "main")).toBe("production");
     expect(monitoringEnvironment("preview", "m3-dev")).toBe("staging");
+    expect(monitoringEnvironment("preview", "staging-web")).toBe("staging");
+    expect(monitoringEnvironment("preview", "staging-web-x")).toBe("preview");
+    expect(monitoringEnvironment("production", "staging-web")).toBe("production");
     expect(monitoringEnvironment("preview", "w2-monitoring")).toBe("preview");
     expect(monitoringEnvironment(undefined, undefined)).toBe("development");
   });
