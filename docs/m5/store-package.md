@@ -21,11 +21,11 @@ Legend:
 | Apple App Privacy answers (§2) | **Ready.** Installation ID in native crashes: **declared** (decided 23 Nov). Sentry-derived approximate location: declared until the prepared Sentry change is applied and verified (§9 E2b) |
 | Google Data safety answers (§3) | **Ready**, same two declarations; "sharing with clubs" to confirm (Legal) |
 | Age rating answers, both stores (§4) | **Ready** (18+ decided) |
-| Permissions (§5) | **Ready**: nothing to declare beyond Sign in with Apple |
+| Permissions (§5) | **Ready.** Today: nothing to declare beyond Sign in with Apple. **From the native build with #20 (Near me):** one while-in-use, approximate location permission on each platform (iOS purpose string; Android coarse location), asked only on a tap; no store declaration form needed (no background location). Privacy answers unchanged (§2, §3) |
 | Listing text (§6) | **Drafted**; app name and support URL: **Paul** |
 | Screenshots and graphics (§7) | **Eng** after the store build exists; specifications below |
 | Reviewer access (§8) | **Approved in principle (23 Nov):** one dedicated, player-only reviewer account with a password, on Supabase's existing sign-in. Built closer to store submission (E7). Label and server-side restriction: decided then |
-| Sign in with Apple token revocation on deletion (§9 E1) | **Eng, blocked on Account** (needs the company's Sign in with Apple key) |
+| Sign in with Apple token revocation on deletion (§9 E1) | **Eng, blocked on Account.** Where it runs is decided (L14, 24 Nov: the existing Next.js backend); it needs the company's Sign in with Apple key |
 | Message filter word list (Apple 1.2) | **Paul**: the filter exists (0074) but its list is empty by design |
 | Developer accounts, D-U-N-S, store records (§9) | **Account / Paul** |
 
@@ -303,7 +303,7 @@ Recommended before public launch. Availability on our Supabase plan is still to 
 ### Engineering
 | # | Work | Needs a native build? |
 | --- | --- | --- |
-| E1 | **Revoke Sign in with Apple tokens on account deletion** (Apple TN3194). The app sends only the identity token today; the server must exchange the authorization code at sign-in (or ask the user to sign in with Apple again when deleting) and call Apple's revoke endpoint in `/api/admin/delete-account` | No (JS + server), but needs the key from the Apple account |
+| E1 | **Revoke Sign in with Apple tokens on account deletion** (Apple TN3194). The app sends only the identity token today; the server must exchange the authorization code at sign-in (or ask the user to sign in with Apple again when deleting) and call Apple's revoke endpoint in `/api/admin/delete-account`. **L14 decided 24 Nov:** both the exchange and the revocation run in the existing Next.js backend; company credentials are configured only at release | No (JS + server), but needs the key from the Apple account |
 | E2 | **Decided 23 Nov: declare** the installation ID (§2/§3); no native filter solely for it. Native crash reports also carry language, time zone, device state and the system's error message, which `/privacy` states (`docs/m5/crash-privacy.md`) | No |
 | E2b | App reports get a Sentry-derived country and city. **Prepared, not executed** (`docs/m5/sentry-location-change.md`): a Sentry data-scrubbing rule on `$user.geo.**`. It changes production monitoring, so it needs Paul's go. Declared on `/privacy` and in §2/§3 until it is applied and verified | No |
 | E3 | Store builds with the `production` profile (exists: store distribution, auto-incremented build numbers); crash reporting on for the live apps (L11, needs the live DSN) | Yes (the store build itself) |
