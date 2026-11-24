@@ -1,9 +1,21 @@
-# Release candidate (0086–0092): staging rollout plan
+# Release candidate (0086–0092, legal drafts): staging rollout plan
 
 Status: **plan only.** Every step needs Paul's go. Staging first; live repeats the same steps later.
 
-**Today:** staging is at 0085, live at 0077. The release candidate (PR #26) combines #18, #19, #20 and #22–#25 on
-#13 and passes every local suite. Local results are not evidence about staging: each step below has its own check.
+**Today:** staging is at 0085, live at 0077. The release candidate (PR #26) combines #18, #19, #20, #22–#25, #27 and
+#28 on #13, plus the legal and store drafts #14 + #29, and passes every local suite. Local results are not evidence
+about staging: each step below has its own check.
+
+**Legal pages (#14, #29) — publication needs legal approval.** They may go to **staging** with the website (draft
+banner, not indexed). They must **not reach the live website** while `LEGAL_STATUS` is `"draft"`: the live merge of
+#14/#29 waits for the lawyer's approval and the switch to `"final"` (store package §1a). The app's links (#15) stay
+out until the pages are final and public; `check-legal-pages --gate` enforces that for app builds.
+
+**Prerequisites before step 0 (all Paul's, none set yet):** (a) go for each step; (b) staging retries (decided 24 Nov:
+GitHub Actions calling the staging deployment through Vercel's automation bypass, with staging-only credentials):
+the bypass secret and `CRON_SECRET_STAGING` / `DELETION_RETRY_URL_STAGING` in GitHub, `CRON_SECRET` on the Vercel
+Preview environment, the workflow merged but its schedule left inactive until step 3; (c) the staging website deploy
+built from this release candidate's branch.
 
 ## Order and stop conditions
 
@@ -16,7 +28,7 @@ Status: **plan only.** Every step needs Paul's go. Staging first; live repeats t
 | 4 | `apply` `0087 0088 0089` with the website from #19 (+#24) | `repeat_use` behaviour on staging: the website check of areas, favourites and Near me in a browser (staging `web_accept`, after adding M14 steps); the coordinates audit (read only) | A published club loses visibility; favourites or areas readable by another account |
 | 5 | `apply` `0090` | Postcheck row "0090" ok; `api` action (booking checks through Supabase's API) PASS | Any booking check fails |
 | 6 | `apply` `0091` with the website from #23 | `rc_postcheck` all ok; `staff_ops`-equivalent desk check in a browser: walk-in, extend (price shown and confirmed), move, cancel | The calendar shows "paid in the app" for an unpaid booking, or a move changes a price without showing it |
-| 6b | `apply` `0092` with the website from #27 | Postcheck row "0092" ok ("applied"); in a browser: set one price with one peak on a club with no prices; Prices lists the expected rules; deactivating a court with an upcoming booking is refused with the plain message | A quote differs from the rules shown, or a booked court can be deactivated |
+| 6b | `apply` `0092` with the website from #27 (preflight part 2 must show no published club with unpriced times first) | Postcheck row "0092" ok ("applied"); in a browser: set one price with one peak on a club with no prices; Prices lists the expected rules; deactivating a court with an upcoming booking is refused with the plain message; on a published club, extending the hours past its prices is refused | A quote differs from the rules shown, a booked court can be deactivated, or a published club gains unpriced hours |
 | 7 | **App OTA to staging, JavaScript only:** #18 + #19 code **without #20**. The update workflow's fingerprint gate refuses native changes, so this needs a branch without `expo-location` | Paul's phone: one-step deletion (email code if the session is old), areas, favourites, "Not now"; the A17 retest | The gate refuses (native code slipped in), or any phone check fails: republish the previous update (`rollback-to-previous`) |
 | 8 | Native build with #20 (app version bumped, e.g. 0.4.0), staging channel | Near me: approximate only; prompt only on tap; Beirut/Batroun behaviour; `check-native-config` | Precise or background location requested |
 
