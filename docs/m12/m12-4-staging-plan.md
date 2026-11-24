@@ -147,3 +147,45 @@ Setup:
 
 Pass: every row as described; any difference is written down with a screenshot. Not testable on staging (needs a real
 provider): the provider's own page, a real return from it, refunds, a lost callback with real money.
+
+## 5. Conditions from the 24 Nov review — preparation status (nothing run on staging)
+
+| # | Condition | Prepared |
+| --- | --- | --- |
+| 1 | Staging unchanged until the trial is accepted (27 Nov) | Nothing on staging changed. Trial check-ins 2–9 and the final evaluation (27 Nov 17:55Z) are scheduled; the GitHub retry workflow stays disabled |
+| 2 | No inappropriate personal or production data before opening the alias | Draft PR #39: staging-db action `access_audit` (read only). Prints counts and 8-character ids only — no address, name, phone or text (the log is public). **Fails** on: personal-address accounts, stored phone numbers, names on personal accounts, desk phone numbers, free text by personal accounts, non-demo clubs, money marked collected. Each failure is a decision for you; nothing is changed by it |
+| 3 | Can new staging registrations be disabled without affecting test accounts? | **Yes, by Supabase's documented behaviour; one point to verify.** See below |
+| 4 | Deletion-probe correction (a request without the bearer must get 401) | Draft PR #38 (`deletion-probe-401`, base `main`, not merged). Harness PASS; 3 of 5 checks fail on the current `main`. The active trial (Vercel schedule) is untouched |
+| 5 | Exception restricted to the verified alias | §1: `courtbook-staging-git-staging-web-paul-bc50.vercel.app` only. The §2.4 live checks confirm the other addresses stay protected |
+| 6 | Separate approvals | Unchanged (§3) |
+| 7 | Real payments off, Whish unimplemented | Unchanged. Bundle check: in a build without `EXPO_PUBLIC_FEE_PAYMENTS` the switch compiles to `undefined` (off). No credential, server-only function name or bypass header is in the app bundle |
+
+### Registrations (condition 3)
+
+- **The setting.** Supabase → staging project → Authentication → Sign In / Providers → "Allow new users to sign up".
+  Supabase's documentation: with it off, only existing users can sign in. The change takes effect immediately and can
+  be undone the same way.
+- **What it blocks.** A first sign-in by an unknown email address (email code), and a first Google or Apple sign-in.
+- **Existing test accounts are unaffected:**
+  - Your staging app signs in with a password (`paul.tester@courtbook.test`, the staging-only password form): an
+    existing account.
+  - Email codes to existing accounts keep working (staging's built-in email only reaches a limited set of addresses
+    anyway).
+- **Staging tools are not sign-ups.** They create throwaway accounts either by SQL (`smoke`, `cancel`) or through the
+  admin API (`web_accept`, `auth_checks`: `admin.createUser` / `admin.generateLink`).
+- **To verify, not assumed:** that Supabase's admin API still creates users with sign-ups off. The Auth server's own
+  documentation says invites remain possible. Proof: the first `web_accept` or `auth_checks` run after the switch
+  (both are approval-gated).
+- **The A17 test needs accounts A and B.** Create them **before** switching sign-ups off, or with the `tester` action
+  (admin API).
+- **Current value: unknown.** The browser here is not signed in to Supabase. `access_audit` prints it ("new sign-ups:
+  ALLOWED / BLOCKED").
+
+### Order at activation time (each separately approved; replaces nothing in §3, adds 4a–4c before step 5)
+
+- **4a.** `access_audit` with `confirm_ref`, read only. Any failed row is decided by you before going on.
+- **4b.** Test accounts A and B exist (`tester` action, admin API).
+- **4c.** "Allow new users to sign up" off in staging Auth (your click). Then `access_audit` again; it must print
+  "BLOCKED".
+- **5.** Exception for the alias, with PR #38 merged in the same approved change. The §2.4 live checks run, then a
+  manual probe run of the retry workflow. The probe stays manual and the workflow disabled unless you decide otherwise.
