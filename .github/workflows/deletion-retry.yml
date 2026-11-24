@@ -1,0 +1,67 @@
+# M2 (0086), R1: automatic deletion retries — STAGING ONLY (staging step 3, docs/ops/release-candidate-staging.md).
+#
+# Calls the staging website's /api/internal/deletions/retry every 15 minutes. Production is deliberately not a target
+# in this file: adding it later is a separate, reviewed change.
+#
+# Secrets live in the GitHub environment `staging-deletion-retry`, whose deployment branches are limited to `main`
+# (Settings → Environments). A run from any other branch, a fork or a pull request cannot read them.
+#   CRON_SECRET_STAGING          the same value as Vercel's CRON_SECRET (Preview, branch staging-web only), ≥ 32 chars
+#   VERCEL_BYPASS_STAGING        Vercel "Protection Bypass for Automation" secret (staging is behind Vercel login)
+#   DELETION_RETRY_URL_STAGING   https://<staging-web alias>/api/internal/deletions/retry (a secret, so it is masked in
+#                                this public repository's logs)
+# With any of the three missing, a run calls nothing and says so.
+#
+# One POST per run; no checkout; no repository permissions; output is the HTTP status and counts (no account ids).
+# A run by hand with probe = true first checks that the route refuses callers without the bypass, without the bearer
+# secret, and with a wrong one; then makes the normal call.
+# Every successful call records the worker heartbeat; the new app offers one-step deletion only while it is under an
+# hour old, so if this stops, app deletions pause (the website keeps working).
+# Turning it off: disable this workflow (Actions → Deletion retries → Disable), or delete CRON_SECRET in Vercel
+# (the route then answers 503 and does nothing).
+name: Deletion retries (staging)
+
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"   # every 15 min, off the hour (GitHub delays runs at :00)
+  workflow_dispatch:
+    inputs:
+      probe:
+        description: "Also check that the route refuses callers without the bypass or the bearer secret"
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: deletion-retry-staging
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    environment: staging-deletion-retry
+    steps:
+      - name: Call the staging retry route
+        env:
+          URL: ${{ secrets.DELETION_RETRY_URL_STAGING }}
+          SECRET: ${{ secrets.CRON_SECRET_STAGING }}
+          BYPASS: ${{ secrets.VERCEL_BYPASS_STAGING }}
+          PROBE: ${{ inputs.probe && 'true' || 'false' }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$SECRET" ] || [ -z "$BYPASS" ]; then
+            echo "staging: not activated (a secret of environment staging-deletion-retry is missing); nothing called."; exit 0
+          fi
+          case "$URL" in https://*.vercel.app/api/internal/deletions/retry) ;; *) echo "::error::URL must be https://<staging alias>.vercel.app/api/internal/deletions/retry"; exit 1;; esac
+          [ ${#SECRET} -ge 32 ] || { echo "::error::CRON_SECRET_STAGING is shorter than 32 characters"; exit 1; }
+          call() { curl -sS -o /tmp/out.json -w '%{http_code}' --max-time 90 -X POST "$@" "$URL"; }
+          if [ "$PROBE" = true ]; then
+            c1=$(call -H "Authorization: Bearer $SECRET")                                         # no bypass
+            c2=$(call -H "x-vercel-protection-bypass: $BYPASS")                                   # no bearer
+            c3=$(call -H "x-vercel-protection-bypass: $BYPASS" -H "Authorization: Bearer wrong-$RANDOM-$RANDOM-$RANDOM-$RANDOM")
+            echo "probe: without bypass HTTP $c1 (expect 401 or 403: Vercel login); without bearer HTTP $c2 (expect 401); wrong bearer HTTP $c3 (expect 401)"
+            { [ "$c1" = 401 ] || [ "$c1" = 403 ]; } && [ "$c2" = 401 ] && [ "$c3" = 401 ] || { echo "::error::the route or Vercel protection did not refuse as expected"; exit 1; }
+          fi
+          code=$(call -H "x-vercel-protection-bypass: $BYPASS" -H "Authorization: Bearer $SECRET")
+          echo "staging: HTTP $code $(head -c 300 /tmp/out.json)"
+          [ "$code" = 200 ]
