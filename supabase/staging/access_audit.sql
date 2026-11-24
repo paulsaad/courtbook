@@ -2,8 +2,8 @@
 -- staging holds no inappropriate personal data and no production data. READ ONLY (run with
 -- default_transaction_read_only = on, through .github/scripts/run-check.sh <db> this-file all).
 --
--- The workflow log is public, so this prints NO email address, phone number, name, message text or account id
--- beyond its first 8 characters. Test addresses (@courtbook.test) count as test accounts; any other address is a
+-- The workflow log is public, so this prints NO email address, phone number, name (people's or clubs'), message
+-- text, file name or account id beyond its first 8 characters. Test addresses (@courtbook.test) count as test accounts; any other address is a
 -- personal one and FAILS its row: a person decides what happens to it (nothing here changes anything).
 -- Rows: item | ok | detail.
 with u as (
@@ -43,11 +43,18 @@ from (select (select count(*) from match_messages x join u on u.id = x.profile_i
              (select count(*) from coaches x join u on u.id = x.profile_id where not u.test) c) t
 union all
 select 'C1 clubs that are not demo clubs (production data would show here)', count(*) filter (where not is_demo) = 0,
-       coalesce(string_agg(format('%s (%s, %s)', name, case when is_demo then 'demo' else 'NOT demo' end, case when active then 'active' else 'inactive' end), '; ' order by name), 'none')
+       format('%s clubs: %s demo (%s active), %s not demo (%s active)', count(*),
+              count(*) filter (where is_demo), count(*) filter (where is_demo and active),
+              count(*) filter (where not is_demo), count(*) filter (where not is_demo and active))
 from clubs
 union all
-select 'C2 uploaded files (storage)', true,
-       coalesce((select string_agg(bucket_id || '=' || n, ' ' order by bucket_id) from (select bucket_id, count(*) n from storage.objects group by bucket_id) x), 'none')
+-- Any stored file fails this row: its content must be reviewed by a person (in the dashboard, not here) before the
+-- alias is exposed. Counts only: no file name, path or content. 'club-media' is the only bucket our migrations
+-- create (0056); any other bucket is counted together, without its name.
+select 'C2 stored files — any file needs its content reviewed before the alias is exposed', count(*) = 0,
+       format('club-media: %s files; other buckets: %s files in %s buckets', count(*) filter (where bucket_id = 'club-media'),
+              count(*) filter (where bucket_id <> 'club-media'), count(distinct bucket_id) filter (where bucket_id <> 'club-media'))
+from storage.objects
 union all
 select 'D1 money: payments or fee charges marked collected, or any real provider', (a + b + c) = 0,
        format('payments collected %s, fee charges collected %s, non-simulated provider rows %s', a, b, c)
