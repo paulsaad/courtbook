@@ -96,6 +96,10 @@ insert into t values
   ('O15 booking safety unchanged: the same slot cannot be booked twice', pg_temp.r(pg_temp.u(1), format($$select book_at_desk(%L, %L, %L, gen_random_uuid())::text$$,
        (select id from courts where name = 'M8 Padel 1'), pg_temp.at(5, 2), pg_temp.at(5, 2) + interval '60 min')) like 'ERR%', '');
 -- 6. after publishing: hiding is always possible; republishing needs the checks again
+-- 0092: a court with an upcoming booking cannot be deactivated (its bookings would vanish from the desk's calendar)
+insert into t values ('O16a deactivating a court that still has an upcoming booking is refused (court_has_bookings)',
+  pg_temp.r(pg_temp.u(2), format($$update courts set active = false where club_id = %L$$, pg_temp.x())) = 'ERR court_has_bookings', '');
+update bookings set status = 'cancelled' where club_id = pg_temp.x() and status in ('confirmed', 'pending');   -- the desk cancels it first
 insert into t values ('O16 deactivating the only court: the checklist warns, the club is not hidden by surprise',
   pg_temp.r(pg_temp.u(2), format($$update courts set active = false where club_id = %L$$, pg_temp.x())) = 'ok', '');
 insert into t values
