@@ -25,6 +25,14 @@ export function attemptReturnUrl(origin: string, attemptId: string): string {
   return `${origin}/pay/return?attempt=${attemptId}`;
 }
 
+/**
+ * Where the provider sends a player who paid from the app (M12.4). Deliberately carries nothing — no attempt, no
+ * payment, no token: the page only hands control back to the app, which then asks the server where the payment stands.
+ */
+export function appReturnUrl(origin: string): string {
+  return `${origin}/pay/app-return`;
+}
+
 export function providerCallbackUrl(origin: string, provider: string): string {
   if (!/^[a-z]{1,20}$/.test(provider)) throw new Error("bad provider name");
   return `${origin}/api/pay/callback/${provider}`;

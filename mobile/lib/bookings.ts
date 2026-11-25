@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 
 export type BookingDetail = {
   id: string; status: string; start_at: string; end_at: string; price_usd: number | null; fee_usd: number | null;
+  hold_expires_at?: string | null;
   club: { name: string; slug: string; timezone: string; cancel_cutoff_hours: number; location_url: string | null; payment_mode: string | null; lat?: number | string | null; lng?: number | string | null };
   court: { name: string; sport: string } | null;
 };
@@ -15,7 +16,7 @@ export function useBooking(id: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("bookings")
-        .select("id, status, start_at, end_at, price_usd, fee_usd, clubs(name, slug, timezone, cancel_cutoff_hours, location_url, payment_mode, lat, lng), courts!bookings_court_id_fkey(name, sport)")
+        .select("id, status, start_at, end_at, hold_expires_at, price_usd, fee_usd, clubs(name, slug, timezone, cancel_cutoff_hours, location_url, payment_mode, lat, lng), courts!bookings_court_id_fkey(name, sport)")
         .eq("id", id!)
         .maybeSingle();
       if (error) throw error;
@@ -86,14 +87,22 @@ export function splitAgenda(rows: AgendaRow[], now = Date.now()) {
 }
 
 /** The payment behind a booking at a club that takes payment in the app (none for pay-at-the-club). */
+/** The player's own payment row for a booking. kind: 'fee_only' (Model 2: only the CourtBook fee online, M12.1) or
+ *  'court_and_fee' (Model 1 demo clubs). provider 'simulated' means no real money. */
+export type BookingPayment = { id: string; status: string; total_usd: number | null; kind: "fee_only" | "court_and_fee" | string; provider: string };
 export function usePayment(bookingId: string | undefined) {
   return useQuery({
     queryKey: ["payment", bookingId],
     enabled: !!bookingId,
     queryFn: async () => {
-      const { data, error } = await supabase.from("payments").select("status, total_usd").eq("booking_id", bookingId!).maybeSingle();
+      // "*", not a column list: `kind` exists only from 0094 on, and naming it would break this screen against a database
+      // without it (Model 1 demo bookings). Missing → "court_and_fee", the only kind before 0094.
+      const { data, error } = await supabase.from("payments").select("*").eq("booking_id", bookingId!).maybeSingle();
       if (error) throw error;
-      return data as { status: string; total_usd: number | null } | null;
+      if (!data) return null;
+      const r = data as Record<string, unknown>;
+      return { id: String(r.id), status: String(r.status), total_usd: r.total_usd == null ? null : Number(r.total_usd),
+        kind: typeof r.kind === "string" ? r.kind : "court_and_fee", provider: String(r.provider ?? "") } as BookingPayment;
     },
   });
 }

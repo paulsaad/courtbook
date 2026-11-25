@@ -38,6 +38,40 @@ export function useQuote(courtId: string | null, start: string | null, minutes: 
 }
 
 /** How the club settles money. club_day_slots does not carry it; read like the website does. */
+/** The club's payment mode and CourtBook fee, read fresh (M12.4: the fee decides whether a fee_online booking needs
+ *  the payment screen; $0 confirms at once). Unknown mode → "simulated", which the app never reserves. */
+export function useClubPayment(clubId: string | null) {
+  return useQuery({
+    queryKey: ["club-payment", clubId],
+    enabled: !!clubId,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("clubs").select("payment_mode, service_fee_usd, hold_minutes").eq("id", clubId!).single();
+      if (error) throw error;
+      const fee = Number(data?.service_fee_usd);
+      // how long hold_slot keeps the court for payment: the club's own setting (2–30 minutes), never assumed
+      const hold = Number(data?.hold_minutes);
+      return { mode: (data?.payment_mode as string | null) ?? "simulated", fee: Number.isFinite(fee) && fee >= 0 ? fee : null,
+        holdMinutes: Number.isInteger(hold) && hold > 0 ? hold : null };
+    },
+  });
+}
+
+/** The player's live court hold, if any (my_active_hold, 0013): one at a time. */
+export function useActiveHold(enabled: boolean) {
+  return useQuery({
+    queryKey: ["active-hold"],
+    enabled,
+    staleTime: 0,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("my_active_hold");
+      if (error) throw error;
+      const row = (Array.isArray(data) ? data[0] : data) as { booking_id: string; hold_expires_at: string; club_slug: string } | null | undefined;
+      return row ?? null;
+    },
+  });
+}
+
 export function useClubMode(clubId: string | null) {
   return useQuery({
     queryKey: ["club-mode", clubId],
