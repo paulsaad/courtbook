@@ -1,6 +1,6 @@
 // @vitest-environment node
-import { describe, it, expect, beforeEach } from "vitest";
-import { processDeletion, dbCode, type DeletionDeps, type RpcResult } from "./pipeline";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { APPLE_CHECK_MS, processDeletion, dbCode, type DeletionDeps, type RpcResult } from "./pipeline";
 
 /**
  * A small model of 0086's server functions (claim lease + token, record_deletion_step, the data step, finish) and of
@@ -301,5 +301,61 @@ describe("dbCode", () => {
     expect(dbCode({ message: "Jana Probe +961 70 123 456" })).toBe("failed");
     expect(dbCode({ message: "duplicate key value violates unique constraint" })).toBe("failed");
     expect(dbCode(null)).toBe("failed");
+  });
+});
+
+describe("E1: an Apple-linked account closed without revocation (older app) is noticed before D, never blocking it", () => {
+  type St = { apple: boolean; marked: boolean } | null | "throw" | "hang";
+  function hook(st: St, opts: { alertFails?: boolean } = {}) {
+    const log: string[] = [];
+    const h = {
+      state: async () => {
+        log.push(`state@${calls.length}`);
+        if (st === "throw") throw new Error("auth down");
+        if (st === "hang") return new Promise<never>(() => {});
+        return st;
+      },
+      alert: async (code: string) => { log.push(`alert:${code}`); if (opts.alertFails) throw new Error("monitoring down"); },
+      mark: async () => { log.push("mark"); },
+    };
+    return { h, log };
+  }
+  it("Apple link and nothing recorded: one alert, marked, read while the sign-in still exists; deletion completes", async () => {
+    const { h, log } = hook({ apple: true, marked: false });
+    expect(await processDeletion(S, { ...deps, appleRevocation: h })).toEqual({ result: "done" });
+    expect(log).toEqual([`state@${calls.indexOf("delete_user")}`, "alert:old_app_or_direct_close", "mark"]);   // before D
+    expect(authUser.exists).toBe(false);
+  });
+  it("revocation already recorded by the new flow, or no Apple link: no alert", async () => {
+    for (const st of [{ apple: true, marked: true }, { apple: false, marked: false }]) {
+      reset();
+      const { h, log } = hook(st);
+      expect(await processDeletion(S, { ...deps, appleRevocation: h })).toEqual({ result: "done" });
+      expect(log.filter((l) => l.startsWith("alert"))).toEqual([]);
+    }
+  });
+  it("the check failing, unreadable or the alert failing: deletion completes", async () => {
+    for (const [st, opts] of [["throw", {}], [null, {}], [{ apple: true, marked: false }, { alertFails: true }]] as [St, { alertFails?: boolean }][]) {
+      reset();
+      expect(await processDeletion(S, { ...deps, appleRevocation: hook(st, opts).h })).toEqual({ result: "done" });
+      expect(authUser.exists).toBe(false);
+    }
+  });
+  it("the check hanging: deletion goes ahead after the short limit, not waiting for it", async () => {
+    vi.useFakeTimers();
+    try {
+      const run = processDeletion(S, { ...deps, appleRevocation: hook("hang").h });
+      await vi.advanceTimersByTimeAsync(APPLE_CHECK_MS);
+      expect(await run).toEqual({ result: "done" });
+    } finally { vi.useRealTimers(); }
+  });
+  it("without the hook (today's serviceDeps), nothing changes", async () => {
+    expect(await processDeletion(S, deps)).toEqual({ result: "done" });
+  });
+  it("held accounts never reach D, so no check runs", async () => {
+    reset("held", "legal_hold");
+    const { h, log } = hook({ apple: true, marked: false });
+    expect(await processDeletion(S, { ...deps, appleRevocation: h })).toEqual({ result: "held", reason: "legal_hold" });
+    expect(log).toEqual([]);
   });
 });
