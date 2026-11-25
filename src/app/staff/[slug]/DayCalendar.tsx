@@ -715,10 +715,10 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         {view === "grid" && (
           // phones only: the grid scrolls with the page, so its own name row would scroll away (S1). This copy sits in
           // the sticky header; onScroll below keeps it lined up with the columns. Screen readers use the grid's row.
-          <div ref={namesRef} aria-hidden="true" data-testid="court-names" className="overflow-hidden px-2 lg:hidden">
+          <div ref={namesRef} aria-hidden="true" data-testid="court-names" className="overflow-hidden pl-0 pr-2 lg:hidden">
             <div className="flex min-w-max">
               {/* covers the names as they scroll left, like the time column below it */}
-              <div className="sticky left-0 z-10 w-[3.25rem] shrink-0 bg-paper" />
+              <div className="sticky left-0 z-10 w-[3.5rem] shrink-0 bg-paper" />
               <div className="grid flex-1 gap-x-1.5 [--col-min:7rem]" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(var(--col-min), 1fr))` }}>
                 {courts.map((c) => courtHead(c, "min-h-9"))}
               </div>
@@ -764,12 +764,12 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
           onOpen={(b) => openSheet({ kind: "booking", booking: b })}
         />
       ) : view === "grid" ? (
-        <div className="flex-1 overflow-x-auto px-2 pb-24 lg:overflow-visible lg:pb-6" onScroll={(e) => { if (namesRef.current) namesRef.current.scrollLeft = e.currentTarget.scrollLeft; }}>
+        <div className="flex-1 overflow-x-auto pb-24 pl-0 pr-2 lg:overflow-visible lg:pb-6 lg:pl-2" onScroll={(e) => { if (namesRef.current) namesRef.current.scrollLeft = e.currentTarget.scrollLeft; }}>
           <div className="flex min-w-max">
             {/* time axis: pinned on the left while the courts scroll sideways (S2); on phones it starts level with the
                 first row, because the court names are in the header. z-[8]: above bookings (≤ z-[6]), below the
                 sticky header (z-10) and the sheets (z-20) */}
-            <div className="sticky left-0 z-[8] w-[3.25rem] shrink-0 bg-paper lg:z-20 lg:mt-9 lg:w-14" style={{ height: times.length * ROW_PX }}>
+            <div className="sticky left-0 z-[8] w-[3.5rem] shrink-0 bg-paper lg:z-20 lg:mt-9 lg:w-14" style={{ height: times.length * ROW_PX }}>
               {times.map((t, i) => i % labelEvery === 0 && (
                 <div key={t} className="absolute right-1.5 -translate-y-1/2 whitespace-nowrap text-xs text-muted lg:right-2 lg:text-[13px]" style={{ top: i * ROW_PX }}>{t}</div>
               ))}
