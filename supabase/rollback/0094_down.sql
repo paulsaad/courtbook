@@ -1,6 +1,6 @@
--- Rollback of 0093 (M12.1 fee_online payments): back to exactly the 0092 schema. STAGING ONLY, and only while no
+-- Rollback of 0094 (M12.1 fee_online payments): back to exactly the 0092 schema. STAGING ONLY, and only while no
 -- fee-only money exists: it refuses (and changes nothing) if any attempt, fee charge, fee-only payment or fee_online
--- club exists. Run as ONE transaction (psql -1). Verified locally: 0001–0092 → 0093 → this script gives a schema
+-- club exists. Run as ONE transaction (psql -1). Verified locally: 0001–0092 → 0094 → this script gives a schema
 -- fingerprint identical to 0001–0092 (supabase/tests/schema_fingerprint.sql).
 do $$
 begin
@@ -20,7 +20,7 @@ drop function if exists attempts_to_check(interval, interval, int);
 drop function if exists complete_fee_refund(uuid, numeric, text, text);
 drop function if exists fee_refunds_due();
 
--- the functions 0093 replaced, exactly as they were after 0092
+-- the functions 0094 replaced, exactly as they were after 0092
 CREATE OR REPLACE FUNCTION public.set_club_payment_mode(p_club uuid, p_mode text)
  RETURNS integer
  LANGUAGE plpgsql

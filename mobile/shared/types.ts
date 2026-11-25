@@ -123,7 +123,7 @@ export const ERRORS: Record<string, string> = {
   court_has_bookings: "This court still has upcoming bookings. Move or cancel them first, then deactivate it.",
   prices_incomplete: "Players would see times with no price. Add a price for those times first (Prices → Add), then change the hours or the price.",
   not_payable: "This booking is no longer waiting for payment.",
-  // M12.1 fee payments (0093)
+  // M12.1 fee payments (0094)
   hold_expired: "The time to pay has run out. Pick the slot again if it is still free.",
   attempts_exhausted: "No more payment tries for this hold. Pick the slot again if it is still free.",
   payment_in_progress: "Your payment is already under way. If you paid, it will show here shortly; otherwise tap Pay again in a moment.",
