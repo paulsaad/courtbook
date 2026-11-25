@@ -76,10 +76,10 @@ export function safeText(text: unknown, exceptionType?: string): string {
 /** Every page and route of the website (src/app). Kept in step with the folders by monitoring.routes.test.ts. */
 export const ROUTES = [
   "/", "/account-closed", "/admin", "/admin/clubs/[slug]", "/admin/deletions", "/admin/monitoring", "/admin/payments", "/admin/reports", "/age",
-  "/api/account/close", "/api/admin/delete-account", "/api/club-media", "/api/internal/deletions/retry", "/api/internal/payments/sweep", "/api/health", "/api/monitoring/test", "/api/notify/email", "/api/pay/callback/[provider]", "/api/pay/simulate", "/api/pay/start", "/api/payments.csv",
+  "/api/account/close", "/api/admin/delete-account", "/api/club-media", "/api/internal/deletions/retry", "/api/internal/payments/sweep", "/api/health", "/api/monitoring/test", "/api/native/pay/start", "/api/native/pay/status", "/api/notify/email", "/api/pay/callback/[provider]", "/api/pay/simulate", "/api/pay/start", "/api/payments.csv",
   "/auth/callback", "/auth/signout", "/bookings", "/bookings/[id]", "/club/[slug]", "/club/[slug]/coaches",
   "/club/[slug]/info", "/club/[slug]/matches", "/coach", "/coaches", "/coaches/[id]", "/courts", "/delete-account", "/levels", "/login",
-  "/matches/[id]", "/me", "/notifications", "/pay/[id]", "/pay/return", "/play", "/privacy", "/profile", "/staff", "/staff/[slug]",
+  "/matches/[id]", "/me", "/notifications", "/pay/[id]", "/pay/app-return", "/pay/return", "/play", "/privacy", "/profile", "/staff", "/staff/[slug]",
   "/staff/[slug]/payments", "/staff/[slug]/settings", "/terms",
   // files served by the app itself
   "/favicon.ico", "/icon.png", "/manifest.webmanifest",
