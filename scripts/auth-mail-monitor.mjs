@@ -14,12 +14,25 @@
  * Token: a scoped personal access token limited to ONE project and the "Logs: Read" permission (env
  * SUPABASE_ACCESS_TOKEN). Never printed.
  *
- * Exit codes: 0 = checked, no mail failures; 1 = mail failures found (alert); 2 = the monitor could not check (alert).
- * Optional heartbeat: SENTRY_CRONS_URL (a Sentry Crons check-in URL). in_progress at the start, ok on 0, error on 1 or
- * 2; a run that never happens is reported by Sentry as missed. A failed heartbeat never changes the exit code.
+ * Exit codes: 0 = checked, no mail failures; 1 = mail failures found (alert); 2 = the monitor could not check, or the
+ * checked windows have a gap (alert).
+ *
+ * Coverage (review 25 Nov, finding 2): each run checks from where the previous successful run stopped (a watermark
+ * kept between runs, WATERMARK_FILE) up to now minus an ingestion lag (INGEST_LAG_MINUTES, default 5), so windows
+ * chain without holes however late GitHub starts a run. The API allows at most 24 hours per query: if the previous
+ * successful check ended more than 24 hours ago, or the watermark is missing (other than on a first run the person
+ * marks as such, FIRST_RUN=true), the last 24 hours are still checked and the run also reports a COVERAGE GAP (exit 2).
+ * The new watermark is written (to WATERMARK_FILE + ".new") only after a successful query.
+ *
+ * Heartbeat (review 25 Nov, finding 1): a heartbeat service is REQUIRED for check runs: Sentry Crons (SENTRY_CRONS_URL)
+ * or Healthchecks.io (HEALTHCHECKS_URL), exactly one; without one the run fails. A start signal, then success on exit
+ * 0 or failure on 1 or 2, all with one run id. A run that never happens is reported by the service as missed; a failed
+ * run is reported as failed and also fails the GitHub run. A heartbeat that cannot be sent never changes the result of
+ * the check (the service then reports the run as missed or timed out).
  *
  * Modes: `check` (default) as above; `probe` lists the attribute KEYS present on Auth log events in the window (names
- * only, never values), to confirm once that the attribute names this query uses exist.
+ * only, never values); `selftest` makes a deliberate failure (no logs read): Sentry error check-in, exit 2, so that
+ * the alert paths can be proved end to end before activation.
  */
 
 export const KINDS = ["smtp", "timeout", "rate_limit", "address_validation", "other"];
@@ -81,41 +94,97 @@ function safe(text) {
   return /@|sbp_|eyJ|[A-Za-z0-9_-]{41,}/.test(text) ? "(output withheld: it did not match the expected safe shape)" : text;
 }
 
-async function heartbeat(fetchImpl, url, status, log) {
-  if (!url) return;
+export const MONITOR = { schedule: { type: "crontab", value: "17 * * * *" }, checkin_margin: 30, max_runtime: 10, timezone: "UTC" };
+
+/**
+ * One heartbeat per status, to the one configured service:
+ *  - Sentry Crons (SENTRY_CRONS_URL): ?check_in_id=<uuid>&status=in_progress|ok|error; in_progress is a POST that also
+ *    states the monitor's schedule (MONITOR);
+ *  - Healthchecks.io (HEALTHCHECKS_URL, the check's ping URL): /start, success, /fail, each with ?rid=<uuid>; the
+ *    schedule (cron "17 * * * *", UTC, grace 30 minutes) is set on the check itself.
+ */
+const name = (hb) => (hb.kind === "sentry" ? "Sentry" : "Healthchecks.io");
+async function heartbeat(fetchImpl, hb, checkInId, status, log) {
+  if (!hb) return;
   try {
-    const u = new URL(url);
-    u.searchParams.set("status", status);
-    const r = await fetchImpl(u.toString(), { method: "GET", signal: AbortSignal.timeout(10_000) });
-    if (!r.ok) log(`heartbeat: Sentry answered HTTP ${r.status} (status ${status} not recorded)`);
+    let u, init = { method: "GET" };
+    if (hb.kind === "sentry") {
+      u = new URL(hb.url);
+      u.searchParams.set("check_in_id", checkInId);
+      u.searchParams.set("status", status);
+      if (status === "in_progress") init = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, monitor_config: MONITOR }) };
+    } else {
+      u = new URL(hb.url.replace(/\/+$/, "") + ({ in_progress: "/start", ok: "", error: "/fail" }[status]));
+      u.searchParams.set("rid", checkInId);
+    }
+    const r = await fetchImpl(u.toString(), { ...init, signal: AbortSignal.timeout(10_000) });
+    if (!r.ok) log(`heartbeat: ${name(hb)} answered HTTP ${r.status} (status ${status} not recorded)`);
   } catch {
-    log(`heartbeat: could not reach Sentry (status ${status} not recorded)`);
+    log(`heartbeat: could not reach ${name(hb)} (status ${status} not recorded)`);
   }
 }
 
-export async function run({ env, fetch: fetchImpl = fetch, now = () => new Date(), log = console.log, mode = "check" }) {
+const iso = (d) => d.toISOString();
+
+export async function run({ env, fetch: fetchImpl = fetch, now = () => new Date(), log = console.log, mode = "check", fs = null, uuid = () => crypto.randomUUID() }) {
   const token = env.SUPABASE_ACCESS_TOKEN ?? "";
   const ref = env.PROJECT_REF ?? "";
-  const minutes = Number(env.WINDOW_MINUTES ?? 70);
-  const cron = env.SENTRY_CRONS_URL || "";
+  const lag = Number(env.INGEST_LAG_MINUTES ?? 5);
+  const sentryUrl = env.SENTRY_CRONS_URL || "";
+  const hcUrl = env.HEALTHCHECKS_URL || "";
+  const hb = sentryUrl && !hcUrl ? { kind: "sentry", url: sentryUrl } : hcUrl && !sentryUrl ? { kind: "healthchecks", url: hcUrl } : null;
+  const wmFile = env.WATERMARK_FILE || "";
+  const firstRun = env.FIRST_RUN === "true";
   const say = (t) => log(safe(t));
-  if (mode === "check") await heartbeat(fetchImpl, cron, "in_progress", say);
+  const checkInId = uuid();
+  const beat = (status) => (mode === "check" || mode === "selftest") ? heartbeat(fetchImpl, hb, checkInId, status, say) : null;
   const fail = async (why) => {
-    say(`MONITOR FAILURE: ${why}. Mail failures could not be checked for this window.`);
-    if (mode === "check") await heartbeat(fetchImpl, cron, "error", say);
+    say(`MONITOR FAILURE: ${why}. Mail failures could not be checked.`);
+    await beat("error");
     return 2;
   };
 
+  if (mode !== "probe" && !hb) {
+    say(sentryUrl && hcUrl
+      ? "MONITOR FAILURE: both SENTRY_CRONS_URL and HEALTHCHECKS_URL are set; configure exactly one heartbeat service."
+      : "MONITOR FAILURE: no heartbeat service is configured (SENTRY_CRONS_URL or HEALTHCHECKS_URL); one is required, so that runs that fail or never happen are reported.");
+    return 2;
+  }
+  await beat("in_progress");
+  if (mode === "selftest") {
+    say(`SELFTEST: a deliberate monitor failure (no logs were read). Expect a failed-run notice from GitHub and a failure alert from ${name(hb)}.`);
+    await beat("error");
+    return 2;
+  }
   if (!token) return fail("no logs token (SUPABASE_ACCESS_TOKEN) is configured");
   if (!REF.test(ref)) return fail("PROJECT_REF is missing or not a project reference");
-  if (!Number.isInteger(minutes) || minutes < 5 || minutes > 24 * 60) return fail("WINDOW_MINUTES must be 5 to 1440 (the API allows at most 24 hours)");
+  if (!Number.isInteger(lag) || lag < 0 || lag > 60) return fail("INGEST_LAG_MINUTES must be 0 to 60");
+  if (mode === "check" && !wmFile) return fail("no WATERMARK_FILE is configured (coverage between runs cannot be guaranteed)");
 
-  const end = now();
-  const start = new Date(end.getTime() - minutes * 60_000);
+  // the window: from the previous successful check's end (or 24 h back), to now minus the ingestion lag
+  const end = new Date(now().getTime() - lag * 60_000);
+  const max = 24 * 3600_000;
+  let start = new Date(end.getTime() - max);
+  let gap = null;
+  if (mode === "check") {
+    let wm = null;
+    try { wm = fs ? fs.read(wmFile) : null; } catch { wm = null; }
+    const t = wm && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{3})?Z$/.test(wm.trim()) ? Date.parse(wm.trim()) : NaN;
+    if (Number.isNaN(t)) {
+      if (!firstRun) gap = "no record of where the previous check ended (watermark missing); the last 24 hours were checked, anything earlier is unknown";
+    } else if (end.getTime() - t > max) {
+      gap = `the previous check ended at ${iso(new Date(t))}, more than 24 hours ago; the last 24 hours were checked, the hours before are not covered`;
+    } else {
+      start = new Date(Math.min(t, end.getTime()));
+    }
+  } else {
+    start = new Date(end.getTime() - 70 * 60_000);   // probe: a short recent window is enough
+  }
+
   const url = new URL(`https://api.supabase.com/v1/projects/${ref}/analytics/endpoints/logs`);
   url.searchParams.set("sql", mode === "probe" ? PROBE_SQL : CHECK_SQL);
-  url.searchParams.set("iso_timestamp_start", start.toISOString());
-  url.searchParams.set("iso_timestamp_end", end.toISOString());
+  url.searchParams.set("iso_timestamp_start", iso(start));
+  url.searchParams.set("iso_timestamp_end", iso(end));
 
   let res;
   try {
@@ -136,26 +205,31 @@ export async function run({ env, fetch: fetchImpl = fetch, now = () => new Date(
   const rows = checkRows(body?.result, mode);
   if (!rows) return fail("the logs API answer did not have the expected shape (nothing from it is shown)");
 
-  const window = `${start.toISOString()} to ${end.toISOString()}`;
+  const window = `${iso(start)} to ${iso(end)}`;
   if (mode === "probe") {
     say(`Auth log attribute names, ${window} (names only, no values):`);
     for (const r of rows) say(`  ${r.key}: ${r.n}`);
     return 0;
   }
+  // the window was checked: the next run starts here
+  try { if (fs) fs.write(`${wmFile}.new`, iso(end)); } catch { say("note: the new watermark could not be written (the next run will report a gap)"); }
   const total = rows.reduce((s, r) => s + r.n, 0);
-  if (total === 0) {
-    say(`OK: 0 Auth mail failures, ${window}.`);
-    await heartbeat(fetchImpl, cron, "ok", say);
-    return 0;
+  if (gap) say(`COVERAGE GAP: ${gap}.`);
+  if (total > 0) {
+    say(`ALERT: ${total} Auth mail failure(s), ${window}. Sign-in codes may not have reached people.`);
+    for (const r of rows) say(`  ${r.task} · ${r.kind}: ${r.n}`);
+    say("Look in Supabase → Logs → Auth for this window (the run log deliberately shows counts only).");
+    await beat("error");
+    return 1;
   }
-  say(`ALERT: ${total} Auth mail failure(s), ${window}. Sign-in codes may not have reached people.`);
-  for (const r of rows) say(`  ${r.task} · ${r.kind}: ${r.n}`);
-  say("Look in Supabase → Logs → Auth for this window (the run log deliberately shows counts only).");
-  await heartbeat(fetchImpl, cron, "error", say);
-  return 1;
+  say(`${gap ? "Checked (with the gap above)" : "OK"}: 0 Auth mail failures, ${window}.`);
+  await beat(gap ? "error" : "ok");
+  return gap ? 2 : 0;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const mode = process.argv[2] === "probe" ? "probe" : "check";
-  run({ env: process.env, mode }).then((code) => process.exit(code), () => { console.log("MONITOR FAILURE: unexpected error (details withheld)."); process.exit(2); });
+  const { readFileSync, writeFileSync } = await import("node:fs");
+  const arg = process.argv[2];
+  const mode = arg === "probe" || arg === "selftest" ? arg : "check";
+  run({ env: process.env, mode, fs: { read: (f) => readFileSync(f, "utf8"), write: (f, t) => writeFileSync(f, t) } }).then((code) => process.exit(code), () => { console.log("MONITOR FAILURE: unexpected error (details withheld)."); process.exit(2); });
 }
