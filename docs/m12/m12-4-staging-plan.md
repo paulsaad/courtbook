@@ -66,7 +66,7 @@ and then row-level security.
 | E2 | Email-code requests to staging can be triggered by anyone (Supabase's own rate limits apply) | Accept for the test window |
 | E3 | **Deletion-schedule probe.** The probe's "no bypass" call (`.github/workflows/deletion-retry.yml`, line 88) sends the **real bearer**. With the alias public, that call would reach the route and run the worker (200), and the probe would fail. Scheduled runs are unaffected (they send the bypass) | In the same approved change: make that call send no bearer and expect 401 from the route. Do not run the probe by hand until then |
 | E4 | With the alias public, `CRON_SECRET` alone protects the retry route (as on production) | Already the design; secret is 64 characters, Preview-only |
-| E5 | Native payment endpoints are reachable by any signed-in staging account | Simulated provider only; demo clubs only (0093); the feature switch stays off until §3 step 5 |
+| E5 | Native payment endpoints are reachable by any signed-in staging account | Simulated provider only; demo clubs only (0094); the feature switch stays off until §3 step 5 |
 | E6 | Old staging deployments stay protected; only the alias opens | None |
 
 ### 2.4 Live checks at activation (I run them; read-only)
@@ -106,7 +106,7 @@ domain → Remove), then report.
 | --- | --- | --- | --- | --- |
 | 0 | Deletion trial final results reviewed and accepted | — | your acceptance | — |
 | 1 | Release-candidate staging steps for 0087–0092 (`docs/ops/release-candidate-staging.md`) | staging DB | as in that procedure | its rollbacks |
-| 2 | 0093 by the PR #35 procedure (check → preflight → apply → postcheck → functional → smoke) | staging DB | 11 + 12 rows ok; 60 checks; 0 leftovers | `m12_1_rollback` |
+| 2 | 0094 by the PR #35 procedure (check → preflight → apply → postcheck → functional → smoke) | staging DB | 11 + 12 rows ok; 60 checks; 0 leftovers | `m12_1_rollback` |
 | 3 | Push the combined commit to `staging-web` (no new variables: native endpoints answer 503) | staging website | Ready; page code uses `pwznauyioqykdwodwpvx`; the alias still asks for Vercel login; deletion schedule listed; next Sentry check-in ok; `/api/native/pay/start` → 503 | redeploy `59a2f11` |
 | 4 | Vercel `courtbook-staging` → Preview, branch `staging-web`: `NATIVE_PAYMENTS=1`, `PAYMENT_APP_SCHEME=courtbook-staging`, `PAYMENT_SITE_URL=https://courtbook-staging-git-staging-web-paul-bc50.vercel.app`. **`PAYMENT_PROVIDER` stays unset** (simulated). Redeploy | staging website | env names only, scoped to staging-web; native status → 401 without a token | delete the three variables, redeploy |
 | 5 | **Activation (separate approval):** Deployment Protection Exception for the alias only, with the E3 probe fix in the same change | public alias | §2.4 checks 1–7 | remove the exception |
