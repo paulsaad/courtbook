@@ -42,7 +42,7 @@ export type AppleDeletionDeps = {
 
 export type AppleDeletionOutcome =
   | { kind: "closed"; revocation: "done" | "failed" | "skipped" }
-  | { kind: "use_fallback"; intent: string; reason: "cancelled" | "apple_unavailable" }   // offer the email code
+  | { kind: "use_fallback"; intent: string; reason: "cancelled" | "apple_unavailable" | "apple_refused" }   // offer the email code
   | { kind: "not_configured" }                                                            // use the existing flow
   | { kind: "account_mismatch" }
   | { kind: "unknown" }                                                                   // may have closed: say so
@@ -52,7 +52,9 @@ export const MISMATCH_TEXT =
   "That Apple ID belongs to a different CourtBook account, so nothing was deleted. Try again with the Apple ID you use for this account.";
 export const UNKNOWN_TEXT =
   "We couldn't confirm whether your account was deleted. Please check your connection and open Profile again before trying anything else.";
-export const APPLE_FAILED_TEXT = "That didn't work, and nothing was changed. Please try again, or confirm with an email code instead.";
+export const APPLE_FAILED_TEXT = "That didn't work, and nothing was changed. Please try again.";
+/** Server answers after which the email code is offered (fourth review): Apple could not be used, nothing changed. */
+export const RECOVERABLE_APPLE = new Set(["apple_unavailable", "apple_code_rejected", "apple_identity_unverified", "apple_code_missing"]);
 export const REVOCATION_NOTE =
   "To also remove CourtBook from your Apple ID, open Settings → your name → Sign in with Apple → CourtBook → Stop Using Apple ID.";
 const FAILED = "That didn't work, and nothing was changed. Please try again.";
@@ -88,7 +90,7 @@ export async function deleteWithApple(d: AppleDeletionDeps): Promise<AppleDeleti
     return { kind: "account_mismatch" };
   }
   const answer = await d.post("/api/account/apple-delete", fresh.accessToken, { method: "apple", code: sheet.authorizationCode, intent });
-  const out = await settle(d, answer);
+  const out = await settle(d, answer, intent);
   if (out.kind !== "closed") await fresh.signOut().catch(() => undefined);
   return out;
 }
@@ -100,7 +102,7 @@ export async function deleteWithFallback(d: AppleDeletionDeps, intent: string): 
   return settle(d, await d.post("/api/account/apple-delete", s.accessToken, { method: "fallback", intent }));
 }
 
-async function settle(d: AppleDeletionDeps, a: ApiAnswer): Promise<AppleDeletionOutcome> {
+async function settle(d: AppleDeletionDeps, a: ApiAnswer, intent?: string): Promise<AppleDeletionOutcome> {
   const body = (a?.body ?? {}) as { closed?: unknown; revocation?: unknown; error?: unknown };
   if (a && a.status === 200 && body.closed === true) {
     await d.signOutEverywhere().catch(() => undefined);
@@ -110,6 +112,9 @@ async function settle(d: AppleDeletionDeps, a: ApiAnswer): Promise<AppleDeletion
   if (a && a.status !== 202 && body.closed === false) {
     const code = typeof body.error === "string" ? body.error : "";
     if (code === "account_mismatch") return { kind: "account_mismatch" };
+    // Apple's token exchange or signing keys out of service, or a code Apple would not accept: nothing changed, and
+    // the existing email code can confirm instead (the same server call with method "fallback")
+    if (intent && RECOVERABLE_APPLE.has(code)) return { kind: "use_fallback", intent, reason: code === "apple_unavailable" ? "apple_unavailable" : "apple_refused" };
     if (code === "processing_unavailable") return { kind: "refused", message: PROCESSING_PAUSED };
     if (CLOSE_MESSAGES[code]) return { kind: "refused", message: CLOSE_MESSAGES[code] };
     if (code.startsWith("apple_") || code === "wrong_apple_account") return { kind: "refused", message: code === "wrong_apple_account" ? MISMATCH_TEXT : APPLE_FAILED_TEXT };

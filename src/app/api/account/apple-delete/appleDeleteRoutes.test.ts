@@ -13,7 +13,10 @@ vi.mock("server-only", () => ({}));
 const calls: string[] = [];
 let bearerUser: string | null;
 let identities: Record<string, unknown>[];
-let closeAnswer: { error: { message: string; code?: string } | null } | "throw";
+let closeAnswer: { error: { message: string; code?: string } | null; status?: number } | "throw";
+let markFails: "error" | "unconfirmed" | null;
+let keysStatus: number;
+let tokenStatus: number;
 let statusRows: { data: unknown; error: unknown };
 let recent: boolean;
 const metadata: Record<string, unknown>[] = [];
@@ -26,7 +29,7 @@ vi.mock("@/lib/supabase/bearer", () => ({
   playerFromBearer: async () => bearerUser ? { userId: bearerUser, player: {
     rpc: (fn: string) => builder(`user:${fn}`, () => {
       if (fn === "recently_authenticated") return { data: recent, error: null };
-      if (fn === "close_my_account") { if (closeAnswer === "throw") throw new TypeError("fetch failed"); return { data: { status: "closing" }, ...closeAnswer }; }
+      if (fn === "close_my_account") { if (closeAnswer === "throw") throw new TypeError("fetch failed"); return { data: closeAnswer.error ? null : { status: "closing" }, status: closeAnswer.error ? 400 : 200, ...closeAnswer }; }
       return { data: null, error: { message: "unexpected", code: "X" } };
     }),
   } } : null,
@@ -37,7 +40,13 @@ vi.mock("@/lib/supabase/admin", () => ({
     auth: { admin: {
       getUserById: async () => { calls.push("service:getUser"); return { data: { user: { id: bearerUser, identities, app_metadata: {} } }, error: null }; },
       updateUserById: async (_id: string, attrs: { app_metadata?: Record<string, unknown> }) => {
-        if (attrs.app_metadata) { calls.push("service:mark"); metadata.push(attrs.app_metadata); } else calls.push("service:ban");
+        if (attrs.app_metadata) {
+          calls.push("service:mark"); metadata.push(attrs.app_metadata);
+          if (markFails === "error") return { data: { user: null }, error: { message: "Database error updating user", status: 500 } };
+          if (markFails === "unconfirmed") return { data: { user: { app_metadata: {} } }, error: null };
+          return { data: { user: { app_metadata: attrs.app_metadata } }, error: null };
+        }
+        calls.push("service:ban");
         return { error: null };
       },
       deleteUser: async () => { calls.push("service:deleteUser"); return { error: null }; },
@@ -71,8 +80,9 @@ const appleFetch = vi.fn(async (url: string, init?: { body?: string }) => {
   const path = new URL(url).pathname;
   calls.push(`apple:${path}`);
   const json = (status: number, body?: unknown) => ({ ok: status < 300, status, json: async () => { if (body === undefined) throw new Error("empty"); return body; } });
-  if (path === "/auth/keys") return json(200, { keys: [JWK] });
+  if (path === "/auth/keys") return keysStatus === 200 ? json(200, { keys: [JWK] }) : json(keysStatus);
   if (path === "/auth/token") {
+    if (tokenStatus !== 200) return json(tokenStatus);
     const code = new URLSearchParams(init?.body ?? "").get("code") ?? "";
     const sub = appleSubForCode[code];
     return sub ? json(200, { id_token: idToken(sub), refresh_token: "RT", access_token: "AT" }) : json(400, { error: "invalid_grant" });
@@ -101,6 +111,7 @@ async function intentFor(user: string) {
 beforeEach(() => {
   calls.length = 0; metadata.length = 0; reported.length = 0; claimed = false;
   bearerUser = A; recent = true; closeAnswer = { error: null }; statusRows = { data: [], error: null }; revokeStatus = 200;
+  markFails = null; keysStatus = 200; tokenStatus = 200;
   identities = [{ provider: "email", identity_data: { sub: A } }, { provider: "apple", identity_data: { sub: "apple-A" } }];
   appleSubForCode = { "CODE-A": "apple-A", "CODE-B": "apple-B" };
   for (const [k, v] of Object.entries(ENV)) vi.stubEnv(k, v);
@@ -235,14 +246,98 @@ describe("the Apple path end to end (fake Apple, mocked Supabase)", () => {
   });
 });
 
-describe("closeOutcomeOf: only an answer with an error code is definite", async () => {
+describe("fourth review, point 1: Apple's token exchange or signing keys out of service", () => {
+  it("token endpoint down (503) or keys endpoint down (503/500): 503 apple_unavailable, nothing closed (the app then offers the email code)", async () => {
+    const { resetAppleKeysForTests } = await import("@/lib/apple/routeDeps");
+    for (const [t, k] of [[503, 200], [500, 200], [200, 503], [200, 500]]) {
+      calls.length = 0;
+      resetAppleKeysForTests();   // a signing-key outage only shows when the keys are not already cached
+      const intent = await intentFor(A);
+      tokenStatus = t; keysStatus = k;
+      const r = await deleteRoute.POST(post({ method: "apple", code: "CODE-A", intent }));
+      expect(r.status).toBe(503);
+      expect(await r.json()).toEqual({ closed: false, error: "apple_unavailable" });
+      expect(calls).not.toContain("user:close_my_account");
+    }
+  });
+  it("…and the fallback then closes the account with the same intent", async () => {
+    const intent = await intentFor(A);
+    tokenStatus = 503;
+    await deleteRoute.POST(post({ method: "apple", code: "CODE-A", intent }));
+    const r = await deleteRoute.POST(post({ method: "fallback", intent }));
+    expect(await r.json()).toEqual({ closed: true, revocation: "skipped" });
+  });
+});
+
+describe("fourth review, point 2: only Postgres's own refusals are definite; infrastructure errors go to recovery", async () => {
   const { closeOutcomeOf } = await import("@/lib/apple/routeDeps");
-  it("maps answers", () => {
+  it("definite: SQLSTATE classes P0, 22, 23, 28, 40, 42 with a 4xx status (or none)", () => {
     expect(closeOutcomeOf({ error: null })).toEqual({ ok: true });
-    expect(closeOutcomeOf({ error: { message: "reauth_required", code: "P0001" } })).toEqual({ ok: false, code: "reauth_required" });
-    expect(closeOutcomeOf({ error: { message: "permission denied", code: "42501" } })).toEqual({ ok: false, code: "failed" });
-    expect(closeOutcomeOf({ error: { message: "TypeError: fetch failed" } })).toEqual({ ok: "unknown" });
-    expect(closeOutcomeOf({ error: { message: "AbortError", code: "" } })).toEqual({ ok: "unknown" });
-    expect(closeOutcomeOf(null)).toEqual({ ok: "unknown" });
+    expect(closeOutcomeOf({ error: { message: "reauth_required", code: "P0001" }, status: 400 })).toEqual({ ok: false, code: "reauth_required" });
+    expect(closeOutcomeOf({ error: { message: "staff_role", code: "P0001" } })).toEqual({ ok: false, code: "staff_role" });
+    expect(closeOutcomeOf({ error: { message: "permission denied", code: "42501" }, status: 403 })).toEqual({ ok: false, code: "failed" });
+    expect(closeOutcomeOf({ error: { message: "could not serialize", code: "40001" }, status: 409 })).toEqual({ ok: false, code: "failed" });
+    expect(closeOutcomeOf({ error: { message: "deadlock detected", code: "40P01" }, status: 409 })).toEqual({ ok: false, code: "failed" });
+  });
+  it("unknown: PostgREST, gateway, transport, cancellation, connection and internal errors, and any 5xx", () => {
+    for (const r of [
+      { error: { message: "Could not connect", code: "PGRST000" }, status: 503 },
+      { error: { message: "connection error", code: "PGRST001" }, status: 503 },
+      { error: { message: "schema cache", code: "PGRST002" }, status: 503 },
+      { error: { message: "pool timeout", code: "PGRST003" }, status: 504 },
+      { error: { message: "canceling statement due to statement timeout", code: "57014" }, status: 500 },
+      { error: { message: "terminating connection", code: "57P01" }, status: 503 },
+      { error: { message: "connection failure", code: "08006" }, status: 503 },
+      { error: { message: "too many connections", code: "53300" }, status: 503 },
+      { error: { message: "internal", code: "XX000" }, status: 500 },
+      { error: { message: "reauth_required", code: "P0001" }, status: 502 },   // a refusal code behind a gateway error: not trusted
+      { error: { message: "<html>502 Bad Gateway</html>", code: "" }, status: 502 },
+      { error: { message: "TypeError: fetch failed" }, status: 0 },
+      { error: { message: "AbortError" } },
+      null,
+    ]) expect(closeOutcomeOf(r)).toEqual({ ok: "unknown" });
+  });
+  it("REGRESSION (route): a PostgREST time-out or an internal error after the closure committed → recovery finds it → closed and revoked", async () => {
+    for (const lost of [{ error: { message: "pool timeout", code: "PGRST003" }, status: 504 }, { error: { message: "internal", code: "XX000" }, status: 500 },
+                        { error: { message: "canceling statement", code: "57014" }, status: 500 }]) {
+      calls.length = 0; claimed = false;
+      const intent = await intentFor(A);
+      closeAnswer = lost; statusRows = { data: [{ status: "closing" }], error: null };
+      const r = await deleteRoute.POST(post({ method: "apple", code: "CODE-A", intent }));
+      expect(await r.json()).toEqual({ closed: true, revocation: "done" });
+      expect(calls).toContain("service:status");
+    }
+  });
+  it("REGRESSION (route): the same errors with no closure found → 202 unknown, never 'nothing changed'", async () => {
+    const intent = await intentFor(A);
+    closeAnswer = { error: { message: "Could not connect", code: "PGRST000" }, status: 503 }; statusRows = { data: [], error: null };
+    const r = await deleteRoute.POST(post({ method: "apple", code: "CODE-A", intent }));
+    expect(r.status).toBe(202);
+    expect(await r.json()).toEqual({ closed: "unknown", error: "close_result_unknown" });
+  });
+});
+
+describe("fourth review, point 3: revocation-marker writes are checked", () => {
+  it("an Auth error or an unconfirmed write is alerted, not taken as recorded; the account is still closed and processed", async () => {
+    for (const f of ["error", "unconfirmed"] as const) {
+      calls.length = 0; claimed = false; reported.length = 0;
+      const intent = await intentFor(A);
+      markFails = f;
+      const r = await deleteRoute.POST(post({ method: "apple", code: "CODE-A", intent }));
+      expect(await r.json()).toEqual({ closed: true, revocation: "done" });
+      expect(reported).toContain("appleRevocationMarkFailed");
+      expect(calls).toContain("service:deleteUser");
+    }
+  });
+  it("the older-app hook's mark: an Auth error or unconfirmed write throws (the pipeline then alerts 'mark_failed')", async () => {
+    const { appleRevocationHook } = await import("@/lib/apple/routeDeps");
+    const hook = appleRevocationHook()!;
+    const s = new AbortController().signal;
+    markFails = "error";
+    await expect(hook.mark(A, s)).rejects.toThrow("revocation_mark_not_confirmed");
+    markFails = "unconfirmed";
+    await expect(hook.mark(A, s)).rejects.toThrow("revocation_mark_not_confirmed");
+    markFails = null;
+    await expect(hook.mark(A, s)).resolves.toBeUndefined();
   });
 });

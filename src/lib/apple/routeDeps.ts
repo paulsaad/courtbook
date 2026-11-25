@@ -22,13 +22,36 @@ export function appleDeletionSetup(env: Record<string, string | undefined> = pro
 // Apple's signing keys, shared by requests on the same server instance (cached one hour inside AppleKeys)
 let keys: AppleKeys | null = null;
 const appleKeys = () => (keys ??= new AppleKeys());
+/** Tests only: forget the cached keys (a cached key set otherwise survives a later outage of Apple's key endpoint). */
+export function resetAppleKeysForTests(): void { keys = null; }
 
-/** A database answer for close_my_account. Only an answer that carries a database or API error code is DEFINITE
- *  (nothing committed); anything else — a network failure, an abort, a gateway error without a code — is "unknown". */
-export function closeOutcomeOf(r: { error: { message?: string; code?: string } | null } | null | undefined): CloseOutcome {
+/**
+ * close_my_account's answer → definite or unknown (fourth review 25 Nov).
+ *
+ * DEFINITE (nothing committed) only when Postgres itself refused the statement and PostgREST passed that refusal back
+ * as a client error: an SQLSTATE in a class where the statement is rolled back by the database's own decision —
+ *   P0 (our raise exception: reauth_required, staff_role, …), 22 (data), 23 (integrity), 28 (authorization),
+ *   40 (serialization failure / deadlock: rolled back), 42 (privilege / syntax) —
+ * with an HTTP 4xx status (or no status at all, as in tests).
+ * Everything else is UNKNOWN and goes to the closure-status recovery: PostgREST's own codes (PGRST…: connection,
+ * pool and schema-cache errors, time-outs), gateway and transport failures (no code, 5xx, status 0), query
+ * cancellation or shutdown (57…), connection exceptions (08…), resource or internal errors (53, 58, XX), any 5xx.
+ */
+const DEFINITE_CLASSES = new Set(["P0", "22", "23", "28", "40", "42"]);
+const SQLSTATE = /^[0-9A-Z]{5}$/;
+
+export function closeOutcomeOf(
+  r: { error: { message?: string; code?: string } | null; status?: number } | null | undefined,
+): CloseOutcome {
   if (!r) return { ok: "unknown" };
   if (!r.error) return { ok: true };
-  return typeof r.error.code === "string" && r.error.code ? { ok: false, code: dbCode(r.error) } : { ok: "unknown" };
+  const code = typeof r.error.code === "string" ? r.error.code : "";
+  const status = typeof r.status === "number" ? r.status : null;
+  const clientError = status === null || (status >= 400 && status < 500);
+  if (SQLSTATE.test(code) && !code.startsWith("PGRST") && DEFINITE_CLASSES.has(code.slice(0, 2)) && clientError) {
+    return { ok: false, code: dbCode(r.error) };
+  }
+  return { ok: "unknown" };
 }
 
 export function appleDeletionDeps(setup: AppleDeletionSetup, who: BearerPlayer, now: () => Date = () => new Date()): AppleDeletionDeps {
@@ -52,7 +75,9 @@ export function appleDeletionDeps(setup: AppleDeletionSetup, who: BearerPlayer, 
       return closureFromRecords(error ? null : data);
     },
     markRevocation: async (outcome) => {
-      await admin.auth.admin.updateUserById(who.userId, { app_metadata: { [REVOCATION_MARK]: outcome } });
+      // confirmed only by Auth's own answer showing the value; anything else throws (alerted by closeAppleAccount)
+      const { data, error } = await admin.auth.admin.updateUserById(who.userId, { app_metadata: { [REVOCATION_MARK]: outcome } });
+      if (error || data?.user?.app_metadata?.[REVOCATION_MARK] !== outcome) throw new Error("revocation_mark_not_confirmed");
     },
     process: async () => {
       const out = await processDeletion(who.userId, await serviceDeps());
@@ -73,6 +98,9 @@ export function appleRevocationHook(env: Record<string, string | undefined> = pr
       return error || !data?.user ? null : appleLinkState(data.user);
     },
     alert: (code) => report("appleRevocationSkipped", "account", { code }),
-    mark: async (id) => { await admin.auth.admin.updateUserById(id, { app_metadata: { [REVOCATION_MARK]: "skipped" } }); },
+    mark: async (id) => {
+      const { data, error } = await admin.auth.admin.updateUserById(id, { app_metadata: { [REVOCATION_MARK]: "skipped" } });
+      if (error || data?.user?.app_metadata?.[REVOCATION_MARK] !== "skipped") throw new Error("revocation_mark_not_confirmed");
+    },
   };
 }

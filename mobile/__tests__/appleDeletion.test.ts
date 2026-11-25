@@ -105,6 +105,25 @@ describe("cancellation, outages and the fallback", () => {
   });
 });
 
+describe("fourth review, point 1: recoverable Apple failures on the server offer the email code", () => {
+  it("token-exchange or signing-key outage (503 apple_unavailable): use_fallback with the same intent; side session signed out", async () => {
+    const f = fake({ del: { status: 503, body: { closed: false, error: "apple_unavailable" } } });
+    expect(await deleteWithApple(f.d)).toEqual({ kind: "use_fallback", intent: "intent-for-A", reason: "apple_unavailable" });
+    expect(f.freshSignOut).toHaveBeenCalledTimes(1);
+    expect(f.log).not.toContain("main.signOutEverywhere");
+  });
+  it("a code Apple would not accept, or a token that failed verification: use_fallback (Apple refused); nothing changed", async () => {
+    for (const error of ["apple_code_rejected", "apple_identity_unverified", "apple_code_missing"]) {
+      expect(await deleteWithApple(fake({ del: { status: 422, body: { closed: false, error } } }).d))
+        .toEqual({ kind: "use_fallback", intent: "intent-for-A", reason: "apple_refused" });
+    }
+  });
+  it("not recoverable by email: another Apple ID, or a database refusal, stays a refusal", async () => {
+    expect((await deleteWithApple(fake({ del: { status: 422, body: { closed: false, error: "wrong_apple_account" } } }).d)).kind).toBe("refused");
+    expect((await deleteWithApple(fake({ del: { status: 409, body: { closed: false, error: "staff_role" } } }).d)).kind).toBe("refused");
+  });
+});
+
 describe("answers from the server, including a lost one", () => {
   it("lost answer: the app's own deletion status decides; not confirmed closed is 'unknown', never 'nothing changed'", async () => {
     let f = fake({ del: null, closedNow: true });

@@ -37,6 +37,7 @@ export const SAFE_MESSAGES = {
   appleRevocationSkipped: "account: Apple token revocation skipped",
   appleIdentityRejected: "account: Apple identity rejected",
   appleCloseResultUnknown: "account: closing result unknown",
+  appleRevocationMarkFailed: "account: Apple revocation outcome not recorded",
   testServer: "CourtBook monitoring test (server)",
   testBrowser: "CourtBook monitoring test (browser)",
 } as const;
