@@ -20,7 +20,7 @@ echo "$out" | grep -qE "^(FAIL|psql)|ERROR" && status=FAIL
 
 echo "== mutation checks (each mutant must make the suite fail)"
 # Mutants are loaded into a scratch copy, never into courtbook_test: putting 0094 back afterwards would also undo
-# every later migration that replaced one of its functions (0095's hold_slot), and later suites would test old code.
+# every later migration that replaced one of its functions, and later suites would test old code.
 T=courtbook_fee_mut
 $PSQL -q -d postgres -c "drop database if exists $T" -c "create database $T template courtbook_test" >/dev/null || { echo "could not make the scratch copy"; exit 2; }
 trap '$PSQL -q -d postgres -c "drop database if exists courtbook_fee_mut" >/dev/null 2>&1' EXIT
