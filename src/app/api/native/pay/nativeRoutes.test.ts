@@ -92,6 +92,7 @@ const provider = {
   startAttempt: vi.fn(),
   attemptStatus: vi.fn(),
   callbackAttemptId: vi.fn(),
+  listCharges: vi.fn() as ((since: Date, until: Date) => Promise<never[]>) | undefined,   // charge-level reconciliation available
   start: vi.fn(), verify: vi.fn(), refund: vi.fn(),
 };
 vi.mock("@/lib/payments", () => ({ getProvider: () => provider, providerNamed: (n: string) => (n === provider.name ? provider : null) }));
@@ -188,6 +189,17 @@ describe("POST /api/native/pay/start", () => {
     expect(input.callbackUrl).toBe("https://courtbook.example/api/pay/callback/whish");
     expect(JSON.stringify(input)).not.toContain(GOOD);
     expect(r.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("review 25 Nov (#40): in the app too, a real provider without charge-level reconciliation starts nothing — 503 payments_not_configured, the provider never called", async () => {
+    userRpc.start_payment_attempt = attempt();
+    const list = provider.listCharges;
+    provider.listCharges = undefined;
+    try {
+      const r = await start.POST(req("/api/native/pay/start", { paymentId: PAY, requestKey: KEY }, `Bearer ${GOOD}`));
+      expect([r.status, (await r.json()).error]).toEqual([503, "payments_not_configured"]);
+      expect(provider.startAttempt).not.toHaveBeenCalled();
+    } finally { provider.listCharges = list; }
   });
 
   it("another player's payment: the database refuses it as not found, and so does the route (nothing reaches the provider)", async () => {

@@ -258,8 +258,12 @@ async function runUntilClean(n, extra = {}) { const out = []; for (let i = 0; i 
   const x = await holdAndStart(); gw.pay(x.attempt);
   const c = gw.foreignCharge(1);
   const r = await run({ provider: noList });
-  rep("R10 no charge list: the run says so on every run (coverage attempts_only) — our attempts are still settled by asking; a charge with no attempt cannot be found",
-    r.coverage === "attempts_only" && (await st(x)).charges === 1 && (await chargesOf(c.providerRef)) === 0 && r.window === null, { coverage: r.coverage, problems: r.problems });
+  rep("R10 no charge list: our attempts are still settled by asking; a charge with no attempt cannot be found — and for real money that FAILS the run (coverage_attempts_only), never a quiet success (review 25 Nov)",
+    r.coverage === "attempts_only" && r.problems.includes("coverage_attempts_only") && (await st(x)).charges === 1 && (await chargesOf(c.providerRef)) === 0 && r.window === null,
+    { coverage: r.coverage, problems: r.problems });
+  const r2 = await run({ provider: noList, attemptsOnlyApproval: "approved alternative, ref" });
+  rep("R10b ...with a specifically approved alternative: not a failure, but a warning on every run",
+    !r2.problems.includes("coverage_attempts_only") && r2.warnings.includes("coverage_attempts_only_approved"), { problems: r2.problems, warnings: r2.warnings });
   await runUntilClean(3);                                             // the full runner picks the foreign charge up
 }
 

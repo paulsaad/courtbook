@@ -2,6 +2,7 @@ import "server-only";
 import { report } from "@/lib/report";
 import { PaymentStartRefused, type PaymentProvider } from "./provider";
 import { paymentCode, recordEvidence, verifyAndRecord } from "./attempts";
+import { chargeCoverage } from "./coverage";
 import { isSafeRedirect, isUuid, providerCallbackUrl } from "./urls";
 
 /**
@@ -119,6 +120,9 @@ export async function startFeePayment(d: FlowDeps, input: { paymentId: unknown; 
   const attempt = a;
   const abandon = async (why: string) => { await admin.rpc("abandon_payment_attempt", { p_attempt: attempt.attempt_id, p_note: why }); };
   if (attempt.provider !== provider.name) { await abandon("provider not configured on this deployment"); return fail("payments_not_configured", 503); }
+  // review 25 Nov (#40): real money needs charge-level reconciliation or an approved alternative; without it no payment
+  // starts, on the website or in the app (getProvider's gate refuses too — this says why, as a configuration code)
+  if (chargeCoverage(provider) === "missing") { await abandon("no charge-level reconciliation for this provider"); return fail("payments_not_configured", 503); }
 
   if (!d.origin && provider.name !== "simulated") { await abandon("PAYMENT_SITE_URL not configured"); return fail("payments_not_configured", 503); }
   const base = d.origin ?? "http://localhost";   // simulated: the URLs are never used

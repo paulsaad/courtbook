@@ -2,6 +2,7 @@ import "server-only";
 import { PaymentStartRefused, type PaymentProvider } from "./provider";
 import { guardProvider, ProviderAnswerInvalid } from "./guard";
 import { simulatedProvider } from "./simulated";
+import { attemptsOnlyApproval, chargeCoverage, withCoverageGate } from "./coverage";
 import { whishProvider } from "./whish";
 
 /**
@@ -16,6 +17,13 @@ import { whishProvider } from "./whish";
  *                 reports provider_mismatch for every waiting attempt, and paymentConfigProblem says why.
  *
  * PAYMENT_PAGE_HOSTS (optional, comma-separated host names): the only hosts a payment page may be on.
+ *
+ * Charge-level coverage (review 25 Nov). A real-money provider (anything but `simulated`) must offer its own charge list
+ * (listCharges), so that reconciliation can find a charge that has no attempt of ours (a second charge on a page, a
+ * foreign reference). Without one, no new payment can START (`charge_reconciliation_unavailable`); existing attempts are
+ * still asked about and settled. The only way round it is a specifically approved alternative, named in
+ * PAYMENT_ATTEMPTS_ONLY_APPROVAL (an approval reference, e.g. a document and date). Even then every reconciliation run
+ * reports `coverage_attempts_only_approved` as a warning.
  */
 const UNCONFIGURED = "unconfigured";
 
@@ -40,6 +48,8 @@ export function paymentConfigProblem(env: Record<string, string | undefined> = p
   if (p !== "" && p !== "simulated" && p !== "whish") return "provider_unknown";
   if (p === "whish") return "provider_not_implemented";
   if ((env.PAYMENT_PAGE_HOSTS ?? "").trim() && pageHosts(env).length === 0) return "page_hosts_invalid";
+  if ((env.PAYMENT_ATTEMPTS_ONLY_APPROVAL ?? "").trim() && !attemptsOnlyApproval(env)) return "attempts_only_approval_invalid";
+  if (chargeCoverage(getProvider(env), env) === "missing") return "charge_reconciliation_unavailable";
   return null;
 }
 
@@ -48,7 +58,7 @@ export function getProvider(env: Record<string, string | undefined> = process.en
   const base = raw === undefined || raw === "" || raw === "simulated" ? simulatedProvider
     : raw === "whish" ? whishProvider
     : unconfiguredProvider();
-  return guardProvider(base, { pageHosts: pageHosts(env) });
+  return withCoverageGate(guardProvider(base, { pageHosts: pageHosts(env) }), env);
 }
 
 /** The provider an attempt or a callback names — only if it is the one this deployment is configured for. A row
@@ -57,4 +67,5 @@ export function providerNamed(name: string | null | undefined): PaymentProvider 
   const p = getProvider();
   return name === p.name ? p : null;
 }
+export { attemptsOnlyApproval, chargeCoverage, withCoverageGate } from "./coverage";
 export type { PaymentProvider, ProviderName } from "./provider";

@@ -108,6 +108,22 @@ describe("sweepOpenAttempts", () => {
     await sweepOpenAttempts(db, provider({ [A1]: "throw" }), { minAgeSeconds: 0, maxAgeHours: 1, limit: 5 });
     expect(calls.slice(1)).toEqual([{ fn: "record_attempt_result", args: { p_attempt: A1, p_result: "pending" } }]);
   });
+  it("review 25 Nov: if marking an attempt as checked fails (refused or thrown), the run counts rotation_failed — for an unanswerable attempt and for another provider's", async () => {
+    for (const how of ["error", "throw"] as const) {
+      const rows = [{ attempt_id: A1, provider: "whish" }, { attempt_id: A2, provider: "areeba" }];
+      const db: Rpc = { rpc: async (fn, args = {}) => {
+        if (fn === "attempts_to_check") return { data: rows, error: null };
+        if (fn === "record_attempt_result" && args.p_result === "pending") { if (how === "throw") throw new Error("network"); return { data: null, error: { message: "boom" } }; }
+        return { data: null, error: null };
+      } };
+      const s = await sweepOpenAttempts(db, provider({ [A1]: "throw" }), { minAgeSeconds: 0, maxAgeHours: 1, limit: 5 });
+      expect([how, s]).toEqual([how, { checked: 1, skipped: 1, outcomes: {}, failures: { provider_unavailable: 1, rotation_failed: 2 } }]);
+    }
+  });
+  it("...and a successful rotation adds no failure", async () => {
+    const { db } = fakeDb((fn) => (fn === "attempts_to_check" ? { data: [{ attempt_id: A1, provider: "whish" }, { attempt_id: A2, provider: "areeba" }] } : { data: "pending" }));
+    expect((await sweepOpenAttempts(db, provider({ [A1]: "throw" }), { minAgeSeconds: 0, maxAgeHours: 1, limit: 5 })).failures).toEqual({ provider_unavailable: 1 });
+  });
   it("a provider outage is counted, not thrown", async () => {
     const { db } = fakeDb((fn) => (fn === "attempts_to_check" ? { data: [{ attempt_id: A1, provider: "whish" }] } : {}));
     expect(await sweepOpenAttempts(db, provider({ [A1]: "throw" }), { minAgeSeconds: 0, maxAgeHours: 1, limit: 1 })).toEqual({ checked: 1, skipped: 0, outcomes: {}, failures: { provider_unavailable: 1 } });
