@@ -9,10 +9,11 @@ import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { bookingDate, clubLocalToUtc, dayBounds, hhmm, moveTarget, nextDayStart, nowMs, shiftDate, slotTimes, todayIn, toMin, weekStart } from "@/lib/time";
 import { explainBookingError } from "@/lib/report";
-import { blockErrorText, friendlyError, type Block, type Booking, type Club, type Court } from "@/lib/types";
+import { blockErrorText, friendlyError, settlement, SETTLEMENT_TEXT, STAFF_BOOKING_COLUMNS, type Block, type Booking, type Club, type Court } from "@/lib/types";
 import { blockEndOptions, blockStartOptions, bookingSlotOptions, minToHhmm, pickSlots, type Busy } from "./durations";
 import { DESKTOP_QUERY, useDialog, useIsDesktop } from "@/components/useDialog";
 import { matchBookings, readPrefs, writePrefs } from "./findBooking";
+import { paymentsByBooking } from "@/lib/staffPayments";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string>;
   /** the address named a view or sport (then it is used as is, and remembered on desktop) */
@@ -55,11 +56,13 @@ async function withContacts(
   if (error) return null;
   const by = new Map((data as { booking_id: string; name: string | null; phone: string | null }[] | null ?? [])
     .map((c) => [c.booking_id, c] as const));
-  return rows.map((r) => ({
+  const out = rows.map((r) => ({
     ...r,
     player_name: by.get(r.id as string)?.name ?? null,
     contact_phone: by.get(r.id as string)?.phone ?? null,
   })) as unknown as Booking[];
+  // the payment of each app booking (a failed read leaves it unknown, never "paid")
+  return paymentsByBooking(supabase as never, out);
 }
 
 export default function DayCalendar({ club, courts: allCourts, bookings: initialBookings, blocks: initialBlocks, date, view, sport, court: courtParam, loadFailed, sportNames, explicit = false, focusTime = null }: Props) {
@@ -185,7 +188,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     const supabase = createClient();
     const { dayStart, dayEnd } = dayBounds(date, club.timezone);
     const [{ data: b, error: eb }, { data: k, error: ek }] = await Promise.all([
-      supabase.from("bookings").select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id, price_usd, fee_usd, hold_expires_at")
+      supabase.from("bookings").select(STAFF_BOOKING_COLUMNS)
         .eq("club_id", club.id).or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`).not("court_id", "is", null).lt("start_at", dayEnd).gt("end_at", dayStart).order("start_at"),
       supabase.from("blocks").select("id, court_id, start_at, end_at, reason").eq("club_id", club.id).lt("start_at", dayEnd).gt("end_at", dayStart),
     ]);
@@ -245,7 +248,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
       const from = dayBounds(wkStart, club.timezone).dayStart;
       const to = dayBounds(shiftDate(wkStart, 6), club.timezone).dayEnd;
       const [{ data: b, error: eb }, { data: k, error: ek }] = await Promise.all([
-        supabase.from("bookings").select("id, court_id, player_id, guest_name, guest_phone, start_at, end_at, status, source, credit_tx_id, price_usd, fee_usd, hold_expires_at")
+        supabase.from("bookings").select(STAFF_BOOKING_COLUMNS)
           .eq("club_id", club.id).eq("court_id", weekCourt.id)
           .or(`status.eq.confirmed,and(status.eq.pending,hold_expires_at.gt.${new Date().toISOString()})`)
           .lt("start_at", to).gt("end_at", from).order("start_at"),
@@ -573,12 +576,13 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
               <BookingSheet
                 key={sheet.booking.id}
                 club={club} courts={allCourts} booking={sheet.booking} times={times} busy={busy}
-                onMove={(courtId, time, slots) =>
+                onMove={(courtId, time, slots, price) =>
                   run(() => {
                     // the day comes from the booking, never from the page: the sheet can be opened
                     // from a week whose URL says another day (covered by src/lib/time.test.ts)
                     const { start, end } = moveTarget(sheet.booking.start_at, club.timezone, time, slots, club.slot_minutes);
-                    return createClient().rpc("move_booking", { p_booking: sheet.booking.id, p_court: courtId, p_start: start.toISOString(), p_end: end.toISOString() });
+                    // 0091: the price the desk was shown and confirmed; the database refuses if it is no longer right
+                    return createClient().rpc("move_booking_priced", { p_booking: sheet.booking.id, p_court: courtId, p_start: start.toISOString(), p_end: end.toISOString(), p_expected_price: price });
                   })
                 }
                 onCancel={(clubCaused) => run(() => createClient().rpc("cancel_booking", { p_booking: sheet.booking.id, p_club_caused: clubCaused }))}
@@ -1722,7 +1726,7 @@ export function AddSheet({ club, court, time, busy, defaultMinutes, onSave, onDi
 
 function BookingSheet({ club, courts, booking: b, times, busy, onMove, onCancel, onNoShow }: {
   club: Club; courts: Court[]; booking: Booking; times: string[]; busy: boolean;
-  onMove: (courtId: string, time: string, slots: number) => void;
+  onMove: (courtId: string, time: string, slots: number, price: number) => void;
   onCancel: (clubCaused: boolean) => void;
   onNoShow: () => void;
 }) {
@@ -1738,6 +1742,10 @@ function BookingSheet({ club, courts, booking: b, times, busy, onMove, onCancel,
   // the club's minimum to maximum, plus the booking's current length (always allowed to keep)
   const moveOpts = bookingSlotOptions(club, toMin(time), closeMin, curSlots);
   const slots = pickSlots(moveOpts, wish, curSlots);
+  const quote = useMoveQuote(mode === "move" && slots !== null ? { booking: b, club, courtId, time, slots } : null);
+  const [agreed, setAgreed] = useState(false);
+  const priceChanges = quote.state === "ready" && quote.kind !== "same";
+  const canSave = quote.state === "ready" && quote.kind !== "refused" && (quote.kind !== "agreement" || agreed);
 
   return (
     <div className="flex flex-col gap-3">
@@ -1753,11 +1761,8 @@ function BookingSheet({ club, courts, booking: b, times, busy, onMove, onCancel,
           <p className="mt-1 text-sm">
             ${Number(b.price_usd).toFixed(2)}
             <span className="text-muted">
-              {b.status === "pending"
-                ? ` + $${Number(b.fee_usd ?? 0).toFixed(2)} fee · awaiting payment`
-                : b.source === "app"
-                  ? ` + $${Number(b.fee_usd ?? 0).toFixed(2)} fee · paid in the app`
-                  : " · take payment at the desk, not through CourtBook"}
+              {(settlement(b) === "awaiting" || settlement(b) === "paid_in_app") && ` + $${Number(b.fee_usd ?? 0).toFixed(2)} fee`}
+              {` · ${SETTLEMENT_TEXT[settlement(b)]}`}
             </span>
           </p>
         )}
@@ -1794,7 +1799,10 @@ function BookingSheet({ club, courts, booking: b, times, busy, onMove, onCancel,
               <span className="text-muted">too close to closing</span>
             )}
           </label>
-          <button disabled={busy || slots === null} onClick={() => slots !== null && onMove(courtId, time, slots)} className={primary}>{busy ? "Saving…" : "Save move"}</button>
+          <MovePrice quote={quote} agreed={agreed} setAgreed={setAgreed} />
+          <button disabled={busy || slots === null || !canSave} onClick={() => slots !== null && quote.state === "ready" && onMove(courtId, time, slots, quote.next)} className={primary}>
+            {busy ? "Saving…" : priceChanges ? `Save move · new price $${quote.state === "ready" ? quote.next.toFixed(2) : ""}` : "Save move"}
+          </button>
           <button disabled={busy} onClick={() => setMode("view")} className={backLink}>Back</button>
         </>
       )}
@@ -1810,6 +1818,54 @@ function BookingSheet({ club, courts, booking: b, times, busy, onMove, onCancel,
           <button disabled={busy} onClick={() => onCancel(clubCaused)} className="rounded-xl bg-danger py-3.5 font-medium text-white disabled:opacity-50">{busy ? "Cancelling…" : "Confirm cancellation"}</button>
           <button disabled={busy} onClick={() => setMode("view")} className={backLink}>Back</button>
         </>
+      )}
+    </div>
+  );
+}
+
+type MoveQuote = { state: "idle" | "loading" | "failed" } | { state: "ready"; current: number; next: number; kind: "same" | "reprice" | "agreement" | "refused" };
+
+/** 0091: what the move does to the price, asked from the database (quote_move) whenever court, time or length change. */
+function useMoveQuote(q: { booking: Booking; club: Club; courtId: string; time: string; slots: number } | null): MoveQuote {
+  const [res, setRes] = useState<{ key: string; quote: MoveQuote } | null>(null);
+  const key = q ? `${q.booking.id}|${q.courtId}|${q.time}|${q.slots}` : "";
+  useEffect(() => {
+    if (!q) return;
+    let alive = true;
+    const { start, end } = moveTarget(q.booking.start_at, q.club.timezone, q.time, q.slots, q.club.slot_minutes);
+    Promise.resolve(createClient().rpc("quote_move", { p_booking: q.booking.id, p_court: q.courtId, p_start: start.toISOString(), p_end: end.toISOString() }))
+      .then(({ data, error }) => {
+        if (!alive) return;
+        const d = data as { current: number | string; new: number | string; kind: string } | null;
+        setRes({ key, quote: error || !d ? { state: "failed" } : { state: "ready", current: Number(d.current), next: Number(d.new), kind: d.kind as "same" } });
+      }, () => { if (alive) setRes({ key, quote: { state: "failed" } }); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  if (!q) return { state: "idle" };
+  return res?.key === key ? res.quote : { state: "loading" };
+}
+
+function MovePrice({ quote, agreed, setAgreed }: { quote: MoveQuote; agreed: boolean; setAgreed: (v: boolean) => void }) {
+  if (quote.state === "loading") return <p className="text-sm text-muted" role="status">Checking the price…</p>;
+  if (quote.state === "failed") return <p className="text-sm text-danger" role="alert">Couldn&apos;t check the price for this change. Try again.</p>;
+  if (quote.state !== "ready") return null;
+  const money = (n: number) => `$${n.toFixed(2)}`;
+  if (quote.kind === "same") return <p className="text-sm text-muted" role="status">Price unchanged: {money(quote.current)}</p>;
+  if (quote.kind === "refused") return (
+    <p className="rounded-xl bg-sand-soft p-3 text-sm" role="alert">
+      This booking was paid in the app, so its length can&apos;t change. Move it at the same length, or cancel it (the refund
+      follows the club&apos;s rules) and book the new length.
+    </p>
+  );
+  return (
+    <div className="flex flex-col gap-2 rounded-xl bg-sand-soft p-3 text-sm" role="status">
+      <p>Price changes from <b>{money(quote.current)}</b> to <b>{money(quote.next)}</b>.</p>
+      {quote.kind === "agreement" && (
+        <label className="flex items-start gap-3">
+          <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-1 h-4 w-4" />
+          <span>The player agreed to pay {money(quote.next)} at the desk for the new length.</span>
+        </label>
       )}
     </div>
   );
