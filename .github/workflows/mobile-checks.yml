@@ -35,6 +35,8 @@ jobs:
         run: npm run check:shared
       - name: Legal-pages release check, its own tests (fixture pages, no network)
         run: node --test scripts/check-legal-pages.nodetest.mjs
+      - name: Store artwork gate, its own tests (no network)
+        run: node --test scripts/check-store-artwork.nodetest.mjs
       # The exact release bundling step an EAS build runs, on mobile/ alone. This is the check that
       # would have caught the 0.2.0 iOS build failure before a build was spent on it.
       - name: Release bundling, as EAS runs it (iOS and Android, mobile/ only)

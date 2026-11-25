@@ -95,6 +95,13 @@ jobs:
       - name: Legal pages the app links to are final and public (only if the app links to them)
         run: node scripts/check-legal-pages.mjs --gate --mode "$([ "${{ inputs.app }}" = live ] && echo fail || echo warn)"
 
+      # Decision 25 Nov: no store release may contain the Expo template artwork; the final icon comes from a
+      # separate branding decision. Live app: refuses while any icon or splash file is an Expo template file
+      # (so live builds stop here until the final icon is added). Staging: refuses unless every icon and
+      # splash file is the temporary STAGING artwork in assets/staging/.
+      - name: Icon and splash are not the Expo placeholder (live) / are the STAGING artwork (staging)
+        run: node scripts/check-store-artwork.mjs --app "${{ inputs.app }}"
+
       # No linking step: app.json carries owner and extra.eas.projectId, so the
       # build targets that one project. The previous `eas init --force` is gone
       # deliberately — it was only ever needed to create the project, and a
