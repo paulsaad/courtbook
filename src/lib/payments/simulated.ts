@@ -1,7 +1,7 @@
 import "server-only";
 import type { AttemptStatus, PaymentProvider, StartAttemptInput, StartAttemptResult, StartPaymentInput, StartPaymentResult, VerifyResult } from "./provider";
 
-/** Demo clubs only (0070, 0093): every payment succeeds instantly for exactly what was asked; nothing is collected
+/** Demo clubs only (0070, 0094): every payment succeeds instantly for exactly what was asked; nothing is collected
  *  (payments.collected and fee_charges.collected stay false); refunds are recorded, not executed. */
 export const simulatedProvider: PaymentProvider = {
   name: "simulated",

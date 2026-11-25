@@ -1,4 +1,4 @@
--- 0094 — M12.2: nothing in payment reconciliation may disappear silently (review of PR #36). NOT APPLIED ANYWHERE.
+-- 0095 — M12.2: nothing in payment reconciliation may disappear silently (review of PR #36). NOT APPLIED ANYWHERE.
 --
 -- 1. A watermark per provider: how far the provider's own charge list has been reconciled completely. Each run reads
 --    from the watermark (minus an overlap) instead of a fixed look-back, and moves it forward only when its whole

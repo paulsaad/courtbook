@@ -3,7 +3,7 @@ import "server-only";
 /**
  * Payment provider interface. The booking flow never talks to a gateway directly, and never trusts what a browser or a
  * callback says about money: the server asks the provider (attemptStatus) and hands that answer to the database
- * (record_attempt_result, 0093), which alone decides what a successful charge means.
+ * (record_attempt_result, 0094), which alone decides what a successful charge means.
  *
  * Two flows:
  *  - Model 2 (fee_online clubs, M12.1): one ATTEMPT per request to the provider. The attempt's id is the external
