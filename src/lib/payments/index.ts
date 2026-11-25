@@ -21,9 +21,9 @@ import { whishProvider } from "./whish";
  * Charge-level coverage (review 25 Nov). A real-money provider (anything but `simulated`) must offer its own charge list
  * (listCharges), so that reconciliation can find a charge that has no attempt of ours (a second charge on a page, a
  * foreign reference). Without one, no new payment can START (`charge_reconciliation_unavailable`); existing attempts are
- * still asked about and settled. The only way round it is a specifically approved alternative, named in
- * PAYMENT_ATTEMPTS_ONLY_APPROVAL (an approval reference, e.g. a document and date). Even then every reconciliation run
- * reports `coverage_attempts_only_approved` as a warning.
+ * still asked about and settled. The only way round it is a specifically approved alternative: its reference in
+ * PAYMENT_ATTEMPTS_ONLY_APPROVAL AND a registered entry in coverage.ts (Paul's approval plus a committed process
+ * document; none today). Even then every reconciliation run reports `coverage_attempts_only_approved` as a warning.
  */
 const UNCONFIGURED = "unconfigured";
 
@@ -67,5 +67,6 @@ export function providerNamed(name: string | null | undefined): PaymentProvider 
   const p = getProvider();
   return name === p.name ? p : null;
 }
-export { attemptsOnlyApproval, chargeCoverage, withCoverageGate } from "./coverage";
+export { APPROVED_ATTEMPTS_ONLY_ALTERNATIVES, attemptsOnlyApproval, chargeCoverage, isCompleteAlternative, withCoverageGate } from "./coverage";
+export type { AttemptsOnlyAlternative } from "./coverage";
 export type { PaymentProvider, ProviderName } from "./provider";
