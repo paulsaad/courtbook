@@ -17,6 +17,7 @@ import { money } from "../../lib/queries";
 import { durationLabel } from "../../lib/courts";
 import { sportName } from "../../lib/days";
 import { useCancellation } from "../../lib/cancel";
+import { ClubContactAction } from "../../components/ClubContactAction";
 import { GAME_WRITES_AVAILABLE } from "../../lib/gameActions";
 import { color, font, radius, space } from "../../lib/theme";
 
@@ -140,6 +141,8 @@ export default function Booking() {
               ? freeCancel ? `Free to cancel before ${cutoffLabel}. Nothing was paid through CourtBook.` : `Less than ${b.club.cancel_cutoff_hours} h before start — please tell the club.`
               : freeCancel ? `Full refund if you cancel before ${cutoffLabel}.` : `Less than ${b.club.cancel_cutoff_hours} h before start: no refund.`}
           </Text>
+          {/* PR-9b: the notice asks the player to tell the club, so give them the way to */}
+          {atDesk && !freeCancel && b.club_id && <ClubContactAction clubId={b.club_id} clubName={b.club.name} />}
           <Button
             label={cancel.phase === "sending" ? "Cancelling…" : "Cancel booking"}
             variant="quiet"
