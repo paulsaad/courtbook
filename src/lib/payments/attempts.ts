@@ -72,6 +72,16 @@ async function record(admin: Rpc, args: Record<string, unknown>): Promise<Record
   return { ok: true, outcome: String(res.data) };
 }
 
+/**
+ * Mark an attempt as looked at now ('pending': last_checked_at and checks only, nothing about money), so that it leaves
+ * the head of attempts_to_check's queue. If that write fails the attempt stays at the head and could hold the queue
+ * again on the next run, so the failure is counted (`rotation_failed`) and the run reports it (review 25 Nov).
+ */
+async function rotate(admin: Rpc, attemptId: string, summary: SweepSummary): Promise<void> {
+  const r = await record(admin, { p_attempt: attemptId, p_result: "pending" });
+  if (!r.ok) summary.failures.rotation_failed = (summary.failures.rotation_failed ?? 0) + 1;
+}
+
 /** `skipped`: open attempts of another provider than this runner's — never silently ignored (the run reports them).
  *  `more` (M12.3): more attempts were waiting than this run could ask about — the run is not complete. */
 export type SweepSummary = { checked: number; skipped: number; more?: boolean; outcomes: Record<string, number>; failures: Record<string, number> };
@@ -113,7 +123,7 @@ export async function sweepOpenAttempts(admin: Rpc, provider: PaymentProvider,
       // attempt the provider could not answer for: otherwise, never checked, it would stay at the head of the queue and
       // `limit` of them would starve every attempt of the real provider for ever (review 25 Nov, gateway2 R12).
       summary.skipped++;
-      await record(admin, { p_attempt: row.attempt_id, p_result: "pending" });
+      await rotate(admin, row.attempt_id, summary);
       continue;
     }
     summary.checked++;
@@ -121,7 +131,7 @@ export async function sweepOpenAttempts(admin: Rpc, provider: PaymentProvider,
     const bucket = r.ok ? summary.outcomes : summary.failures;
     const key = r.ok ? r.outcome : r.code;
     bucket[key] = (bucket[key] ?? 0) + 1;
-    if (!r.ok && r.code === "provider_unavailable") await record(admin, { p_attempt: row.attempt_id, p_result: "pending" });
+    if (!r.ok && r.code === "provider_unavailable") await rotate(admin, row.attempt_id, summary);
   }
   return summary;
 }
