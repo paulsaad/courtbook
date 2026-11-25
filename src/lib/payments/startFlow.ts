@@ -2,6 +2,7 @@ import "server-only";
 import { report } from "@/lib/report";
 import { PaymentStartRefused, type PaymentProvider } from "./provider";
 import { paymentCode, recordEvidence, verifyAndRecord } from "./attempts";
+import { chargeCoverage } from "./coverage";
 import { isSafeRedirect, isUuid, providerCallbackUrl } from "./urls";
 
 /**
@@ -53,17 +54,18 @@ const STATUS: Record<string, number> = {
 };
 
 type AttemptRow = { attempt_id: string; attempt_no: number; provider: string; amount_usd: number | string; currency: string; status: string; session_url: string | null; already: boolean };
-type Unresolved = { id: string; status: string; session_url: string | null; outcome: string | null };
+type Unresolved = { id: string; status: string; session_url: string | null; outcome: string | null; created_at?: string | null };
 const UNRESOLVED = ["starting", "open"];
 
 async function readAttempt(admin: AdminDb, id: string): Promise<Unresolved | null> {
-  const { data } = await admin.from("payment_attempts").select("id, status, session_url, outcome").eq("id", id).single();
+  const { data } = await admin.from("payment_attempts").select("id, status, session_url, outcome, created_at").eq("id", id).single();
   return (data as Unresolved | null) ?? null;
 }
 
 /** Ask the provider about an unresolved attempt and record its answer; then what the attempt is now. */
-async function settle(admin: AdminDb, provider: PaymentProvider, attemptId: string): Promise<Unresolved | null> {
-  const r = await verifyAndRecord(admin, provider, attemptId);
+async function settle(admin: AdminDb, provider: PaymentProvider, attemptId: string, createdAt?: string | null): Promise<Unresolved | null> {
+  // createdAt lets a provider's "never heard of it" end the attempt after UNKNOWN_GRACE_MINUTES (M12.2)
+  const r = await verifyAndRecord(admin, provider, attemptId, { createdAt: createdAt ?? (await readAttempt(admin, attemptId))?.created_at });
   if (!r.ok) await report(r.code === "provider_unavailable" ? "paymentProvider" : "paymentRecord", "payment", { code: r.code });
   return readAttempt(admin, attemptId);
 }
@@ -93,10 +95,10 @@ export async function startFeePayment(d: FlowDeps, input: { paymentId: unknown; 
     }
     // Another attempt of this payment is unresolved. The database has already checked the payment is this player's.
     // Ask the provider about it: if it has ended, this tap may start the next attempt (one more round).
-    const { data: open } = await admin.from("payment_attempts").select("id, status, session_url, outcome, provider")
+    const { data: open } = await admin.from("payment_attempts").select("id, status, session_url, outcome, provider, created_at")
       .eq("payment_id", paymentId).in("status", UNRESOLVED).order("attempt_no", { ascending: false }).limit(1).maybeSingle();
     if (!open) continue;                                                  // it ended meanwhile
-    const now = open.provider === provider.name ? await settle(admin, provider, open.id) : (open as Unresolved);
+    const now = open.provider === provider.name ? await settle(admin, provider, open.id, open.created_at) : (open as Unresolved);
     if (now && UNRESOLVED.includes(now.status)) return answerFor(now);   // still live: its page, or "in progress"
     if (now?.status === "succeeded") return answerFor(now);              // it had been paid
     // failed or expired: loop once more and start the next attempt
@@ -118,6 +120,9 @@ export async function startFeePayment(d: FlowDeps, input: { paymentId: unknown; 
   const attempt = a;
   const abandon = async (why: string) => { await admin.rpc("abandon_payment_attempt", { p_attempt: attempt.attempt_id, p_note: why }); };
   if (attempt.provider !== provider.name) { await abandon("provider not configured on this deployment"); return fail("payments_not_configured", 503); }
+  // review 25 Nov (#40): real money needs charge-level reconciliation or an approved alternative; without it no payment
+  // starts, on the website or in the app (getProvider's gate refuses too — this says why, as a configuration code)
+  if (chargeCoverage(provider) === "missing") { await abandon("no charge-level reconciliation for this provider"); return fail("payments_not_configured", 503); }
 
   if (!d.origin && provider.name !== "simulated") { await abandon("PAYMENT_SITE_URL not configured"); return fail("payments_not_configured", 503); }
   const base = d.origin ?? "http://localhost";   // simulated: the URLs are never used
@@ -200,9 +205,9 @@ export async function feePaymentStatus(d: Pick<FlowDeps, "player" | "admin" | "p
   if (!mine.data) return fail("not_found", 404);                              // not this player's (or does not exist)
   if (mine.data.kind !== "fee_only") return fail("wrong_payment_mode", 409);
 
-  type AttemptRead = { id: string; status: string; outcome: string | null; attempt_no: number; provider: string };
+  type AttemptRead = { id: string; status: string; outcome: string | null; attempt_no: number; provider: string; created_at: string };
   const attemptsOf = async (): Promise<{ rows: AttemptRead[] } | { error: string }> => {
-    const { data, error } = await player.from("payment_attempts").select("id, status, outcome, attempt_no, provider").eq("payment_id", paymentId).order("attempt_no", { ascending: false });
+    const { data, error } = await player.from("payment_attempts").select("id, status, outcome, attempt_no, provider, created_at").eq("payment_id", paymentId).order("attempt_no", { ascending: false });
     if (error || !Array.isArray(data)) return { error: error?.code ?? "attempts" };
     return { rows: data as AttemptRead[] };
   };
@@ -210,7 +215,7 @@ export async function feePaymentStatus(d: Pick<FlowDeps, "player" | "admin" | "p
   if ("error" in read) return unavailable("attempts", read.error);
   const open = read.rows.find((x) => UNRESOLVED.includes(x.status));
   if (open && open.provider === provider.name) {
-    await settle(admin, provider, open.id);
+    await settle(admin, provider, open.id, open.created_at);
     mine = await readMine();
     if (mine.error) return unavailable("payment", mine.error.code);
     if (!mine.data) return fail("not_found", 404);
