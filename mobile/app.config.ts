@@ -1,15 +1,34 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
-/**
- * Two apps from one code base (see lib/variant.ts):
- *   default             → CourtBook          app.courtbook.mobile          live database
- *   APP_VARIANT=staging → CourtBook Staging  app.courtbook.mobile.staging  staging database
- * The staging app installs beside the real one, has its own name, scheme and update channel, and
- * refuses to connect to the live database. app.json stays the single source of everything else.
- */
+// Temporary internal staging identifier ("STG" on charcoal; scripts/staging-artwork.py). Not CourtBook branding:
+// the final name, logo and icon come from a separate branding decision. Live builds keep the assets named in
+// app.json. Which exact files may ship is pinned in assets/artwork-approvals.json (check-store-artwork.mjs).
+const STAGING_ASSETS = {
+  icon: "./assets/staging/icon.png",
+  adaptiveIcon: {
+    backgroundColor: "#1F2328",
+    foregroundImage: "./assets/staging/android-icon-foreground.png",
+    backgroundImage: "./assets/staging/android-icon-background.png",
+    monochromeImage: "./assets/staging/android-icon-monochrome.png",
+  },
+  splashImage: "./assets/staging/splash-icon.png",
+  splashBackground: "#1F2328",
+} as const;
+
+type PluginEntry = NonNullable<ExpoConfig["plugins"]>[number];
+
+function stagingSplash(plugins: ExpoConfig["plugins"]): ExpoConfig["plugins"] {
+  return (plugins ?? []).map((p: PluginEntry): PluginEntry => {
+    if (!Array.isArray(p) || p[0] !== "expo-splash-screen") return p;
+    const opts = (p[1] ?? {}) as Record<string, unknown>;
+    return [
+      "expo-splash-screen",
+      { ...opts, image: STAGING_ASSETS.splashImage, backgroundColor: STAGING_ASSETS.splashBackground },
+    ];
+  });
+}
+
 export default ({ config }: ConfigContext): ExpoConfig => {
-  // E2E_BUILD: the emulator test build made on GitHub (no EAS). It must run exactly the code it was
-  // built with, so it never fetches over-the-air updates.
   const base = (process.env.E2E_BUILD === "1"
     ? { ...config, updates: { ...config.updates, enabled: false } }
     : config) as ExpoConfig;
@@ -18,7 +37,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...base,
     name: "CourtBook Staging",
     scheme: "courtbook-staging",
+    icon: STAGING_ASSETS.icon,
     ios: { ...base.ios, bundleIdentifier: "app.courtbook.mobile.staging" },
-    android: { ...base.android, package: "app.courtbook.mobile.staging" },
+    android: {
+      ...base.android,
+      package: "app.courtbook.mobile.staging",
+      adaptiveIcon: { ...STAGING_ASSETS.adaptiveIcon },
+    },
+    plugins: stagingSplash(base.plugins),
   };
 };

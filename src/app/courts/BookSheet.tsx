@@ -6,14 +6,14 @@ import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { explainBookingError } from "@/lib/report";
 import { newToken, reserve as reserveSlot } from "@/lib/reserve";
+import { reserveText } from "@/lib/fees";
 import { useDialog } from "@/components/useDialog";
-import { DEMO_NOTE } from "@/lib/fees";
 
 export type SheetClub = { id: string; name: string; slug: string; slot_minutes: number; min_minutes: number; max_minutes: number; service_fee_usd: number; hold_minutes: number; cancel_cutoff_hours: number; timezone: string };
 
 /** How this club settles money. club_day_slots does not carry it, so the sheet asks when it opens;
  *  until the answer arrives, Reserve waits rather than guessing which flow to use. */
-type Mode = "simulated" | "at_desk" | null;
+type Mode = "simulated" | "at_desk" | "fee_online" | null;
 type Quote = { state: "loading" } | { state: "ok"; value: number } | { state: "error"; message: string };
 
 /** Booking panel: court, duration, price, Reserve. Nothing is held until Reserve (hold_slot). */
@@ -79,7 +79,7 @@ export default function BookSheet({ club, date, at, courts, initialCourtId, init
     router.push(r.value.href);
   }
 
-  const atDesk = mode === "at_desk";
+  const text = reserveText(mode, club.service_fee_usd, current.state === "ok" ? current.value : null, club.hold_minutes, club.cancel_cutoff_hours);
   const pill = (on: boolean) => `flex-1 rounded-2xl px-3 py-3 text-center text-[15px] ${on ? "bg-ink font-bold text-white" : "border border-grid bg-white font-semibold"}`;
   return (
     <div className="fixed inset-0 z-30 flex items-end bg-ink/45 lg:items-center lg:justify-center lg:p-6" onClick={() => { if (!busy) onClose(); }}>
@@ -101,17 +101,15 @@ export default function BookSheet({ club, date, at, courts, initialCourtId, init
           <p className="mt-3 flex items-center justify-between rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{current.message}{current.message.startsWith("Could") && <button onClick={() => setRetry((n) => n + 1)} className="font-semibold underline">Retry</button>}</p>
         ) : (
           <div className="mt-3 flex items-center justify-between">
-            <span className="text-sm text-muted">{atDesk ? "Pay at the club" : `Court ${current.state === "ok" ? `$${current.value.toFixed(2)}` : "…"} + booking fee $${club.service_fee_usd.toFixed(2)}`}</span>
-            <span className="text-2xl font-extrabold tracking-tight">{atDesk ? (current.state === "ok" ? `$${current.value.toFixed(2)}` : "…") : total !== null ? `$${total.toFixed(2)}` : "…"}</span>
+            <span className="text-sm text-muted">{text.label}</span>
+            <span className="text-2xl font-extrabold tracking-tight">{text.amount}</span>
           </div>
         )}
         <button disabled={busy || total === null || !valid || mode === null} onClick={reserve} className="btn btn-primary mt-4">
-          {busy ? "Reserving…" : !signedIn ? "Sign in to reserve" : atDesk ? "Reserve — you pay at the club" : `Reserve and pay${total !== null ? ` $${total.toFixed(2)}` : ""}`}
+          {busy ? "Reserving…" : !signedIn ? "Sign in to reserve" : text.button}
         </button>
         <p className="mt-2 text-center text-xs text-muted">
-          {atDesk
-            ? `Confirmed straight away · nothing is paid through the app · free cancellation until ${club.cancel_cutoff_hours} h before`
-            : `${mode === "simulated" ? `${DEMO_NOTE} · ` : ""}Slot held ${club.hold_minutes} minutes while you pay · free cancellation until ${club.cancel_cutoff_hours} h before`}
+          {text.note}
         </p>
       </section>
     </div>

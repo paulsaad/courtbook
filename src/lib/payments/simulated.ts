@@ -1,7 +1,8 @@
 import "server-only";
-import type { PaymentProvider, StartPaymentInput, StartPaymentResult, VerifyResult } from "./provider";
+import type { AttemptStatus, PaymentProvider, StartAttemptInput, StartAttemptResult, StartPaymentInput, StartPaymentResult, VerifyResult } from "./provider";
 
-/** Milestone A: every payment succeeds instantly; refunds are recorded, not executed. */
+/** Demo clubs only (0070, 0094): every payment succeeds instantly for exactly what was asked; nothing is collected
+ *  (payments.collected and fee_charges.collected stay false); refunds are recorded, not executed. */
 export const simulatedProvider: PaymentProvider = {
   name: "simulated",
   async start(input: StartPaymentInput): Promise<StartPaymentResult> {
@@ -13,5 +14,13 @@ export const simulatedProvider: PaymentProvider = {
   },
   async refund() {
     return { ok: true };
+  },
+  async startAttempt(input: StartAttemptInput): Promise<StartAttemptResult> {
+    return { kind: "immediate", evidence: { providerRef: `SIM-${input.attemptId}`, amount: input.amountUsd, currency: input.currency } };
+  },
+  async attemptStatus(): Promise<AttemptStatus> {
+    // A simulated attempt is recorded in the same request that starts it. One still open later was interrupted before
+    // that: nothing was (or could be) charged, so it has expired.
+    return { state: "expired" };
   },
 };

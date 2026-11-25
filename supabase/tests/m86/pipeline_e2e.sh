@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # Runs pipeline_e2e.mjs: the website pipeline (TypeScript) against 0086 on a disposable copy of courtbook_test.
-# Needs Node 22.6+ (type stripping) and the "pg" package somewhere outside the repo:
+# Needs Node 22.6+ (type stripping) and the "pg" package somewhere outside the repo. A module hook
+# (supabase/tests/m86/alias.mjs) resolves the website's "@/..." imports (pipeline.ts imports "@/lib/bounded").
+# Install:
 #   mkdir -p /tmp/pgdeps && (cd /tmp/pgdeps && npm init -y && npm install pg@8)
 #   PG_MODULE=/tmp/pgdeps/node_modules bash supabase/tests/m86/pipeline_e2e.sh
 set -u
 cd "$(dirname "$0")/../../.."
 SRC=courtbook_test; DB=courtbook_m86_e2e
-: "${PG_MODULE:?set PG_MODULE to a node_modules folder containing pg}"
+PG_MODULE=${PG_MODULE:-/tmp/pgdeps/node_modules}   # the same default as the race and API suites
+[ -d "$PG_MODULE/pg" ] || { echo "no pg package in $PG_MODULE: see the install line above"; exit 2; }
 sudo -u postgres psql -q -d postgres -c "drop database if exists $DB" -c "create database $DB template $SRC" >/dev/null || exit 2
 run() { sudo -u postgres psql -q -d postgres -c "drop database if exists $DB" -c "create database $DB template $SRC" >/dev/null || exit 2
-        sudo -u postgres env PG_MODULE="$PG_MODULE" E2E_DB=$DB ${1:+E2E_PIPELINE=$1} node --experimental-strip-types --no-warnings supabase/tests/m86/pipeline_e2e.mjs; }
+        sudo -u postgres env PG_MODULE="$PG_MODULE" E2E_DB=$DB ${1:+E2E_PIPELINE=$1} node --experimental-strip-types --no-warnings --import ./supabase/tests/m86/alias_register.mjs supabase/tests/m86/pipeline_e2e.mjs; }
 run; rc=$?
 
 # mutants of the pipeline: each must make at least one check fail

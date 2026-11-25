@@ -69,6 +69,8 @@ function RootLayout() {
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               <Stack.Screen name="sign-in" options={{ title: "Sign in", presentation: "modal" }} />
               <Stack.Screen name="booking/[id]" options={{ title: "Booking" }} />
+              <Stack.Screen name="pay/[id]" options={{ title: "Booking fee" }} />
+              <Stack.Screen name="payment-return" options={{ title: "", headerShown: false }} />
               <Stack.Screen name="design-preview" options={{ title: "Component preview" }} />
               <Stack.Screen name="club/[id]" options={{ title: "" }} />
               <Stack.Screen name="games/index" options={{ title: "" }} />

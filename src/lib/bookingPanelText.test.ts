@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bookingPanelText } from "./fees";
+import { bookingPanelText, reserveText } from "./fees";
 
 const base = { courtUsd: 30, serviceFeeUsd: 1, holdMinutes: 10, cutoffHours: 6, signedIn: true, busy: false };
 
@@ -26,9 +26,26 @@ describe("booking panel wording follows the club's payment mode (W1)", () => {
     });
   });
   it("an unknown mode is treated as paid in the app (never promises free), without the demo note", () => {
-    expect(bookingPanelText({ ...base, mode: "fee_online" }).total).toBe("$31.00");
-    expect(bookingPanelText({ ...base, mode: "fee_online" }).footnote).not.toContain("no real money");
+    expect(bookingPanelText({ ...base, mode: "card_gateway" }).total).toBe("$31.00");
+    expect(bookingPanelText({ ...base, mode: "card_gateway" }).footnote).not.toContain("no real money");
     expect(bookingPanelText({ ...base, mode: null }).button).toBe("Reserve and pay $31.00");
+  });
+  it("fee online (M12.1): the court at the club, only the fee now, kept on cancel; no demo note", () => {
+    expect(bookingPanelText({ ...base, mode: "fee_online" })).toEqual({
+      priceLine: "Court $30.00 at the club + booking fee now",
+      total: "$1.00",
+      button: "Reserve and pay the $1.00 booking fee",
+      footnote: "Slot held 10 minutes while you pay the booking fee · it is not refunded if you cancel",
+    });
+  });
+  it("fee online with a $0 fee reads exactly like the desk", () => {
+    expect(bookingPanelText({ ...base, mode: "fee_online", serviceFeeUsd: 0 })).toEqual(bookingPanelText({ ...base, mode: "at_desk" }));
+  });
+  it("reserveText (M12.1's shape) is the same rule", () => {
+    for (const mode of ["at_desk", "fee_online", "simulated", null]) {
+      const p = bookingPanelText({ ...base, mode }); const r = reserveText(mode, 1, 30, 10, 6);
+      expect(r).toEqual({ label: p.priceLine, amount: p.total, button: p.button, note: p.footnote });
+    }
   });
   it("price still loading, signed out, busy", () => {
     expect(bookingPanelText({ ...base, mode: "at_desk", courtUsd: null }).total).toBe("…");

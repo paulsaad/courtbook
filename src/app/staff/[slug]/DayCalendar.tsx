@@ -1782,6 +1782,7 @@ function BookingSheet({ club, courts, booking: b, times, busy, onMove, onCancel,
             ${Number(b.price_usd).toFixed(2)}
             <span className="text-muted">
               {(settlement(b) === "awaiting" || settlement(b) === "paid_in_app") && ` + $${Number(b.fee_usd ?? 0).toFixed(2)} fee`}
+              {(settlement(b) === "fee_awaiting" || settlement(b) === "fee_paid") && ` (+ $${Number(b.fee_usd ?? 0).toFixed(2)} CourtBook fee online)`}
               {` · ${SETTLEMENT_TEXT[settlement(b)]}`}
             </span>
           </p>
@@ -1829,6 +1830,12 @@ function BookingSheet({ club, courts, booking: b, times, busy, onMove, onCancel,
 
       {mode === "cancel" && (
         <>
+          {settlement(b) === "fee_paid" && (
+            <label className="flex items-start gap-3 rounded-xl bg-paper p-3 text-sm">
+              <input type="checkbox" checked={clubCaused} onChange={(e) => setClubCaused(e.target.checked)} className="mt-1 h-4 w-4" />
+              <span>The club is cancelling (rain, maintenance, court closed, our mistake): CourtBook refunds the player&apos;s ${Number(b.fee_usd ?? 0).toFixed(2)} booking fee. Leave unticked if the player asked to cancel: the fee is then kept.</span>
+            </label>
+          )}
           {b.source === "app" && b.credit_tx_id && (
             <label className="flex items-start gap-3 rounded-xl bg-paper p-3 text-sm">
               <input type="checkbox" checked={clubCaused} onChange={(e) => setClubCaused(e.target.checked)} className="mt-1 h-4 w-4" />
