@@ -6,7 +6,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/types";
 
-/** One CourtBook booking fee owed back (fee_refunds_due, 0093). Admin only: the database refuses anyone else. */
+/** One CourtBook booking fee owed back (fee_refunds_due, 0094). Admin only: the database refuses anyone else. */
 export type FeeRefundRow = {
   charge_id: string; club_name: string | null; provider: string; provider_ref: string; amount: number | string; currency: string;
   reason: string; since: string; court_name: string | null; start_at: string | null;

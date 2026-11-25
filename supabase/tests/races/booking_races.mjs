@@ -10,7 +10,7 @@
 //      no-show or cancelled (a late cancellation keeps the money); an expired or failed booking holds no paid money;
 //   I4 at most one payment row per booking; desk walk-ins have no payment row and no CourtBook fee;
 //   I5 an expired or failed hold never blocks a later booking of the same slot (checked by booking it afterwards).
-// FEE=1 (M12.1, 0093): the same scenarios 1–5 at a club in 'fee_online' mode (court paid at the desk, $1 fee online
+// FEE=1 (M12.1, 0094): the same scenarios 1–5 at a club in 'fee_online' mode (court paid at the desk, $1 fee online
 // through provider-verified attempts), then the fee-only races F6–F11 instead of 6–9, with four more invariants:
 //   I6 every successful attempt has exactly one charge of its own (an extra charge proven by the provider's records is
 //   separate), and never two unresolved attempts on one payment; I7 a fee-only payment is paid exactly when it has one kept charge

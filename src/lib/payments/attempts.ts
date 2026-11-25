@@ -2,7 +2,7 @@ import "server-only";
 import type { PaymentProvider } from "./provider";
 
 /**
- * Provider-independent handling of payment attempts (M12.1, 0093). Three callers share it, so they cannot disagree:
+ * Provider-independent handling of payment attempts (M12.1, 0094). Three callers share it, so they cannot disagree:
  * the provider's callback, the player's return page and the sweeper/reconciliation. Each one only ASKS the provider
  * (attemptStatus) and hands the answer to record_attempt_result, which is idempotent: asking twice, or from two places
  * at once, records a charge once.

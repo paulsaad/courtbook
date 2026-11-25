@@ -1,4 +1,4 @@
--- M12.2 (0094 payment reconciliation) — POSTCHECK. READ ONLY: one SELECT, changes nothing. Every row must be ok.
+-- M12.2 (0095 payment reconciliation) — POSTCHECK. READ ONLY: one SELECT, changes nothing. Every row must be ok.
 with checks(item, ok, detail) as (
   select 'tables payment_reconciliation and payment_reconciliation_issues exist, row security on',
     to_regclass('public.payment_reconciliation') is not null and to_regclass('public.payment_reconciliation_issues') is not null
@@ -33,7 +33,7 @@ with checks(item, ok, detail) as (
     has_function_privilege('authenticated', 'resolve_reconciliation_issue(uuid,text)', 'execute')
     and not has_function_privilege('anon', 'resolve_reconciliation_issue(uuid,text)', 'execute')
     and position('is_admin()' in (select prosrc from pg_proc where oid = 'resolve_reconciliation_issue(uuid,text)'::regprocedure)) > 0, ''
-  union all select 'every 0094 function runs as its owner with a fixed search_path',
+  union all select 'every 0095 function runs as its owner with a fixed search_path',
     (select bool_and(p.prosecdef and coalesce(array_to_string(p.proconfig, ','), '') like '%search_path=public%') from pg_proc p
       where p.oid in ('initialise_reconciliation_watermark(text,timestamptz)'::regprocedure, 'advance_reconciliation_watermark(text,timestamptz)'::regprocedure,
                       'rewind_reconciliation_watermark(text,timestamptz)'::regprocedure, 'record_reconciliation_issue(text,text,text,numeric,text,text)'::regprocedure,
@@ -42,7 +42,7 @@ with checks(item, ok, detail) as (
     not exists (select 1 from payment_reconciliation), coalesce((select string_agg(provider, ',') from payment_reconciliation), '')
   union all select 'no reconciliation issue exists yet',
     not exists (select 1 from payment_reconciliation_issues), (select count(*)::text from payment_reconciliation_issues)
-  union all select '0094 replaced nothing: 0093''s payment functions are unchanged (fee-only guards present)',
+  union all select '0095 replaced nothing: 0094''s payment functions are unchanged (fee-only guards present)',
     position('use_payment_attempts' in (select prosrc from pg_proc where oid = 'confirm_payment(uuid,text,numeric)'::regprocedure)) > 0
     and position('settle_payment_on_cancel' in (select prosrc from pg_proc where oid = 'cancel_booking(uuid,boolean)'::regprocedure)) > 0, ''
   union all select 'real payments still off: no real club takes fees online; no real provider configured in the database',

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# M12.2 (0094) reconciliation: watermark, issues, health — then mutation checks: each deliberate mistake in 0094 must
+# M12.2 (0095) reconciliation: watermark, issues, health — then mutation checks: each deliberate mistake in 0095 must
 # make the suite fail. LOCAL ONLY (refuses anything but a local database; default courtbook_test, or DB=<name>).
 #   PSQL="sudo -u postgres psql" bash supabase/tests/run.sh && PSQL="sudo -u postgres psql" bash supabase/tests/payments/reconciliation.sh
 set -u
 cd "$(dirname "$0")/../../.."
 PSQL=${PSQL:-psql}
 DB=${DB:-courtbook_test}
-MIG=supabase/migrations/0094_payment_reconciliation.sql
+MIG=supabase/migrations/0095_payment_reconciliation.sql
 where=$($PSQL -At -d "$DB" -c "select coalesce(host(inet_server_addr()),'local-socket')" 2>/dev/null)
 case "$where" in local-socket|127.0.0.1|::1) ;; *) echo "refusing: $DB@$where"; exit 2;; esac
 T=$DB
@@ -40,7 +40,7 @@ caught=0; total=0
 for m in "${MUTANTS[@]}"; do
   name=${m%%|*}; rest=${m#*|}; from=${rest%%|*}; to=${rest#*|}
   total=$((total+1))
-  tmp=$(mktemp /tmp/m0094.XXXXXX); chmod 644 "$tmp"
+  tmp=$(mktemp /tmp/m0095.XXXXXX); chmod 644 "$tmp"
   FROM="$from" TO="$to" python3 -c "import os,sys; s=open(sys.argv[1]).read(); f=os.environ['FROM'].replace('\\\\n','\n'); t=os.environ['TO'].replace('\\\\n','\n'); n=s.count(f); assert n==1, (n, f); open(sys.argv[2],'w').write(s.replace(f,t))" "$MIG" "$tmp" \
     || { echo "  MUTANT NOT APPLIED: $name"; status=FAIL; rm -f "$tmp"; continue; }
   $PSQL -q -d "$T" -v ON_ERROR_STOP=1 -1 -f "$tmp" >/dev/null 2>&1 || { echo "  MUTANT DID NOT LOAD: $name"; status=FAIL; rm -f "$tmp"; continue; }

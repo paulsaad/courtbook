@@ -1,5 +1,5 @@
--- M12.2 (0094): reconciliation watermark, issues kept until a person resolves them, and the runner's health reading.
--- No provider is contacted. ONE transaction, rolled back: nothing it does persists (safe on staging after 0094).
+-- M12.2 (0095): reconciliation watermark, issues kept until a person resolves them, and the runner's health reading.
+-- No provider is contacted. ONE transaction, rolled back: nothing it does persists (safe on staging after 0095).
 \set ON_ERROR_STOP 1
 begin;
 create temp table t (id text, pass boolean, detail text);

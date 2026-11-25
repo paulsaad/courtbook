@@ -1,13 +1,13 @@
--- M12.2 (0094 payment reconciliation) — PREFLIGHT. READ ONLY: one SELECT, changes nothing.
--- Part 1 rows must all be ok before applying 0094; part 2 is information to note in the run log.
+-- M12.2 (0095 payment reconciliation) — PREFLIGHT. READ ONLY: one SELECT, changes nothing.
+-- Part 1 rows must all be ok before applying 0095; part 2 is information to note in the run log.
 with checks(part, item, ok, detail) as (
-  select 1, '0093 is applied (payment attempts and fee charges, which 0094 reads)',
+  select 1, '0094 is applied (payment attempts and fee charges, which 0095 reads)',
     to_regclass('public.payment_attempts') is not null and to_regclass('public.fee_charges') is not null
     and to_regprocedure('record_attempt_result(uuid,text,text,numeric,text)') is not null
     and to_regprocedure('reconcile_provider_charge(text,text,text,numeric,text)') is not null, ''
-  union all select 1, 'what 0094 needs is here (profiles, is_admin, gen_random_uuid)',
+  union all select 1, 'what 0095 needs is here (profiles, is_admin, gen_random_uuid)',
     to_regclass('public.profiles') is not null and to_regprocedure('is_admin()') is not null and to_regprocedure('gen_random_uuid()') is not null, ''
-  union all select 1, 'nothing of 0094 is here yet (no half-applied migration)',
+  union all select 1, 'nothing of 0095 is here yet (no half-applied migration)',
     to_regclass('public.payment_reconciliation') is null and to_regclass('public.payment_reconciliation_issues') is null
     and to_regprocedure('initialise_reconciliation_watermark(text,timestamptz)') is null
     and to_regprocedure('advance_reconciliation_watermark(text,timestamptz)') is null
@@ -19,7 +19,7 @@ with checks(part, item, ok, detail) as (
     not exists (select 1 from clubs where payment_mode = 'fee_online' and not is_demo)
     and coalesce(nullif(current_setting('app.payment_provider', true), ''), 'simulated') = 'simulated',
     coalesce((select string_agg(left(id::text, 8), ',') from clubs where payment_mode = 'fee_online' and not is_demo), '')
-  union all select 1, 'every attempt and payment provider is one 0094 knows (simulated, whish, areeba)',
+  union all select 1, 'every attempt and payment provider is one 0095 knows (simulated, whish, areeba)',
     not exists (select 1 from payment_attempts where provider not in ('simulated', 'whish', 'areeba'))
     and not exists (select 1 from payments where provider not in ('simulated', 'whish', 'areeba')), ''
   -- information (counts only)
