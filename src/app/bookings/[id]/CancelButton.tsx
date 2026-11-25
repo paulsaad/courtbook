@@ -1,11 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { explainBookingError } from "@/lib/report";
 
-export default function CancelButton({ bookingId, freeCancel, cutoffHours, cutoffLabel, nothingPaid }: { bookingId: string; freeCancel: boolean; cutoffHours: number; cutoffLabel: string; nothingPaid?: boolean }) {
+export default function CancelButton({ bookingId, freeCancel, cutoffHours, cutoffLabel, nothingPaid, clubPhone = null, clubInfoHref }: {
+  bookingId: string; freeCancel: boolean; cutoffHours: number; cutoffLabel: string; nothingPaid?: boolean;
+  /** PR-9b: the club's callable public phone (already checked by callableClubPhone), and its Info page as the fallback */
+  clubPhone?: string | null; clubInfoHref?: string;
+}) {
   const router = useRouter();
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -28,6 +33,11 @@ export default function CancelButton({ bookingId, freeCancel, cutoffHours, cutof
             ? (freeCancel ? `Free to cancel before ${cutoffLabel}. Nothing was paid through CourtBook.` : `Less than ${cutoffHours} h before start — please tell the club.`)
             : (freeCancel ? `Full refund if you cancel before ${cutoffLabel}.` : `Less than ${cutoffHours} h before start: no refund.`)}
         </p>
+        {nothingPaid && !freeCancel && (clubPhone ? (
+          <a href={`tel:${clubPhone}`} className="rounded-xl border border-grid bg-white py-3 text-center">Call club</a>
+        ) : clubInfoHref ? (
+          <Link href={clubInfoHref} className="rounded-xl border border-grid bg-white py-3 text-center">Club info</Link>
+        ) : null)}
       </div>
     );
   }
