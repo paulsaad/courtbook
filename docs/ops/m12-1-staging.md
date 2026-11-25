@@ -8,7 +8,8 @@ trial is complete and independently accepted.
 
 - **Staging database** (`pwznauyioqykdwodwpvx`): migrations 0001–0086 (staging step 1, 24 Nov). 0087–0092 are not
   applied.
-- **0094 depends on 0087–0092.** Checked against the code:
+- **0094 depends on 0087–0093.** Checked against the code (0093 is the pilot's closed-account fix, PR-8, #55;
+  renumbered 25 Nov: this migration was 0093 before):
 
   | 0094 relies on | From | How |
   | --- | --- | --- |
@@ -17,13 +18,15 @@ trial is complete and independently accepted.
   | `delete_account_data` | 0086 | 0094 replaces it (0086's body plus the shared fee rule) |
   | `bookings_need_active_court`, `set_club_base_prices` | 0092 | none directly; the replaced function bodies were taken from a 0001–0092 database, so applying 0087–0092 *after* 0094 would overwrite part of 0094 |
   | `club_readiness_rows` requiring `at_desk` for real clubs | 0081 / 0089 | keeps real-payment clubs unpublishable (§4) |
+  | `hold_slot` refusing a closed account under the profile lock, before any court | 0093 | 0094 replaces `hold_slot` with the same refusal; its rollback restores 0093's version. The preflight refuses to run without 0093; the workflow refuses 0094 unless 0093 is recorded as applied; the postcheck confirms the refusal is still there |
 
   0087–0089 add nothing 0094 uses, but `0094` is numbered after them: applying it first would make them "out of
   order". **Order: the release-candidate staging steps for 0087–0092 (`docs/ops/release-candidate-staging.md`, steps
-  4–7, each with its own approval) first, then 0094.**
-- **Rehearsed locally on a 0001–0092 database:** the preflight passes; 0094 applies; the postcheck passes; the
-  fee-payment suite (60 checks) passes; the rollback returns a schema identical to 0001–0092 (fingerprint, 1334
-  items), and 0094 applies again after it (`supabase/tests/payments/rollback_0094.sh`).
+  4–7, each with its own approval) first, then the pilot's 0093 (its own approval), then 0094.**
+- **Rehearsed locally on a 0001–0093 database (re-run 25 Nov after renumbering):** the preflight passes (and fails on
+  0001–0092 at the 0093 row); 0094 applies; the postcheck passes (and fails if `hold_slot` loses the refusal); the
+  rollback returns a schema identical to 0001–0093 (fingerprint), and 0094 applies again after it
+  (`supabase/tests/payments/rollback_0094.sh`).
 
 ## 2. The staging website
 
