@@ -46,7 +46,7 @@ describe("club page booking panel and the club's payment mode (W1)", () => {
     expect(text).toContain("$20.00");
     expect(text).toContain("Reserve — you pay at the club");
     expect(text).toContain("nothing is paid through the app");
-    expect(text).not.toMatch(/booking fee|\$21\.00|Reserve and pay|while you pay/);
+    expect(text).not.toMatch(/booking fee|\$21\.00|Reserve and pay|while you pay|Demo club/);
   });
   it("paid in the app (simulated): court + fee, the total and the hold are shown", async () => {
     const text = await panel("simulated");
@@ -54,5 +54,6 @@ describe("club page booking panel and the club's payment mode (W1)", () => {
     expect(text).toContain("$21.00");
     expect(text).toContain("Reserve and pay $21.00");
     expect(text).toContain("Slot held 10 minutes while you pay");
+    expect(text).toContain("Demo club: no real money is charged");
   });
 });
