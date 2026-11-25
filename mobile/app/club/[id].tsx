@@ -207,7 +207,7 @@ export default function Club() {
           {durations.length > 0 && (
             <View style={styles.durRow}>
               <Text variant="secondary">Play for</Text>
-              {durations.slice(0, 4).map((m) => (
+              {durations.map((m) => (
                 <Chip key={m} label={durationLabel(m)} selected={m === dur} disabled={locked} onPress={() => { if (locked) return; setMinutes(m); setNotice(null); }} />
               ))}
             </View>

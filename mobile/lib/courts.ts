@@ -6,6 +6,7 @@
  * The function returns free starts only. A start missing between two free ones is shown as
  * "not free" — never "booked", because the gap may equally be the club being closed.
  */
+import { bookingDurations } from "@shared/durations";
 export type DaySlot = {
   club_id: string; club_name: string; slug: string; town: string | null; district: string | null;
   price_from: number | null; sports: string[];
@@ -45,11 +46,10 @@ export function clubsFromSlots(rows: DaySlot[]): ClubDay[] {
   });
 }
 
-/** Durations a player may choose at this club: min..max in slot steps, capped to a short list. */
+/** Durations a player may choose at this club: every whole grid step from its minimum to its maximum (the website's
+ *  rule too: @shared/durations). None is left out (PR-9a). */
 export function durationOptions(club: Pick<ClubDay, "slotMinutes" | "minMinutes" | "maxMinutes">): number[] {
-  const out: number[] = [];
-  for (let m = club.minMinutes; m <= club.maxMinutes && out.length < 5; m += club.slotMinutes) out.push(m);
-  return out;
+  return bookingDurations(club);
 }
 
 export function durationLabel(m: number): string {

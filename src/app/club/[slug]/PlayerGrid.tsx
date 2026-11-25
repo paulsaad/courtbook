@@ -11,6 +11,7 @@ import { type Club, type Court } from "@/lib/types";
 import { readPrefs } from "@/lib/prefs";
 import { newToken, reserve as reserveSlot } from "@/lib/reserve";
 import { useDialog } from "@/components/useDialog";
+import { bookingDurations } from "@/lib/durations";
 
 export type Occ = { id?: string | null; court_id: string; start_at: string; end_at: string; status?: string; mine?: boolean; kind: "booking" | "block" };
 type ClubX = Club & { booking_window_days: number; service_fee_usd: number; location_url: string | null; hold_minutes: number };
@@ -44,9 +45,13 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
   const courts = sport && sports.includes(sport) ? allCourts.filter((c) => c.sport === sport) : allCourts;
 
   const [pick, setPick] = useState<{ courtId: string; time: string } | null>(preselect && preselect.date === initialDate ? { courtId: preselect.courtId, time: preselect.time } : null);
+  // Every length the club allows (whole grid steps from its minimum to its maximum; the app uses the same rule).
+  const lengths = bookingDurations({ slotMinutes: club.slot_minutes, minMinutes: club.min_booking_minutes, maxMinutes: club.max_booking_minutes });
   const [slots, setSlots] = useState(() => {
-    const want = preselect?.minutes ? Math.round(preselect.minutes / club.slot_minutes) : 0;
-    return Math.max(Math.round(club.min_booking_minutes / club.slot_minutes), Math.min(want, Math.round(club.max_booking_minutes / club.slot_minutes)));
+    const want = preselect?.minutes ?? 0;
+    // the preselected length if the club allows it, otherwise the nearest allowed one not above it (else the shortest)
+    const pickLen = lengths.filter((m) => m <= want).pop() ?? lengths[0] ?? club.slot_minutes;
+    return Math.round(pickLen / club.slot_minutes);
   });
   const [notice, setNotice] = useState<string | null>(null);
   // quote: loading → ok(value) | error(message); Reserve needs ok
@@ -100,7 +105,8 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
     while (i + n < times.length && !isTaken(courtId, times[i + n]) && (n + 1) * club.slot_minutes <= club.max_booking_minutes) n++;
     return n;
   }
-  const minSlots = Math.round(club.min_booking_minutes / club.slot_minutes);
+  // shortest allowed length, in grid steps (no allowed length at all: nothing can be reserved)
+  const minSlots = lengths.length ? lengths[0] / club.slot_minutes : Number.POSITIVE_INFINITY;
   const maxSlotsHere = pick ? freeRun(pick.courtId, pick.time) : 0;
 
   // a preselected slot (from Home, or carried through sign-in / profile setup) is re-checked once availability is known
@@ -149,7 +155,8 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
 
   const changeDate = (d: string) => { setDate(d); setPick(null); setError(null); setNotice(null); tokenRef.current = null; };
   const endLabel = (t: string, n: number) => { const m = toMin(t) + n * club.slot_minutes; return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; };
-  const fmtDur = (m: number) => (m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60}`);
+  // the app's words too (mobile/lib/courts.ts durationLabel): "30 min", "1 h", "1 h 30"
+  const fmtDur = (m: number) => (m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60}`);
   const dayOf = (d: string) => clubLocalToUtc(d, "12:00", club.timezone);
 
   return (
@@ -235,7 +242,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
           </div>
           <p className="text-sm text-muted">{date === today ? "Today" : formatInTimeZone(dayOf(date), club.timezone, "EEEE d MMMM")}</p>
           <div className="mt-3 flex flex-wrap gap-2">
-            {Array.from({ length: maxSlotsHere }, (_, i) => i + 1).filter((n) => n >= minSlots).map((n) => (
+            {lengths.map((m) => m / club.slot_minutes).filter((n) => n <= maxSlotsHere).map((n) => (
               <button key={n} onClick={() => { setSlots(n); setQuote({ state: "loading" }); }} className={`rounded-xl border px-3 py-2 text-sm ${slots === n ? "border-ink bg-ink text-white" : "border-grid"}`}>{fmtDur(n * club.slot_minutes)}</button>
             ))}
           </div>
