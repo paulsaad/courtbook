@@ -37,7 +37,8 @@ export type AppleRevocationHook = {
   /** The sign-in's Apple link and whether a revocation outcome is already recorded on it. null: could not read. */
   state: (id: string, signal: AbortSignal) => Promise<{ apple: boolean; marked: boolean } | null>;
   alert: (code: string, signal: AbortSignal) => Promise<void>;
-  /** Records that the skip was alerted, so a later run does not alert again. */
+  /** Records that the skip was alerted, so a later run does not alert again. Must THROW when the write was not
+   *  confirmed: the failure is then alerted ("mark_failed") instead of being taken as recorded (fourth review). */
   mark: (id: string, signal: AbortSignal) => Promise<void>;
 };
 /** The whole Apple check may take at most this long; then D goes ahead (review 25 Nov: never delay deletion). On the
@@ -51,7 +52,12 @@ async function noteAppleRevocation(subject: string, hook: AppleRevocationHook, m
     if (signal.aborted || !st || !st.apple || st.marked) return;
     await hook.alert("old_app_or_direct_close", signal);
     if (signal.aborted) return;
-    await hook.mark(subject, signal);
+    try {
+      await hook.mark(subject, signal);
+    } catch {
+      // not recorded: say so (a later run may alert again for this account, a duplicate rather than a silent gap)
+      if (!signal.aborted) await hook.alert("mark_failed", signal).catch(() => undefined);
+    }
   });
 }
 

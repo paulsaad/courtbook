@@ -250,6 +250,20 @@ describe("third review, point 3: slow responses and time-outs never hold up the 
     expect(log).toContain("process");
     expect(signals["mark:done"].aborted).toBe(true);
   });
+  it("fourth review: a marker write that FAILS is alerted, never taken as recorded; the processing still runs", async () => {
+    const { deps, log, alerts } = world({ mark: "throw" });
+    expect(await closeAppleAccount(APPLE, deps)).toEqual({ closed: true, revocation: "done" });
+    expect(alerts).toEqual([["appleRevocationMarkFailed", "done_error"]]);
+    expect(log).toContain("process");
+  });
+  it("…and a marker write that times out is alerted as a time-out", async () => {
+    vi.useFakeTimers();
+    const { deps, alerts } = world({ mark: "hang" });
+    const p = closeAppleAccount(FALLBACK, deps);
+    await vi.advanceTimersByTimeAsync(3 * LIMITS.bookkeeping);
+    expect(await p).toEqual({ closed: true, revocation: "skipped" });
+    expect(alerts).toEqual([["appleRevocationSkipped", "fallback"], ["appleRevocationMarkFailed", "skipped_timeout"]]);
+  });
   it("monitoring that hangs or fails delays nothing beyond its limit, on every alert path", async () => {
     vi.useFakeTimers();
     for (const alert of ["hang" as const, "throw" as const]) {

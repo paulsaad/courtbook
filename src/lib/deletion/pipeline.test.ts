@@ -306,7 +306,7 @@ describe("dbCode", () => {
 
 describe("E1: an Apple-linked account closed without revocation (older app) is noticed before D, never blocking it", () => {
   type St = { apple: boolean; marked: boolean } | null | "throw" | "hang" | "slow";
-  function hook(st: St, opts: { alertFails?: boolean; alert?: "hang" } = {}) {
+  function hook(st: St, opts: { alertFails?: boolean; alert?: "hang"; markFails?: boolean } = {}) {
     const log: string[] = [];
     const h = {
       state: async (_id: string, signal: AbortSignal) => {
@@ -326,7 +326,7 @@ describe("E1: an Apple-linked account closed without revocation (older app) is n
         if (opts.alert === "hang") { await new Promise<never>(() => {}); }
         void signal;
       },
-      mark: async () => { log.push("mark"); },
+      mark: async () => { log.push("mark"); if (opts.markFails) throw new Error("auth write refused"); },
     };
     return { h, log };
   }
@@ -380,6 +380,12 @@ describe("E1: an Apple-linked account closed without revocation (older app) is n
       expect(await run).toEqual({ result: "done" });
       expect(log).not.toContain("mark");
     } finally { vi.useRealTimers(); }
+  });
+  it("fourth review: a mark write that fails is alerted ('mark_failed'), not taken as recorded; deletion completes", async () => {
+    const { h, log } = hook({ apple: true, marked: false }, { markFails: true });
+    expect(await processDeletion(S, { ...deps, appleRevocation: h })).toEqual({ result: "done" });
+    expect(log.slice(1)).toEqual(["alert:old_app_or_direct_close", "mark", "alert:mark_failed"]);
+    expect(authUser.exists).toBe(false);
   });
   it("without the hook (today's serviceDeps), nothing changes", async () => {
     expect(await processDeletion(S, deps)).toEqual({ result: "done" });

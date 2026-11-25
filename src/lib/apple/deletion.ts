@@ -62,12 +62,13 @@ export type AppleDeletionDeps = {
   close: (signal: AbortSignal) => Promise<CloseOutcome>;
   /** After an ambiguous close: closureFromRecords() of the account's deletion records ("unknown" if the read failed). */
   closureStatus: (signal: AbortSignal) => Promise<"closed" | "open" | "unknown">;
-  /** Marks the sign-in record with the revocation outcome, so the deletion processing does not alert again. Best effort. */
+  /** Marks the sign-in record with the revocation outcome, so the deletion processing does not alert again. Must THROW
+   *  (or reject) when the write was not confirmed; a failed write is then alerted, never taken as done (fourth review). */
   markRevocation: (outcome: "done" | "failed" | "skipped", signal: AbortSignal) => Promise<void>;
   /** The existing deletion processing (B–E). It records its own failures; a throw here changes nothing below. */
   process: () => Promise<void>;
   revoke: (token: AppleToken, signal: AbortSignal) => Promise<RevokeResult>;
-  alert: (event: "appleRevokeFailed" | "appleRevocationSkipped" | "appleIdentityRejected" | "appleCloseResultUnknown",
+  alert: (event: "appleRevokeFailed" | "appleRevocationSkipped" | "appleIdentityRejected" | "appleCloseResultUnknown" | "appleRevocationMarkFailed",
           code: string, signal: AbortSignal) => Promise<void>;
 };
 
@@ -147,7 +148,10 @@ export async function closeAppleAccount(input: AppleDeletionInput, deps: AppleDe
     revocation = r.ok ? "done" : "failed";
     if (!r.ok) await note("appleRevokeFailed", r.code);
   }
-  await bounded(LIMITS.bookkeeping, (s) => deps.markRevocation(revocation, s));
+  // the marker: a write that failed or timed out is alerted (the older-app check may then alert again for this
+  // account: a duplicate, never a silent gap). Neither ever holds up the processing beyond its limit.
+  const mark = await bounded(LIMITS.bookkeeping, (s) => deps.markRevocation(revocation, s));
+  if (!mark.done) await note("appleRevocationMarkFailed", `${revocation}_${mark.reason}`);
   await deps.process().catch(() => undefined);
   return { closed: true, revocation };
 }
