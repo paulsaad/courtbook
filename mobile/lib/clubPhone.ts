@@ -12,7 +12,7 @@ export function useClubPhone(clubId: string | null | undefined) {
     enabled: !!clubId,
     staleTime: 5 * 60_000,
     queryFn: async () => {
-      const contact = contactFrom(await supabase.from("clubs").select("contact_phone, contact_email").eq("id", clubId!).single());
+      const contact = contactFrom(await supabase.from("clubs").select("contact_phone").eq("id", clubId!).single());
       return callableClubPhone(contact?.contact_phone);
     },
   });

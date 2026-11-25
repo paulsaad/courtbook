@@ -8,7 +8,7 @@ const mockPush = jest.fn();
 jest.mock("expo-router", () => ({ router: { push: (...a: unknown[]) => mockPush(...a) } }));
 
 import { Linking } from "react-native";
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { callableClubPhone } from "../lib/clubPhone";
 import { ClubContactAction } from "../components/ClubContactAction";
@@ -53,11 +53,19 @@ describe("ClubContactAction", () => {
     expect(screen.queryByTestId("club-info-link")).toBeNull();
     open.mockRestore();
   });
-  it("reads the club's own contact columns only: never a profile (no staff member's number)", async () => {
+  it("the phone cannot start a call (openURL fails): the Info tab opens instead, nothing thrown", async () => {
+    answer({ data: { contact_phone: "+961 6 123 456" }, error: null });
+    const open = jest.spyOn(Linking, "openURL").mockRejectedValue(new Error("no dialler"));
+    await show();
+    fireEvent.press(await screen.findByTestId("call-club"));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith({ pathname: "/club/[id]", params: { id: "c1", name: "Test Club", tab: "info" } }));
+    open.mockRestore();
+  });
+  it("reads clubs.contact_phone only: never a profile (no staff member's number)", async () => {
     answer({ data: { contact_phone: "06 123 456", contact_email: null }, error: null });
     await show();
     await screen.findByTestId("call-club");
-    expect(asked).toEqual([{ table: "clubs", cols: "contact_phone, contact_email", eq: ["id", "c1"] }]);
+    expect(asked).toEqual([{ table: "clubs", cols: "contact_phone", eq: ["id", "c1"] }]);
     expect(mockFrom).not.toHaveBeenCalledWith("profiles");
     expect(mockFrom).not.toHaveBeenCalledWith("club_staff");
   });
