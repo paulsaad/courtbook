@@ -70,19 +70,24 @@ insert into price_rules (club_id, court_id, weekday_mask, start_time, end_time, 
 select pg_temp.club(), pg_temp.c(n), 127, '00:00', '23:59', 25, 'test' from generate_series(1, 6) n;
 update clubs set service_fee_usd = 1.00, cancel_cutoff_hours = 6, max_upcoming_bookings = 20 where id = pg_temp.club();
 
+-- a real (non-demo) club of the test's own, so the suite also runs on staging (rolled back; the local seed's 'other' club
+-- does not exist there)
+insert into clubs (name, slug, is_demo) values ('M12.1 test real club', 'zz-m121-real', false);
+insert into courts (club_id, name, sport, sort) select id, 'zz-m121-real-1', 'padel', 990 from clubs where slug = 'zz-m121-real';
+
 -- ------------------------------------------------------------------------------------------------ M mode
-select pg_temp.keep('m_nondemo', pg_temp.r(pg_temp.u(30), format('select set_club_payment_mode(%L, ''fee_online'')::text', (select id from clubs where slug = 'other'))));
+select pg_temp.keep('m_nondemo', pg_temp.r(pg_temp.u(30), format('select set_club_payment_mode(%L, ''fee_online'')::text', (select id from clubs where slug = 'zz-m121-real'))));
 insert into t values ('M1 a real club cannot take fees online while no real provider is configured', pg_temp.got('m_nondemo') = 'ERR payments_not_configured', pg_temp.got('m_nondemo'));
 select pg_temp.keep('m_staff', pg_temp.r(pg_temp.u(29), format('select set_club_payment_mode(%L, ''fee_online'')::text', pg_temp.club())));
 insert into t values ('M2 club staff cannot change the payment mode', pg_temp.got('m_staff') = 'ERR forbidden', pg_temp.got('m_staff'));
 select pg_temp.keep('m_demo', pg_temp.r(pg_temp.u(30), format('select set_club_payment_mode(%L, ''fee_online'')::text', pg_temp.club())));
 insert into t select 'M3 an admin switches the demo club to fee_online', pg_temp.got('m_demo') ~ '^[0-9]+$' and payment_mode = 'fee_online', pg_temp.got('m_demo') from clubs where id = pg_temp.club();
 -- a real club set to fee_online behind the admin function's back still never takes a simulated fee
-update clubs set payment_mode = 'fee_online' where slug = 'other';
+update clubs set payment_mode = 'fee_online' where slug = 'zz-m121-real';
 select pg_temp.keep('m_hold_nondemo', pg_temp.r(pg_temp.u(1), format('select booking_id::text from hold_slot(%L,%L,%L,%L)',
-  (select id from clubs where slug = 'other'), (select id from courts where club_id = (select id from clubs where slug = 'other') limit 1), pg_temp.at(2, '10:00'), pg_temp.at(2, '11:00'))));
+  (select id from clubs where slug = 'zz-m121-real'), (select id from courts where club_id = (select id from clubs where slug = 'zz-m121-real') limit 1), pg_temp.at(2, '10:00'), pg_temp.at(2, '11:00'))));
 insert into t values ('M4 a hold at a real club with the simulated provider is refused (never a simulated fee for real)', pg_temp.got('m_hold_nondemo') = 'ERR payments_not_configured', pg_temp.got('m_hold_nondemo'));
-update clubs set payment_mode = 'at_desk' where slug = 'other';
+update clubs set payment_mode = 'at_desk' where slug = 'zz-m121-real';
 
 -- ------------------------------------------------------------------------------------------------ H holds
 select pg_temp.keep('h1', pg_temp.hold(1, 1, 2, '10:00', '11:00'));
