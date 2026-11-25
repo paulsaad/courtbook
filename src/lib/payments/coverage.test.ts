@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
-import { attemptsOnlyApproval, chargeCoverage, getProvider, paymentConfigProblem, withCoverageGate } from "./index";
+import { existsSync } from "node:fs";
+import {
+  APPROVED_ATTEMPTS_ONLY_ALTERNATIVES, attemptsOnlyApproval, chargeCoverage, getProvider, isCompleteAlternative,
+  paymentConfigProblem, withCoverageGate, type AttemptsOnlyAlternative,
+} from "./index";
 import { FakeGateway } from "./testing/fakeGateway";
 import { PaymentStartRefused } from "./provider";
 
@@ -25,16 +29,50 @@ describe("charge-level coverage gate", () => {
     await g.startAttempt({ ...START, attemptId: "0d000000-0000-4000-8000-000000000002" });   // an attempt made earlier
     expect((await gated.attemptStatus("0d000000-0000-4000-8000-000000000002")).state).toBe("pending");
   });
-  it("...with a specifically approved alternative (its reference in PAYMENT_ATTEMPTS_ONLY_APPROVAL): it may start", async () => {
-    const env = { PAYMENT_ATTEMPTS_ONLY_APPROVAL: "Paul 2026-12-01, doc X" };
+  it("...with a registered, approved alternative AND its reference in PAYMENT_ATTEMPTS_ONLY_APPROVAL: it may start", async () => {
+    const registry: AttemptsOnlyAlternative[] = [
+      { ref: "ALT-1", approvedBy: "Paul", approvedOn: "2026-12-01", process: "docs/payments/alt-1.md" },
+    ];
+    const env = { PAYMENT_ATTEMPTS_ONLY_APPROVAL: "ALT-1" };
     const g = realWithoutList();
-    expect(chargeCoverage(g, env)).toBe("approved_attempts_only");
-    expect(await withCoverageGate(g, env).startAttempt(START)).toMatchObject({ url: expect.stringMatching(/^https:/) });
+    expect(chargeCoverage(g, env, registry)).toBe("approved_attempts_only");
+    expect(await withCoverageGate(g, env, registry).startAttempt(START)).toMatchObject({ url: expect.stringMatching(/^https:/) });
   });
-  it("a blank or absurd approval is no approval, and is itself a configuration problem", () => {
-    for (const a of ["", "  ", "x", "y".repeat(201)]) expect(attemptsOnlyApproval({ PAYMENT_ATTEMPTS_ONLY_APPROVAL: a })).toBeNull();
-    expect(chargeCoverage(realWithoutList(), { PAYMENT_ATTEMPTS_ONLY_APPROVAL: "x" })).toBe("missing");
-    expect(paymentConfigProblem({ PAYMENT_ATTEMPTS_ONLY_APPROVAL: "x" })).toBe("attempts_only_approval_invalid");
+  it("decision 25 Nov: the environment variable alone activates nothing; an unregistered reference is a configuration problem", async () => {
+    const env = { PAYMENT_ATTEMPTS_ONLY_APPROVAL: "Paul 2026-12-01, doc X" };
+    expect(attemptsOnlyApproval(env)).toBeNull();
+    expect(chargeCoverage(realWithoutList(), env)).toBe("missing");
+    await expect(withCoverageGate(realWithoutList(), env).startAttempt(START)).rejects.toMatchObject({ reason: "charge_reconciliation_unavailable" });
+    expect(paymentConfigProblem(env)).toBe("attempts_only_approval_invalid");
+    // the reference of a registered entry must match exactly
+    const registry: AttemptsOnlyAlternative[] = [{ ref: "ALT-1", approvedBy: "Paul", approvedOn: "2026-12-01", process: "docs/payments/alt-1.md" }];
+    expect(attemptsOnlyApproval({ PAYMENT_ATTEMPTS_ONLY_APPROVAL: "ALT-2" }, registry)).toBeNull();
+    expect(attemptsOnlyApproval({ PAYMENT_ATTEMPTS_ONLY_APPROVAL: " ALT-1 " }, registry)).toBe("ALT-1");
+  });
+  it("an incomplete registry entry (no approver, no date, no process document) approves nothing", () => {
+    const base = { ref: "ALT-1", approvedBy: "Paul", approvedOn: "2026-12-01", process: "docs/payments/alt-1.md" };
+    expect(isCompleteAlternative(base)).toBe(true);
+    for (const bad of [
+      { ...base, approvedBy: " " }, { ...base, approvedOn: "1 Dec" }, { ...base, process: "" },
+      { ...base, process: "notes/alt.md" }, { ...base, process: "docs/payments/../x.md" }, { ...base, ref: "x" },
+    ]) {
+      expect(isCompleteAlternative(bad)).toBe(false);
+      expect(attemptsOnlyApproval({ PAYMENT_ATTEMPTS_ONLY_APPROVAL: bad.ref }, [bad])).toBeNull();
+    }
+  });
+  it("today no alternative is registered; every registered one names a committed process document", () => {
+    expect(APPROVED_ATTEMPTS_ONLY_ALTERNATIVES).toEqual([]);   // adding one needs Paul's approval (decision 25 Nov)
+    for (const a of APPROVED_ATTEMPTS_ONLY_ALTERNATIVES) {
+      expect(isCompleteAlternative(a)).toBe(true);
+      expect(existsSync(a.process)).toBe(true);
+    }
+  });
+  it("a blank approval is no approval and not a problem; a non-blank unregistered one is a problem", () => {
+    for (const a of ["", "  "]) expect(paymentConfigProblem({ PAYMENT_ATTEMPTS_ONLY_APPROVAL: a })).toBeNull();
+    for (const a of ["x", "y".repeat(201), "anything"]) {
+      expect(attemptsOnlyApproval({ PAYMENT_ATTEMPTS_ONLY_APPROVAL: a })).toBeNull();
+      expect(paymentConfigProblem({ PAYMENT_ATTEMPTS_ONLY_APPROVAL: a })).toBe("attempts_only_approval_invalid");
+    }
   });
   it("a provider with its own charge list: full; the simulated provider (no money): not gated", async () => {
     expect(chargeCoverage(new FakeGateway(() => 0), {})).toBe("full");
