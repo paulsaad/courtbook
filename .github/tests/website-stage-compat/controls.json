@@ -1,0 +1,9 @@
+[
+ {"file":"control","line":1,"admin":false,"kind":"from","table":"towns","ops":[{"op":"select","cols":"id, created_by"}]},
+ {"file":"control","line":2,"admin":false,"kind":"from","table":"profiles","ops":[{"op":"delete"},{"op":"filter","m":"eq","col":"id"}]},
+ {"file":"control","line":3,"admin":false,"kind":"from","table":"clubs","ops":[{"op":"select","cols":"id, no_such_column"}]},
+ {"file":"control","line":4,"admin":false,"kind":"rpc","fn":"quote_price","keys":["p_court","p_start","p_wrong"]},
+ {"file":"control","line":5,"admin":false,"kind":"from","table":"clubs","ops":[{"op":"select","cols":"id, nosuch(id)"}]},
+ {"file":"control","line":6,"admin":false,"kind":"from","table":"club_favourites","ops":[{"op":"select","cols":"club_id"}]},
+ {"file":"control","line":7,"admin":false,"kind":"from","table":"clubs","ops":[{"op":"select","cols":"id, courts(id, name)"},{"op":"filter","m":"eq","col":"courts.no_col"}]}
+]

@@ -116,8 +116,53 @@ this order:
   so that `staging-web` converges on the release candidate. The app reaches phones only through step 8's native build,
   never through `staging-web`.
 - **#23's branch head `8e7c85d`** has one test-only commit more than the release candidate's copy.
-- **Database calls:** every `rpc("…")` name in WB exists in migrations up to 0089, in WD up to 0091, and in WE up to
-  0092. Only names were checked, not table reads.
+- **Database calls (review of 25 Nov): tables, columns, permissions and functions are checked per stage.**
+  `.github/tests/website-stage-compat/run.sh` reads every Supabase call in a website's `src/` (tests excluded). That
+  covers `.from()` chains with their select lists, embeds, filters, ordering, insert/update/upsert keys and deletes,
+  and `.rpc()` calls with their argument names. Each call is checked against a scratch database migrated to the stage
+  (0001 up to that stage, on the repository's Supabase shim). For anon, authenticated and service_role, it checks
+  that:
+  - the table, view or function exists;
+  - every column exists;
+  - the table- or column-level privilege is granted;
+  - RLS has a permissive policy for that command;
+  - an rpc signature takes exactly those argument names, with EXECUTE granted.
+
+  Any verdict that differs from a reference stage is reported.
+
+  | Website | At stage | Reference | Table calls | RPC calls | Missing | Regression | Refused for its role |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | current `59a2f11` (minutes while B applies) | 0087, 0088, 0089 | 0086 | 112 | 136 | 0 | 0 | 0 |
+  | **WB `6e499a5`** | **0089** | 0092 | 114 | 142 | 0 | 0 | 0 |
+  | WB (C, and minutes into D) | 0090, 0091 | 0089 | 114 | 142 | 0 | 0 | 0 |
+  | **WD `afce917`** | **0091** | 0092 | 115 | 143 | 0 | 0 | 0 |
+  | WD (minutes into E) | 0092 | 0091 | 115 | 143 | 0 | 0 | 0 |
+  | **WE `b85b566`** | **0092** | 0092 | 116 | 144 | 0 | 0 | 0 |
+
+  **How the checker was itself checked:**
+  - Deliberately wrong calls in `controls.json` are all caught; `run.sh` refuses to report unless they are: a missing
+    column, a missing embedded column, a column-level revoke (`towns.created_by`), a delete with no RLS policy
+    (`profiles`), wrong rpc argument names, an unknown embed, and a table that does not exist yet.
+  - Negative check: **WE at 0089** reports the three functions it needs from 0091/0092 (`move_booking_priced`,
+    `quote_move`, `set_club_base_prices`) as missing, and exits 1.
+
+  **Non-literal calls:**
+  - 13 calls through local wrappers (`call("fn", {...})`, `run("fn", {...})`) are now extracted automatically.
+  - 5 calls whose keys come from a variable or a spread are resolved by hand in `manual.json`: the club settings
+    update, the coach insert and update, and the two discovery searches. Their source text is identical in all four
+    websites (checked).
+
+  **Not covered by this check (stated):**
+  - **Row visibility:** policy expressions are not evaluated. But no RLS policy changes on any table these websites use
+    in the windows where an older website meets a newer database (0086→0089, 0089→0091, 0091→0092; compared).
+  - **Function bodies:** only names, argument names and EXECUTE are checked; the behaviour of functions is covered by
+    the release candidate's suites.
+  - **New write rules:** 0092 adds triggers on `bookings`, `clubs`, `courts` and `price_rules` that refuse certain
+    writes by design (switching off a booked court, leaving offered hours unpriced). WD would meet them only in the
+    minutes before WE is deployed.
+  - **The scratch database is not staging.** It has the same migrations and the shim mirrors Supabase's default grants;
+    staging-specific data and state are what preflight A checks.
+  - The websites use no Realtime subscriptions and no direct REST calls (checked).
 - **WE compared with the release candidate (`90d7fcb`), website files only.** Two differences, both expected:
   - the legal drafts #14/#29: privacy, terms and their links, which are step 6c and staging only;
   - the staging-only deletion schedule: the Sentry check-ins in the retry route, `vercel.json` schedules and staging
@@ -148,6 +193,8 @@ trees: compare with `git rev-parse <commit>^{tree}` before pushing.
   - re-running E applies nothing;
   - `rc_postcheck` (read only) passes.
 - `.github/tests/staging-rc87-steps.sh` (12/12): mixed runs, gaps and resuming; 0094 is refused until 0093.
+- `.github/tests/website-stage-compat/run.sh`: every website at every stage it meets, 0 findings (table in §2);
+  controls caught; WE at 0089 correctly refused.
 - The release candidate's full local matrix and the pilot build matrix include 0087–0092.
 
 ## 4. Rollback limits
