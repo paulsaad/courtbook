@@ -28,8 +28,9 @@ export type DeletionDeps = {
   rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<RpcResult>;
   banUser: (id: string) => PromiseLike<AuthResult>;
   deleteUser: (id: string) => PromiseLike<AuthResult>;
-  /** E1 (prepared, NOT in serviceDeps yet): before D removes the sign-in, notice an Apple-linked account whose Apple
-   *  tokens were not revoked (an older app closed it directly) and raise `appleRevocationSkipped`. Never blocks D. */
+  /** E1: before D removes the sign-in, notice an Apple-linked account whose Apple tokens were not revoked (an older
+   *  app closed it directly) and raise `appleRevocationSkipped`. Never blocks D. In serviceDeps only when E1 is
+   *  configured (routeDeps.appleRevocationHook); today it is not. */
   appleRevocation?: AppleRevocationHook;
 };
 
@@ -170,5 +171,8 @@ export async function serviceDeps(): Promise<DeletionDeps> {
     // ~100 years: Supabase's ban is a duration; the sign-in is deleted at D anyway
     banUser: (id) => admin.auth.admin.updateUserById(id, { ban_duration: "876000h" }),
     deleteUser: (id) => admin.auth.admin.deleteUser(id),
+    // E1 older-app check before D: undefined (off) unless Sign in with Apple deletion is configured. Loading it can
+    // never stop the deletion: any failure means no check.
+    appleRevocation: await import("@/lib/apple/routeDeps").then((m) => m.appleRevocationHook()).catch(() => undefined),
   };
 }
