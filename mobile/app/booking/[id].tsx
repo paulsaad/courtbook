@@ -12,6 +12,7 @@ import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { SignInPrompt } from "../../components/SignInPrompt";
 import { useSession } from "../../lib/session";
 import { cancellation, useBooking, usePayment } from "../../lib/bookings";
+import { directionsUrl } from "@shared/places";
 import { money } from "../../lib/queries";
 import { durationLabel } from "../../lib/courts";
 import { sportName } from "../../lib/days";
@@ -54,6 +55,7 @@ export default function Booking() {
   const tz = b.club.timezone;
   const minutes = Math.round((Date.parse(b.end_at) - Date.parse(b.start_at)) / 60_000);
   const { cutoffAt, free } = cancellation(b.start_at, b.club.cancel_cutoff_hours);
+  const directions = directionsUrl(b.club.lat, b.club.lng, b.club.location_url);   // the exact point when there is one
   const freeCancel = b.status === "confirmed" && free;
   const upcoming = b.status === "confirmed" && Date.parse(b.end_at) > Date.now();
   const cutoffLabel = formatInTimeZone(cutoffAt, tz, "EEE d MMM HH:mm");
@@ -118,8 +120,8 @@ export default function Booking() {
 
       <View style={styles.actions}>
         {isNew && <Button label="See it in Bookings" onPress={() => router.dismissTo("/bookings")} />}
-        {upcoming && b.club.location_url && (
-          <Button label="Directions" variant="secondary" onPress={() => void Linking.openURL(b.club.location_url!)} />
+        {upcoming && directions && (
+          <Button label="Directions" variant="secondary" onPress={() => void Linking.openURL(directions)} />
         )}
         {GAME_WRITES_AVAILABLE && b.status === "confirmed" && Date.parse(b.start_at) > Date.now() && (
           // J6 path A: open this booking to other players (the game screen handles an already-posted booking)

@@ -113,6 +113,8 @@ insert into t values ('U10 player: cannot book the hidden club',
   pg_temp.r(pg_temp.u(1), 'select hold_slot(''' || pg_temp.hid() || ''', ''' || pg_temp.hc() || ''', ''' || pg_temp.at(pg_temp.hid(), 5) || ''', ''' || (pg_temp.at(pg_temp.hid(), 5) + interval '1 hour') || ''', gen_random_uuid())::text') like 'ERR %', '');
 
 -- ----------------------------------------------------------------- publishing, demo switch
+-- 0089: publishing needs the exact map point too (no effect without 0089)
+update clubs set lat = 34.2553, lng = 35.6586 where id = pg_temp.hid();
 update clubs set active = true where id = pg_temp.hid();
 insert into t values ('U11 once published, visitors read it',
   pg_temp.r(null, 'select count(*)::text from clubs where slug = ''m85-hidden''') = '1', '');

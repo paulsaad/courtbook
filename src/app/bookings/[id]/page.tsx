@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { directionsUrl } from "@/lib/places";
 import { notFound, redirect } from "next/navigation";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
@@ -16,7 +17,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
 
   const { data: b } = loaded(await supabase
     .from("bookings")
-    .select("id, status, start_at, end_at, price_usd, fee_usd, cancelled_at, clubs(name, slug, timezone, cancel_cutoff_hours, location_url, payment_mode), courts!bookings_court_id_fkey(name, sport)")
+    .select("id, status, start_at, end_at, price_usd, fee_usd, cancelled_at, clubs(name, slug, timezone, cancel_cutoff_hours, location_url, payment_mode, lat, lng), courts!bookings_court_id_fkey(name, sport)")
     .eq("id", id)
     .eq("player_id", user.id)
     .single(), "this booking");
@@ -30,7 +31,8 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
   ]), "this booking");
   const match = ((bm ?? []) as NonNullable<BookingMatch>[])[0] ?? null;
   const sportLabel = new Map(((sportRows ?? []) as { code: string; name_en: string }[]).map((x) => [x.code, x.name_en]));
-  const club = b.clubs as unknown as { name: string; slug: string; timezone: string; cancel_cutoff_hours: number; location_url: string | null; payment_mode: string | null };
+  const club = b.clubs as unknown as { name: string; slug: string; timezone: string; cancel_cutoff_hours: number; location_url: string | null; payment_mode: string | null; lat: number | string | null; lng: number | string | null };
+  const directions = directionsUrl(club.lat, club.lng, club.location_url);
   const atDesk = club.payment_mode === "at_desk";
   const court = b.courts as unknown as { name: string; sport: string };
   const tz = club.timezone;
@@ -40,7 +42,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
   const freeCancel = b.status === "confirmed" && cutoffAt.getTime() > nowMs();
   const upcoming = b.status === "confirmed" && new Date(b.end_at).getTime() > nowMs();
 
-  const waText = encodeURIComponent(`Court booked ✅ ${club.name}, ${court.name}\n${day}, ${time}\n${club.location_url ?? ""}`.trim());
+  const waText = encodeURIComponent(`Court booked ✅ ${club.name}, ${court.name}\n${day}, ${time}\n${directions ?? ""}`.trim());
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5">
@@ -73,7 +75,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
       {upcoming && (
         <>
           <a href={`https://wa.me/?text=${waText}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#25D366] py-3.5 text-center font-medium text-white">Share on WhatsApp</a>
-          {club.location_url && <a href={club.location_url} target="_blank" rel="noreferrer" className="rounded-xl border border-grid bg-white py-3.5 text-center">Directions</a>}
+          {directions && <a href={directions} target="_blank" rel="noreferrer" className="rounded-xl border border-grid bg-white py-3.5 text-center">Directions</a>}
           <CancelButton bookingId={b.id} freeCancel={freeCancel} cutoffHours={club.cancel_cutoff_hours} cutoffLabel={`${formatInTimeZone(cutoffAt, tz, "EEE d MMM HH:mm")}`} nothingPaid={atDesk} />
         </>
       )}
