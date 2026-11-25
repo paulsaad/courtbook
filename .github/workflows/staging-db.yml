@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; cancel = cancellation and refund checks in SQL (temporary courts and accounts, removed after); web_accept = launch-1 website flows in a browser against this branch's website built for staging (throwaway accounts, club and court, removed after; needs confirm_ref); api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else); m3_0067_preflight / m3_0067_postcheck and m3_0072_preflight / m3_0072_postcheck, m3_0073_*, m3_0074_* and m3_0075_* = read-only checks before / after applying 0067 0072, 0073 or 0074 (supabase/live/00xx_*.sql); blocks_0076_* / blocks_0077_* = read-only checks before / after 0076 or 0077 (calendar blocks); blocks_functional = the block rules tried as a demo-club desk account, in one transaction that is rolled back; m7_0078_* = read-only checks before / after 0078 (hide demo clubs); m7_demo_hidden_on / _off = staging only: set the hide_demo_clubs switch on or off (nothing else); launch1_preflight / launch1_postcheck = read-only checks before / after applying 0078–0084 together (supabase/live/launch1_*.sql); m85_preflight / m85_postcheck = read-only checks before / after applying 0085 (unpublished clubs unreadable); auth_checks = real Supabase Auth behaviour account closing relies on (sign-in time in the token, global sign-out, ban, delete, same email again; throwaway auth-*@courtbook.test users made with the admin API, no email sent, removed after; no migration; needs confirm_ref); m86_worker_check = read only: the deletion retry worker's last run and open deletion records by status (counts only; the R1 release gate); m86_old_app = after 0086 only: the released app's deletion calls (request, cancel, status) as a throwaway account in ONE transaction that is rolled back, compared with the answers the released screen is tested against; rc_preflight / rc_postcheck = read-only checks before / after applying the release candidate's 0086–0092 (supabase/live/rc_0086_0091_*.sql); m12_1_preflight / m12_1_postcheck = read-only checks before / after applying 0093 (supabase/live/m12_1_0093_*.sql); m12_1_functional = after 0093 only: the fee-payment suite (supabase/tests/payments/fee_online_tests.sql) in ONE transaction that is rolled back; m12_1_rollback = staging only, needs confirm_ref: undo 0093 (supabase/rollback/0093_down.sql) and forget it in staging_meta.applied, in one transaction; refuses and changes nothing if any fee-only money, attempt, charge or fee_online club exists; coords_audit = read only: active clubs whose map point can't be trusted (supabase/tests/favourites/club_coordinates_audit.sql); test_conflicts = read only: what occupies the demo courts the smoke/API tests used to book (no player details)"
+        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; cancel = cancellation and refund checks in SQL (temporary courts and accounts, removed after); web_accept = launch-1 website flows in a browser against this branch's website built for staging (throwaway accounts, club and court, removed after; needs confirm_ref); api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else); m3_0067_preflight / m3_0067_postcheck and m3_0072_preflight / m3_0072_postcheck, m3_0073_*, m3_0074_* and m3_0075_* = read-only checks before / after applying 0067 0072, 0073 or 0074 (supabase/live/00xx_*.sql); blocks_0076_* / blocks_0077_* = read-only checks before / after 0076 or 0077 (calendar blocks); blocks_functional = the block rules tried as a demo-club desk account, in one transaction that is rolled back; m7_0078_* = read-only checks before / after 0078 (hide demo clubs); m7_demo_hidden_on / _off = staging only: set the hide_demo_clubs switch on or off (nothing else); launch1_preflight / launch1_postcheck = read-only checks before / after applying 0078–0084 together (supabase/live/launch1_*.sql); m85_preflight / m85_postcheck = read-only checks before / after applying 0085 (unpublished clubs unreadable); auth_checks = real Supabase Auth behaviour account closing relies on (sign-in time in the token, global sign-out, ban, delete, same email again; throwaway auth-*@courtbook.test users made with the admin API, no email sent, removed after; no migration; needs confirm_ref); m86_worker_check = read only: the deletion retry worker's last run and open deletion records by status (counts only; the R1 release gate); m86_old_app = after 0086 only: the released app's deletion calls (request, cancel, status) as a throwaway account in ONE transaction that is rolled back, compared with the answers the released screen is tested against; rc_preflight / rc_postcheck = read-only checks before / after applying the release candidate's 0086–0092 (supabase/live/rc_0086_0091_*.sql); m12_1_preflight / m12_1_postcheck = read-only checks before / after applying 0094 (supabase/live/m12_1_0094_*.sql); m12_1_functional = after 0094 only: the fee-payment suite (supabase/tests/payments/fee_online_tests.sql) in ONE transaction that is rolled back; m12_1_rollback = staging only, needs confirm_ref: undo 0094 (supabase/rollback/0094_down.sql) and forget it in staging_meta.applied, in one transaction; refuses and changes nothing if any fee-only money, attempt, charge or fee_online club exists; coords_audit = read only: active clubs whose map point can't be trusted (supabase/tests/favourites/club_coordinates_audit.sql); test_conflicts = read only: what occupies the demo courts the smoke/API tests used to book (no player details)"
         type: choice
         options: [check, apply, smoke, cancel, api, web_accept, reset_demo, tester, demo_at_desk, m3_0067_preflight, m3_0067_postcheck, m3_0072_preflight, m3_0072_postcheck, m3_0073_preflight, m3_0073_postcheck, m3_0074_preflight, m3_0074_postcheck, m3_0075_preflight, m3_0075_postcheck, blocks_0076_preflight, blocks_0076_postcheck, blocks_0077_preflight, blocks_0077_postcheck, blocks_functional, m7_0078_preflight, m7_0078_postcheck, m7_demo_hidden_on, m7_demo_hidden_off, launch1_preflight, launch1_postcheck, m85_preflight, m85_postcheck, auth_checks, m86_worker_check, m86_old_app, rc_preflight, rc_postcheck, m12_1_preflight, m12_1_postcheck, m12_1_functional, m12_1_rollback, coords_audit, test_conflicts, m3_accounts, m3_test_games, m3_test_games_shared, m3_test_games_cleanup, m3_moderator_check, m3_moderator_grant]
         default: check
@@ -132,12 +132,12 @@ jobs:
             bash .github/scripts/run-check.sh "$DB" supabase/live/0085_preflight.sql part1 \
               || { echo "::error::0085 preflight failed: nothing was applied."; exit 1; }
           fi
-          # 0093 (M12.1 fee_online payments): on its own, after 0086–0092; its preflight must pass first.
-          if echo "$plan" | grep -q '^0093_'; then
-            if echo "$plan" | grep -qvE '^0093_'; then echo "::error::apply 0093 on its own (migrations: 0093)."; exit 1; fi
-            echo "0093: running the preflight before applying"
-            bash .github/scripts/run-check.sh "$DB" supabase/live/m12_1_0093_preflight.sql part1 \
-              || { echo "::error::0093 preflight failed: nothing was applied."; exit 1; }
+          # 0094 (M12.1 fee_online payments): on its own, after 0086–0092; its preflight must pass first.
+          if echo "$plan" | grep -q '^0094_'; then
+            if echo "$plan" | grep -qvE '^0094_'; then echo "::error::apply 0094 on its own (migrations: 0094)."; exit 1; fi
+            echo "0094: running the preflight before applying"
+            bash .github/scripts/run-check.sh "$DB" supabase/live/m12_1_0094_preflight.sql part1 \
+              || { echo "::error::0094 preflight failed: nothing was applied."; exit 1; }
           fi
           n=0
           for name in $plan; do
@@ -381,12 +381,12 @@ jobs:
       - name: Release candidate 0086–0091 postcheck, read only (rc_postcheck)
         if: inputs.action == 'rc_postcheck'
         run: bash .github/scripts/run-check.sh "$DB" supabase/live/rc_0086_0091_postcheck.sql all
-      - name: M12.1 0093 preflight, read only (m12_1_preflight)
+      - name: M12.1 0094 preflight, read only (m12_1_preflight)
         if: inputs.action == 'm12_1_preflight'
-        run: bash .github/scripts/run-check.sh "$DB" supabase/live/m12_1_0093_preflight.sql part1
-      - name: M12.1 0093 postcheck, read only (m12_1_postcheck)
+        run: bash .github/scripts/run-check.sh "$DB" supabase/live/m12_1_0094_preflight.sql part1
+      - name: M12.1 0094 postcheck, read only (m12_1_postcheck)
         if: inputs.action == 'm12_1_postcheck'
-        run: bash .github/scripts/run-check.sh "$DB" supabase/live/m12_1_0093_postcheck.sql all
+        run: bash .github/scripts/run-check.sh "$DB" supabase/live/m12_1_0094_postcheck.sql all
       - name: M12.1 fee-payment suite, one transaction rolled back (m12_1_functional)
         if: inputs.action == 'm12_1_functional'
         run: |
@@ -402,17 +402,17 @@ jobs:
             || { echo "::error::could not read what is left after the run"; exit 1; }
           echo "after the run: $left attempts, fee charges and fee-only payments in the database (must be 0)"
           [ "$left" = 0 ] || { echo "::error::$left attempts, fee charges or fee-only payments exist after the rolled-back run"; exit 1; }
-      - name: M12.1 undo 0093, one transaction (m12_1_rollback)
+      - name: M12.1 undo 0094, one transaction (m12_1_rollback)
         if: inputs.action == 'm12_1_rollback'
         env:
           CONFIRM: ${{ inputs.confirm_ref }}
         run: |
           if [ "$CONFIRM" != "$REF" ]; then echo "::error::confirm_ref '$CONFIRM' does not match the target ref '$REF'."; exit 1; fi
-          [ "$(psql "$DB" -At -c "select count(*) from staging_meta.applied where name = '0093_fee_online_payments.sql'")" = 1 ] \
-            || { echo "::error::0093 is not recorded as applied here: nothing to undo."; exit 1; }
-          { cat supabase/rollback/0093_down.sql; echo "delete from staging_meta.applied where name = '0093_fee_online_payments.sql';"; } \
+          [ "$(psql "$DB" -At -c "select count(*) from staging_meta.applied where name = '0094_fee_online_payments.sql'")" = 1 ] \
+            || { echo "::error::0094 is not recorded as applied here: nothing to undo."; exit 1; }
+          { cat supabase/rollback/0094_down.sql; echo "delete from staging_meta.applied where name = '0094_fee_online_payments.sql';"; } \
             | psql "$DB" -X -v ON_ERROR_STOP=1 -1 -q
-          echo "0093 undone; staging_meta.applied: $(psql "$DB" -At -c "select count(*) from staging_meta.applied") files, highest $(psql "$DB" -At -c "select max(name) from staging_meta.applied")"
+          echo "0094 undone; staging_meta.applied: $(psql "$DB" -At -c "select count(*) from staging_meta.applied") files, highest $(psql "$DB" -At -c "select max(name) from staging_meta.applied")"
       - name: Club coordinates audit, read only (coords_audit)
         if: inputs.action == 'coords_audit'
         run: psql "$DB" -X -v ON_ERROR_STOP=1 -c "set default_transaction_read_only = on" -f supabase/tests/favourites/club_coordinates_audit.sql

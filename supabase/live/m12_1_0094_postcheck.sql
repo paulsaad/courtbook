@@ -1,4 +1,4 @@
--- M12.1 (0093 fee_online payments) — POSTCHECK. READ ONLY: one SELECT, changes nothing. Every row must be ok.
+-- M12.1 (0094 fee_online payments) — POSTCHECK. READ ONLY: one SELECT, changes nothing. Every row must be ok.
 with checks(item, ok, detail) as (
   select 'tables payment_attempts and fee_charges exist, row security on', 
     coalesce((select bool_and(relrowsecurity) from pg_class where oid in (to_regclass('public.payment_attempts'), to_regclass('public.fee_charges'))), false)
@@ -32,7 +32,7 @@ with checks(item, ok, detail) as (
     has_function_privilege('authenticated', 'start_payment_attempt(uuid,uuid)', 'execute') and not has_function_privilege('anon', 'start_payment_attempt(uuid,uuid)', 'execute')
     and has_function_privilege('authenticated', 'complete_fee_refund(uuid,numeric,text,text)', 'execute') and not has_function_privilege('anon', 'complete_fee_refund(uuid,numeric,text,text)', 'execute')
     and not has_function_privilege('anon', 'fee_refunds_due()', 'execute'), ''
-  union all select 'the replaced functions are 0093''s (fee-only guards present)',
+  union all select 'the replaced functions are 0094''s (fee-only guards present)',
     position('use_payment_attempts' in (select prosrc from pg_proc where oid = 'confirm_payment(uuid,text,numeric)'::regprocedure)) > 0
     and position('courtbook_fee_refund' in (select prosrc from pg_proc where oid = 'mark_refunded(uuid)'::regprocedure)) > 0
     and position('settle_payment_on_cancel' in (select prosrc from pg_proc where oid = 'cancel_booking(uuid,boolean)'::regprocedure)) > 0

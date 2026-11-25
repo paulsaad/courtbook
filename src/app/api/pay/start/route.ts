@@ -11,7 +11,7 @@ import { attemptReturnUrl, isSafeRedirect, isUuid, paymentSiteOrigin, providerCa
  * Pay the CourtBook booking fee (fee_online clubs, M12.1). One tap = one attempt with the provider.
  *
  * - The browser sends the payment and a request key it made for this tap, and keeps the key until the outcome is
- *   known; a retry of the same tap gets the same attempt (start_payment_attempt, 0093). At most three attempts per
+ *   known; a retry of the same tap gets the same attempt (start_payment_attempt, 0094). At most three attempts per
  *   hold; the hold's deadline is never moved.
  * - Only one attempt may be unresolved at a time (review of PR #34). A tap while another attempt is still 'starting'
  *   or 'open' makes the server ask the provider about that attempt first; only if it has ended may a new one start.
