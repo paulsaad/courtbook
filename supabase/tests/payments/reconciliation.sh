@@ -9,7 +9,10 @@ DB=${DB:-courtbook_test}
 MIG=supabase/migrations/0094_payment_reconciliation.sql
 where=$($PSQL -At -d "$DB" -c "select coalesce(host(inet_server_addr()),'local-socket')" 2>/dev/null)
 case "$where" in local-socket|127.0.0.1|::1) ;; *) echo "refusing: $DB@$where"; exit 2;; esac
-suite() { $PSQL -d "$DB" -X -q -At -f supabase/tests/payments/reconciliation_tests.sql 2>&1; }
+T=$DB
+suite() { $PSQL -d "$T" -X -q -At -f supabase/tests/payments/reconciliation_tests.sql 2>&1; }
+fp() { $PSQL -At -d "$DB" -c "select md5(string_agg(p.proname || pg_get_functiondef(p.oid), '' order by p.proname, p.oid)) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prokind = 'f'"; }
+before=$(fp)
 out=$(suite)
 echo "$out" | grep -v "^$"
 status=PASS
@@ -17,6 +20,10 @@ echo "$out" | grep -qE "^(FAIL|psql)|ERROR" && status=FAIL
 echo "$out" | grep -q ' 0 failed$' || status=FAIL
 
 echo "== mutation checks (each mutant must make the suite fail)"
+# mutants go into a scratch copy, never into $DB (putting a migration back could undo later ones)
+T=courtbook_rec_mut
+$PSQL -q -d postgres -c "drop database if exists $T" -c "create database $T template $DB" >/dev/null || { echo "could not make the scratch copy"; exit 2; }
+trap '$PSQL -q -d postgres -c "drop database if exists courtbook_rec_mut" >/dev/null 2>&1' EXIT
 MUTANTS=(
   "M1 the starting point can be set twice|  if exists (select 1 from payment_reconciliation where provider = p_provider) then raise exception 'already_initialised'; end if;|"
   "M2 a starting point in the future|  if p_from is null or p_from > now() then raise exception 'bad_watermark'; end if;|"
@@ -36,14 +43,13 @@ for m in "${MUTANTS[@]}"; do
   tmp=$(mktemp /tmp/m0094.XXXXXX); chmod 644 "$tmp"
   FROM="$from" TO="$to" python3 -c "import os,sys; s=open(sys.argv[1]).read(); f=os.environ['FROM'].replace('\\\\n','\n'); t=os.environ['TO'].replace('\\\\n','\n'); n=s.count(f); assert n==1, (n, f); open(sys.argv[2],'w').write(s.replace(f,t))" "$MIG" "$tmp" \
     || { echo "  MUTANT NOT APPLIED: $name"; status=FAIL; rm -f "$tmp"; continue; }
-  $PSQL -q -d "$DB" -v ON_ERROR_STOP=1 -1 -f "$tmp" >/dev/null 2>&1 || { echo "  MUTANT DID NOT LOAD: $name"; status=FAIL; rm -f "$tmp"; continue; }
+  $PSQL -q -d "$T" -v ON_ERROR_STOP=1 -1 -f "$tmp" >/dev/null 2>&1 || { echo "  MUTANT DID NOT LOAD: $name"; status=FAIL; rm -f "$tmp"; continue; }
   mo=$(suite)
   if echo "$mo" | grep -qE "^(FAIL|psql)|ERROR"; then caught=$((caught+1)); echo "  caught  $name ($(echo "$mo" | grep -m1 '^FAIL' | cut -c1-70))"
   else echo "  MISSED  $name"; status=FAIL; fi
   rm -f "$tmp"
 done
-$PSQL -q -d "$DB" -v ON_ERROR_STOP=1 -1 -f "$MIG" >/dev/null 2>&1 || { echo "could not restore 0094"; exit 1; }
-again=$(suite); echo "$again" | grep -q ' 0 failed$' || { echo "suite fails after restoring 0094"; status=FAIL; }
+[ "$(fp)" = "$before" ] || { echo "$DB's functions changed during the run"; status=FAIL; }
 echo "mutants caught: $caught of $total"
 echo "RESULT: $status"
 [ $status = PASS ]
