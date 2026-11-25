@@ -10,6 +10,7 @@ import { appleAvailable, signInWithApple } from "../lib/appleAuth";
 import { installedVariant } from "../lib/appIdentity";
 import { color, radius, TOUCH } from "../lib/theme";
 import { CODE_MAX, cleanCode, codeReady } from "../lib/otpCode";
+import { safeReturnPath } from "../lib/safeReturn";
 
 type Stage = "email" | "code";
 
@@ -27,7 +28,7 @@ export default function SignIn() {
 
   function finish() {
     if (router.canGoBack()) router.back();
-    else router.replace(typeof returnTo === "string" && returnTo.startsWith("/") ? returnTo : "/");
+    else router.replace(safeReturnPath(returnTo));
   }
 
   async function appleSignIn() {
