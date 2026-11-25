@@ -2,6 +2,11 @@
 -- The pilot rule: every club players can book (published, not a demo club) takes payment at its desk, and nothing
 -- is being paid online through CourtBook.
 --
+-- Two modes (psql variable `mode`):
+--   verdict (default)  the pilot-readiness verdict: RESULT is "ok" only if nothing blocks;
+--   prep               preparation only: before any club is published, no_bookable_club is a warning. Its RESULT is
+--                      never a readiness verdict (it says "prep-ok").
+--     psql -v mode=prep -f supabase/live/pilot_config_check.sql
 -- One row per finding: slug | published | payment_mode | level | issue, then a final RESULT row.
 --   level "block": the pilot must not start (or continue) while this holds;
 --   level "warn":  allowed, but worth a look before inviting players.
@@ -12,7 +17,11 @@
 --   online_payment_recent  (warn)  an online payment at a non-demo club in the last 30 days, in any status;
 --   fee_set_at_desk        (warn)  a bookable at-desk club has a non-zero CourtBook fee. Nothing is charged at the
 --                          desk, but switching its mode would start charging that fee;
---   no_bookable_club       (warn)  no club is published yet.
+--   no_bookable_club       (block; warn in prep mode) no club is published yet: a pilot cannot be ready without one.
+\if :{?mode}
+\else
+  \set mode verdict
+\endif
 -- Needs clubs.is_demo (0063) and payment_mode (0051): live and staging both have them.
 with bookable as (
   select c.id, c.slug, c.active, c.payment_mode, c.service_fee_usd
@@ -33,14 +42,18 @@ findings as (
   select b.slug, b.active, b.payment_mode, 'warn', 'fee_set_at_desk'
   from bookable b where b.payment_mode = 'at_desk' and b.service_fee_usd > 0
   union all
-  select null, null, null, 'warn', 'no_bookable_club'
+  select null, null, null, case when :'mode' = 'prep' then 'warn' else 'block' end, 'no_bookable_club'
   where not exists (select 1 from bookable)
+  union all
+  select null, null, null, 'block', 'unknown_mode'   -- only verdict or prep; anything else is never "ok"
+  where :'mode' not in ('verdict', 'prep')
 )
 select slug, published, payment_mode, level, issue from (
   select slug, active as published, payment_mode, level, issue, 0 as k from findings
   union all
   select 'RESULT', null, null,
-         case when exists (select 1 from findings where level = 'block') then 'block' else 'ok' end,
+         case when exists (select 1 from findings where level = 'block') then 'block'
+              when :'mode' = 'prep' then 'prep-ok' else 'ok' end,
          format('%s block, %s warn, %s bookable clubs',
                 (select count(*) from findings where level = 'block'),
                 (select count(*) from findings where level = 'warn'),

@@ -12,7 +12,7 @@ where=$($PSQL -At -d $DB -c "select current_database()||'@'||coalesce(host(inet_
 case "$where" in courtbook_test@local-socket|courtbook_test@127.0.0.1|courtbook_test@::1) ;;
   *) echo "refusing: connected to '$where'"; exit 2;; esac
 status=0
-run() { # $1 = SQL set-up; prints the check's rows
+run() { # $1 = SQL set-up, $2 = optional psql option (e.g. "-v mode=prep"); prints the check's rows
   { echo "begin;"
     echo "alter table clubs disable trigger user;"
     echo "alter table payments drop constraint if exists payments_booking_id_fkey, drop constraint if exists payments_profile_id_fkey;"
@@ -24,7 +24,7 @@ run() { # $1 = SQL set-up; prints the check's rows
     echo "$1"
     cat supabase/live/pilot_config_check.sql
     echo "rollback;"
-  } | $PSQL -d $DB -X -q -At -F '|' -v ON_ERROR_STOP=1 2>&1
+  } | $PSQL -d $DB -X -q -At -F '|' -v ON_ERROR_STOP=1 ${2:-} 2>&1
 }
 club() { # slug active mode fee demo
   echo "insert into clubs (name, slug, active, payment_mode, service_fee_usd, is_demo, town_id) values ('$1', '$1', $2, '$3', $4, $5, (select id from towns limit 1));"
@@ -63,12 +63,27 @@ expect "a recent settled online payment is a warning, not a block" "$out" \
 RESULT|||ok|0 block, 1 warn, 1 bookable clubs"
 
 out=$(run "")
-expect "nothing published yet: a warning" "$out" \
+expect "verdict: nothing published yet blocks (a pilot cannot be ready without a bookable club)" "$out" \
+"|||block|no_bookable_club
+RESULT|||block|1 block, 0 warn, 0 bookable clubs"
+
+out=$(run "" "-v mode=prep")
+expect "preparation mode: nothing published yet is a warning, and the result is not a readiness verdict" "$out" \
 "|||warn|no_bookable_club
-RESULT|||ok|0 block, 1 warn, 0 bookable clubs"
+RESULT|||prep-ok|0 block, 1 warn, 0 bookable clubs"
+
+out=$(run "$(club p-sim true simulated 1 false)" "-v mode=prep")
+expect "preparation mode still blocks on an online club" "$out" \
+"p-sim|t|simulated|block|not_at_desk
+RESULT|||block|1 block, 0 warn, 1 bookable clubs"
+
+out=$(run "$(club p-desk true at_desk 0 false)" "-v mode=ready")
+expect "an unknown mode is never ok" "$out" \
+"|||block|unknown_mode
+RESULT|||block|1 block, 0 warn, 1 bookable clubs"
 
 # the check itself never writes: every statement in it is a select
-if grep -iEq '^\s*(insert|update|delete|alter|create|drop|truncate|grant|revoke)\b' supabase/live/pilot_config_check.sql; then
+if grep -iEq '^\s*(insert|update|delete|alter|create|drop|truncate|grant|revoke|copy|call|do)\b' supabase/live/pilot_config_check.sql; then
   echo "FAIL the check contains a writing statement"; status=1; else echo "ok   the check is select-only"; fi
 [ $status = 0 ] && echo "RESULT: PASS" || echo "RESULT: FAIL"
 exit $status
