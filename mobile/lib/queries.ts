@@ -46,10 +46,13 @@ export function useClubPayment(clubId: string | null) {
     enabled: !!clubId,
     staleTime: 60_000,
     queryFn: async () => {
-      const { data, error } = await supabase.from("clubs").select("payment_mode, service_fee_usd").eq("id", clubId!).single();
+      const { data, error } = await supabase.from("clubs").select("payment_mode, service_fee_usd, hold_minutes").eq("id", clubId!).single();
       if (error) throw error;
       const fee = Number(data?.service_fee_usd);
-      return { mode: (data?.payment_mode as string | null) ?? "simulated", fee: Number.isFinite(fee) && fee >= 0 ? fee : null };
+      // how long hold_slot keeps the court for payment: the club's own setting (2–30 minutes), never assumed
+      const hold = Number(data?.hold_minutes);
+      return { mode: (data?.payment_mode as string | null) ?? "simulated", fee: Number.isFinite(fee) && fee >= 0 ? fee : null,
+        holdMinutes: Number.isInteger(hold) && hold > 0 ? hold : null };
     },
   });
 }

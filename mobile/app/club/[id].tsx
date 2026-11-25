@@ -24,7 +24,7 @@ import { FEE_PAYMENTS_ON } from "../../lib/payments";
 import { afterReserve, reservableInApp } from "../../lib/feePayment";
 import { useSession } from "../../lib/session";
 import { useReservation } from "../../lib/reservation";
-import { joinParts, timeRange, unit } from "../../lib/panelText";
+import { feeOnlineNote, joinParts, timeRange, unit } from "../../lib/panelText";
 import { reserveButton } from "../../lib/reserveButton";
 import { useOnline } from "../../lib/online";
 import { haptic } from "../../lib/haptics";
@@ -314,7 +314,7 @@ export default function Club() {
             ) : atDesk || (feeClub && fee === 0) ? (
               <Text variant="caption">Nothing is charged in the app.{cutoff !== null ? ` Free cancellation up to ${cutoff} h before.` : ""}</Text>
             ) : feeClub ? (
-              <Text variant="caption">{`Court price paid at the club. CourtBook booking fee ${money(fee)}, paid online to confirm — the court is held for 10 minutes while you pay. The fee is not refunded if you cancel; it is refunded if the club cancels or your booking cannot be confirmed.`}</Text>
+              <Text variant="caption">{feeOnlineNote(money(fee), clubPay.data?.holdMinutes)}</Text>
             ) : mode.isSuccess ? (
               <Text variant="caption">This club takes payment in the app. That arrives in the next update — reserve it on the website for now.</Text>
             ) : null}
