@@ -46,10 +46,10 @@ ok "m12_2_rollback refuses while a starting point is set" $?
 [ "$(psql -At -d $S -c "select count(*) from staging_meta.applied where name = '0095_payment_reconciliation.sql'")|$(psql -At -d $S -c "select count(*) from payment_reconciliation")" = "1|1" ]
 ok "...and nothing changed (still recorded, starting point kept)" $?
 psql -q -d $S -c "delete from payment_reconciliation" >/dev/null
-psql -q -d $S -c "insert into staging_meta.applied (name) values ('0095_later.sql')" >/dev/null
+psql -q -d $S -c "insert into staging_meta.applied (name) values ('0096_later.sql')" >/dev/null
 out=$(run_step "M12.2 undo 0095, one transaction (m12_2_rollback)" CONFIRM=$REF); [ $? != 0 ] && echo "$out" | grep -q "migrations after 0095 are applied"
 ok "m12_2_rollback refuses while a later migration is recorded" $?
-psql -q -d $S -c "delete from staging_meta.applied where name = '0095_later.sql'" >/dev/null
+psql -q -d $S -c "delete from staging_meta.applied where name = '0096_later.sql'" >/dev/null
 out=$(run_step "M12.2 undo 0095, one transaction (m12_2_rollback)" CONFIRM=wrong); [ $? != 0 ]; ok "m12_2_rollback refuses a wrong confirm_ref" $?
 out=$(run_step "M12.2 undo 0095, one transaction (m12_2_rollback)" CONFIRM=$REF); rc=$?
 [ $rc = 0 ] && [ "$(psql -At -d $S -c "select to_regclass('public.payment_reconciliation') is null and not exists (select 1 from staging_meta.applied where name like '0095%')")" = t ]
