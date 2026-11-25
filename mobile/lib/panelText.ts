@@ -21,3 +21,10 @@ export function timeRange(start: string, end: string): string {
 export function joinParts(parts: string[]): string {
   return parts.map(unit).join(`${NBSP}· `);
 }
+
+/** The line under the slot at a club where only CourtBook's booking fee is paid in the app (Model 2). The hold length is
+ *  the club's own (clubs.hold_minutes, the same value hold_slot uses and the website shows); unknown → no number. */
+export function feeOnlineNote(fee: string, holdMinutes: number | null | undefined): string {
+  const held = holdMinutes ? `the court is held for ${holdMinutes} ${holdMinutes === 1 ? "minute" : "minutes"} while you pay` : "the court is held for a few minutes while you pay";
+  return `Court price paid at the club. CourtBook booking fee ${fee}, paid online to confirm — ${held}. The fee is not refunded if you cancel; it is refunded if the club cancels or your booking cannot be confirmed.`;
+}
