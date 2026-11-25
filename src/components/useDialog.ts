@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /** The width from which the website uses its desktop layout (Phase I, decision D1). */
 export const DESKTOP_QUERY = "(min-width: 1024px)";
@@ -41,10 +41,10 @@ export function useDialog<T extends HTMLElement>(
   { canClose = true, modal = true }: { canClose?: boolean; modal?: boolean } = {},
 ) {
   const ref = useRef<T>(null);
+  // the latest onClose and canClose, for the key handler; updated after each render (not during it)
   const close = useRef(onClose);
-  close.current = onClose;
   const allowed = useRef(canClose);
-  allowed.current = canClose;
+  useLayoutEffect(() => { close.current = onClose; allowed.current = canClose; });
 
   useEffect(() => {
     if (!open) return;
