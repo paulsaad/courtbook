@@ -293,6 +293,30 @@ async function runUntilClean(n, extra = {}) { const out = []; for (let i = 0; i 
   rep("R11d ...a well-formed list afterwards records it, once", (await chargesOf(c.providerRef)) === 1);
 }
 
+// ------------------------------------------------------------------ R12 open attempts of another provider (review 25 Nov)
+// After a provider switch (simulated → whish, or a later change), attempts of the old provider stay open: only that
+// provider's runner could ever settle them, and attempts_to_check gives never-checked rows first. Skipping them without
+// marking them checked kept them at the head of the queue on every run, so `limit` of them could starve every attempt
+// of the real provider for ever. They must rotate like unanswerable attempts (R4), and still be reported every run.
+{
+  const old = [];
+  for (let i = 0; i < 12; i++) old.push(await holdAndStart());
+  await q("update payment_attempts set provider = 'simulated', last_checked_at = null where id = any($1::uuid[])", [old.map((x) => x.attempt)]);
+  const real = [];
+  for (let i = 0; i < 4; i++) real.push(await holdAndStart());
+  await q("update payment_attempts set last_checked_at = now(), checks = 0 where id = any($1::uuid[])", [real.map((x) => x.attempt)]);
+  const runs = [];
+  for (let i = 0; i < 3; i++) runs.push((await run({ limit: 10 })).problems);
+  const asked = Number(await one("select count(*) from payment_attempts where id = any($1::uuid[]) and checks > 0", [real.map((x) => x.attempt)]));
+  const oldStill = Number(await one("select count(*) from payment_attempts where id = any($1::uuid[]) and status in ('starting', 'open')", [old.map((x) => x.attempt)]));
+  rep("R12 12 open attempts of another provider, 10 asked about per run: within 3 runs the queue still reaches the 4 real ones; the other provider's attempts are left open (only their provider can settle them) and reported on every run",
+    asked === 4 && oldStill === 12 && runs.every((p) => p.includes("provider_mismatch")), { asked, oldStill, runs });
+  // clean up: the old provider's attempts end (as their own runner would), the real ones are paid
+  for (const x of old) await service.rpc("record_attempt_result", { p_attempt: x.attempt, p_result: "expired" });
+  for (const x of real) gw.pay(x.attempt);
+  await runUntilClean(8, { limit: 25 });
+}
+
 // ------------------------------------------------------------------ invariants over the whole database
 const inv = {
   primary: Number(await one(`select count(*) from payment_attempts a where (a.status = 'succeeded') <> ((select count(*) from fee_charges c where c.attempt_id = a.id and c.reason is distinct from 'extra_charge') = 1)`)),
