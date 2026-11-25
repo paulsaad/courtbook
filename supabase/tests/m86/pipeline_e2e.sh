@@ -6,7 +6,8 @@
 set -u
 cd "$(dirname "$0")/../../.."
 SRC=courtbook_test; DB=courtbook_m86_e2e
-: "${PG_MODULE:?set PG_MODULE to a node_modules folder containing pg}"
+PG_MODULE=${PG_MODULE:-/tmp/pgdeps/node_modules}   # the same default as the race and API suites
+[ -d "$PG_MODULE/pg" ] || { echo "no pg package in $PG_MODULE: see the install line above"; exit 2; }
 sudo -u postgres psql -q -d postgres -c "drop database if exists $DB" -c "create database $DB template $SRC" >/dev/null || exit 2
 run() { sudo -u postgres psql -q -d postgres -c "drop database if exists $DB" -c "create database $DB template $SRC" >/dev/null || exit 2
         sudo -u postgres env PG_MODULE="$PG_MODULE" E2E_DB=$DB ${1:+E2E_PIPELINE=$1} node --experimental-strip-types --no-warnings supabase/tests/m86/pipeline_e2e.mjs; }
