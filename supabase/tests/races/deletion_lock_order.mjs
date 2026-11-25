@@ -1,7 +1,9 @@
-// 0095: account deletion versus the same person's booking attempt, raced many times on a scratch copy of the local
-// test database. Before 0095 hold_slot / book_at_desk locked the profile row, then queued for courts the deletion
+// Account deletion versus the same person's booking attempt, raced many times on a scratch copy of the local test
+// database. Without the refusal, hold_slot / book_at_desk locked the profile row, then queued for courts the deletion
 // already held, and the deletion then waited for that row: a deadlock (Postgres aborts one; in practice the deletion
-// run). After 0095 the booking is refused (account_closed) before any court is locked: no deadlock, ever.
+// run). With it (the pilot's 0093 in book_at_desk; the same line in 0094's hold_slot) the booking is refused
+// (account_closed) before any court is locked: no deadlock, ever. (Written 25 Nov as the test of the M12 draft 0095,
+// which the renumbering retired.)
 // Env: DB, PG_MODULE, N (races per pair, default 60), CONTROL (set when the old definitions were put back: then the
 // suite only reports how many deadlocks it saw and expects at least one).
 import { createRequire } from "node:module";
