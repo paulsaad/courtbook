@@ -114,19 +114,25 @@ function AdminBasics({ club, busy, run, hasChecklist }: { club: ClubRow; busy: b
       <label className="flex flex-col gap-1 text-sm">CourtBook fee per booking ($)<input className={input} inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} /></label>
       {/* with the checklist (0081), visibility is set by Publish / Hide at the top of the page */}
       {!hasChecklist && <label className="flex min-h-11 items-center gap-2 text-sm sm:min-h-0"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Visible to players</label>}
-      <button disabled={busy} onClick={() => run(() => createClient().from("clubs").update(hasChecklist ? { name: name.trim(), service_fee_usd: Number(fee) } : { name: name.trim(), service_fee_usd: Number(fee), active }).eq("id", club.id))} className={primary}>Save</button>
+      <button disabled={busy} onClick={() => run(() => !/^\d{1,4}(\.\d{1,2})?$/.test(fee.trim())
+        ? Promise.resolve({ error: { message: "bad_fee" } })   // whole cents only (the column would round 0.255 silently)
+        : createClient().from("clubs").update(hasChecklist ? { name: name.trim(), service_fee_usd: Number(fee) } : { name: name.trim(), service_fee_usd: Number(fee), active }).eq("id", club.id))} className={primary}>Save</button>
 
       <div className="mt-2 border-t border-grid pt-3">
         <h3 className="text-sm font-medium">How this club takes money</h3>
         <p className="mt-1 text-xs text-muted">
           <b>At the desk</b>: players reserve and it is confirmed at once; nothing is paid through CourtBook, and the
           in-app payment flow is refused for this club. <b>In the app</b>: the slot is held while the player pays.
-          Switching to at-the-desk releases any hold a player is part-way through paying for.
+          <b>Court at the desk, booking fee online</b>: the club takes the court price at its desk; the player pays only
+          CourtBook&apos;s booking fee in the app (kept if the player cancels, refunded by CourtBook if the club cancels). A
+          real club can use it only once a payment provider is connected. Changing the mode releases any hold a player is
+          part-way through paying for.
         </p>
         <label className="mt-2 flex flex-col gap-1 text-sm">Payment
           <select className={input} value={mode} onChange={(e) => setMode(e.target.value)}>
             <option value="simulated">In the app (simulated until a real provider is connected)</option>
             <option value="at_desk">At the club&apos;s desk</option>
+            <option value="fee_online">Court at the desk, booking fee online</option>
           </select>
         </label>
         <label className="mt-2 flex flex-col gap-1 text-sm">Most bookings one player may hold at once

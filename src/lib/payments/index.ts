@@ -11,4 +11,11 @@ export function getProvider(): PaymentProvider {
     default: return simulatedProvider;
   }
 }
-export type { PaymentProvider } from "./provider";
+
+/** The provider an attempt or a callback names — only if it is the one this deployment is configured for. A row
+ *  written under another configuration is not answered by guessing. */
+export function providerNamed(name: string | null | undefined): PaymentProvider | null {
+  const p = getProvider();
+  return name === p.name ? p : null;
+}
+export type { PaymentProvider, ProviderName } from "./provider";

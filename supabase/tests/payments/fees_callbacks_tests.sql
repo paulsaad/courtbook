@@ -161,7 +161,7 @@ insert into t select 'C6 a reference already used for another payment is refused
 
 -- C7: wrong amount (e.g. the provider took its own fee out)
 select pg_temp.keep('amt', pg_temp.cb(pg_temp.py('taker'), 'amt-ref', pg_temp.part('taker', 3)::numeric - 0.25));
-insert into t select 'C7 a success for a different amount is refused (amount_mismatch) and nothing is recorded. M12 HARD ACCEPTANCE CRITERION (deferred to the gateway): it must become a recorded reconciliation/refund obligation; this check must then be rewritten to require that',
+insert into t select 'C7 Model 1 (simulated, demo clubs only): a success for a different amount is refused (amount_mismatch). The real gateway path is the fee-only one (0094), where a wrong amount IS recorded as a charge owed back: hard criterion 1, fee_online_tests.sql A6',
   pg_temp.got('amt') = 'ERR amount_mismatch' and p.status = 'pending' and p.provider_ref is null, pg_temp.got('amt') from payments p where p.id = pg_temp.py('taker');
 
 -- C8: the player released the hold, then the success arrives

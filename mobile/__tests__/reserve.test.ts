@@ -31,6 +31,13 @@ describe("reserve", () => {
     expect(r).toMatchObject({ kind: "reserved", value: { bookingId: "b2", confirmed: true, already: false } });
   });
 
+  it("a hold that comes back with no payment and no deadline is already confirmed (a $0 fee at a fee_online club, 0094)", async () => {
+    rpc.mockResolvedValueOnce({ data: [{ booking_id: "b3", payment_id: null, hold_expires_at: null, already: false }], error: null });
+    expect(await reserve(attempt("fee_online"), now)).toMatchObject({ kind: "reserved", value: { bookingId: "b3", paymentId: null, confirmed: true } });
+    rpc.mockResolvedValueOnce({ data: [{ booking_id: "b4", payment_id: "p4", hold_expires_at: "t", already: false }], error: null });
+    expect(await reserve(attempt("fee_online"), now)).toMatchObject({ kind: "reserved", value: { bookingId: "b4", paymentId: "p4", confirmed: false } });
+  });
+
   it("does not retry a refusal; it is final", async () => {
     rpc.mockResolvedValueOnce({ data: null, error: { message: "slot_taken", code: "P0001" } });
     const r = await reserve(attempt("simulated"), now);

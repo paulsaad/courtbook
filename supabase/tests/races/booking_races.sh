@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Booking safety under real concurrency (booking_races.mjs) on a scratch copy of the local replica, dropped after.
-# LOCAL ONLY.  PSQL="sudo -u postgres psql" PG_MODULE=/tmp/pgdeps/node_modules bash supabase/tests/races/booking_races.sh
+# FEE=1 runs it at a fee_online club (M12.1). LOCAL ONLY.  PSQL="sudo -u postgres psql" PG_MODULE=/tmp/pgdeps/node_modules bash supabase/tests/races/booking_races.sh
 set -u
 cd "$(dirname "$0")/../../.."
 PSQL=${PSQL:-psql}
@@ -25,4 +25,4 @@ end $f$;
 SQL
   echo "CONTROL: trigger as before 0090"
 fi
-sudo -u postgres env PG_MODULE="${PG_MODULE:-/tmp/pgdeps/node_modules}" DB="postgresql:///$DB?host=/var/run/postgresql" node supabase/tests/races/booking_races.mjs
+sudo -u postgres env FEE="${FEE:-}" PG_MODULE="${PG_MODULE:-/tmp/pgdeps/node_modules}" DB="postgresql:///$DB?host=/var/run/postgresql" node supabase/tests/races/booking_races.mjs

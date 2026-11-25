@@ -41,3 +41,19 @@ describe("settlement(): every state", () => {
     expect(s({ status: "pending", payments: null })).toBe("unknown");
   });
 });
+
+describe("settlement() for a fee-only payment (M12.1): the court is always taken at the desk", () => {
+  const s = (st: string) => settlement({ source: "app", status: "confirmed", payments: { status: st, kind: "fee_only" } } as never);
+  it.each([["paid", "fee_paid"], ["pending", "fee_awaiting"], ["refund_due", "fee_refund"], ["refunded", "fee_refund"], ["expired", "not_paid"]])("fee %s → %s", (st, want) => expect(s(st)).toBe(want));
+  it("never says 'paid in the app' for a fee-only payment; a live one tells the desk the court is due", async () => {
+    const { SETTLEMENT_TEXT } = await import("./types");
+    for (const st of ["paid", "pending", "refund_due", "refunded"]) expect(s(st)).not.toBe("paid_in_app");
+    for (const st of ["paid", "pending"]) expect(SETTLEMENT_TEXT[s(st)]).toMatch(/court due at the desk/);
+    expect(SETTLEMENT_TEXT[s("refund_due")]).toMatch(/CourtBook is refunding .* nothing for the desk/);
+  });
+  it("the read keeps the kind", async () => {
+    const reader = { from: () => ({ select: () => ({ in: async () => ({ data: [{ booking_id: "a", status: "paid", kind: "fee_only" }], error: null }) }) }) };
+    const out = await paymentsByBooking(reader, [{ id: "a", source: "app" as const, status: "confirmed" as const }]);
+    expect(settlement(out[0])).toBe("fee_paid");
+  });
+});
