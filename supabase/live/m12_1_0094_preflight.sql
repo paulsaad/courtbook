@@ -7,6 +7,13 @@ with checks(part, item, ok, detail) as (
     to_regprocedure('move_price_plan(bookings,uuid,timestamptz,timestamptz)') is not null and to_regprocedure('quote_move(uuid,uuid,timestamptz,timestamptz)') is not null, ''
   union all select 1, '0092 is applied (set_club_base_prices, courts keep booked active)',
     to_regprocedure('set_club_base_prices(uuid,numeric,jsonb,boolean)') is not null and to_regprocedure('bookings_need_active_court()') is not null, ''
+  union all select 1, '0093 (pilot, PR-8) is applied: hold_slot and book_at_desk refuse a closed account under the profile lock; the older-app request takes the profile lock',
+    coalesce((select position('deletion_requested(v_player)' in prosrc) between 1 and position('lock_courts(' in prosrc)
+              from pg_proc where oid = to_regprocedure('hold_slot(uuid,uuid,timestamptz,timestamptz,uuid)')), false)
+    and coalesce((select position('deletion_requested(v_player)' in prosrc) between 1 and position('lock_courts(' in prosrc)
+              from pg_proc where oid = to_regprocedure('book_at_desk(uuid,timestamptz,timestamptz,uuid)')), false)
+    and coalesce((select position('from profiles where id = auth.uid() for update' in prosrc) > 0
+              from pg_proc where oid = to_regprocedure('request_account_deletion(text)')), false), ''
   union all select 1, '0086–0089 are applied (deletion worker, favourites, playing areas)',
     to_regclass('public.deletion_worker') is not null and to_regclass('public.club_favourites') is not null and to_regclass('public.player_areas') is not null, ''
   union all select 1, 'nothing of 0094 is here yet (no half-applied migration)',
