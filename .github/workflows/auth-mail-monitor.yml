@@ -1,0 +1,68 @@
+name: Auth mail monitor
+
+# B5 (master checklist): Supabase Auth can answer 200 to a sign-in-code request and then fail to send the email in the
+# background; only its logs show it. Once an hour this asks Supabase, through the Management API logs endpoint, how many
+# Auth mail sends failed in the last 70 minutes (overlapping windows, so a delayed run misses nothing), as COUNTS ONLY.
+#
+# Inactive until configured: the job is skipped while the repository variable AUTH_MONITOR_PROJECT_REF is unset, and
+# GitHub runs schedules only from the default branch. Nothing here was configured or created with this change.
+#
+# Alerts (each one independent of the others):
+#   - mail failures found → the run fails (exit 1);
+#   - the monitor could not check (token missing, rejected or expired; API error; timeout; an answer of an unexpected
+#     shape) → the run fails (exit 2);
+#     GitHub emails failed scheduled runs to the person who last changed the schedule;
+#   - Sentry Crons (optional, AUTH_MONITOR_SENTRY_CRONS): every run checks in; error on exit 1 or 2; a run that does not
+#     happen at all (schedule disabled, GitHub outage, or GitHub's 60-day inactivity pause of schedules) is reported by
+#     Sentry as missed.
+#
+# Privacy: the repository is public, so this run log is public. The query returns counts grouped by fixed words only
+# (no log line, no message text, no email address, no user id); the script refuses to print anything else, and never
+# prints the token or an API error body. See scripts/auth-mail-monitor.mjs and its tests.
+#
+# Credentials (Paul creates them; none exist yet), in the GitHub environment `auth-monitor`:
+#   - secret AUTH_MONITOR_LOGS_TOKEN: a Supabase scoped personal access token, ONE project (production first),
+#     permission "Logs: Read" only, with an expiry date;
+#   - secret AUTH_MONITOR_SENTRY_CRONS (optional): the Sentry Crons check-in URL of a monitor with this schedule;
+#   - repository variable AUTH_MONITOR_PROJECT_REF: the project reference (setting it turns the monitor on).
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check = count Auth mail failures (as scheduled); probe = list Auth log attribute NAMES once (no values), to confirm the query's field names"
+        type: choice
+        options: [check, probe]
+        default: check
+
+permissions: {}
+
+concurrency:
+  group: auth-mail-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    if: vars.AUTH_MONITOR_PROJECT_REF != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: auth-monitor
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/auth-mail-monitor.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Count Auth mail failures (counts only)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.AUTH_MONITOR_LOGS_TOKEN }}
+          SENTRY_CRONS_URL: ${{ secrets.AUTH_MONITOR_SENTRY_CRONS }}
+          PROJECT_REF: ${{ vars.AUTH_MONITOR_PROJECT_REF }}
+          WINDOW_MINUTES: "70"
+          MODE: ${{ inputs.mode || 'check' }}
+        run: node scripts/auth-mail-monitor.mjs "$MODE"
