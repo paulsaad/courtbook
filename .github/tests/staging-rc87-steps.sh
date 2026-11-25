@@ -40,5 +40,14 @@ out=$(run_step "$APPLY" MIGRATIONS="0089 0090 0091 0092"); rc=$?
   && ! echo "$out" | grep -q "0087–0092: running the preflight"
 ok "resuming 0089–0092: no second preflight, all applied, the 0086–0092 postcheck ran and passed" $?
 out=$(run_step "Release candidate 0086–0091 postcheck, read only (rc_postcheck)"); ok "rc_postcheck passes" $?
+# then the pilot's 0093 (PR-8) and only after it M12.1's 0094
+out=$(run_step "$APPLY" MIGRATIONS="0094"); [ $? != 0 ] && echo "$out" | grep -q "0094 needs 0093 (pilot) applied first" \
+  && [ "$(psql -At -d $S -c "select count(*) from staging_meta.applied where name ~ '^009[34]_'")" = 0 ]
+ok "0094 before the pilot's 0093 is refused; nothing applied" $?
+out=$(run_step "$APPLY" MIGRATIONS="0093"); [ $? = 0 ] && [ "$(psql -At -d $S -c "select count(*) from staging_meta.applied where name = '0093_closed_account_booking_lock_order.sql'")" = 1 ]
+ok "the pilot's 0093 applies after 0092" $?
+out=$(run_step "$APPLY" MIGRATIONS="0094"); [ $? = 0 ] && echo "$out" | grep -q "0094: running the preflight" \
+  && [ "$(psql -At -d $S -c "select count(*) from staging_meta.applied where name = '0094_fee_online_payments.sql'")" = 1 ]
+ok "0094 after 0093: preflight first, applied" $?
 echo "RESULT: $([ $FAILS = 0 ] && echo PASS || echo FAIL)"
 [ $FAILS = 0 ]
