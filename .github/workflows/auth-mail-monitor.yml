@@ -1,0 +1,103 @@
+name: Auth mail monitor
+
+# B5 (master checklist): Supabase Auth can answer 200 to a sign-in-code request and then fail to send the email in the
+# background; only its logs show it. Once an hour this asks Supabase, through the Management API logs endpoint, how many
+# Auth mail sends failed since the previous check ended, as COUNTS ONLY.
+#
+# INACTIVE: the job is skipped while the repository variable AUTH_MONITOR_PROJECT_REF is unset. The one exception is a
+# selftest (a manual run in mode selftest, or a scheduled run while the variable AUTH_MONITOR_SELFTEST is 'true'), which
+# reads no logs and needs only the heartbeat URL. GitHub runs schedules only from the default branch.
+# Review 25 Nov: stays inactive until (1) a controlled failure has been proved to reach Paul by GitHub email AND by the
+# heartbeat service, and (3) the query has been validated against real, sanitized Auth log examples of a failed and a
+# successful email. Procedures: docs/ops/auth-mail-monitor.md.
+#
+# Coverage (review finding 2): each run checks from where the previous successful run ended (a watermark kept in the
+# Actions cache) to now minus 15 minutes of ingestion lag, so windows chain without holes however late GitHub starts a
+# run. A missing watermark, or one more than 24 hours old (the API's limit per query), is reported as a COVERAGE GAP:
+# the run fails and the last 24 hours are still checked.
+#
+# Alerts (review finding 1): a heartbeat service is REQUIRED (none configured → the run fails): Sentry Crons or
+# Healthchecks.io, exactly one. Every run signals start, then success or failure; a run that fails, or never happens
+# (schedule disabled, GitHub outage, the 60-day inactivity pause, a delay beyond the 30-minute grace), is reported by
+# that service. Failed runs also fail on GitHub, which emails depending on the account's notification settings, which is
+# why it is not relied on alone. Note: the Sentry organisation's one free cron monitor is used by deletion-retry.
+#
+# Privacy: the repository is public, so this run log is public. The query returns counts grouped by fixed words only
+# (no log line, no message text, no email address, no user id); the script refuses to print anything else, and never
+# prints the token or an API error body. See scripts/auth-mail-monitor.mjs and its tests.
+#
+# Credentials (Paul creates them; none exist yet), in the GitHub environment `auth-monitor`:
+#   - secret AUTH_MONITOR_LOGS_TOKEN: Supabase scoped personal access token, ONE project, "Logs: Read" only, expiring;
+#   - ONE of: secret AUTH_MONITOR_SENTRY_CRONS (Sentry Crons check-in URL, monitor slug auth-mail-monitor) or secret
+#     AUTH_MONITOR_HEALTHCHECKS (Healthchecks.io ping URL of a check with cron "17 * * * *", UTC, grace 30 minutes);
+#   - repository variable AUTH_MONITOR_PROJECT_REF: the project reference (setting it turns the monitor on);
+#   - repository variable AUTH_MONITOR_SELFTEST: 'true' only during the scheduled alert test, then deleted.
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check = count Auth mail failures (as scheduled); probe = list Auth log attribute NAMES (no values); selftest = a deliberate failure to prove the alerts reach you (no logs read)"
+        type: choice
+        options: [check, probe, selftest]
+        default: check
+      first_run:
+        description: "check only: this is the very first run (there is no previous check, so no gap is reported)"
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: auth-mail-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    if: vars.AUTH_MONITOR_PROJECT_REF != '' || inputs.mode == 'selftest' || vars.AUTH_MONITOR_SELFTEST == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: auth-monitor
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/auth-mail-monitor.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # where the previous successful check ended (the newest saved watermark)
+      - name: Restore the watermark
+        uses: actions/cache/restore@v4
+        with:
+          path: .wm/watermark
+          key: auth-mail-monitor-wm-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: auth-mail-monitor-wm-
+      - name: Count Auth mail failures (counts only)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.AUTH_MONITOR_LOGS_TOKEN }}
+          SENTRY_CRONS_URL: ${{ secrets.AUTH_MONITOR_SENTRY_CRONS }}
+          HEALTHCHECKS_URL: ${{ secrets.AUTH_MONITOR_HEALTHCHECKS }}
+          PROJECT_REF: ${{ vars.AUTH_MONITOR_PROJECT_REF }}
+          WATERMARK_FILE: .wm/watermark
+          INGEST_LAG_MINUTES: "15"
+          FIRST_RUN: ${{ inputs.first_run && 'true' || 'false' }}
+          # a manual run uses the mode chosen; a scheduled run is a selftest while AUTH_MONITOR_SELFTEST is 'true'
+          MODE: ${{ inputs.mode || (vars.AUTH_MONITOR_SELFTEST == 'true' && 'selftest') || 'check' }}
+        run: |
+          mkdir -p .wm
+          node scripts/auth-mail-monitor.mjs "$MODE"
+      # only a window that was actually checked moves the watermark (the script writes .new after a successful query)
+      - name: Keep the new watermark
+        id: wm
+        if: always() && hashFiles('.wm/watermark.new') != ''
+        run: mv .wm/watermark.new .wm/watermark
+      - name: Save the watermark
+        if: always() && steps.wm.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: .wm/watermark
+          key: auth-mail-monitor-wm-${{ github.run_id }}-${{ github.run_attempt }}
