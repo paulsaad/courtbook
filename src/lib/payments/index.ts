@@ -2,6 +2,7 @@ import "server-only";
 import { PaymentStartRefused, type PaymentProvider } from "./provider";
 import { guardProvider, ProviderAnswerInvalid } from "./guard";
 import { simulatedProvider } from "./simulated";
+import { attemptsOnlyApproval, chargeCoverage, withCoverageGate } from "./coverage";
 import { whishProvider } from "./whish";
 
 /**
@@ -40,31 +41,6 @@ export function pageHosts(env: Record<string, string | undefined> = process.env)
   return (env.PAYMENT_PAGE_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase()).filter((h) => /^[a-z0-9.-]{1,253}$/.test(h));
 }
 
-/** The approved alternative to a charge list, if one was configured (its reference only; never a secret). */
-export function attemptsOnlyApproval(env: Record<string, string | undefined> = process.env): string | null {
-  const a = (env.PAYMENT_ATTEMPTS_ONLY_APPROVAL ?? "").trim();
-  return a.length >= 3 && a.length <= 200 ? a : null;
-}
-
-/** Charge-level coverage of a provider: "missing" for a real-money provider with no charge list and no approval. */
-export function chargeCoverage(provider: Pick<PaymentProvider, "name" | "listCharges">, env: Record<string, string | undefined> = process.env):
-  "full" | "simulated" | "approved_attempts_only" | "missing" {
-  if (provider.listCharges) return "full";
-  if (provider.name === "simulated") return "simulated";
-  return attemptsOnlyApproval(env) ? "approved_attempts_only" : "missing";
-}
-
-/** A real-money provider without charge-level reconciliation cannot start payments (see above). Asking about and
- *  settling existing attempts is unaffected. */
-export function withCoverageGate(provider: PaymentProvider, env: Record<string, string | undefined> = process.env): PaymentProvider {
-  if (chargeCoverage(provider, env) !== "missing") return provider;
-  // Object.create keeps every other method, whether the provider is a plain object or a class instance (a spread
-  // would drop a class's methods).
-  const gated: PaymentProvider = Object.create(provider);
-  gated.startAttempt = async () => { throw new PaymentStartRefused("charge_reconciliation_unavailable"); };
-  return gated;
-}
-
 /** null when the payment configuration is coherent; otherwise a code for the operator (never secret values). */
 export function paymentConfigProblem(env: Record<string, string | undefined> = process.env): string | null {
   const p = (env.PAYMENT_PROVIDER ?? "").trim();
@@ -91,4 +67,5 @@ export function providerNamed(name: string | null | undefined): PaymentProvider 
   const p = getProvider();
   return name === p.name ? p : null;
 }
+export { attemptsOnlyApproval, chargeCoverage, withCoverageGate } from "./coverage";
 export type { PaymentProvider, ProviderName } from "./provider";
