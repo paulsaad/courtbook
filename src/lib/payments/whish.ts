@@ -1,5 +1,5 @@
 import "server-only";
-import type { PaymentProvider } from "./provider";
+import { PaymentStartRefused, type PaymentProvider } from "./provider";
 
 /**
  * Whish Pay "Collect" adapter — NOT IMPLEMENTED. Shape from the public Whish Collect spec:
@@ -22,6 +22,8 @@ export const whishProvider: PaymentProvider = {
   async start() { throw new Error("whish provider not configured"); },
   async verify() { throw new Error("whish provider not configured"); },
   async refund() { return { ok: false, reason: "whish provider not configured" }; },
-  async startAttempt() { throw new Error("whish provider not configured"); },
+  // M12.4 audit (H2): the stub sends nothing, so a start is a definite refusal (the attempt ends, nothing is left
+  // 'starting' for a provider that was never asked). A plain error would read as "outcome unknown".
+  async startAttempt() { throw new PaymentStartRefused("whish provider not configured"); },
   async attemptStatus() { throw new Error("whish provider not configured"); },
 };

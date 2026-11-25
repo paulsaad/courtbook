@@ -11,7 +11,9 @@ import { PaymentStartRefused } from "../provider";
  *  - status answers: pending, succeeded, failed, expired, or "unknown" (the gateway never heard of the reference);
  *  - charges in its own list that the status never shows: a second charge on a page, a different amount or currency,
  *    or a charge with a reference that is not ours;
- *  - an outage of the status or list API.
+ *  - an outage of the status or list API;
+ *  - (M12.3) charges that reach its own list only `listDelayMs` after they were taken; status calls that fail for
+ *    chosen references only (`statusFailFor`); malformed status answers for chosen references (`statusAnswer`).
  * Time comes from `clock` so tests can move it.
  */
 type Charge = ProviderCharge & { at: number };   // when the gateway took it (its own list is filtered by this)
@@ -26,6 +28,9 @@ export class FakeGateway implements PaymentProvider {
   statusDown = false;
   listDown = false;
   pageMinutes = 5;
+  listDelayMs = 0;
+  statusFailFor = new Set<string>();
+  statusAnswer = new Map<string, unknown>();
   startCalls = 0;
   private seq = 0;
   clock: () => number;
@@ -74,6 +79,8 @@ export class FakeGateway implements PaymentProvider {
 
   async attemptStatus(attemptId: string): Promise<AttemptStatus> {
     if (this.statusDown) throw new Error("status API down");
+    if (this.statusFailFor.has(attemptId)) throw new Error("status API error for this reference");
+    if (this.statusAnswer.has(attemptId)) return this.statusAnswer.get(attemptId) as AttemptStatus;
     const p = this.pages.get(attemptId);
     if (!p) return { state: "unknown" };
     if (p.state === "paid") return { state: "succeeded", evidence: { providerRef: p.charges[0].providerRef, amount: p.charges[0].amount, currency: p.charges[0].currency } };
@@ -91,7 +98,7 @@ export class FakeGateway implements PaymentProvider {
     this.listCalls.push({ since: since.getTime(), until: until.getTime() });
     if (this.listDown) throw new Error("list API down");
     return [...[...this.pages.values()].flatMap((p) => p.charges), ...this.foreign]
-      .filter((c) => c.at >= since.getTime() && c.at < until.getTime())
+      .filter((c) => c.at >= since.getTime() && c.at < until.getTime() && c.at + this.listDelayMs <= this.clock())
       .map((c) => ({ externalRef: c.externalRef, providerRef: c.providerRef, amount: c.amount, currency: c.currency }));
   }
 }

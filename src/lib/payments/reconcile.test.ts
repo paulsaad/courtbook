@@ -123,11 +123,15 @@ describe("runPaymentReconciliation", () => {
     g.listDown = true;
     expect((await runPaymentReconciliation(world().rpc, g, { now: NOW })).problems).toEqual(expect.arrayContaining(["charge_list", "reconciliation_behind"]));
   });
-  it("a provider without a charge list: sweep and health only", async () => {
+  it("a provider without a charge list: sweep and health only, and that is never a quiet success for real money (review 25 Nov)", async () => {
     const g = new FakeGateway(() => NOW.getTime());
     (g as { listCharges?: unknown }).listCharges = undefined;
-    const s = await runPaymentReconciliation(world().rpc, g, { now: NOW });
-    expect([s.reconcile, s.window, s.problems]).toEqual([null, null, []]);
+    const real = await runPaymentReconciliation(world().rpc, g, { now: NOW });
+    expect([real.reconcile, real.window, real.coverage, real.problems, real.warnings]).toEqual([null, null, "attempts_only", ["coverage_attempts_only"], []]);
+    const approved = await runPaymentReconciliation(world().rpc, g, { now: NOW, attemptsOnlyApproval: "ref" });
+    expect([approved.problems, approved.warnings]).toEqual([[], ["coverage_attempts_only_approved"]]);
+    const sim = await runPaymentReconciliation(world().rpc, { ...g, name: "simulated", attemptStatus: g.attemptStatus.bind(g), startAttempt: g.startAttempt.bind(g) } as typeof g, { now: NOW });
+    expect([sim.problems, sim.warnings]).toEqual([[], ["coverage_attempts_only"]]);
   });
 });
 
