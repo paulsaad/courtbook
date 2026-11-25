@@ -621,7 +621,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
 
   /** A court's column heading: in the grid (desktop; screen readers everywhere) and in the phone header strip (S1). */
   const courtHead = (c: Court, extra = "") => (
-    <div key={c.id} className={`h-9 px-1 text-center text-sm lg:sticky lg:top-0 lg:z-10 ${draftOn(c.id, date) ? "rounded-t-lg bg-draft-soft lg:bg-draft-soft" : "lg:bg-paper"} ${extra}`}>
+    <div key={c.id} className={`px-1 text-center text-sm lg:sticky lg:top-0 lg:z-10 ${draftOn(c.id, date) ? "rounded-t-lg bg-draft-soft lg:bg-draft-soft" : "lg:bg-paper"} ${extra}`}>
       <div className={`font-medium leading-tight lg:text-[15px] ${draftOn(c.id, date) ? "text-draft" : ""}`}>{c.name}</div>
       <div className="text-xs text-muted">{sportNames[c.sport] ?? c.sport}</div>
     </div>
@@ -718,9 +718,9 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
           <div ref={namesRef} aria-hidden="true" data-testid="court-names" className="overflow-hidden px-2 lg:hidden">
             <div className="flex min-w-max">
               {/* covers the names as they scroll left, like the time column below it */}
-              <div className="sticky left-0 z-10 w-12 shrink-0 bg-paper" />
+              <div className="sticky left-0 z-10 w-[3.25rem] shrink-0 bg-paper" />
               <div className="grid flex-1 gap-x-1.5 [--col-min:7rem]" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(var(--col-min), 1fr))` }}>
-                {courts.map((c) => courtHead(c))}
+                {courts.map((c) => courtHead(c, "min-h-9"))}
               </div>
             </div>
           </div>
@@ -769,9 +769,9 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
             {/* time axis: pinned on the left while the courts scroll sideways (S2); on phones it starts level with the
                 first row, because the court names are in the header. z-[8]: above bookings (≤ z-[6]), below the
                 sticky header (z-10) and the sheets (z-20) */}
-            <div className="sticky left-0 z-[8] w-12 shrink-0 bg-paper lg:z-20 lg:mt-9 lg:w-14" style={{ height: times.length * ROW_PX }}>
+            <div className="sticky left-0 z-[8] w-[3.25rem] shrink-0 bg-paper lg:z-20 lg:mt-9 lg:w-14" style={{ height: times.length * ROW_PX }}>
               {times.map((t, i) => i % labelEvery === 0 && (
-                <div key={t} className="absolute right-2 -translate-y-1/2 text-xs text-muted lg:text-[13px]" style={{ top: i * ROW_PX }}>{t}</div>
+                <div key={t} className="absolute right-1.5 -translate-y-1/2 whitespace-nowrap text-xs text-muted lg:right-2 lg:text-[13px]" style={{ top: i * ROW_PX }}>{t}</div>
               ))}
             </div>
             {/* courts: one Tab stop; arrows move inside (see onGridKey) */}
@@ -779,7 +779,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
             <div ref={gridRef} role="group" aria-label={`Courts, ${dayName} ${dayNum} ${monthName}`} aria-describedby="grid-keys-hint"
                  tabIndex={activeItem || canAdd ? -1 : 0} onKeyDown={onGridKey}
                  className="grid flex-1 gap-x-1.5 outline-none [--col-min:7rem] focus-visible:ring-2 focus-visible:ring-turf lg:[--col-min:9rem]" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(var(--col-min), 1fr))` }}>
-              {courts.map((c) => courtHead(c, "max-lg:sr-only"))}
+              {courts.map((c) => courtHead(c, "h-9 max-lg:sr-only"))}
               {courts.map((c, ci) => (
                 <div key={c.id} className="relative rounded-lg border border-grid bg-white" style={{ height: times.length * ROW_PX }}>
                   {/* free slots; a slot under a booking or block is not a slot (disabled, hidden from keyboard and screen readers) */}
