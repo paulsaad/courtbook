@@ -2,7 +2,7 @@ import "server-only";
 import type { PaymentProvider } from "./provider";
 
 /**
- * Provider-independent handling of payment attempts (M12.1, 0093). Three callers share it, so they cannot disagree:
+ * Provider-independent handling of payment attempts (M12.1, 0094). Three callers share it, so they cannot disagree:
  * the provider's callback, the player's return page and the sweeper/reconciliation. Each one only ASKS the provider
  * (attemptStatus) and hands the answer to record_attempt_result, which is idempotent: asking twice, or from two places
  * at once, records a charge once.
@@ -86,7 +86,7 @@ async function rotate(admin: Rpc, attemptId: string, summary: SweepSummary): Pro
  *  `more` (M12.3): more attempts were waiting than this run could ask about — the run is not complete. */
 export type SweepSummary = { checked: number; skipped: number; more?: boolean; outcomes: Record<string, number>; failures: Record<string, number> };
 
-/** attempts_to_check (0093) returns at most this many rows per call. */
+/** attempts_to_check (0094) returns at most this many rows per call. */
 export const SWEEP_MAX_LIMIT = 200;
 
 /**

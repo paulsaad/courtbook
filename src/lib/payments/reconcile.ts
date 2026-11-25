@@ -4,14 +4,14 @@ import { paymentCode, sweepOpenAttempts, type Rpc, type SweepSummary } from "./a
 
 /**
  * M12.2 payment reconciliation, provider-independent. Safe to repeat and to run alongside callbacks and the player's
- * return page (every money write goes through the database's idempotent functions, 0093).
+ * return page (every money write goes through the database's idempotent functions, 0094).
  *
  *  1. Sweep: every unresolved attempt, however old, is asked about again (oldest check first). One of another provider
  *     is counted, never silently skipped.
- *  2. Health (0094), read after the sweep: attempts of another provider than this runner's (misconfiguration),
+ *  2. Health (0095), read after the sweep: attempts of another provider than this runner's (misconfiguration),
  *     attempts still unresolved past the overdue age, reconciliation issues nobody has resolved yet. Each is a problem.
  *  3. Charge list (if the provider offers one): never before a person has set a verified starting point
- *     (initialise_reconciliation_watermark, 0094) — until then the run reports `reconciliation_not_initialised`.
+ *     (initialise_reconciliation_watermark, 0095) — until then the run reports `reconciliation_not_initialised`.
  *     Then read from the watermark (minus an overlap) for at most one window,
  *     reconciled charge by charge. The watermark moves forward only when the whole window was processed, so a window
  *     that failed or ran out of time is read again, and a runner that was down catches up window by window. Evidence
@@ -39,7 +39,7 @@ export async function reconcileCharges(admin: Rpc, provider: PaymentProvider, ch
     if (res.error) {
       const code = paymentCode(res.error, "record_failed");
       if (!CONFLICTS.has(code)) { fail(code); continue; }
-      // kept until a person resolves it (0094): reported on every run, not once. A conflict a person has already
+      // kept until a person resolves it (0095): reported on every run, not once. A conflict a person has already
       // resolved, seen again in a later window, is counted but not raised again.
       let kept;
       try {

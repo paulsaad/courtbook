@@ -85,7 +85,7 @@ export async function reserve(a: Attempt, opts: { attempts?: number; waitMs?: (n
           paymentId: data.payment_id ?? null,
           holdExpiresAt: data.hold_expires_at ?? null,
           already: data.already === true,
-          // a hold with no payment is already confirmed: a $0 fee at a fee_online club (0093). Every other hold has one.
+          // a hold with no payment is already confirmed: a $0 fee at a fee_online club (0094). Every other hold has one.
           confirmed: a.mode === "at_desk" || (!data.payment_id && !data.hold_expires_at),
         },
       };

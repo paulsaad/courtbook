@@ -9,7 +9,7 @@ import { whishProvider } from "./whish";
  * The deployment's payment provider, from PAYMENT_PROVIDER, always behind the provider contract (guard.ts).
  * Must match payments.provider set by hold_slot (database setting app.payment_provider) — both default to 'simulated'.
  *
- *   unset or ""   simulated (demo clubs only: the database refuses a simulated fee anywhere else, 0070/0093)
+ *   unset or ""   simulated (demo clubs only: the database refuses a simulated fee anywhere else, 0070/0094)
  *   "simulated"   simulated
  *   "whish"       the Whish adapter — NOT IMPLEMENTED: it refuses every start and answers nothing (whish.ts)
  *   anything else a misconfiguration (M12.3): before, a typo silently meant "simulated". Now nothing can start and

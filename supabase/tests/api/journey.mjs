@@ -211,7 +211,7 @@ const moneyWithoutBooking = () => one(`select count(*)::int from payments p join
   rep("B14 never: money taken without a booking or a refund owed (whole database)", (await moneyWithoutBooking()) === 0);
 }
 
-// ================================================================== 2B-fee. Model 2 through the API (M12.1, 0093)
+// ================================================================== 2B-fee. Model 2 through the API (M12.1, 0094)
 section("2B-fee court at the desk, CourtBook fee online (fee_online): grants, RLS and the attempt path through the API");
 {
   const ADMIN = U(9);

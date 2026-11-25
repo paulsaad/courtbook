@@ -1,4 +1,4 @@
--- 0093 — M12.1: Model 2 payments. The club collects the court price at its desk; CourtBook collects only its booking
+-- 0094 — M12.1: Model 2 payments. The club collects the court price at its desk; CourtBook collects only its booking
 -- fee online (decisions of 24 Nov: Model 2, fee $1, D1 fee-refund rule, up to three attempts per hold).
 --
 -- Nothing here talks to a provider. A server route asks the provider for the truth and hands it to the database;
@@ -130,14 +130,14 @@ begin
   select payment_mode, is_demo into v_old, v_demo from clubs where id = p_club for update;
   if not found then raise exception 'club_not_found'; end if;
   if p_mode = 'simulated' and not v_demo then raise exception 'simulated_demo_only'; end if;  -- 0070
-  -- 0093: a real club takes fees online only once a real provider is configured; otherwise every hold would be refused
+  -- 0094: a real club takes fees online only once a real provider is configured; otherwise every hold would be refused
   if p_mode = 'fee_online' and not v_demo
      and coalesce(nullif(current_setting('app.payment_provider', true), ''), 'simulated') = 'simulated' then
     raise exception 'payments_not_configured';
   end if;
   if p_mode = v_old then return 0; end if;
 
-  -- 0093: every change of mode releases the holds made under the old one (before, only a switch to at_desk did),
+  -- 0094: every change of mode releases the holds made under the old one (before, only a switch to at_desk did),
   -- BEFORE the club flips, or the at_desk trigger would refuse to expire their payments. An attempt still open on a
   -- released hold stays open: if it succeeds, the charge is recorded and owed back (record_attempt_result).
   update bookings set status = 'expired' where club_id = p_club and status = 'pending';
@@ -175,7 +175,7 @@ begin
   select * into c from clubs where id = p_club and active for share;
   if not found then raise exception 'club_not_found'; end if;
   if c.payment_mode = 'at_desk' then raise exception 'wrong_payment_mode'; end if;
-  -- 0093: a real club never takes a simulated fee
+  -- 0094: a real club never takes a simulated fee
   if c.payment_mode = 'fee_online' and v_provider = 'simulated' and not c.is_demo then raise exception 'payments_not_configured'; end if;
   if p_start > now() + make_interval(days => c.booking_window_days) then raise exception 'beyond_booking_window'; end if;
   if not exists (select 1 from courts where id = p_court and club_id = p_club and active) then raise exception 'court_not_found'; end if;
@@ -639,7 +639,7 @@ begin
   -- correct it). A hold can still be released.
   if not is_staff and b.status = 'confirmed' and b.start_at <= now() then raise exception 'booking_started'; end if;
 
-  -- 0093: the money follows the one shared rule (fee kept on the player's cancellation; owed back when club-caused)
+  -- 0094: the money follows the one shared rule (fee kept on the player's cancellation; owed back when club-caused)
   perform settle_payment_on_cancel(p_booking, case when p_club_caused then 'club' else 'player' end);
 
   update bookings set status = 'cancelled', cancelled_at = now() where id = p_booking;
@@ -668,7 +668,7 @@ begin
   if v_court is not null then perform 1 from courts where id = v_court for update; end if;
   select * into b from bookings where id = v_booking for update;
   select * into p from payments where id = p_payment for update;
-  -- 0093: a fee-only payment is paid only through a provider-verified attempt (record_attempt_result)
+  -- 0094: a fee-only payment is paid only through a provider-verified attempt (record_attempt_result)
   if p.kind = 'fee_only' then raise exception 'use_payment_attempts'; end if;
   v_real := p.provider <> 'simulated';
 
@@ -711,7 +711,7 @@ begin
   if v_court is not null then perform 1 from courts where id = v_court for update; end if;
   perform 1 from bookings where id = v_booking for update;
   select * into p from payments where id = p_payment for update;
-  -- 0093: a failed fee-only attempt ends the attempt, never the hold (record_attempt_result)
+  -- 0094: a failed fee-only attempt ends the attempt, never the hold (record_attempt_result)
   if p.kind = 'fee_only' then raise exception 'use_payment_attempts'; end if;
   if p.status <> 'pending' then return; end if;
   update payments set status = 'failed', note = p_note where id = p.id;
@@ -726,7 +726,7 @@ begin
   select * into p from payments where id = p_payment for update;
   if not found then raise exception 'not_found'; end if;
   if auth.uid() is not null and not is_staff_of(p.club_id) then raise exception 'forbidden'; end if;
-  -- 0093: the booking fee is CourtBook's money; only an admin completes its refund, with a reference (complete_fee_refund)
+  -- 0094: the booking fee is CourtBook's money; only an admin completes its refund, with a reference (complete_fee_refund)
   if p.kind = 'fee_only' then raise exception 'courtbook_fee_refund'; end if;
   if p.status <> 'refund_due' then raise exception 'not_refund_due'; end if;
   if not p.collected then raise exception 'never_collected'; end if;
@@ -810,7 +810,7 @@ language sql stable security definer set search_path = public as $$
          coalesce(sum(p.total_usd)  filter (where p.status = 'paid' and p.collected), 0),
          coalesce(sum(p.fee_usd)    filter (where p.status = 'paid' and p.collected), 0),
          coalesce(sum(p.amount_usd) filter (where p.status = 'paid' and p.collected), 0),
-         -- only money that was taken can be owed back; 0093: and only the club's own (CourtBook refunds its fee)
+         -- only money that was taken can be owed back; 0094: and only the club's own (CourtBook refunds its fee)
          count(*) filter (where p.status = 'refund_due' and p.collected and p.kind = 'court_and_fee')::int,
          coalesce(sum(p.total_usd)  filter (where p.status = 'refunded' and p.collected), 0),
          count(*) filter (where p.status = 'paid' and not p.collected)::int,
@@ -901,7 +901,7 @@ begin
     n_games := n_games + 1;
   end loop;
 
-  -- (b) their future and pending bookings: cancelled as the player would cancel them (0093: through the one shared
+  -- (b) their future and pending bookings: cancelled as the player would cancel them (0094: through the one shared
   --     rule, settle_payment_on_cancel). Pending → payment expired. A CourtBook booking fee (fee_only) is kept, as when
   --     the player cancels (decision D1); refunds already owed for club or system failures and payment errors are left
   --     as they are. A court-and-fee payment (demo clubs) keeps its rule: refund due before the club's cutoff.
