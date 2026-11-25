@@ -1,8 +1,8 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
-// Temporary internal STAGING artwork. Not CourtBook branding: the final
-// name, logo and icon come from a separate branding decision. Live builds
-// keep the assets named in app.json.
+// Temporary internal staging identifier ("STG" on charcoal; scripts/staging-artwork.py). Not CourtBook branding:
+// the final name, logo and icon come from a separate branding decision. Live builds keep the assets named in
+// app.json. Which exact files may ship is pinned in assets/artwork-approvals.json (check-store-artwork.mjs).
 const STAGING_ASSETS = {
   icon: "./assets/staging/icon.png",
   adaptiveIcon: {

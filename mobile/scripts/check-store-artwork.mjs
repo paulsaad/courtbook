@@ -1,12 +1,20 @@
 #!/usr/bin/env node
-// Release gate: which icon and splash artwork a native build of each app would ship.
-//   node scripts/check-store-artwork.mjs --app live      (fails while live uses the Expo template artwork)
-//   node scripts/check-store-artwork.mjs --app staging   (fails unless staging uses its own STAGING artwork)
-// Reads the resolved app config (app.json + app.config.ts) for the chosen app, hashes every icon and
-// splash file it names, and compares them with the Expo template files created by the scaffold (1d014d0).
-// Decision 25 Nov: no final store release may contain the Expo placeholder; the final icon comes from a
-// separate branding decision. Development assets stay unchanged until then, so `--app live` fails today
-// by design.
+// Release gate: is the icon and splash artwork a native build of this app would ship the APPROVED artwork?
+//   node scripts/check-store-artwork.mjs --app live
+//   node scripts/check-store-artwork.mjs --app staging
+// Reads the resolved app config (app.json + app.config.ts) for the chosen app and hashes every icon and splash file
+// it names. It passes only if:
+//   1. no file is an Expo template file (hashes from the scaffold, 1d014d0);
+//   2. staging uses only files under assets/staging/ (live/staging separation);
+//   3. every file and colour matches assets/artwork-approvals.json for that app, byte for byte (sha256), and
+//   4. that app's entry is "approved", with approvedBy and approvedOn.
+// A folder name or "not the placeholder" proves nothing about the design; only 3 and 4 tie a build to the exact
+// artwork Paul approved. Decisions 25 Nov:
+//   - no store release may contain the Expo placeholder;
+//   - the final icon comes from a separate branding decision, and passing this gate for live is NOT branding
+//     approval by itself: the live entry is filled in only after that decision;
+//   - the staging "STG" artwork needs Paul's approval before any native build.
+// Today both apps fail by design: live is "not_approved", staging is "pending_review".
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -23,7 +31,9 @@ export const EXPO_PLACEHOLDERS = new Map([
   ["a4e030697a7571b3e95d31860e4da55d2f98e5e861e2b55e414f45a8556828ba", "favicon.png"],
 ]);
 
-/** Every artwork file a resolved Expo config names, as [label, relative path]. */
+const norm = (p) => "./" + String(p).replace(/^\.\//, "");
+
+/** Every artwork file a resolved Expo config names, as [label, "./relative/path"]. */
 export function artworkOf(config) {
   const out = [];
   if (config.icon) out.push(["icon", config.icon]);
@@ -35,19 +45,39 @@ export function artworkOf(config) {
   for (const p of config.plugins ?? []) {
     if (Array.isArray(p) && p[0] === "expo-splash-screen" && p[1]?.image) out.push(["expo-splash-screen.image", p[1].image]);
   }
-  return out;
+  return out.map(([l, p]) => [l, norm(p)]);
 }
 
-/** Problems for one app, given its artwork list and a hash function. Empty means it passes. */
-export function problems(app, artwork, hashOf) {
+/** The colours shown around the artwork (adaptive-icon background, splash background). */
+export function colorsOf(config) {
+  const c = {};
+  if (config.android?.adaptiveIcon?.backgroundColor) c.adaptiveIconBackground = config.android.adaptiveIcon.backgroundColor;
+  for (const p of config.plugins ?? []) {
+    if (Array.isArray(p) && p[0] === "expo-splash-screen" && p[1]?.backgroundColor) c.splashBackground = p[1].backgroundColor;
+  }
+  return c;
+}
+
+/** Problems for one app. Empty means it passes. */
+export function problems(app, artwork, colors, hashOf, approvals) {
   const found = [];
   if (artwork.length === 0) found.push("the config names no icon at all");
+  const entry = approvals?.[app];
   for (const [label, path] of artwork) {
     const h = hashOf(path);
     if (EXPO_PLACEHOLDERS.has(h)) found.push(`${label} (${path}) is the Expo template ${EXPO_PLACEHOLDERS.get(h)}`);
-    if (app === "staging" && !path.replace(/^\.\//, "").startsWith("assets/staging/"))
-      found.push(`${label} (${path}) is not STAGING artwork (expected assets/staging/…)`);
+    if (app === "staging" && !path.startsWith("./assets/staging/")) found.push(`${label} (${path}) is not staging artwork (expected assets/staging/…)`);
+    const want = entry?.files?.[path];
+    if (!want) found.push(`${label} (${path}) is not in the approved artwork list`);
+    else if (want !== h) found.push(`${label} (${path}) differs from the approved artwork (sha256 ${h.slice(0, 12)}…, approved ${want.slice(0, 12)}…)`);
   }
+  for (const [k, v] of Object.entries(colors)) {
+    const want = entry?.colors?.[k];
+    if (!want || want.toUpperCase() !== String(v).toUpperCase()) found.push(`colour ${k} ${v} is not the approved ${want ?? "(none)"}`);
+  }
+  const approved = entry?.status === "approved" && typeof entry.approvedBy === "string" && entry.approvedBy.trim()
+    && /^\d{4}-\d{2}-\d{2}$/.test(entry.approvedOn ?? "");
+  if (!approved) found.push(`the ${app} artwork is not approved (status: ${entry?.status ?? "missing"})`);
   return found;
 }
 
@@ -65,16 +95,18 @@ function main() {
   const config = JSON.parse(
     execFileSync("npx", ["expo", "config", "--json", "--type", "public"], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
   );
+  const approvals = JSON.parse(readFileSync(resolve(root, "assets/artwork-approvals.json"), "utf8"));
   const hashOf = (p) => createHash("sha256").update(readFileSync(resolve(root, p))).digest("hex");
   const art = artworkOf(config);
   for (const [label, path] of art) console.log(`${app}: ${label} = ${path}`);
-  const found = problems(app, art, hashOf);
+  const found = problems(app, art, colorsOf(config), hashOf, approvals);
   if (found.length === 0) {
-    console.log(`PASS ${app}: no Expo template artwork${app === "staging" ? "; all artwork is STAGING artwork" : ""}`);
+    console.log(`PASS ${app}: every icon and splash file is the approved artwork (approved by ${approvals[app].approvedBy}, ${approvals[app].approvedOn})`);
     return;
   }
   for (const f of found) console.log(`FAIL ${app}: ${f}`);
-  if (app === "live") console.log("The live app cannot go to a store until the final icon is approved and added (separate branding decision).");
+  if (app === "live") console.log("The live app cannot go to a store until its final artwork is approved after the branding decision.");
+  else console.log("The staging app cannot be built until Paul approves this exact artwork (assets/artwork-approvals.json).");
   process.exit(1);
 }
 
