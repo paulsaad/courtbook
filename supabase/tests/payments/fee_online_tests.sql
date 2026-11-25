@@ -1,4 +1,4 @@
--- M12.1 (0093): Model 2 — the club collects the court price; CourtBook collects its booking fee online through
+-- M12.1 (0094): Model 2 — the club collects the court price; CourtBook collects its booking fee online through
 -- provider-verified attempts. No provider is contacted: record_attempt_result and reconcile_provider_charge are what the
 -- server calls after asking a provider. ONE transaction, rolled back. The demo club is switched to fee_online inside it.
 \set ON_ERROR_STOP 1

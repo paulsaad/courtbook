@@ -59,7 +59,7 @@ union all
 select 'D1 money: payments or fee charges marked collected, or any real provider', (a + b + c) = 0,
        format('payments collected %s, fee charges collected %s, non-simulated provider rows %s', a, b, c)
 from (select (select count(*) from payments where collected) a,
-             -- fee_charges / payment_attempts exist only from 0093: counted only if present, so this runs before 0093 too
+             -- fee_charges / payment_attempts exist only from 0094: counted only if present, so this runs before 0094 too
              case when to_regclass('public.fee_charges') is null then 0
                   else (xpath('/row/n/text()', query_to_xml('select count(*) as n from fee_charges where collected', false, true, '')))[1]::text::int end b,
              (select count(*) from payments where provider <> 'simulated')
