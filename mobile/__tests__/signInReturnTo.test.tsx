@@ -3,6 +3,9 @@
  * `returnTo`. A link could set it to "//evil.example": it passed the old startsWith("/") check, and expo-router opens
  * such a value outside the app. Only a screen of this app is accepted now.
  */
+// The first test pays for loading and rendering the whole sign-in screen (several seconds on a busy or cold machine):
+// 5 s was not enough in a clean checkout run under load (25 Nov). The tests wait on the real flow, not on timers.
+jest.setTimeout(30_000);
 const mockReplace = jest.fn();
 let mockParams: Record<string, string> = {};
 jest.mock("../lib/supabase", () => ({ supabase: { auth: { signInWithOtp: async () => ({ error: null }), verifyOtp: async () => ({ error: null }) } } }));
