@@ -30,6 +30,10 @@
 --      fail_payment now refuse fee-only payments: those have no evidence without an attempt.
 --
 -- Lock order everywhere: club (share) → court → booking → payment → payment_attempts → fee_charges.
+--
+-- hold_slot below keeps the pilot's 0093 refusal (PR-8): a closed account is refused while holding its profile row and
+-- before locking any court (club FOR SHARE → profile FOR UPDATE → deletion_requested() → courts), so this migration
+-- cannot bring back the deadlock with delete_account_data (courts → profile). Same line as 0093; see its header.
 
 -- ------------------------------------------------------------------ 1. the mode and the shape of a fee-only payment
 alter table clubs drop constraint if exists clubs_payment_mode_check;
@@ -204,6 +208,8 @@ begin
 
   select array_agg(court_id) || p_court into v_courts
   from bookings where player_id = v_player and status = 'pending' and court_id is not null;
+  -- Refused HERE, holding the profile row and no court yet (0093, pilot; see its header)
+  if deletion_requested(v_player) then raise exception 'account_closed'; end if;
   perform lock_courts(coalesce(v_courts, array[p_court]));
 
   perform 1 from bookings where player_id = v_player and status = 'pending' for update;
