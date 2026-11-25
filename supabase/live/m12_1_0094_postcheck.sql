@@ -38,6 +38,11 @@ with checks(item, ok, detail) as (
     and position('settle_payment_on_cancel' in (select prosrc from pg_proc where oid = 'cancel_booking(uuid,boolean)'::regprocedure)) > 0
     and position('settle_payment_on_cancel' in (select prosrc from pg_proc where oid = 'delete_account_data(uuid,boolean)'::regprocedure)) > 0
     and position('fee_online' in (select prosrc from pg_proc where oid = 'hold_slot(uuid,uuid,timestamptz,timestamptz,uuid)'::regprocedure)) > 0, ''
+  union all select 'hold_slot still refuses a closed account under the profile lock, before any court (the pilot''s 0093, PR-8)',
+    coalesce((select position('deletion_requested(v_player)' in prosrc) between 1 and position('lock_courts(' in prosrc)
+              from pg_proc where oid = 'hold_slot(uuid,uuid,timestamptz,timestamptz,uuid)'::regprocedure), false)
+    and coalesce((select position('for update' in prosrc) between 1 and position('deletion_requested(v_player)' in prosrc)
+              from pg_proc where oid = 'hold_slot(uuid,uuid,timestamptz,timestamptz,uuid)'::regprocedure), false), ''
   union all select 'real payments still off: no club takes fees online; no real provider configured in the database',
     not exists (select 1 from clubs where payment_mode = 'fee_online' and not is_demo)
     and coalesce(nullif(current_setting('app.payment_provider', true), ''), 'simulated') = 'simulated',
