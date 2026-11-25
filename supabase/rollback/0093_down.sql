@@ -4,6 +4,11 @@
 -- fingerprint identical to 0001–0092 (supabase/tests/schema_fingerprint.sql).
 do $$
 begin
+  -- 0094 reads 0093's tables: undo 0094 first (supabase/rollback/0094_down.sql), never leave its functions dangling
+  if to_regclass('public.payment_reconciliation') is not null or to_regclass('public.payment_reconciliation_issues') is not null
+     or to_regprocedure('payment_reconciliation_health(text,interval)') is not null then
+    raise exception 'rollback refused: 0094 is applied; undo 0094 first';
+  end if;
   if exists (select 1 from clubs where payment_mode = 'fee_online') then raise exception 'rollback refused: a club is in fee_online mode'; end if;
   if exists (select 1 from payments where kind = 'fee_only') then raise exception 'rollback refused: fee-only payments exist'; end if;
   if exists (select 1 from payment_attempts) then raise exception 'rollback refused: payment attempts exist'; end if;
