@@ -4,6 +4,7 @@
 set -u
 SCRIPT=supabase/tests/api/${SCRIPT:-journey.mjs}
 cd "$(dirname "$0")/../../.."
+mkdir -p /tmp/courtbook-api   # a clean machine has no folder yet for the start log
 bash supabase/tests/api/start.sh > /tmp/courtbook-api/start.log 2>&1 || { cat /tmp/courtbook-api/start.log; exit 2; }
 chmod 644 /tmp/courtbook-api/env
 sudo -u postgres env PG_MODULE="${PG_MODULE:-/tmp/pgdeps/node_modules}" node --experimental-strip-types --no-warnings \
