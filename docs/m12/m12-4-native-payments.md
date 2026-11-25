@@ -10,7 +10,7 @@ provider (Whish is a stub), and nothing has run on a phone.
 | --- | --- |
 | `at_desk` | Unchanged: confirmed at once, pay at the club |
 | `fee_online`, fee > 0, **feature on** | Reserve → 10-minute hold → payment screen → pay the fee on the provider's page → the server confirms → "Court booked" |
-| `fee_online`, fee $0, **feature on** | Confirmed at once, no payment screen (hold_slot does this, 0093) |
+| `fee_online`, fee $0, **feature on** | Confirmed at once, no payment screen (hold_slot does this, 0094) |
 | `fee_online`, **feature off** (every distributed build today) | Unchanged: "Reserve on the website for now" |
 | `simulated` (Model 1 demo), unknown modes | Unchanged: website |
 
@@ -37,7 +37,7 @@ provider (Whish is a stub), and nothing has run on a phone.
 | `NATIVE_PAYMENTS=1` | Turns both native endpoints on. Anything else → 503 |
 | `PAYMENT_APP_SCHEME` | `courtbook` (live) or `courtbook-staging`; anything else → no app link on the return page |
 
-**Database:** nothing new. Needs 0093 (M12.1). 0094 (M12.2) is not needed.
+**Database:** nothing new. Needs 0094 (M12.1). 0095 (M12.2) is not needed.
 
 ## 3. App
 
@@ -66,7 +66,7 @@ already installed.
   hold ended, refund due, cancelled) or its hold was released. A temporary server error or no answer changes nothing.
   The `payment-return` link reopens the payment with an unresolved key first.
 - **One request key per unresolved tap.** It is stored per account before sending. The same key always returns the
-  same attempt (0093), so a double tap, a lost answer or a tap after the app was killed cannot start a second payment.
+  same attempt (0094), so a double tap, a lost answer or a tap after the app was killed cannot start a second payment.
 - **When the key is dropped:**
   - after a start answer: the attempt finished, failed or expired, or the refusal was final;
   - after a status answer: the server reports no unresolved attempt.
@@ -124,7 +124,7 @@ Mutation checks on the new server code (each caught, then restored):
 ## 7. H1 — phone checklist (Galaxy A17; for Paul, when §6.1 is resolved)
 
 Preconditions (developer, each separately approved):
-- 0093 on staging (PR #35 procedure);
+- 0094 on staging (PR #35 procedure);
 - the staging website built from this branch with `NATIVE_PAYMENTS=1`, `PAYMENT_APP_SCHEME=courtbook-staging`,
   `PAYMENT_SITE_URL` set to the staging address, and `PAYMENT_PROVIDER` unset (simulated);
 - a demo club set to `fee_online` with fee $1;
@@ -166,7 +166,7 @@ Findings:
   ended, and the player could not try again. It now throws `PaymentStartRefused`, a definite refusal: nothing was sent.
   No money risk either way.
 - Adding any single variable cannot cause a real charge (items 1 and 3 are independent of every variable).
-- The simulated provider is accepted only at demo clubs (0093 `hold_slot`). Its success is recorded with
+- The simulated provider is accepted only at demo clubs (0094 `hold_slot`). Its success is recorded with
   `collected=false`. The app labels it "Test mode".
 - No Whish endpoint, field or behaviour was invented. The adapter remains unwritten until Whish confirms the open
   questions in `whish.ts`.

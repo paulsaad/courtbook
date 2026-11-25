@@ -95,8 +95,8 @@ export function usePayment(bookingId: string | undefined) {
     queryKey: ["payment", bookingId],
     enabled: !!bookingId,
     queryFn: async () => {
-      // "*", not a column list: `kind` exists only from 0093 on, and naming it would break this screen against a database
-      // without it (Model 1 demo bookings). Missing → "court_and_fee", the only kind before 0093.
+      // "*", not a column list: `kind` exists only from 0094 on, and naming it would break this screen against a database
+      // without it (Model 1 demo bookings). Missing → "court_and_fee", the only kind before 0094.
       const { data, error } = await supabase.from("payments").select("*").eq("booking_id", bookingId!).maybeSingle();
       if (error) throw error;
       if (!data) return null;

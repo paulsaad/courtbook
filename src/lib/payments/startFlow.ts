@@ -5,7 +5,7 @@ import { paymentCode, recordEvidence, verifyAndRecord } from "./attempts";
 import { isSafeRedirect, isUuid, providerCallbackUrl } from "./urls";
 
 /**
- * The one server-side payment engine for the CourtBook booking fee (M12.1 rules, 0093), shared by the website
+ * The one server-side payment engine for the CourtBook booking fee (M12.1 rules, 0094), shared by the website
  * (/api/pay/start, signed in by cookie) and the app (/api/native/pay/*, signed in by bearer token — M12.4). Each route
  * only establishes WHO the player is and builds a database client that acts as that player; everything else is here.
  *
