@@ -148,9 +148,11 @@ jobs:
                 || { echo "::error::0087–0092 preflight failed: nothing was applied."; exit 1; }
             fi
           fi
-          # 0094 (M12.1 fee_online payments): on its own, after 0086–0092; its preflight must pass first.
+          # 0094 (M12.1 fee_online payments): on its own, after 0086–0093 (0093 = the pilot's closed-account fix, PR-8);
+          # its preflight must pass first.
           if echo "$plan" | grep -q '^0094_'; then
             if echo "$plan" | grep -qvE '^0094_'; then echo "::error::apply 0094 on its own (migrations: 0094)."; exit 1; fi
+            grep -q '^0093_' /tmp/applied.txt || { echo "::error::0094 needs 0093 (pilot) applied first."; exit 1; }
             echo "0094: running the preflight before applying"
             bash .github/scripts/run-check.sh "$DB" supabase/live/m12_1_0094_preflight.sql part1 \
               || { echo "::error::0094 preflight failed: nothing was applied."; exit 1; }
