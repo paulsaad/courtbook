@@ -8,13 +8,22 @@ PSQL=${PSQL:-psql}
 MIG=supabase/migrations/0094_fee_online_payments.sql
 where=$($PSQL -At -d courtbook_test -c "select current_database()||'@'||coalesce(host(inet_server_addr()),'local-socket')" 2>/dev/null)
 case "$where" in courtbook_test@local-socket|courtbook_test@127.0.0.1|courtbook_test@::1) ;; *) echo "refusing: $where"; exit 2;; esac
-suite() { $PSQL -d courtbook_test -X -q -At -f supabase/tests/payments/fee_online_tests.sql 2>&1; }
+T=courtbook_test
+suite() { $PSQL -d $T -X -q -At -f supabase/tests/payments/fee_online_tests.sql 2>&1; }
+# every function in courtbook_test, to show the run left them exactly as they were
+fp() { $PSQL -At -d courtbook_test -c "select md5(string_agg(p.proname || pg_get_functiondef(p.oid), '' order by p.proname, p.oid)) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prokind = 'f'"; }
+before=$(fp)
 out=$(suite)
 echo "$out" | grep -v "^$"
 status=PASS
 echo "$out" | grep -qE "^(FAIL|psql)|ERROR" && status=FAIL
 
 echo "== mutation checks (each mutant must make the suite fail)"
+# Mutants are loaded into a scratch copy, never into courtbook_test: putting 0094 back afterwards would also undo
+# every later migration that replaced one of its functions, and later suites would test old code.
+T=courtbook_fee_mut
+$PSQL -q -d postgres -c "drop database if exists $T" -c "create database $T template courtbook_test" >/dev/null || { echo "could not make the scratch copy"; exit 2; }
+trap '$PSQL -q -d postgres -c "drop database if exists courtbook_fee_mut" >/dev/null 2>&1' EXIT
 # name | text in 0094 | replacement
 MUTANTS=(
   "M1 a wrong amount confirms|elsif p_amount <> a.amount_usd then|elsif false then"
@@ -44,13 +53,13 @@ for m in "${MUTANTS[@]}"; do
   tmp=$(mktemp /tmp/m0094.XXXXXX); chmod 644 "$tmp"   # read by the database's own user
   FROM="$from" TO="$to" python3 -c "import os,sys; s=open(sys.argv[1]).read(); f=os.environ['FROM'].replace('\\\\n','\n'); t=os.environ['TO'].replace('\\\\n','\n'); n=s.count(f); assert n==1, (n, f); open(sys.argv[2],'w').write(s.replace(f,t))" "$MIG" "$tmp" \
     || { echo "  MUTANT NOT APPLIED: $name"; status=FAIL; rm -f "$tmp"; continue; }
-  $PSQL -q -d courtbook_test -v ON_ERROR_STOP=1 -1 -f "$tmp" >/dev/null 2>&1 || { echo "  MUTANT DID NOT LOAD: $name"; status=FAIL; rm -f "$tmp"; continue; }
+  $PSQL -q -d $T -v ON_ERROR_STOP=1 -1 -f "$tmp" >/dev/null 2>&1 || { echo "  MUTANT DID NOT LOAD: $name"; status=FAIL; rm -f "$tmp"; continue; }
   mo=$(suite)
   if echo "$mo" | grep -qE "^(FAIL|psql)|ERROR"; then caught=$((caught+1)); echo "  caught  $name ($(echo "$mo" | grep -m1 '^FAIL' | cut -c1-70))"
   else echo "  MISSED  $name"; status=FAIL; fi
   rm -f "$tmp"
 done
-$PSQL -q -d courtbook_test -v ON_ERROR_STOP=1 -1 -f "$MIG" >/dev/null 2>&1 || { echo "could not restore 0094"; exit 1; }
+[ "$(fp)" = "$before" ] || { echo "courtbook_test's functions changed during the run"; status=FAIL; }
 echo "mutants caught: $caught of $total"
 echo "RESULT: $status"
 [ $status = PASS ]
