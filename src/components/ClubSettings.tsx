@@ -115,7 +115,7 @@ function AdminBasics({ club, busy, run, hasChecklist }: { club: ClubRow; busy: b
       {/* with the checklist (0081), visibility is set by Publish / Hide at the top of the page */}
       {!hasChecklist && <label className="flex min-h-11 items-center gap-2 text-sm sm:min-h-0"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Visible to players</label>}
       <button disabled={busy} onClick={() => run(() => !/^\d{1,4}(\.\d{1,2})?$/.test(fee.trim())
-        ? Promise.resolve({ error: { message: "bad_fee" } })   // whole cents only (the column would round 0.255 silently)
+        ? Promise.resolve({ error: { message: "bad_fee" } })   // whole cents only (the database also refuses finer values: 0096)
         : createClient().from("clubs").update(hasChecklist ? { name: name.trim(), service_fee_usd: Number(fee) } : { name: name.trim(), service_fee_usd: Number(fee), active }).eq("id", club.id))} className={primary}>Save</button>
 
       <div className="mt-2 border-t border-grid pt-3">
