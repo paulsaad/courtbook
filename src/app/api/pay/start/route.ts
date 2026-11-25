@@ -37,19 +37,20 @@ const STATUS: Record<string, number> = {
 
 type AttemptRow = { attempt_id: string; attempt_no: number; provider: string; amount_usd: number | string; currency: string; status: string; session_url: string | null; already: boolean };
 type Admin = ReturnType<typeof createAdminClient>;
-type Unresolved = { id: string; status: string; session_url: string | null; outcome: string | null };
+type Unresolved = { id: string; status: string; session_url: string | null; outcome: string | null; created_at?: string | null };
 
 const UNRESOLVED = ["starting", "open"];
 
 async function readAttempt(admin: Admin, id: string): Promise<Unresolved | null> {
-  const { data } = await admin.from("payment_attempts").select("id, status, session_url, outcome").eq("id", id).single();
+  const { data } = await admin.from("payment_attempts").select("id, status, session_url, outcome, created_at").eq("id", id).single();
   return (data as Unresolved | null) ?? null;
 }
 
 /** Ask the provider about an unresolved attempt and record its answer; then what the attempt is now. */
-async function settle(admin: Admin, attemptId: string): Promise<Unresolved | null> {
+async function settle(admin: Admin, attemptId: string, createdAt?: string | null): Promise<Unresolved | null> {
   const provider = getProvider();
-  const r = await verifyAndRecord(admin, provider, attemptId);
+  // createdAt lets a provider's "never heard of it" end the attempt after UNKNOWN_GRACE_MINUTES (M12.2)
+  const r = await verifyAndRecord(admin, provider, attemptId, { createdAt: createdAt ?? (await readAttempt(admin, attemptId))?.created_at });
   if (!r.ok) await report(r.code === "provider_unavailable" ? "paymentProvider" : "paymentRecord", "payment", { code: r.code });
   return readAttempt(admin, attemptId);
 }
@@ -82,10 +83,10 @@ export async function POST(request: Request) {
     }
     // Another attempt of this payment is unresolved. The database has already checked the payment is this player's.
     // Ask the provider about it: if it has ended, this tap may start the next attempt (one more round).
-    const { data: open } = await admin.from("payment_attempts").select("id, status, session_url, outcome, provider")
+    const { data: open } = await admin.from("payment_attempts").select("id, status, session_url, outcome, provider, created_at")
       .eq("payment_id", body.paymentId).in("status", UNRESOLVED).order("attempt_no", { ascending: false }).limit(1).maybeSingle();
     if (!open) continue;                                                  // it ended meanwhile
-    const now = open.provider === getProvider().name ? await settle(admin, open.id) : (open as Unresolved);
+    const now = open.provider === getProvider().name ? await settle(admin, open.id, open.created_at) : (open as Unresolved);
     if (now && UNRESOLVED.includes(now.status)) return answerFor(now);   // still live: its page, or "in progress"
     if (now?.status === "succeeded") return answerFor(now);              // it had been paid
     // failed or expired: loop once more and start the next attempt

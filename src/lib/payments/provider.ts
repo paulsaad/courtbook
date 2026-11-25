@@ -51,7 +51,14 @@ export type StartAttemptResult =
 
 export type AttemptStatus =
   | { state: "succeeded"; evidence: ChargeEvidence }
-  | { state: "failed" | "expired" | "pending" };
+  | { state: "failed" | "expired" | "pending" }
+  /** The provider has no record of this reference at all (the start request never reached it, or it dropped it).
+   *  Never treated as a failure at once: see UNKNOWN_GRACE_MINUTES in attempts.ts. */
+  | { state: "unknown" };
+
+/** One successful charge in the provider's own transaction records (M12.2 reconciliation). `externalRef` is the
+ *  reference we sent (our attempt id), or null/anything else if the provider's record carries none we recognise. */
+export type ProviderCharge = { externalRef: string | null; providerRef: string; amount: number; currency: string };
 
 export type ProviderName = "simulated" | "whish" | "areeba";
 
@@ -62,7 +69,8 @@ export type ProviderName = "simulated" | "whish" | "areeba";
  * by asking attemptStatus (review of PR #34).
  */
 export class PaymentStartRefused extends Error {
-  constructor(public readonly reason: string) { super("payment start refused"); this.name = "PaymentStartRefused"; }
+  readonly reason: string;
+  constructor(reason: string) { super("payment start refused"); this.name = "PaymentStartRefused"; this.reason = reason; }
 }
 
 export interface PaymentProvider {
@@ -79,4 +87,7 @@ export interface PaymentProvider {
   /** Reads ONLY which attempt a callback is about. Whatever else the callback claims is ignored: the server then asks
    *  attemptStatus. Absent for a provider that sends no callbacks (simulated). */
   callbackAttemptId?(request: Request): Promise<string | null>;
+  /** The provider's record of successful charges made between `since` and `until` (authoritative, server to server).
+   *  Absent for a provider that offers no such list; reconciliation then relies on attemptStatus alone. */
+  listCharges?(since: Date, until: Date): Promise<ProviderCharge[]>;
 }
