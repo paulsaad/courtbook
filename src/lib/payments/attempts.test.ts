@@ -71,8 +71,11 @@ describe("sweepOpenAttempts", () => {
     });
     const p = provider({ [A1]: { state: "succeeded", evidence: { providerRef: "W-9", amount: 1, currency: "USD" } }, [A3]: { state: "expired" } });
     const s = await sweepOpenAttempts(db, p, { minAgeSeconds: 120, maxAgeHours: 48, limit: 50 });
-    expect(calls[0]).toEqual({ fn: "attempts_to_check", args: { p_min_age: "120 seconds", p_max_age: "48 hours", p_limit: 50 } });
-    expect(recorded).toEqual([A1, A3]);
+    expect(calls[0]).toEqual({ fn: "attempts_to_check", args: { p_min_age: "120 seconds", p_max_age: "48 hours", p_limit: 51 } });   // one more than the limit: is there a backlog? (M12.3)
+    // the other provider's attempt is never asked about, only marked as looked at ('pending': last_checked_at, nothing
+    // about money), so it rotates out of the head of the queue (review 25 Nov; gateway2 R12)
+    expect(recorded).toEqual([A1, A2, A3]);
+    expect(calls.filter((c) => c.args?.p_attempt === A2).map((c) => c.args?.p_result)).toEqual(["pending"]);
     expect(s).toEqual({ checked: 2, skipped: 1, outcomes: { late: 1, expired: 1 }, failures: {} });
   });
   it("running it twice asks twice; the database decides it is the same charge (already_recorded)", async () => {
@@ -88,6 +91,38 @@ describe("sweepOpenAttempts", () => {
     const s = await sweepOpenAttempts(db, provider({ [A1]: { state: "succeeded", evidence: { providerRef: "W-t", amount: 1, currency: "USD" } } }), { minAgeSeconds: 60, maxAgeHours: 24, limit: 10 });
     expect(s.outcomes).toEqual({ confirmed: 1 });
     expect(calls[1].args).toEqual({ p_attempt: A1, p_result: "succeeded", p_provider_ref: "W-t", p_amount: 1, p_currency: "USD" });
+  });
+  it("M12.3: more waiting than the limit → only `limit` are asked about, and `more` says the run is not complete", async () => {
+    const rows = [A1, A2, A3].map((id) => ({ attempt_id: id, provider: "whish" }));
+    const { db, calls } = fakeDb((fn, args) => (fn === "attempts_to_check" ? { data: rows.slice(0, Number(args.p_limit)) } : { data: "pending" }));
+    const s = await sweepOpenAttempts(db, provider({ [A1]: { state: "pending" }, [A2]: { state: "pending" }, [A3]: { state: "pending" } }), { minAgeSeconds: 0, maxAgeHours: 1, limit: 2 });
+    expect(calls[0].args.p_limit).toBe(3);
+    expect(s.checked).toBe(2);
+    expect(s.more).toBe(true);
+    const exact = await sweepOpenAttempts(fakeDb((fn) => (fn === "attempts_to_check" ? { data: rows.slice(0, 2) } : { data: "pending" })).db,
+      provider({ [A1]: { state: "pending" }, [A2]: { state: "pending" } }), { minAgeSeconds: 0, maxAgeHours: 1, limit: 2 });
+    expect(exact.more).toBeUndefined();
+  });
+  it("M12.3: an attempt the provider could not answer for is still marked as checked now ('pending'), so the queue moves on", async () => {
+    const { db, calls } = fakeDb((fn) => (fn === "attempts_to_check" ? { data: [{ attempt_id: A1, provider: "whish" }] } : { data: "pending" }));
+    await sweepOpenAttempts(db, provider({ [A1]: "throw" }), { minAgeSeconds: 0, maxAgeHours: 1, limit: 5 });
+    expect(calls.slice(1)).toEqual([{ fn: "record_attempt_result", args: { p_attempt: A1, p_result: "pending" } }]);
+  });
+  it("review 25 Nov: if marking an attempt as checked fails (refused or thrown), the run counts rotation_failed — for an unanswerable attempt and for another provider's", async () => {
+    for (const how of ["error", "throw"] as const) {
+      const rows = [{ attempt_id: A1, provider: "whish" }, { attempt_id: A2, provider: "areeba" }];
+      const db: Rpc = { rpc: async (fn, args = {}) => {
+        if (fn === "attempts_to_check") return { data: rows, error: null };
+        if (fn === "record_attempt_result" && args.p_result === "pending") { if (how === "throw") throw new Error("network"); return { data: null, error: { message: "boom" } }; }
+        return { data: null, error: null };
+      } };
+      const s = await sweepOpenAttempts(db, provider({ [A1]: "throw" }), { minAgeSeconds: 0, maxAgeHours: 1, limit: 5 });
+      expect([how, s]).toEqual([how, { checked: 1, skipped: 1, outcomes: {}, failures: { provider_unavailable: 1, rotation_failed: 2 } }]);
+    }
+  });
+  it("...and a successful rotation adds no failure", async () => {
+    const { db } = fakeDb((fn) => (fn === "attempts_to_check" ? { data: [{ attempt_id: A1, provider: "whish" }, { attempt_id: A2, provider: "areeba" }] } : { data: "pending" }));
+    expect((await sweepOpenAttempts(db, provider({ [A1]: "throw" }), { minAgeSeconds: 0, maxAgeHours: 1, limit: 5 })).failures).toEqual({ provider_unavailable: 1 });
   });
   it("a provider outage is counted, not thrown", async () => {
     const { db } = fakeDb((fn) => (fn === "attempts_to_check" ? { data: [{ attempt_id: A1, provider: "whish" }] } : {}));

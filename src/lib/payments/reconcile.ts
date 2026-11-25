@@ -57,7 +57,15 @@ export async function reconcileCharges(admin: Rpc, provider: PaymentProvider, ch
 }
 
 export type Health = { other_provider_attempts: number; overdue_attempts: number; oldest_unresolved: string | null; open_issues: number; reconciled_until: string | null };
+/** `coverage` (M12.3): "full" when the provider's own charge list was read this run; "attempts_only" when the provider
+ *  offers no such list — then a charge that reached the provider without one of our attempts (a second charge on a
+ *  page, a foreign reference) cannot be found by CourtBook at all. Reported on every run, never hidden. */
 export type RunSummary = {
+  coverage: "full" | "attempts_only";
+  /** Conditions a person should see on every run that do not fail it (review 25 Nov): `coverage_attempts_only` (the
+   *  simulated provider, no real money), `coverage_attempts_only_approved` (a real provider under an approved
+   *  alternative to a charge list). */
+  warnings: string[];
   health: Health | null; sweep: SweepSummary; reconcile: ReconcileSummary | null;
   window: { since: string; until: string; advanced: boolean } | null; problems: string[];
 };
@@ -78,17 +86,28 @@ export const RECONCILE_DEFAULTS = {
 };
 
 /** One scheduled run. `problems` (codes only) is empty only when the run completed and needs nobody. */
-export async function runPaymentReconciliation(admin: Rpc, provider: PaymentProvider, opts: Partial<typeof RECONCILE_DEFAULTS> & { now?: Date } = {}): Promise<RunSummary> {
+export async function runPaymentReconciliation(admin: Rpc, provider: PaymentProvider,
+  opts: Partial<typeof RECONCILE_DEFAULTS> & { now?: Date; attemptsOnlyApproval?: string | null } = {}): Promise<RunSummary> {
   const o = { ...RECONCILE_DEFAULTS, ...opts };
   const now = opts.now ?? new Date();
   const deadline = Date.now() + o.budgetMs;
   const problems = new Set<string>();
+  const warnings: string[] = [];
+  // Charge-level coverage (review 25 Nov). Without the provider's own charge list a charge that has no attempt of ours
+  // cannot be found. For real money that is a failure of every run (500, reported), unless a specifically approved
+  // alternative is configured; then it is still a warning on every run. The simulated provider moves no money: warning.
+  if (!provider.listCharges) {
+    if (provider.name === "simulated") warnings.push("coverage_attempts_only");
+    else if (opts.attemptsOnlyApproval) warnings.push("coverage_attempts_only_approved");
+    else problems.add("coverage_attempts_only");
+  }
 
   const sweep = await sweepOpenAttempts(admin, provider, { minAgeSeconds: o.minAgeSeconds, maxAgeHours: 24 * 365 * 10, limit: o.limit, now, deadline });
   if (sweep.failures.list) problems.add("sweep_list");
   if (sweep.failures.out_of_time) problems.add("incomplete");
   if (Object.keys(sweep.failures).some((k) => k !== "list" && k !== "out_of_time")) problems.add("sweep_failures");
   if (sweep.skipped > 0) problems.add("provider_mismatch");
+  if (sweep.more) problems.add("sweep_backlog");                       // M12.3: more were waiting than one run asks about
 
   // health after the sweep: what is still unresolved once every attempt has been asked about
   let health: Health | null = null;
@@ -131,5 +150,5 @@ export async function runPaymentReconciliation(admin: Rpc, provider: PaymentProv
       if (!window.advanced || until.getTime() < now.getTime()) problems.add("reconciliation_behind");
     }
   }
-  return { health, sweep, reconcile, window, problems: [...problems] };
+  return { coverage: provider.listCharges ? "full" : "attempts_only", warnings, health, sweep, reconcile, window, problems: [...problems] };
 }
