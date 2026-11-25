@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
-# 0093 (pilot) rollback round trip on a scratch copy of the local test database, dropped after. LOCAL ONLY.
-#   PSQL="sudo -u postgres psql" bash supabase/tests/run.sh && PSQL="sudo -u postgres psql" bash supabase/tests/pilot/rollback_0093.sh
+# 0093 (pilot) rollback round trip on a scratch database built from 0001–0093 only, dropped after. LOCAL ONLY.
+#   PSQL="sudo -u postgres psql" bash supabase/tests/pilot/rollback_0093.sh
 # After the rollback the three functions are byte for byte their previous definitions (book_at_desk's fingerprint is
 # the one staging reported before any lock-order change: f199829493c2fc40ef9080b10649d88c); grants are unchanged;
-# re-applying 0093 gives back exactly the same definitions.
+# re-applying 0093 gives back exactly the same definitions. Built from 0001–0093 (not courtbook_test), so it holds on
+# trees with later migrations too: a later migration may replace one of these functions (0094 replaces hold_slot).
 set -u
 cd "$(dirname "$0")/../../.."
 PSQL=${PSQL:-psql}
-SRC=courtbook_test; DB=courtbook_rb93
-where=$($PSQL -At -d $SRC -c "select current_database()||'@'||coalesce(host(inet_server_addr()),'local-socket')" 2>/dev/null)
-case "$where" in courtbook_test@local-socket|courtbook_test@127.0.0.1|courtbook_test@::1) ;; *) echo "refusing: $where"; exit 2;; esac
-$PSQL -q -d postgres -c "drop database if exists $DB" -c "create database $DB template $SRC" >/dev/null 2>&1 || exit 2
-trap '$PSQL -q -d postgres -c "drop database if exists courtbook_rb93" >/dev/null 2>&1' EXIT
+DB=courtbook_rb93p
+trap '$PSQL -q -d postgres -c "drop database if exists courtbook_rb93p" >/dev/null 2>&1' EXIT
+$PSQL -q -d postgres -c "drop database if exists $DB" -c "create database $DB" >/dev/null 2>&1 || exit 2
+$PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql >/dev/null || exit 2
+for f in $(ls supabase/migrations/*.sql | sort); do
+  [ "$(basename "$f" | cut -c1-4)" \< 0094 ] || continue
+  $PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || { echo "migration failed: $f"; exit 2; }
+done
 status=0
 ok() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1 (got '$2', expected '$3')"; status=1; fi; }
 fp() { $PSQL -At -d $DB -c "select string_agg(proname || '=' || md5(prosrc), ' ' order by proname) from pg_proc where pronamespace = 'public'::regnamespace and proname in ('book_at_desk', 'hold_slot', 'request_account_deletion')"; }
