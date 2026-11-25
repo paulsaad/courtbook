@@ -31,7 +31,7 @@ alone is not enough.
 - The service reports a run that fails. It also reports a run that never happens: schedule disabled, GitHub outage,
   GitHub's 60-day inactivity pause, or a start later than the 30-minute grace.
 
-### Decision D1 (Paul): which heartbeat service
+### Decision D1: which heartbeat service — **decided 25 Nov (Paul): Healthchecks.io, free plan**
 
 **Finding while preparing this:** the Sentry organisation is on the free Developer plan. That plan includes one cron
 monitor, and `deletion-retry` (the staging trial) already uses it. A Developer-plan organisation cannot add monitors.
