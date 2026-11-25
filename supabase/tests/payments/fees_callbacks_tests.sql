@@ -101,11 +101,12 @@ insert into t values ('F7 the monthly summary counts the five as test money (nev
   split_part(pg_temp.got('sum'), '|', 1)::int >= 5 and pg_temp.got('sum') !~ '^ERR', pg_temp.got('sum'));
 update profiles set roles = array_remove(roles, 'admin') where id = pg_temp.u(8);
 
--- the fee column holds cents only; anything finer is rounded by the column, never kept
-update clubs set service_fee_usd = 0.255 where id = pg_temp.club();
-insert into t select 'F8 a fee typed with more than two decimals is stored to the cent (0.255 → 0.26); FINDING: rounded silently, not refused',
-  service_fee_usd = 0.26, service_fee_usd::text from clubs where id = pg_temp.club();
+-- the fee is whole cents: anything finer is refused, never rounded (0096; the old finding "rounded silently" is fixed)
 update clubs set service_fee_usd = 1.00 where id = pg_temp.club();
+select pg_temp.keep('subcent', 'unset');
+do $$ begin update clubs set service_fee_usd = 0.255 where id = pg_temp.club(); perform pg_temp.keep('subcent', 'stored'); exception when check_violation then perform pg_temp.keep('subcent', 'refused'); end $$;
+insert into t select 'F8 a fee with more than two decimals (0.255) is refused, and the fee stays as it was (0096)',
+  pg_temp.got('subcent') = 'refused' and service_fee_usd = 1.00, pg_temp.got('subcent') || ' ' || service_fee_usd::text from clubs where id = pg_temp.club();
 select pg_temp.keep('neg', (select 'ERR' from (select 1) one where false));
 do $$ begin update clubs set service_fee_usd = -0.25 where id = pg_temp.club(); perform pg_temp.keep('neg', 'stored'); exception when check_violation then perform pg_temp.keep('neg', 'refused'); end $$;
 insert into t values ('F9 a negative fee is refused', pg_temp.got('neg') = 'refused', pg_temp.got('neg'));
