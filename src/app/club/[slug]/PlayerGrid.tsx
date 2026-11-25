@@ -12,6 +12,7 @@ import { readPrefs } from "@/lib/prefs";
 import { newToken, reserve as reserveSlot } from "@/lib/reserve";
 import { useDialog } from "@/components/useDialog";
 import { bookingDurations } from "@/lib/durations";
+import { bookingPanelText } from "@/lib/fees";
 
 export type Occ = { id?: string | null; court_id: string; start_at: string; end_at: string; status?: string; mine?: boolean; kind: "booking" | "block" };
 type ClubX = Club & { booking_window_days: number; service_fee_usd: number; location_url: string | null; hold_minutes: number };
@@ -54,6 +55,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
     return Math.round(pickLen / club.slot_minutes);
   });
   const [notice, setNotice] = useState<string | null>(null);
+  const namesRef = useRef<HTMLDivElement>(null);
   // quote: loading → ok(value) | error(message); Reserve needs ok
   const [quote, setQuote] = useState<{ state: "loading" } | { state: "ok"; value: number } | { state: "error"; message: string }>({ state: "loading" });
   const [quoteTick, setQuoteTick] = useState(0);
@@ -158,6 +160,13 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
   // the app's words too (mobile/lib/courts.ts durationLabel): "30 min", "1 h", "1 h 30"
   const fmtDur = (m: number) => (m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60}`);
   const dayOf = (d: string) => clubLocalToUtc(d, "12:00", club.timezone);
+  // what the panel says comes from the club's payment mode (W1: a desk club has no fee, no hold, nothing paid in the app)
+  const panel = bookingPanelText({ mode: club.payment_mode ?? null, courtUsd: quote.state === "ok" ? quote.value : null, serviceFeeUsd: club.service_fee_usd,
+    holdMinutes: club.hold_minutes, cutoffHours: club.cancel_cutoff_hours, signedIn, busy });
+
+  const courtHead = (c: Court, extra = "") => (
+    <div key={c.id} className={`px-1 text-center text-sm ${extra}`}><div className="font-medium leading-tight">{c.name}</div><div className="text-xs text-muted">{sportNames[c.sport] ?? c.sport}</div></div>
+  );
 
   return (
     <>
@@ -182,7 +191,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
         </div>
       )}
 
-      <p className="px-4 pt-2 text-xs text-muted">Book {fmtDur(club.min_booking_minutes)} to {fmtDur(club.max_booking_minutes)} · tap a free slot{loading ? " · loading…" : ""}</p>
+      <p className="px-4 pt-2 text-xs text-muted">Book {fmtDur(club.min_booking_minutes)} to {fmtDur(club.max_booking_minutes)} · tap a free slot{courts.length > 2 && <span className="lg:hidden"> · swipe sideways for all {courts.length} courts</span>}{loading ? " · loading…" : ""}</p>
       {failed && <p className="mx-4 mt-2 flex items-center justify-between rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">Could not load availability. <button onClick={() => setTick((n) => n + 1)} className="font-medium underline">Retry</button></p>}
       {notice && <p className="mx-4 mt-2 rounded-xl bg-sand-soft px-3 py-2 text-sm">{notice}</p>}
 
@@ -193,15 +202,23 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
         </Link>
       )}
 
-      <div className={`flex-1 overflow-x-auto px-2 pb-28 pt-2 ${known ? "" : "opacity-60"}`}>
+      {/* phones (W3): court names stay in view while the page scrolls; they follow the grid's sideways scroll */}
+      <div ref={namesRef} aria-hidden="true" data-testid="court-names" className="sticky top-0 z-[9] overflow-hidden bg-paper pl-0 pr-2 pt-2 lg:hidden">
         <div className="flex min-w-max">
-          <div className="relative w-12 shrink-0" style={{ height: times.length * ROW_PX, marginTop: 36 }}>
-            {times.map((t, i) => i % labelEvery === 0 && <div key={t} className="absolute right-2 -translate-y-1/2 text-xs text-muted" style={{ top: i * ROW_PX }}>{t}</div>)}
+          <div className="sticky left-0 z-10 w-[3.75rem] shrink-0 bg-paper lg:w-12" />
+          <div className="grid flex-1 gap-x-1.5" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(6.5rem, 1fr))` }}>
+            {courts.map((c) => courtHead(c, "min-h-9"))}
+          </div>
+        </div>
+      </div>
+      <div className={`flex-1 overflow-x-auto pb-28 pl-0 pr-2 lg:pl-2 lg:pt-2 ${known ? "" : "opacity-60"}`} onScroll={(e) => { if (namesRef.current) namesRef.current.scrollLeft = e.currentTarget.scrollLeft; }}>
+        <div className="flex min-w-max">
+          {/* time axis: pinned on the left while the courts scroll sideways */}
+          <div className="sticky left-0 z-[8] w-[3.75rem] shrink-0 bg-paper lg:mt-9 lg:w-12" style={{ height: times.length * ROW_PX }}>
+            {times.map((t, i) => i % labelEvery === 0 && <div key={t} className="absolute right-1.5 -translate-y-1/2 whitespace-nowrap text-xs text-muted lg:right-2" style={{ top: i * ROW_PX }}>{t}</div>)}
           </div>
           <div className="grid flex-1 gap-x-1.5" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(6.5rem, 1fr))` }}>
-            {courts.map((c) => (
-              <div key={c.id} className="h-9 px-1 text-center text-sm"><div className="font-medium leading-tight">{c.name}</div><div className="text-xs text-muted">{sportNames[c.sport] ?? c.sport}</div></div>
-            ))}
+            {courts.map((c) => courtHead(c, "h-9 max-lg:sr-only"))}
             {courts.map((c) => (
               <div key={c.id} className="relative rounded-lg border border-grid bg-white" style={{ height: times.length * ROW_PX }}>
                 {times.map((t, i) => {
@@ -250,14 +267,14 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
             <p className="mt-4 flex items-center justify-between rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{quote.message}{quote.message.startsWith("Could") && <button onClick={() => { setQuote({ state: "loading" }); setQuoteTick((n) => n + 1); }} className="font-medium underline">Retry</button>}</p>
           ) : (
             <div className="mt-4 flex items-center justify-between text-sm">
-              <span className="text-muted">Court {quote.state === "ok" ? `$${quote.value.toFixed(2)}` : "…"} + booking fee ${Number(club.service_fee_usd).toFixed(2)}</span>
-              <span className="text-lg font-semibold">{quote.state === "ok" ? `$${(quote.value + Number(club.service_fee_usd)).toFixed(2)}` : "…"}</span>
+              <span className="text-muted">{panel.priceLine}</span>
+              <span className="text-lg font-semibold">{panel.total}</span>
             </div>
           )}
           <button disabled={busy || quote.state !== "ok" || !known || slots < minSlots || slots > maxSlotsHere} onClick={reserve} className="mt-3 w-full rounded-xl bg-action py-3.5 font-medium text-white disabled:opacity-50">
-            {busy ? "Reserving…" : signedIn ? "Reserve and pay" : "Sign in to reserve"}
+            {panel.button}
           </button>
-          <p className="mt-2 text-center text-xs text-muted">Slot is held for {club.hold_minutes} minutes while you pay. Free cancellation up to {club.cancel_cutoff_hours} h before.</p>
+          <p className="mt-2 text-center text-xs text-muted">{panel.footnote}</p>
         </div>
       )}
     </>
