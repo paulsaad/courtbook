@@ -35,7 +35,7 @@ export async function reserve(opts: {
   });
   if (error) return { ok: false, message: error.message, code: error.code };
   const row = (Array.isArray(data) ? data[0] : data) as { booking_id: string; payment_id: string | null };
-  // no payment: a $0 fee at a fee_online club, confirmed already (0093)
+  // no payment: a $0 fee at a fee_online club, confirmed already (0094)
   if (!row.payment_id) return { ok: true, value: { bookingId: row.booking_id, href: `/bookings/${row.booking_id}?new=1` } };
   return { ok: true, value: { bookingId: row.booking_id, href: `/pay/${row.booking_id}` } };
 }
