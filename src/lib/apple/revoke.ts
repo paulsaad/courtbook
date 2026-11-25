@@ -79,9 +79,12 @@ export function clientSecret(cfg: AppleConfig, now: Date = new Date()): string {
   return `${head}.${body}.${b64url(sig)}`;
 }
 
-async function call(fetchFn: Fetch, path: string, form?: Record<string, string>) {
+async function call(fetchFn: Fetch, path: string, form?: Record<string, string>, outer?: AbortSignal) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  // the caller's limit (deletion.ts bounded()) stops the request too
+  if (outer?.aborted) ctl.abort();
+  outer?.addEventListener("abort", () => ctl.abort(), { once: true });
   try {
     const r = await fetchFn(`${APPLE_ORIGIN}${path}`, form
       ? { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(form).toString(), signal: ctl.signal }
@@ -100,12 +103,12 @@ export type ExchangeResult =
   | { ok: true; idToken: string; token: AppleToken }
   | { ok: false; code: "not_configured" | "code_rejected" | "apple_unavailable" | "exchange_failed" };
 
-export async function exchangeCode(cfg: AppleConfig | null, code: string, opts: { fetchFn?: Fetch; now?: Date } = {}): Promise<ExchangeResult> {
+export async function exchangeCode(cfg: AppleConfig | null, code: string, opts: { fetchFn?: Fetch; now?: Date; signal?: AbortSignal } = {}): Promise<ExchangeResult> {
   if (!cfg) return { ok: false, code: "not_configured" };
   if (typeof code !== "string" || !code || code.length > 2048) return { ok: false, code: "code_rejected" };
   const fetchFn = opts.fetchFn ?? (fetch as unknown as Fetch);
   try {
-    const t = await call(fetchFn, "/auth/token", { grant_type: "authorization_code", code, client_id: cfg.clientId, client_secret: clientSecret(cfg, opts.now) });
+    const t = await call(fetchFn, "/auth/token", { grant_type: "authorization_code", code, client_id: cfg.clientId, client_secret: clientSecret(cfg, opts.now) }, opts.signal);
     if (!t.ok) {
       if (t.json.error === "invalid_grant") return { ok: false, code: "code_rejected" };
       return { ok: false, code: t.status >= 500 || t.status === 429 ? "apple_unavailable" : "exchange_failed" };
@@ -195,11 +198,11 @@ export async function verifyAppleIdToken(idToken: string, opts: { clientId: stri
 
 export type RevokeResult = { ok: true } | { ok: false; code: "not_configured" | "revoke_failed" | "apple_unavailable" };
 
-export async function revokeToken(cfg: AppleConfig | null, token: AppleToken, opts: { fetchFn?: Fetch; now?: Date } = {}): Promise<RevokeResult> {
+export async function revokeToken(cfg: AppleConfig | null, token: AppleToken, opts: { fetchFn?: Fetch; now?: Date; signal?: AbortSignal } = {}): Promise<RevokeResult> {
   if (!cfg) return { ok: false, code: "not_configured" };
   const fetchFn = opts.fetchFn ?? (fetch as unknown as Fetch);
   try {
-    const r = await call(fetchFn, "/auth/revoke", { client_id: cfg.clientId, client_secret: clientSecret(cfg, opts.now), token: token.reveal(), token_type_hint: token.hint });
+    const r = await call(fetchFn, "/auth/revoke", { client_id: cfg.clientId, client_secret: clientSecret(cfg, opts.now), token: token.reveal(), token_type_hint: token.hint }, opts.signal);
     if (r.ok) return { ok: true };
     return { ok: false, code: r.status >= 500 || r.status === 429 ? "apple_unavailable" : "revoke_failed" };
   } catch {

@@ -1,4 +1,5 @@
 import "server-only";
+import { bounded } from "@/lib/bounded";
 import type { AppleToken, ExchangeResult, RevokeResult, VerifyResult } from "./revoke";
 
 /**
@@ -26,38 +27,52 @@ import type { AppleToken, ExchangeResult, RevokeResult, VerifyResult } from "./r
  *    recorded as skipped with an alert, and the app tells them how to remove CourtBook from their Apple ID settings.
  */
 
-/** ok:false = a definite answer from the database (its refusal or error: nothing committed). A thrown error or
- *  ok:"unknown" = the answer was lost; the closure may or may not have committed. */
+/** ok:false = a definite answer from the database (its refusal or error: nothing committed). A thrown error, a
+ *  time-out or ok:"unknown" = the answer was lost; the closure may or may not have committed. */
 export type CloseOutcome = { ok: true } | { ok: false; code: string } | { ok: "unknown" };
 
 /** Closed states of an account_deletions record (0086). 'requested' (an old app's unconfirmed request) is not closed. */
 export const CLOSED_STATES = ["closing", "closed", "held", "data_removed", "done"] as const;
-/** From the account's deletion records, read server-side (service key) by subject id. */
-export function closureFromRecords(rows: { status?: unknown }[] | null | undefined): "closed" | "open" {
-  return (rows ?? []).some((r) => (CLOSED_STATES as readonly unknown[]).includes(r?.status)) ? "closed" : "open";
+/**
+ * From the account's deletion records, read server-side (service key) by subject id. Third review, point 2: only a
+ * SUCCESSFUL lookup can prove "open". `null`/`undefined` means the lookup failed and is "unknown"; an empty list (the
+ * lookup worked and found no record) is "open".
+ */
+export function closureFromRecords(rows: { status?: unknown }[] | null | undefined): "closed" | "open" | "unknown" {
+  if (!Array.isArray(rows)) return "unknown";
+  return rows.some((r) => (CLOSED_STATES as readonly unknown[]).includes(r?.status)) ? "closed" : "open";
 }
 
+/** Upper limits for each awaited step (third review, point 3). Bookkeeping (alerts, markers) never waits long. */
+export const LIMITS = { lookup: 5_000, apple: 10_000, close: 10_000, status: 5_000, revoke: 10_000, bookkeeping: 3_000 } as const;
+
 export type AppleDeletionDeps = {
+  /** The CourtBook account authenticated on THIS request (from its bearer token, checked with Supabase Auth). */
+  userId: string;
+  /** The account a deletion intent was issued to (intent.ts verifyIntent with the server secret); null: invalid/expired. */
+  intentOwner: (intent: unknown) => string | null;
   /** Apple user ids on the signed-in account's identities (provider "apple"), read server-side. null: lookup failed. */
-  appleSubs: () => Promise<string[] | null>;
+  appleSubs: (signal: AbortSignal) => Promise<string[] | null>;
   /** recently_authenticated() as the signed-in person (read-only). null: could not be read. */
-  recentlyAuthenticated: () => Promise<boolean | null>;
-  exchange: (code: string) => Promise<ExchangeResult>;
-  verify: (idToken: string) => Promise<VerifyResult>;
+  recentlyAuthenticated: (signal: AbortSignal) => Promise<boolean | null>;
+  exchange: (code: string, signal: AbortSignal) => Promise<ExchangeResult>;
+  verify: (idToken: string, signal: AbortSignal) => Promise<VerifyResult>;
   /** close_my_account as the signed-in person: every existing rule applies (recent sign-in, staff/admin, processing). */
-  close: () => Promise<CloseOutcome>;
-  /** After an ambiguous close: is the account closed now? From its deletion record (closureFromRecords). null: unknown. */
-  closureStatus: () => Promise<"closed" | "open" | null>;
+  close: (signal: AbortSignal) => Promise<CloseOutcome>;
+  /** After an ambiguous close: closureFromRecords() of the account's deletion records ("unknown" if the read failed). */
+  closureStatus: (signal: AbortSignal) => Promise<"closed" | "open" | "unknown">;
   /** Marks the sign-in record with the revocation outcome, so the deletion processing does not alert again. Best effort. */
-  markRevocation: (outcome: "done" | "failed" | "skipped") => Promise<void>;
+  markRevocation: (outcome: "done" | "failed" | "skipped", signal: AbortSignal) => Promise<void>;
   /** The existing deletion processing (B–E). It records its own failures; a throw here changes nothing below. */
   process: () => Promise<void>;
-  revoke: (token: AppleToken) => Promise<RevokeResult>;
-  alert: (event: "appleRevokeFailed" | "appleRevocationSkipped" | "appleIdentityRejected" | "appleCloseResultUnknown", code: string) => Promise<void>;
+  revoke: (token: AppleToken, signal: AbortSignal) => Promise<RevokeResult>;
+  alert: (event: "appleRevokeFailed" | "appleRevocationSkipped" | "appleIdentityRejected" | "appleCloseResultUnknown",
+          code: string, signal: AbortSignal) => Promise<void>;
 };
 
-/** What the app sends. Deliberately no Apple user id: the expected identity is never client-supplied. */
-export type AppleDeletionInput = { method: "apple"; code: string } | { method: "fallback" };
+/** What the app sends. Deliberately no Apple user id (the expected identity is never client-supplied); the intent
+ *  was issued to the ORIGINAL account before the Apple sheet (intent.ts). */
+export type AppleDeletionInput = { method: "apple"; code: string; intent: string } | { method: "fallback"; intent: string };
 
 export type AppleDeletionResult =
   | { closed: true; revocation: "done" | "failed" | "skipped" }
@@ -67,12 +82,21 @@ export type AppleDeletionResult =
 export async function closeAppleAccount(input: AppleDeletionInput, deps: AppleDeletionDeps): Promise<AppleDeletionResult> {
   const method = input?.method === "apple" ? "apple" : input?.method === "fallback" ? "fallback" : null;
   if (!method) return { closed: false, code: "bad_request" };
+  const note = (event: Parameters<AppleDeletionDeps["alert"]>[0], code: string) => bounded(LIMITS.bookkeeping, (s) => deps.alert(event, code, s));
 
-  const subs = await deps.appleSubs().catch(() => null);
+  // third review, point 1: the deletion must belong to the account that asked for it BEFORE the Apple sheet. If the
+  // Apple reauthentication led to another CourtBook account, this request is authenticated as that other account.
+  const owner = deps.intentOwner(input.intent);
+  if (!owner) return { closed: false, code: "intent_invalid" };
+  if (owner !== deps.userId) return { closed: false, code: "account_mismatch" };
+
+  const subsR = await bounded(LIMITS.lookup, (s) => deps.appleSubs(s));
+  const subs = subsR.done ? subsR.value : null;
   if (subs === null) return { closed: false, code: "identity_lookup_failed" };
   if (subs.length === 0) return { closed: false, code: "not_apple_account" };   // the ordinary deletion applies
 
-  const recent = await deps.recentlyAuthenticated().catch(() => null);
+  const recentR = await bounded(LIMITS.lookup, (s) => deps.recentlyAuthenticated(s));
+  const recent = recentR.done ? recentR.value : null;
   if (recent === null) return { closed: false, code: "failed" };
   if (!recent) return { closed: false, code: "reauth_required" };
 
@@ -80,12 +104,14 @@ export async function closeAppleAccount(input: AppleDeletionInput, deps: AppleDe
   if (method === "apple") {
     const code = (input as { code?: unknown }).code;
     if (typeof code !== "string" || !code) return { closed: false, code: "apple_code_missing" };
-    const ex = await deps.exchange(code).catch((): ExchangeResult => ({ ok: false, code: "apple_unavailable" }));
+    const exR = await bounded(LIMITS.apple, (s) => deps.exchange(code, s));
+    const ex: ExchangeResult = exR.done ? exR.value : { ok: false, code: "apple_unavailable" };
     if (!ex.ok) return { closed: false, code: ex.code === "code_rejected" ? "apple_code_rejected" : "apple_unavailable" };
-    const v = await deps.verify(ex.idToken).catch((): VerifyResult => ({ ok: false, code: "apple_unavailable" }));
+    const vR = await bounded(LIMITS.apple, (s) => deps.verify(ex.idToken, s));
+    const v: VerifyResult = vR.done ? vR.value : { ok: false, code: "apple_unavailable" };
     if (!v.ok) {
       if (v.code === "apple_unavailable") return { closed: false, code: "apple_unavailable" };
-      await deps.alert("appleIdentityRejected", v.code).catch(() => undefined);
+      await note("appleIdentityRejected", v.code);
       return { closed: false, code: "apple_identity_unverified" };
     }
     if (!subs.includes(v.sub)) return { closed: false, code: "wrong_apple_account" };
@@ -93,13 +119,15 @@ export async function closeAppleAccount(input: AppleDeletionInput, deps: AppleDe
   }
 
   // the database decides; nothing about Apple can override its refusals
-  const closed = await deps.close().catch((): CloseOutcome => ({ ok: "unknown" }));
-  if (closed.ok === false) return { closed: false, code: closed.code };   // a definite refusal: nothing revoked
+  const closeR = await bounded(LIMITS.close, (s) => deps.close(s));
+  const closed: CloseOutcome = closeR.done ? closeR.value : { ok: "unknown" };   // thrown or timed out: answer lost
+  if (closed.ok === false) return { closed: false, code: closed.code };          // a definite refusal: nothing revoked
   if (closed.ok === "unknown") {
-    const now = await deps.closureStatus().catch(() => null);
-    if (now === "open") return { closed: false, code: "failed" };       // confirmed not closed: nothing changed
+    const stR = await bounded(LIMITS.status, (s) => deps.closureStatus(s));
+    const now = stR.done ? stR.value : "unknown";
+    if (now === "open") return { closed: false, code: "failed" };                // a successful read: not closed
     if (now !== "closed") {
-      await deps.alert("appleCloseResultUnknown", method).catch(() => undefined);
+      await note("appleCloseResultUnknown", method);
       return { closed: "unknown", code: "close_result_unknown" };
     }
   }
@@ -108,13 +136,15 @@ export async function closeAppleAccount(input: AppleDeletionInput, deps: AppleDe
   let revocation: "done" | "failed" | "skipped";
   if (!token) {
     revocation = "skipped";
-    await deps.alert("appleRevocationSkipped", "fallback").catch(() => undefined);
+    await note("appleRevocationSkipped", "fallback");
   } else {
-    const r = await deps.revoke(token).catch((): RevokeResult => ({ ok: false, code: "apple_unavailable" }));
+    const t = token;
+    const rR = await bounded(LIMITS.revoke, (s) => deps.revoke(t, s));
+    const r: RevokeResult = rR.done ? rR.value : { ok: false, code: "apple_unavailable" };
     revocation = r.ok ? "done" : "failed";
-    if (!r.ok) await deps.alert("appleRevokeFailed", r.code).catch(() => undefined);
+    if (!r.ok) await note("appleRevokeFailed", r.code);
   }
-  await deps.markRevocation(revocation).catch(() => undefined);
+  await bounded(LIMITS.bookkeeping, (s) => deps.markRevocation(revocation, s));
   await deps.process().catch(() => undefined);
   return { closed: true, revocation };
 }

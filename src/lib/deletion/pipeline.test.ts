@@ -305,17 +305,27 @@ describe("dbCode", () => {
 });
 
 describe("E1: an Apple-linked account closed without revocation (older app) is noticed before D, never blocking it", () => {
-  type St = { apple: boolean; marked: boolean } | null | "throw" | "hang";
-  function hook(st: St, opts: { alertFails?: boolean } = {}) {
+  type St = { apple: boolean; marked: boolean } | null | "throw" | "hang" | "slow";
+  function hook(st: St, opts: { alertFails?: boolean; alert?: "hang" } = {}) {
     const log: string[] = [];
     const h = {
-      state: async () => {
+      state: async (_id: string, signal: AbortSignal) => {
         log.push(`state@${calls.length}`);
         if (st === "throw") throw new Error("auth down");
         if (st === "hang") return new Promise<never>(() => {});
+        if (st === "slow") {   // answers only after the limit, i.e. after the deletion went ahead
+          await new Promise((r) => setTimeout(r, APPLE_CHECK_MS + 1_000));
+          log.push(`late-answer(aborted=${signal.aborted})`);
+          return { apple: true, marked: false };
+        }
         return st;
       },
-      alert: async (code: string) => { log.push(`alert:${code}`); if (opts.alertFails) throw new Error("monitoring down"); },
+      alert: async (code: string, signal: AbortSignal) => {
+        log.push(`alert:${code}`);
+        if (opts.alertFails) throw new Error("monitoring down");
+        if (opts.alert === "hang") { await new Promise<never>(() => {}); }
+        void signal;
+      },
       mark: async () => { log.push("mark"); },
     };
     return { h, log };
@@ -347,6 +357,28 @@ describe("E1: an Apple-linked account closed without revocation (older app) is n
       const run = processDeletion(S, { ...deps, appleRevocation: hook("hang").h });
       await vi.advanceTimersByTimeAsync(APPLE_CHECK_MS);
       expect(await run).toEqual({ result: "done" });
+    } finally { vi.useRealTimers(); }
+  });
+  it("a check that answers only after the limit starts nothing: no alert and no mark once the sign-in is deleted", async () => {
+    vi.useFakeTimers();
+    try {
+      const { h, log } = hook("slow");
+      const run = processDeletion(S, { ...deps, appleRevocation: h });
+      await vi.advanceTimersByTimeAsync(APPLE_CHECK_MS);
+      expect(await run).toEqual({ result: "done" });
+      expect(authUser.exists).toBe(false);
+      await vi.advanceTimersByTimeAsync(2_000);   // the slow answer arrives now
+      expect(log).toEqual([`state@${calls.indexOf("delete_user")}`, "late-answer(aborted=true)"]);
+    } finally { vi.useRealTimers(); }
+  });
+  it("an alert that hangs: the mark is skipped and D goes ahead at the limit", async () => {
+    vi.useFakeTimers();
+    try {
+      const { h, log } = hook({ apple: true, marked: false }, { alert: "hang" });
+      const run = processDeletion(S, { ...deps, appleRevocation: h });
+      await vi.advanceTimersByTimeAsync(APPLE_CHECK_MS);
+      expect(await run).toEqual({ result: "done" });
+      expect(log).not.toContain("mark");
     } finally { vi.useRealTimers(); }
   });
   it("without the hook (today's serviceDeps), nothing changes", async () => {

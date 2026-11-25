@@ -129,6 +129,24 @@ describe("step 2: verifyAppleIdToken (signature, issuer, audience, expiry)", () 
   });
 });
 
+describe("the caller's abort signal stops Apple requests", () => {
+  it("an already-aborted or later-aborted signal aborts the request (reported as unavailable)", async () => {
+    const seen: AbortSignal[] = [];
+    const fetchFn: Fetch = async (_u, init) => {
+      seen.push(init.signal!);
+      if (init.signal!.aborted) throw new Error("aborted");   // as real fetch does
+      return new Promise((_r, rej) => init.signal!.addEventListener("abort", () => rej(new Error("aborted"))));
+    };
+    const ctl = new AbortController();
+    const p = exchangeCode(cfg, "C", { fetchFn, signal: ctl.signal });
+    ctl.abort();
+    expect(await p).toEqual({ ok: false, code: "apple_unavailable" });
+    expect(seen[0].aborted).toBe(true);
+    const done = new AbortController(); done.abort();
+    expect(await revokeToken(cfg, new AppleToken("X", "refresh_token"), { fetchFn, signal: done.signal })).toEqual({ ok: false, code: "apple_unavailable" });
+  });
+});
+
 describe("step 3: revokeToken", () => {
   it("revokes with the hint; refusals and outages are distinguished", async () => {
     const a = fakeApple({ "/auth/revoke": { status: 200 } });

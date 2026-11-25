@@ -20,6 +20,8 @@
  * Server only. `rpc` must be the SERVICE client (claim/record refuse any signed-in caller).
  */
 
+import { bounded } from "@/lib/bounded";
+
 export type RpcResult = { data: unknown; error: { message?: string; code?: string } | null };
 export type AuthResult = { error: { message?: string; status?: number; code?: string } | null };
 export type DeletionDeps = {
@@ -33,24 +35,24 @@ export type DeletionDeps = {
 
 export type AppleRevocationHook = {
   /** The sign-in's Apple link and whether a revocation outcome is already recorded on it. null: could not read. */
-  state: (id: string) => Promise<{ apple: boolean; marked: boolean } | null>;
-  alert: (code: string) => Promise<void>;
+  state: (id: string, signal: AbortSignal) => Promise<{ apple: boolean; marked: boolean } | null>;
+  alert: (code: string, signal: AbortSignal) => Promise<void>;
   /** Records that the skip was alerted, so a later run does not alert again. */
-  mark: (id: string) => Promise<void>;
+  mark: (id: string, signal: AbortSignal) => Promise<void>;
 };
-/** The Apple check may take at most this long; then D goes ahead without it (review 25 Nov: never delay deletion). */
+/** The whole Apple check may take at most this long; then D goes ahead (review 25 Nov: never delay deletion). On the
+ *  limit the check is aborted: a slow answer that arrives later starts nothing (no alert, no mark), so no work of it
+ *  continues once the sign-in record is deleted (third review, point 3). */
 export const APPLE_CHECK_MS = 3_000;
 
 async function noteAppleRevocation(subject: string, hook: AppleRevocationHook, ms = APPLE_CHECK_MS): Promise<void> {
-  const work = (async () => {
-    const st = await hook.state(subject);
-    if (!st || !st.apple || st.marked) return;
-    await hook.alert("old_app_or_direct_close");
-    await hook.mark(subject);
-  })().catch(() => undefined);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([work, new Promise<void>((r) => { timer = setTimeout(r, ms); })]);
-  clearTimeout(timer);
+  await bounded(ms, async (signal) => {
+    const st = await hook.state(subject, signal);
+    if (signal.aborted || !st || !st.apple || st.marked) return;
+    await hook.alert("old_app_or_direct_close", signal);
+    if (signal.aborted) return;
+    await hook.mark(subject, signal);
+  });
 }
 
 export type Outcome =
