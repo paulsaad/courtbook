@@ -186,8 +186,9 @@ jobs:
             bash .github/scripts/run-check.sh "$DB" supabase/live/0085_postcheck.sql all
           fi
           if echo "$plan" | grep -q '^0093_'; then
-            echo "0093: applied; running the postcheck"
-            bash .github/scripts/run-check.sh "$DB" supabase/live/pilot_0093_postcheck.sql all
+            echo "0093: applied and recorded (committed); running the postcheck"
+            bash .github/scripts/run-check.sh "$DB" supabase/live/pilot_0093_postcheck.sql all \
+              || { echo "::error::0093 IS APPLIED (committed and recorded in staging_meta.applied) but its postcheck failed. Stop: report the state shown above. Do not roll back without separate approval."; exit 1; }
           fi
 
       - name: API credentials are staging's (api)

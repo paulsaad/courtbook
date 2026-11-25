@@ -24,7 +24,7 @@ function definitions and nothing else: no table, no data, no grant.
 | --- | --- | --- | --- |
 | 0 | `check` | no | Pending lists `0093_closed_account_booking_lock_order.sql` only |
 | 1 | `pilot_0093_preflight` | no | Every part-1 row ok, including the exact fingerprints of the three functions 0093 replaces and that 0092 is in |
-| 2 | `apply`, migrations `0093`, confirm_ref `pwznauyioqykdwodwpvx` | **yes** | The workflow reruns the preflight, refuses 0093 alone without 0092 or with any other number, applies it in one transaction, records it, then runs the postcheck |
+| 2 | `apply`, migrations `0093`, confirm_ref `pwznauyioqykdwodwpvx` | **yes** | The workflow reruns the preflight, refuses 0093 alone without 0092 or with any other number, applies it in one transaction and records it, then runs the postcheck. **The postcheck runs after the commit:** if it fails, 0093 stays applied (see Stop conditions) |
 | 3 | `pilot_0093_postcheck` | no | Every row ok: 0093's exact text; the refusal after the profile lock and before `lock_courts`; the profile lock before the request insert; grants and security unchanged; no M12 |
 | 4 | `pilot_0093_functional` | no (one transaction, rolled back) | 10 checks, 0 failed; 0 test accounts left |
 | 5 | `smoke`, `cancel`, `api`, `m86_worker_check` | throwaway data, removed after | As before 0093 |
@@ -39,11 +39,19 @@ Players see the same answers as before 0093. The lock order itself is shown by t
 
 ## Stop conditions
 
-- Any preflight row not ok: nothing is applied; report.
-- Apply fails: one transaction, so nothing changed; report.
-- Postcheck or functional check fails: report, then roll back (below) with Paul's approval.
+- **A preflight row is not ok:** nothing is applied. Report.
+- **Apply fails:** one transaction, so nothing changed. Report.
+- **The postcheck in step 2 fails:**
+  - **0093 is already committed and recorded** by then. The postcheck runs after the migration's transaction, so its
+    failure does not undo anything. The job says so ("0093 IS APPLIED … but its postcheck failed").
+  - **Stop.** Do not run anything else.
+  - Report the actual state: the postcheck output, `check` (what `staging_meta.applied` records), and the read-only
+    `pilot_0093_postcheck` / `pilot_0093_preflight` results.
+  - **Rollback needs separate approval.**
+- **Step 3 or 4 fails:** read-only, or rolled back, so nothing changed by the step itself. 0093 stays applied. Stop,
+  report the state as above. Rollback needs separate approval.
 
-## Rollback
+## Rollback (only with separate approval)
 
 Action `pilot_0093_rollback`, confirm_ref `pwznauyioqykdwodwpvx`. It is refused, and changes nothing:
 - with a wrong confirm_ref;

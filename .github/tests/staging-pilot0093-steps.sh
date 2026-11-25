@@ -53,5 +53,12 @@ out=$(run_step "Undo 0093 (pilot), one transaction (pilot_0093_rollback)" CONFIR
 [ $rc = 0 ] && [ "$(applied93)" = 0 ] && [ "$(fp)" = "$before" ]; ok "pilot_0093_rollback restores the three exact previous definitions and forgets 0093 ($(echo "$out" | tail -1))" $?
 out=$(run_step "0093 (pilot) preflight, read only (pilot_0093_preflight)"); ok "pilot_0093_preflight passes again after the rollback" $?
 out=$(run_step "$APPLY" MIGRATIONS="0093"); [ $? = 0 ] && [ "$(applied93)" = 1 ] && [ "$(fp)" = "$after" ]; ok "0093 applies again after the rollback (same definitions)" $?
+# A postcheck that fails AFTER the commit: 0093 stays applied and recorded, and the job says so (stop and report;
+# rollback needs separate approval). Forced with a check file that always fails.
+out=$(run_step "Undo 0093 (pilot), one transaction (pilot_0093_rollback)" CONFIRM=$REF); [ $? = 0 ] && [ "$(applied93)" = 0 ]; ok "(setup) rolled back for the forced-failure case" $?
+F=$(mktemp /tmp/pc93.XXXXXX.sql); chmod 644 "$F"; echo "select 'forced failure (rehearsal)', false, ''" > "$F"
+out=$(env MIGRATIONS="0093" bash -e -c "$(step "$APPLY" | sed "s|supabase/live/pilot_0093_postcheck.sql|$F|")" 2>&1); rc=$?; rm -f "$F"
+[ $rc != 0 ] && echo "$out" | grep -q "0093 IS APPLIED (committed and recorded in staging_meta.applied) but its postcheck failed" && [ "$(applied93)" = 1 ] && [ "$(fp)" = "$after" ]
+ok "a postcheck failing after the commit: the job fails, says 0093 IS APPLIED, and 0093 is in fact applied and recorded" $?
 echo "RESULT: $([ $FAILS = 0 ] && echo PASS || echo FAIL)"
 [ $FAILS = 0 ]
