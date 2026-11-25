@@ -6,6 +6,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const here = new URL(".", import.meta.url);
 export async function resolve(spec, ctx, next) {
   if (spec === "expo-crypto") return { url: new URL("shims/expo-crypto.mjs", here).href, shortCircuit: true };
+  // "server-only" guards a Next.js bundle; in node it is an empty module
+  if (spec === "server-only") return { url: new URL("shims/empty.mjs", here).href, shortCircuit: true };
   // the website's own reservation module (src/lib/reserve.ts) runs too: its Supabase client is the one the test sets
   if (spec === "@/lib/supabase/client") return { url: new URL("shims/webclient.mjs", here).href, shortCircuit: true };
   if (spec.startsWith("@shared/")) return { url: new URL(`../../../mobile/shared/${spec.slice(8)}.ts`, here).href, shortCircuit: true };
