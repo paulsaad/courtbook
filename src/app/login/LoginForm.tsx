@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { sendCodeError, verifyCodeError } from "@/lib/authText";
 import { useRouter, useSearchParams } from "next/navigation";
+import { safeNextPath } from "@/lib/safeNext";
 import { createClient } from "@/lib/supabase/client";
 import { Cedar } from "@/components/Brand";
 import { reportAuthError } from "@/lib/report";
@@ -17,7 +18,7 @@ export default function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const next = params.get("next") ?? "/";
-  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  const safeNext = safeNextPath(next);
   const [email, setEmail] = useState("");
   const [state, setState] = useState<"idle" | "sending" | "sent">("idle");
   const [error, setError] = useState<string | null>(() => { const e = params.get("error"); return e ? ERRORS[e] ?? "Sign-in failed. Please request a new link." : null; });
