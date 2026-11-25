@@ -2,7 +2,7 @@
 
 Status: **inactive**. Draft PR #60. Nothing here has been run against a real project, and no credential exists.
 
-Files: `scripts/auth-mail-monitor.mjs` (35 offline tests in `scripts/auth-mail-monitor.nodetest.mjs`),
+Files: `scripts/auth-mail-monitor.mjs` (43 offline tests in `scripts/auth-mail-monitor.nodetest.mjs`),
 `.github/workflows/auth-mail-monitor.yml`.
 
 The monitor stays inactive until all three checks below pass (review of 25 Nov):
@@ -24,6 +24,10 @@ alone is not enough.
 - Every `check` or `selftest` run needs exactly one heartbeat service. With none, or with both, the run fails before
   it reads any log.
 - Each run sends start, then success (exit 0) or failure (exit 1 or 2), all with one run id.
+- **A heartbeat the service does not accept** (no answer, or HTTP 4xx/5xx) makes the run a monitor failure (exit 2),
+  even when the logs were checked cleanly. After a refused start signal, success is never sent: the run ends with a
+  failure signal instead. A refused success signal also gives exit 2 (review 25 Nov, finding 2). Typical causes: a
+  wrong or deleted ping URL (404), a revoked key (403), rate limiting (429).
 - The service reports a run that fails. It also reports a run that never happens: schedule disabled, GitHub outage,
   GitHub's 60-day inactivity pause, or a start later than the 30-minute grace.
 
@@ -98,6 +102,12 @@ The old design checked a fixed 70-minute lookback each hour. A run delayed by mo
   (`INGEST_LAG_MINUTES`). The end point is saved as a watermark in the Actions cache. A late run checks a longer window,
   so windows chain without holes whatever GitHub's delay.
 - **Only a checked window moves the watermark.** A failed query leaves it unchanged, so the next run repeats the window.
+- **The checkpoint must be saved** (review 25 Nov, finding 1). If the script cannot write the new watermark, the run is
+  a monitor failure (exit 2, failure signal, never "OK"), or exit 1 if mail failures were also found. The old
+  watermark is left as it was.
+- **After the script, the workflow saves the watermark to the Actions cache.** GitHub's cache-save step only warns if it
+  fails. That case is safe by construction: the next run restores the previous saved watermark, which is older, so it
+  checks a longer window (overlap, no hole). If saves keep failing for 24 hours, the gap alert fires.
 - **The API allows at most 24 hours per query.** If the watermark is older than that, or missing, the run still checks
   the last 24 hours and reports a **COVERAGE GAP**: exit 2 and a heartbeat failure alert. The only exception is the
   first run, started by hand with `first_run` = true.
@@ -111,7 +121,16 @@ The old design checked a fixed 70-minute lookback each hour. A run delayed by mo
 - a watermark older than 24 h reports a gap;
 - a missing watermark reports a gap, unless `first_run`;
 - a failed query does not move the watermark;
-- gap and failures together are both reported.
+- gap and failures together are both reported;
+- a watermark that cannot be written, or no watermark storage at all, is a monitor failure (with or without mail
+  failures);
+- heartbeat answers 404 (start), 500 (success), 403 (all) and 429 (start, with mail failures) each fail the run and never
+  report it healthy; a selftest with a refused heartbeat still exits 2.
+
+Two deliberately broken copies of the script were run against the tests:
+
+- one ignores the checkpoint failure: 3 tests fail;
+- one treats an HTTP 4xx/5xx heartbeat as accepted: 3 tests fail.
 
 **Residual risks (stated, not hidden):**
 
@@ -128,7 +147,7 @@ The old design checked a fixed 70-minute lookback each hour. A run delayed by mo
 
 ## 3. Real-log validation (finding 3)
 
-The 35 offline tests prove the script's logic and privacy handling. They do not prove that real Supabase Auth logs:
+The 43 offline tests prove the script's logic and privacy handling. They do not prove that real Supabase Auth logs:
 
 - carry the fields the query uses: `log_attributes['action'] = 'apitask'`, `['task_type'] = 'mailer.*'` and
   `['level'] = 'error'`;

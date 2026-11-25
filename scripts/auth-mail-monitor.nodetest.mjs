@@ -11,14 +11,18 @@ const NOW = () => new Date("2026-11-26T10:17:00Z");
 const PERSON = "someone@example.com";
 
 /** A fake fetch: answers the logs API with `api`, records every call; Sentry check-ins answer 202. */
-function harness(api, { sentryDown = false, watermark = "2026-11-26T09:12:00.000Z" } = {}) {
+function harness(api, { sentryDown = false, watermark = "2026-11-26T09:12:00.000Z", beatStatus = () => 202, writeFails = false } = {}) {
   const calls = [];
   const lines = [];
   const files = new Map(watermark ? [["/wm", watermark]] : []);
-  const fs = { read: (f) => { if (!files.has(f)) throw new Error("ENOENT"); return files.get(f); }, write: (f, t) => files.set(f, t) };
+  const fs = { read: (f) => { if (!files.has(f)) throw new Error("ENOENT"); return files.get(f); }, write: (f, t) => { if (writeFails) throw new Error("EACCES"); files.set(f, t); } };
   const fetch = async (url, init = {}) => {
     calls.push({ url: String(url), init });
-    if (String(url).startsWith(CRON) || String(url).startsWith(HC)) { if (sentryDown) throw new Error("down"); return { ok: true, status: 202 }; }
+    if (String(url).startsWith(CRON) || String(url).startsWith(HC)) {
+      if (sentryDown) throw new Error("down");
+      const st = beatStatus(String(url));
+      return { ok: st >= 200 && st < 300, status: st };
+    }
     if (typeof api === "function") return api(url, init);
     return api;
   };
@@ -134,10 +138,12 @@ for (const [name, e] of [
   });
 }
 
-test("Sentry unreachable: the result still stands (exit 0), a note is logged; Sentry would then report a missed run", async () => {
+test("Sentry unreachable: the run is a monitor failure (exit 2), never reported healthy", async () => {
   const h = harness(json(200, { result: [] }), { sentryDown: true });
-  assert.equal(await run({ env, fetch: h.fetch, now: NOW, log: h.log, fs: h.fs, uuid: h.uuid }), 0);
+  assert.equal(await run({ env, fetch: h.fetch, now: NOW, log: h.log, fs: h.fs, uuid: h.uuid }), 2);
   assert.match(h.lines.join("\n"), /heartbeat: could not reach Sentry/);
+  assert.deepEqual(statuses(h), ["in_progress", "error"]);
+  assert.doesNotMatch(h.lines.join("\n"), /^OK:/m);
 });
 
 test("a heartbeat service is required: with neither URL the run fails before reading any log", async () => {
@@ -179,10 +185,83 @@ test("Healthchecks.io selftest: /start then /fail, no logs read, exit 2", async 
   assert.match(h.lines.join("\n"), /failure alert from Healthchecks\.io/);
 });
 
-test("Healthchecks.io unreachable: the result still stands, a note is logged", async () => {
+test("Healthchecks.io unreachable: the run is a monitor failure (exit 2); success is never signalled", async () => {
   const h = harness(json(200, { result: [] }), { sentryDown: true });
-  assert.equal(await run({ env: hcEnv, fetch: h.fetch, now: NOW, log: h.log, fs: h.fs, uuid: h.uuid }), 0);
+  assert.equal(await run({ env: hcEnv, fetch: h.fetch, now: NOW, log: h.log, fs: h.fs, uuid: h.uuid }), 2);
   assert.match(h.lines.join("\n"), /heartbeat: could not reach/);
+  assert.deepEqual(hcPaths(h), ["/start", "/fail"]);
+});
+
+// review 25 Nov, finding 2: HTTP 4xx/5xx heartbeat answers
+/** answer `code` to the heartbeat whose path ends with `path` ("/start", "/fail", or "" for the success signal), 200 otherwise */
+const beatAt = (path, code) => (url) => {
+  const p = new URL(url).pathname;
+  const hit = path === "" ? !/\/(start|fail)$/.test(p) : p.endsWith(path);
+  return hit ? code : 200;
+};
+
+test("heartbeat 404 on start (Healthchecks.io, e.g. a wrong ping URL): the check still runs, exit 2, /fail sent, success never sent", async () => {
+  const h = harness(json(200, { result: [] }), { beatStatus: beatAt("/start", 404) });
+  assert.equal(await run({ env: hcEnv, fetch: h.fetch, now: NOW, log: h.log, fs: h.fs, uuid: h.uuid }), 2);
+  assert.deepEqual(hcPaths(h), ["/start", "/fail"]);
+  const all = h.lines.join("\n");
+  assert.match(all, /answered HTTP 404 \(status in_progress not recorded\)/);
+  assert.match(all, /did not accept this run's start signal/);
+  assert.doesNotMatch(all, /^OK:/m);
+  assert.equal(h.calls.filter((c) => c.url.startsWith("https://api.supabase.com")).length, 1);
+});
+
+test("heartbeat 500 on the success signal (Healthchecks.io): exit 2, the run is not counted healthy", async () => {
+  const h = harness(json(200, { result: [] }), { beatStatus: beatAt("", 500) });
+  assert.equal(await run({ env: hcEnv, fetch: h.fetch, now: NOW, log: h.log, fs: h.fs, uuid: h.uuid }), 2);
+  assert.deepEqual(hcPaths(h), ["/start", "(success)"]);
+  assert.match(h.lines.join("\n"), /did not accept this run's success signal/);
+});
+
+test("heartbeat 403 on every signal (Sentry, e.g. a revoked key): exit 2, status ok is never sent", async () => {
+  const h = harness(json(200, { result: [] }), { beatStatus: () => 403 });
+  assert.equal(await run({ env, fetch: h.fetch, now: NOW, log: h.log, fs: h.fs, uuid: h.uuid }), 2);
+  assert.deepEqual(statuses(h), ["in_progress", "error"]);
+});
+
+test("heartbeat refused while failures were found: still exit 1 (the mail alert), error signalled", async () => {
+  const h = harness(json(200, { result: [{ kind: "smtp", task: "mailer.magiclink", n: 1 }] }), { beatStatus: beatAt("/start", 429) });
+  assert.equal(await run({ env: hcEnv, fetch: h.fetch, now: NOW, log: h.log, fs: h.fs, uuid: h.uuid }), 1);
+  assert.deepEqual(hcPaths(h), ["/start", "/fail"]);
+});
+
+test("selftest with a refused heartbeat: still exit 2", async () => {
+  const h = harness(json(200, { result: [] }), { beatStatus: () => 404 });
+  assert.equal(await run({ env: hcEnv, fetch: h.fetch, now: NOW, log: h.log, fs: h.fs, uuid: h.uuid, mode: "selftest" }), 2);
+});
+
+// review 25 Nov, finding 1: the coverage checkpoint must be saved
+test("watermark write fails: monitor failure (exit 2), error signalled, never OK", async () => {
+  const h = harness(json(200, { result: [] }), { writeFails: true });
+  assert.equal(await run({ env, fetch: h.fetch, now: NOW, log: h.log, fs: h.fs, uuid: h.uuid }), 2);
+  assert.deepEqual(statuses(h), ["in_progress", "error"]);
+  const all = h.lines.join("\n");
+  assert.match(all, /coverage checkpoint \(watermark\) could not be saved/);
+  assert.doesNotMatch(all, /^OK:/m);
+  assert.equal(h.files.get("/wm"), "2026-11-26T09:12:00.000Z", "the old watermark is left as it was");
+});
+
+test("watermark write fails while failures were found: exit 1, both reported", async () => {
+  const h = harness(json(200, { result: [{ kind: "timeout", task: "mailer.signup", n: 3 }] }), { writeFails: true });
+  assert.equal(await run({ env, fetch: h.fetch, now: NOW, log: h.log, fs: h.fs, uuid: h.uuid }), 1);
+  const all = h.lines.join("\n");
+  assert.match(all, /could not be saved/);
+  assert.match(all, /ALERT: 3 Auth mail failure/);
+  assert.deepEqual(statuses(h), ["in_progress", "error"]);
+});
+
+test("no watermark storage at all in check mode: monitor failure (exit 2), never OK", async () => {
+  const h = harness(json(200, { result: [] }));
+  // FIRST_RUN so that no coverage gap is reported: the failure must come from the unsaved checkpoint alone
+  assert.equal(await run({ env: { ...env, FIRST_RUN: "true" }, fetch: h.fetch, now: NOW, log: h.log, fs: null, uuid: h.uuid }), 2);
+  assert.match(h.lines.join("\n"), /could not be saved/);
+  assert.doesNotMatch(h.lines.join("\n"), /COVERAGE GAP/);
+  assert.deepEqual(statuses(h), ["in_progress", "error"]);
 });
 
 test("selftest: a deliberate failure, no logs read; Sentry gets in_progress (with the monitor's schedule) then error", async () => {

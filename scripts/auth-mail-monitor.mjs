@@ -27,8 +27,8 @@
  * Heartbeat (review 25 Nov, finding 1): a heartbeat service is REQUIRED for check runs: Sentry Crons (SENTRY_CRONS_URL)
  * or Healthchecks.io (HEALTHCHECKS_URL), exactly one; without one the run fails. A start signal, then success on exit
  * 0 or failure on 1 or 2, all with one run id. A run that never happens is reported by the service as missed; a failed
- * run is reported as failed and also fails the GitHub run. A heartbeat that cannot be sent never changes the result of
- * the check (the service then reports the run as missed or timed out).
+ * run is reported as failed and also fails the GitHub run. A heartbeat the service does not accept (no answer, or HTTP
+ * 4xx/5xx) makes the run a monitor failure (exit 2), and success is never signalled after it (review 25 Nov).
  *
  * Modes: `check` (default) as above; `probe` lists the attribute KEYS present on Auth log events in the window (names
  * only, never values); `selftest` makes a deliberate failure (no logs read): Sentry error check-in, exit 2, so that
@@ -104,8 +104,9 @@ export const MONITOR = { schedule: { type: "crontab", value: "17 * * * *" }, che
  *    schedule (cron "17 * * * *", UTC, grace 30 minutes) is set on the check itself.
  */
 const name = (hb) => (hb.kind === "sentry" ? "Sentry" : "Healthchecks.io");
+/** Returns true only when the service accepted the signal (HTTP 2xx). */
 async function heartbeat(fetchImpl, hb, checkInId, status, log) {
-  if (!hb) return;
+  if (!hb) return false;
   try {
     let u, init = { method: "GET" };
     if (hb.kind === "sentry") {
@@ -118,9 +119,11 @@ async function heartbeat(fetchImpl, hb, checkInId, status, log) {
       u.searchParams.set("rid", checkInId);
     }
     const r = await fetchImpl(u.toString(), { ...init, signal: AbortSignal.timeout(10_000) });
-    if (!r.ok) log(`heartbeat: ${name(hb)} answered HTTP ${r.status} (status ${status} not recorded)`);
+    if (!r.ok) { log(`heartbeat: ${name(hb)} answered HTTP ${r.status} (status ${status} not recorded)`); return false; }
+    return true;
   } catch {
     log(`heartbeat: could not reach ${name(hb)} (status ${status} not recorded)`);
+    return false;
   }
 }
 
@@ -137,7 +140,14 @@ export async function run({ env, fetch: fetchImpl = fetch, now = () => new Date(
   const firstRun = env.FIRST_RUN === "true";
   const say = (t) => log(safe(t));
   const checkInId = uuid();
-  const beat = (status) => (mode === "check" || mode === "selftest") ? heartbeat(fetchImpl, hb, checkInId, status, say) : null;
+  // review 25 Nov (finding 2): a heartbeat the service did not accept means the run is not confirmed healthy
+  let heartbeatRefused = false;
+  const beat = async (status) => {
+    if (mode !== "check" && mode !== "selftest") return true;
+    const accepted = await heartbeat(fetchImpl, hb, checkInId, status, say);
+    if (!accepted) heartbeatRefused = true;
+    return accepted;
+  };
   const fail = async (why) => {
     say(`MONITOR FAILURE: ${why}. Mail failures could not be checked.`);
     await beat("error");
@@ -211,10 +221,13 @@ export async function run({ env, fetch: fetchImpl = fetch, now = () => new Date(
     for (const r of rows) say(`  ${r.key}: ${r.n}`);
     return 0;
   }
-  // the window was checked: the next run starts here
-  try { if (fs) fs.write(`${wmFile}.new`, iso(end)); } catch { say("note: the new watermark could not be written (the next run will report a gap)"); }
+  // the window was checked: the next run starts here. Review 25 Nov (finding 1): if this checkpoint cannot be saved,
+  // the run is a monitor failure (it is not left for the next run to discover).
+  let checkpointLost = false;
+  try { if (!fs) throw new Error("no storage"); fs.write(`${wmFile}.new`, iso(end)); } catch { checkpointLost = true; }
   const total = rows.reduce((s, r) => s + r.n, 0);
   if (gap) say(`COVERAGE GAP: ${gap}.`);
+  if (checkpointLost) say("MONITOR FAILURE: the coverage checkpoint (watermark) could not be saved; the next run cannot start where this one ended.");
   if (total > 0) {
     say(`ALERT: ${total} Auth mail failure(s), ${window}. Sign-in codes may not have reached people.`);
     for (const r of rows) say(`  ${r.task} · ${r.kind}: ${r.n}`);
@@ -222,9 +235,19 @@ export async function run({ env, fetch: fetchImpl = fetch, now = () => new Date(
     await beat("error");
     return 1;
   }
-  say(`${gap ? "Checked (with the gap above)" : "OK"}: 0 Auth mail failures, ${window}.`);
-  await beat(gap ? "error" : "ok");
-  return gap ? 2 : 0;
+  const problem = gap || checkpointLost || heartbeatRefused;
+  say(`${problem ? "Checked (with the problem above)" : "OK"}: 0 Auth mail failures, ${window}.`);
+  if (problem) {
+    if (heartbeatRefused && !gap && !checkpointLost) say("MONITOR FAILURE: the heartbeat service did not accept this run's start signal, so the run is not reported as healthy.");
+    await beat("error");
+    return 2;
+  }
+  // success is reported only when nothing went wrong, and the run counts as healthy only if the service accepted it
+  if (!(await beat("ok"))) {
+    say("MONITOR FAILURE: the heartbeat service did not accept this run's success signal; it may be misconfigured.");
+    return 2;
+  }
+  return 0;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
