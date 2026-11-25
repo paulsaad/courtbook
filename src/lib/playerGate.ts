@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { safeNextPath } from "./safeNext";
 import { loaded } from "@/lib/load";
 
 /**
@@ -23,7 +24,7 @@ export function isMissingFunction(error: { code?: string; message?: string } | n
   return !!error && (error.code === "PGRST202" || error.code === "42883" || /could not find the function/i.test(error.message ?? ""));
 }
 
-/** Only a path on this site: anything else (another host, "//host", a scheme) becomes "/". */
+/** Only a path on this site: anything else (another host, "//host", "/\\host", "/<tab>/host", a scheme) becomes "/". */
 export function safeNext(next: string | null | undefined): string {
-  return next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/";
+  return safeNextPath(next);
 }

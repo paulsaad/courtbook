@@ -30,6 +30,8 @@ describe("playerGatePath (18+ and first-time profile)", () => {
   });
   it("the way back stays on this site", () => {
     for (const bad of ["https://evil.test", "//evil.test", "/\\evil.test", "", null, undefined]) expect(safeNext(bad)).toBe("/");
+    // a tab or newline after the first "/" is dropped by browsers and URL parsing: "/<tab>/evil.test" is "//evil.test"
+    for (const bad of ["/\t/evil.test", "/\n/evil.test", "/\r/evil.test", "/ /evil.test"]) expect(safeNext(bad)).toBe("/");
     expect(safeNext("/club/x?y=1")).toBe("/club/x?y=1");
   });
 });
