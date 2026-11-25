@@ -79,7 +79,7 @@ export default function HomeClient({ areas, sports, initialMatches, signedIn }: 
 
       <form onSubmit={(e) => { e.preventDefault(); window.location.href = `/courts?q=${encodeURIComponent(q.trim())}`; }} className="flex items-center gap-2.5 rounded-full border border-grid bg-white px-4 py-3">
         <IconSearch size={20} className="text-muted" />
-        <input name="q" enterKeyHint="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clubs or towns" className="flex-1 bg-transparent text-base outline-none" />
+        <input name="q" enterKeyHint="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clubs or towns" className="min-w-0 flex-1 bg-transparent text-base outline-none" />
       </form>
 
       <div className="grid grid-cols-3 gap-3">

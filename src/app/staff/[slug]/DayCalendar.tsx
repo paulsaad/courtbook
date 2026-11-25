@@ -80,6 +80,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const isDesktop = useIsDesktop();
   // Typed but unsaved booking details: switching slot, changing day or closing the panel asks first.
   const addDirty = useRef(false);
+  // phones (S1): the court names live in the sticky header and follow the grid's sideways scroll
+  const namesRef = useRef<HTMLDivElement>(null);
   const confirmDiscard = useCallback(() =>
     !addDirty.current || window.confirm("Discard the details you have entered?"), []);
   // What the open add form has chosen, drawn on the grid as "Not saved" until the database has saved it.
@@ -617,16 +619,24 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     );
   }
 
+  /** A court's column heading: in the grid (desktop; screen readers everywhere) and in the phone header strip (S1). */
+  const courtHead = (c: Court, extra = "") => (
+    <div key={c.id} className={`h-9 px-1 text-center text-sm lg:sticky lg:top-0 lg:z-10 ${draftOn(c.id, date) ? "rounded-t-lg bg-draft-soft lg:bg-draft-soft" : "lg:bg-paper"} ${extra}`}>
+      <div className={`font-medium leading-tight lg:text-[15px] ${draftOn(c.id, date) ? "text-draft" : ""}`}>{c.name}</div>
+      <div className="text-xs text-muted">{sportNames[c.sport] ?? c.sport}</div>
+    </div>
+  );
+
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col lg:max-w-[1600px] lg:flex-row">
       {/* desktop: the calendar column scrolls on its own beside the panel; phones: no wrapper box */}
       <div className="contents lg:flex lg:h-[calc(100vh-4rem)] lg:min-w-0 lg:flex-1 lg:flex-col">
       <header className="sticky top-0 z-10 bg-paper/95 backdrop-blur lg:static lg:shrink-0">
-        <div className="flex items-center justify-between px-4 pt-3 text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 pt-3 text-sm">
           <Link href="/" className="text-muted">‹ {club.name}</Link>
-          <div className="flex gap-4">{/* on desktop these two are in the staff bar (WorkNav) */}<Link href={`/staff/${club.slug}/payments`} className="text-muted lg:hidden">Payments</Link><Link href={`/staff/${club.slug}/settings`} className="text-muted lg:hidden">Settings</Link><button onClick={() => openSheet({ kind: "close" })} className="text-danger">Close courts…</button></div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">{/* on desktop these two are in the staff bar (WorkNav) */}<Link href={`/staff/${club.slug}/payments`} className="text-muted lg:hidden">Payments</Link><Link href={`/staff/${club.slug}/settings`} className="text-muted lg:hidden">Settings</Link><button onClick={() => openSheet({ kind: "close" })} className="text-danger">Close courts…</button></div>
         </div>
-        <div className="flex items-end justify-between px-4 pb-3 pt-1">
+        <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 px-4 pb-3 pt-1">
           {view === "week" ? (
             <div className="leading-tight">
               <div className="text-2xl font-semibold tracking-tight">Week of {formatInTimeZone(clubLocalToUtc(wkStart, "12:00", club.timezone), club.timezone, "d MMM")}</div>
@@ -702,6 +712,18 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
             ))}
           </div>
         )}
+        {view === "grid" && (
+          // phones only: the grid scrolls with the page, so its own name row would scroll away (S1). This copy sits in
+          // the sticky header; onScroll below keeps it lined up with the columns. Screen readers use the grid's row.
+          <div ref={namesRef} aria-hidden="true" data-testid="court-names" className="overflow-hidden px-2 lg:hidden">
+            <div className="flex min-w-max">
+              <div className="w-12 shrink-0" />
+              <div className="grid flex-1 gap-x-1.5 [--col-min:7rem]" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(var(--col-min), 1fr))` }}>
+                {courts.map((c) => courtHead(c))}
+              </div>
+            </div>
+          </div>
+        )}
       </header>
 
       {viewError && (
@@ -741,10 +763,11 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
           onOpen={(b) => openSheet({ kind: "booking", booking: b })}
         />
       ) : view === "grid" ? (
-        <div className="flex-1 overflow-x-auto px-2 pb-24 lg:overflow-visible lg:pb-6">
+        <div className="flex-1 overflow-x-auto px-2 pb-24 lg:overflow-visible lg:pb-6" onScroll={(e) => { if (namesRef.current) namesRef.current.scrollLeft = e.currentTarget.scrollLeft; }}>
           <div className="flex min-w-max">
-            {/* time axis */}
-            <div className="relative w-12 shrink-0 lg:sticky lg:left-0 lg:z-20 lg:w-14 lg:bg-paper" style={{ height: times.length * ROW_PX, marginTop: 36 }}>
+            {/* time axis: pinned on the left while the courts scroll sideways (S2); on phones it starts level with the
+                first row, because the court names are in the header */}
+            <div className="sticky left-0 z-20 w-12 shrink-0 bg-paper lg:mt-9 lg:w-14" style={{ height: times.length * ROW_PX }}>
               {times.map((t, i) => i % labelEvery === 0 && (
                 <div key={t} className="absolute right-2 -translate-y-1/2 text-xs text-muted lg:text-[13px]" style={{ top: i * ROW_PX }}>{t}</div>
               ))}
@@ -754,12 +777,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
             <div ref={gridRef} role="group" aria-label={`Courts, ${dayName} ${dayNum} ${monthName}`} aria-describedby="grid-keys-hint"
                  tabIndex={activeItem || canAdd ? -1 : 0} onKeyDown={onGridKey}
                  className="grid flex-1 gap-x-1.5 outline-none [--col-min:7rem] focus-visible:ring-2 focus-visible:ring-turf lg:[--col-min:9rem]" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(var(--col-min), 1fr))` }}>
-              {courts.map((c) => (
-                <div key={c.id} className={`h-9 px-1 text-center text-sm lg:sticky lg:top-0 lg:z-10 ${draftOn(c.id, date) ? "rounded-t-lg bg-draft-soft lg:bg-draft-soft" : "lg:bg-paper"}`}>
-                  <div className={`font-medium leading-tight lg:text-[15px] ${draftOn(c.id, date) ? "text-draft" : ""}`}>{c.name}</div>
-                  <div className="text-xs text-muted">{sportNames[c.sport] ?? c.sport}</div>
-                </div>
-              ))}
+              {courts.map((c) => courtHead(c, "max-lg:sr-only"))}
               {courts.map((c, ci) => (
                 <div key={c.id} className="relative rounded-lg border border-grid bg-white" style={{ height: times.length * ROW_PX }}>
                   {/* free slots; a slot under a booking or block is not a slot (disabled, hidden from keyboard and screen readers) */}
