@@ -55,6 +55,18 @@ describe("durations", () => {
   it("offers min..max in slot steps", () => {
     expect(durationOptions({ slotMinutes: 30, minMinutes: 60, maxMinutes: 120 })).toEqual([60, 90, 120]);
   });
+  // PR-9a: every allowed length, the maximum included; the same rule as the website (@shared/durations)
+  it("the usual 1 h to 3 h club: all five lengths, 3 h included", () => {
+    expect(durationOptions({ slotMinutes: 30, minMinutes: 60, maxMinutes: 180 })).toEqual([60, 90, 120, 150, 180]);
+  });
+  it("more than five lengths: none dropped", () => {
+    expect(durationOptions({ slotMinutes: 30, minMinutes: 30, maxMinutes: 240 })).toEqual([30, 60, 90, 120, 150, 180, 210, 240]);
+  });
+  it("boundaries: minimum equal to maximum; minimum off the grid; nothing allowed", () => {
+    expect(durationOptions({ slotMinutes: 30, minMinutes: 90, maxMinutes: 90 })).toEqual([90]);
+    expect(durationOptions({ slotMinutes: 30, minMinutes: 75, maxMinutes: 180 })).toEqual([90, 120, 150, 180]);
+    expect(durationOptions({ slotMinutes: 30, minMinutes: 120, maxMinutes: 90 })).toEqual([]);
+  });
   it("labels them as people say them", () => {
     expect([30, 60, 90, 120].map(durationLabel)).toEqual(["30 min", "1 h", "1 h 30", "2 h"]);
   });
