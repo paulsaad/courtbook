@@ -18,6 +18,13 @@ if [ ! -d "$PG_MODULE/pg" ]; then
   mkdir -p "$(dirname "$PG_MODULE")" && (cd "$(dirname "$PG_MODULE")" && npm init -y >/dev/null && npm install --no-audit --no-fund pg@8 >/dev/null) \
     || { echo "could not install pg into $PG_MODULE"; exit 2; }
 fi
+# Autovacuum off while the matrix runs, put back on exit. Suites build hundreds of scratch databases with DDL; on
+# 25 Nov an autovacuum ANALYZE of a freshly built table deadlocked once with the next migration's DROP POLICY and the
+# migration lost (m85 rehearsal "cannot build: 0032"). A real failure, but of this machine's housekeeping, not of the
+# code under test. LOCAL cluster only.
+av=$(sudo -u postgres psql -At -c "show autovacuum")
+sudo -u postgres psql -q -c "alter system set autovacuum = off" -c "select pg_reload_conf()" >/dev/null
+trap 'sudo -u postgres psql -q -c "alter system set autovacuum = $av" -c "select pg_reload_conf()" >/dev/null 2>&1' EXIT
 fails=0; total=0
 run() { local name=$1; shift; local t0; t0=$(date +%s); total=$((total+1))
   sudo service postgresql status >/dev/null 2>&1 || sudo service postgresql start >/dev/null 2>&1
