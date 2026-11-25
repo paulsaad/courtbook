@@ -18,9 +18,10 @@ import type { AppleToken, ExchangeResult, RevokeResult, VerifyResult } from "./r
  *    attempted before the processing, which can be slow or time out. Nothing is closed unless the Apple step
  *    succeeded; nothing is revoked unless the closure is confirmed; the deletion continues whatever the revocation does.
  *  - An ambiguous closure (second review): close_my_account may have committed even though its answer was lost (a
- *    timeout, a dropped connection, a thrown error). Then the account's deletion record decides: closed → continue
- *    (revoke, process); not closed → nothing changed, safely; still unknown → "close_result_unknown" and an alert,
- *    never "nothing changed", and no revocation (it is attempted only for a confirmed closure).
+ *    timeout, a dropped connection, a thrown error). Then the account's deletion record is read: closed → continue
+ *    (revoke, process). Anything else → "close_result_unknown" with an alert, never "nothing changed", and no
+ *    revocation (attempted only for a confirmed closure). A read showing no closure is not proof either: the lost
+ *    request may still commit after it (third review: a lookup failure is never proof; this goes one step further).
  *  - E1-c / point 3: once closed, a revocation failure never undoes or blocks the deletion; it raises an alert. When
  *    Apple cannot be used at all (cancelled, unavailable, misconfigured), the person can still delete with the
  *    existing email-code confirmation ("fallback"); the account is closed by the same database rules, revocation is
@@ -125,9 +126,11 @@ export async function closeAppleAccount(input: AppleDeletionInput, deps: AppleDe
   if (closed.ok === "unknown") {
     const stR = await bounded(LIMITS.status, (s) => deps.closureStatus(s));
     const now = stR.done ? stR.value : "unknown";
-    if (now === "open") return { closed: false, code: "failed" };                // a successful read: not closed
     if (now !== "closed") {
-      await note("appleCloseResultUnknown", method);
+      // Not confirmed closed. Even a successful read showing no closure is not proof that nothing will change: the
+      // lost request may still be in flight and commit after the read. So both stay "unknown" (never "nothing
+      // changed"), distinguished in the alert: no closure seen yet vs the record could not be read.
+      await note("appleCloseResultUnknown", now === "open" ? "no_closure_seen" : "record_unreadable");
       return { closed: "unknown", code: "close_result_unknown" };
     }
   }

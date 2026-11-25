@@ -177,10 +177,11 @@ describe("second review: revoke before processing; a committed closure with a lo
       expect(alerts).toEqual([]);
     }
   });
-  it("lost response, and a SUCCESSFUL lookup finds no closure → definitely nothing changed; nothing revoked", async () => {
-    const { deps, log } = world({ close: "throw", closureStatus: "open" });
-    expect(await closeAppleAccount(APPLE, deps)).toEqual({ closed: false, code: "failed" });
+  it("lost response and a readable record with no closure yet → still unknown (the request may still commit), nothing revoked", async () => {
+    const { deps, log, alerts } = world({ close: "throw", closureStatus: "open" });
+    expect(await closeAppleAccount(APPLE, deps)).toEqual({ closed: "unknown", code: "close_result_unknown" });
     expect(log).not.toContain("revoke");
+    expect(alerts).toEqual([["appleCloseResultUnknown", "no_closure_seen"]]);
   });
   it("a definite database refusal or error is not ambiguous: the record is not consulted", async () => {
     const { deps, log } = world({ close: { ok: false, code: "failed" } });
@@ -198,7 +199,7 @@ describe("third review, point 2: a failed lookup is 'unknown', never proof that 
     for (const status of ["requested", "cancelled"]) expect(closureFromRecords([{ status }])).toBe("open");
     expect(closureFromRecords([{ status: "cancelled" }, { status: "closing" }])).toBe("closed");
   });
-  it("lost response + lookup failed (unknown, thrown or timed out) → close_result_unknown, alert, no revocation", async () => {
+  it("lost response + lookup FAILED (unknown, thrown or timed out) → close_result_unknown, alert 'record_unreadable', no revocation", async () => {
     vi.useFakeTimers();
     for (const closureStatus of ["unknown" as const, "throw" as const, "hang" as const]) {
       for (const input of [APPLE, FALLBACK]) {
@@ -207,13 +208,14 @@ describe("third review, point 2: a failed lookup is 'unknown', never proof that 
         await vi.advanceTimersByTimeAsync(LIMITS.status + LIMITS.bookkeeping);
         expect(await p).toEqual({ closed: "unknown", code: "close_result_unknown" });
         expect(log).not.toContain("revoke");
-        expect(alerts).toEqual([["appleCloseResultUnknown", input.method]]);
+        expect(alerts).toEqual([["appleCloseResultUnknown", "record_unreadable"]]);
       }
     }
   });
-  it("…versus an absent record from a lookup that worked: a definite 'failed'", async () => {
-    const { deps } = world({ close: "throw", closureStatus: closureFromRecords([]) });
-    expect(await closeAppleAccount(APPLE, deps)).toEqual({ closed: false, code: "failed" });
+  it("…versus a lookup that worked and found NO record: told apart ('no_closure_seen'), and still never 'nothing changed'", async () => {
+    const { deps, alerts } = world({ close: "throw", closureStatus: closureFromRecords([]) });
+    expect(await closeAppleAccount(APPLE, deps)).toEqual({ closed: "unknown", code: "close_result_unknown" });
+    expect(alerts).toEqual([["appleCloseResultUnknown", "no_closure_seen"]]);
   });
 });
 
