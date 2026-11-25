@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { safeNextPath } from "@/lib/safeNext";
 import { createClient } from "@/lib/supabase/server";
 import { allLoaded } from "@/lib/load";
 import ProfileForm from "./ProfileForm";
@@ -17,7 +18,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
   ]), "your profile");
   const levels = Object.fromEntries(((lv ?? []) as { sport: string; level: number }[]).map((r) => [r.sport, r.level]));
   const isAdmin = p?.roles?.includes("admin") ?? false;
-  const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  const safeNext = safeNextPath(next);
   return (
     <ProfileForm
       initial={{ name: p?.name ?? "", phone: p?.phone ?? user.phone ?? "", level: p?.level ?? "", sports: p?.sports ?? [], email_notifications: p?.email_notifications ?? true }}
