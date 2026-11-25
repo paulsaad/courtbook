@@ -29,6 +29,9 @@ const one = async (sql, args = []) => Object.values((await q(sql, args))[0] ?? {
 // ------------------------------------------------------------------ a generic hosted-page gateway (not Whish)
 const gw = {
   name: "whish", pages: new Map(), starts: [], statusAsked: 0, next: [], n: 0,
+  // a real provider with its own charge list (#40: without one, real payments cannot start); empty here: these
+  // journeys settle every charge through its attempt
+  async listCharges() { return []; },
   async startAttempt(input) {
     this.starts.push(input);
     const mode = this.next.shift() ?? "ok";
