@@ -22,11 +22,12 @@ describe("booking panel wording follows the club's payment mode (W1)", () => {
       priceLine: "Court $30.00 + booking fee $1.00",
       total: "$31.00",
       button: "Reserve and pay $31.00",
-      footnote: "Slot held 10 minutes while you pay · free cancellation until 6 h before",
+      footnote: "Demo club: no real money is charged · Slot held 10 minutes while you pay · free cancellation until 6 h before",
     });
   });
-  it("an unknown mode is treated as paid in the app (never promises free)", () => {
+  it("an unknown mode is treated as paid in the app (never promises free), without the demo note", () => {
     expect(bookingPanelText({ ...base, mode: "fee_online" }).total).toBe("$31.00");
+    expect(bookingPanelText({ ...base, mode: "fee_online" }).footnote).not.toContain("no real money");
     expect(bookingPanelText({ ...base, mode: null }).button).toBe("Reserve and pay $31.00");
   });
   it("price still loading, signed out, busy", () => {

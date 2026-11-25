@@ -65,6 +65,10 @@ export function bookingPanelText(i: {
     priceLine: `Court ${court} + booking fee ${money(fee)}`,
     total: total === null ? "…" : money(total),
     button: i.busy ? "Reserving…" : !i.signedIn ? "Sign in to reserve" : `Reserve and pay${total !== null ? ` ${money(total)}` : ""}`,
-    footnote: `Slot held ${i.holdMinutes} minutes while you pay · free cancellation until ${i.cutoffHours} h before`,
+    // A simulated (demo) club collects nothing; say so before the player taps, as the pay page already does.
+    footnote: `${i.mode === "simulated" ? `${DEMO_NOTE} · ` : ""}Slot held ${i.holdMinutes} minutes while you pay · free cancellation until ${i.cutoffHours} h before`,
   };
 }
+
+/** Shown wherever a simulated (demo) payment could be read as a real charge. Payment behaviour is unchanged. */
+export const DEMO_NOTE = "Demo club: no real money is charged";
