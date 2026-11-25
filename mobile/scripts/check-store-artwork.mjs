@@ -13,8 +13,9 @@
 //   - no store release may contain the Expo placeholder;
 //   - the final icon comes from a separate branding decision, and passing this gate for live is NOT branding
 //     approval by itself: the live entry is filled in only after that decision;
-//   - the staging "STG" artwork needs Paul's approval before any native build.
-// Today both apps fail by design: live is "not_approved", staging is "pending_review".
+//   - the staging "STG" artwork needed Paul's approval before any native build: approved 25 Nov 2026 (artwork only;
+//     not authorization to merge or build).
+// Today live fails by design ("not_approved"); staging passes with exactly the approved files.
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";

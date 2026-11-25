@@ -97,9 +97,9 @@ jobs:
 
       # Decisions 25 Nov: a build ships only the exact icon and splash files Paul approved, pinned by sha256 in
       # mobile/assets/artwork-approvals.json (never the Expo template; staging only from assets/staging/). The folder
-      # or "differs from the placeholder" proves nothing. Today both apps stop here: live is not_approved (final
-      # artwork waits for the branding decision; passing this check is not branding approval by itself), staging
-      # "STG" is pending_review.
+      # or "differs from the placeholder" proves nothing. Live stops here: not_approved (final artwork waits for the
+      # branding decision; passing this check is not branding approval by itself). Staging "STG": artwork approved
+      # 25 Nov 2026 (approval of the artwork only; every build still needs its own go).
       - name: Icon and splash are exactly the approved artwork for this app
         run: node scripts/check-store-artwork.mjs --app "${{ inputs.app }}"
 

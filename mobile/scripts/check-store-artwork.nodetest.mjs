@@ -32,16 +32,19 @@ test("live artwork that merely differs from the placeholder is NOT approved (dec
   assert.ok(p.includes("the live artwork is not approved (status: not_approved)"));
 });
 
-test("the STG staging artwork matches its pinned hashes exactly, but stays refused while pending review", () => {
+test("the STG staging artwork, approved by Paul on 25 Nov 2026, passes exactly as pinned", () => {
   const art = artworkOf(stagingConfig);
   assert.equal(art.length, 5);
-  assert.deepEqual(problems("staging", art, colorsOf(stagingConfig), hashOf, approvals),
-    ["the staging artwork is not approved (status: pending_review)"]);
+  assert.equal(approvals.staging.status, "approved");
+  assert.equal(approvals.staging.approvedBy, "Paul");
+  assert.equal(approvals.staging.approvedOn, "2026-11-25");
+  assert.deepEqual(problems("staging", art, colorsOf(stagingConfig), hashOf, approvals), []);
 });
 
-test("once approved (a reviewed change), exactly that artwork passes", () => {
-  const ok = { ...approvals, staging: approve(approvals.staging) };
-  assert.deepEqual(problems("staging", artworkOf(stagingConfig), colorsOf(stagingConfig), hashOf, ok), []);
+test("without the recorded approval the same artwork is refused", () => {
+  const pending = { ...approvals, staging: { ...approvals.staging, status: "pending_review", approvedBy: null, approvedOn: null } };
+  assert.deepEqual(problems("staging", artworkOf(stagingConfig), colorsOf(stagingConfig), hashOf, pending),
+    ["the staging artwork is not approved (status: pending_review)"]);
 });
 
 test("a different image under assets/staging/ fails even when approved: the folder proves nothing about the design", () => {
