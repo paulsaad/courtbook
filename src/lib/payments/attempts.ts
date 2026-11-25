@@ -91,6 +91,7 @@ export const SWEEP_MAX_LIMIT = 200;
  *    (record_attempt_result 'pending': only last_checked_at and checks move; nothing about money). attempts_to_check
  *    takes the least recently checked first, so without this the same `limit` unanswerable attempts would be picked
  *    on every run and every other attempt would wait for ever.
+ *  - The same for another provider's attempts (review 25 Nov): skipped and reported, but marked as looked at.
  */
 export async function sweepOpenAttempts(admin: Rpc, provider: PaymentProvider,
   opts: { minAgeSeconds: number; maxAgeHours: number; limit: number; now?: Date; deadline?: number }): Promise<SweepSummary> {
@@ -105,8 +106,16 @@ export async function sweepOpenAttempts(admin: Rpc, provider: PaymentProvider,
   const rows = data as { attempt_id: string; provider: string; created_at?: string }[];
   if (rows.length > limit) summary.more = true;
   for (const row of rows.slice(0, limit)) {
-    if (row.provider !== provider.name) { summary.skipped++; continue; }
     if (opts.deadline !== undefined && Date.now() > opts.deadline) { summary.failures.out_of_time = (summary.failures.out_of_time ?? 0) + 1; break; }
+    if (row.provider !== provider.name) {
+      // Another provider's attempt (left open by a provider switch): only its own provider can settle it, so it is not
+      // asked about, and it is reported (skipped → provider_mismatch). It is still marked as looked at now, exactly as an
+      // attempt the provider could not answer for: otherwise, never checked, it would stay at the head of the queue and
+      // `limit` of them would starve every attempt of the real provider for ever (review 25 Nov, gateway2 R12).
+      summary.skipped++;
+      await record(admin, { p_attempt: row.attempt_id, p_result: "pending" });
+      continue;
+    }
     summary.checked++;
     const r = await verifyAndRecord(admin, provider, row.attempt_id, { createdAt: row.created_at, now: opts.now });
     const bucket = r.ok ? summary.outcomes : summary.failures;

@@ -72,7 +72,10 @@ describe("sweepOpenAttempts", () => {
     const p = provider({ [A1]: { state: "succeeded", evidence: { providerRef: "W-9", amount: 1, currency: "USD" } }, [A3]: { state: "expired" } });
     const s = await sweepOpenAttempts(db, p, { minAgeSeconds: 120, maxAgeHours: 48, limit: 50 });
     expect(calls[0]).toEqual({ fn: "attempts_to_check", args: { p_min_age: "120 seconds", p_max_age: "48 hours", p_limit: 51 } });   // one more than the limit: is there a backlog? (M12.3)
-    expect(recorded).toEqual([A1, A3]);
+    // the other provider's attempt is never asked about, only marked as looked at ('pending': last_checked_at, nothing
+    // about money), so it rotates out of the head of the queue (review 25 Nov; gateway2 R12)
+    expect(recorded).toEqual([A1, A2, A3]);
+    expect(calls.filter((c) => c.args?.p_attempt === A2).map((c) => c.args?.p_result)).toEqual(["pending"]);
     expect(s).toEqual({ checked: 2, skipped: 1, outcomes: { late: 1, expired: 1 }, failures: {} });
   });
   it("running it twice asks twice; the database decides it is the same charge (already_recorded)", async () => {
