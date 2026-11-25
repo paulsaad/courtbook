@@ -205,7 +205,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
       {/* phones (W3): court names stay in view while the page scrolls; they follow the grid's sideways scroll */}
       <div ref={namesRef} aria-hidden="true" data-testid="court-names" className="sticky top-0 z-[9] overflow-hidden bg-paper pl-0 pr-2 pt-2 lg:hidden">
         <div className="flex min-w-max">
-          <div className="sticky left-0 z-10 w-[3.5rem] shrink-0 bg-paper lg:w-12" />
+          <div className="sticky left-0 z-10 w-[3.75rem] shrink-0 bg-paper lg:w-12" />
           <div className="grid flex-1 gap-x-1.5" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(6.5rem, 1fr))` }}>
             {courts.map((c) => courtHead(c, "min-h-9"))}
           </div>
@@ -214,7 +214,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
       <div className={`flex-1 overflow-x-auto pb-28 pl-0 pr-2 lg:pl-2 lg:pt-2 ${known ? "" : "opacity-60"}`} onScroll={(e) => { if (namesRef.current) namesRef.current.scrollLeft = e.currentTarget.scrollLeft; }}>
         <div className="flex min-w-max">
           {/* time axis: pinned on the left while the courts scroll sideways */}
-          <div className="sticky left-0 z-[8] w-[3.5rem] shrink-0 bg-paper lg:mt-9 lg:w-12" style={{ height: times.length * ROW_PX }}>
+          <div className="sticky left-0 z-[8] w-[3.75rem] shrink-0 bg-paper lg:mt-9 lg:w-12" style={{ height: times.length * ROW_PX }}>
             {times.map((t, i) => i % labelEvery === 0 && <div key={t} className="absolute right-1.5 -translate-y-1/2 whitespace-nowrap text-xs text-muted lg:right-2" style={{ top: i * ROW_PX }}>{t}</div>)}
           </div>
           <div className="grid flex-1 gap-x-1.5" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(6.5rem, 1fr))` }}>

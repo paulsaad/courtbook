@@ -718,7 +718,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
           <div ref={namesRef} aria-hidden="true" data-testid="court-names" className="overflow-hidden pl-0 pr-2 lg:hidden">
             <div className="flex min-w-max">
               {/* covers the names as they scroll left, like the time column below it */}
-              <div className="sticky left-0 z-10 w-[3.5rem] shrink-0 bg-paper" />
+              <div className="sticky left-0 z-10 w-[3.75rem] shrink-0 bg-paper" />
               <div className="grid flex-1 gap-x-1.5 [--col-min:7rem]" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(var(--col-min), 1fr))` }}>
                 {courts.map((c) => courtHead(c, "min-h-9"))}
               </div>
@@ -769,7 +769,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
             {/* time axis: pinned on the left while the courts scroll sideways (S2); on phones it starts level with the
                 first row, because the court names are in the header. z-[8]: above bookings (≤ z-[6]), below the
                 sticky header (z-10) and the sheets (z-20) */}
-            <div className="sticky left-0 z-[8] w-[3.5rem] shrink-0 bg-paper lg:z-20 lg:mt-9 lg:w-14" style={{ height: times.length * ROW_PX }}>
+            <div className="sticky left-0 z-[8] w-[3.75rem] shrink-0 bg-paper lg:z-20 lg:mt-9 lg:w-14" style={{ height: times.length * ROW_PX }}>
               {times.map((t, i) => i % labelEvery === 0 && (
                 <div key={t} className="absolute right-1.5 -translate-y-1/2 whitespace-nowrap text-xs text-muted lg:right-2 lg:text-[13px]" style={{ top: i * ROW_PX }}>{t}</div>
               ))}
