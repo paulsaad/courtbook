@@ -72,24 +72,39 @@ async function record(admin: Rpc, args: Record<string, unknown>): Promise<Record
   return { ok: true, outcome: String(res.data) };
 }
 
-/** `skipped`: open attempts of another provider than this runner's — never silently ignored (the run reports them). */
-export type SweepSummary = { checked: number; skipped: number; outcomes: Record<string, number>; failures: Record<string, number> };
+/** `skipped`: open attempts of another provider than this runner's — never silently ignored (the run reports them).
+ *  `more` (M12.3): more attempts were waiting than this run could ask about — the run is not complete. */
+export type SweepSummary = { checked: number; skipped: number; more?: boolean; outcomes: Record<string, number>; failures: Record<string, number> };
+
+/** attempts_to_check (0093) returns at most this many rows per call. */
+export const SWEEP_MAX_LIMIT = 200;
 
 /**
  * The sweeper: attempts still open after `minAgeSeconds` (the player never came back, the callback never came, or it
  * was lost) are asked about again. Safe to run as often as wanted and alongside callbacks: every result goes through
  * the same idempotent function. Attempts of another provider than the configured one are left alone.
+ *
+ * M12.3:
+ *  - One more row than `limit` is asked for. If it exists, more attempts are waiting than this run handles: `more` is
+ *    set and the run reports it, instead of claiming everything was checked.
+ *  - An attempt the provider could not answer for (outage, timeout, malformed answer) is still recorded as checked now
+ *    (record_attempt_result 'pending': only last_checked_at and checks move; nothing about money). attempts_to_check
+ *    takes the least recently checked first, so without this the same `limit` unanswerable attempts would be picked
+ *    on every run and every other attempt would wait for ever.
  */
 export async function sweepOpenAttempts(admin: Rpc, provider: PaymentProvider,
   opts: { minAgeSeconds: number; maxAgeHours: number; limit: number; now?: Date; deadline?: number }): Promise<SweepSummary> {
   const summary: SweepSummary = { checked: 0, skipped: 0, outcomes: {}, failures: {} };
+  const limit = Math.max(1, Math.min(Math.floor(opts.limit), SWEEP_MAX_LIMIT - 1));
   const { data, error } = await admin.rpc("attempts_to_check", {
     p_min_age: `${Math.max(0, Math.floor(opts.minAgeSeconds))} seconds`,
     p_max_age: `${Math.max(1, Math.floor(opts.maxAgeHours))} hours`,
-    p_limit: opts.limit,
+    p_limit: limit + 1,
   });
   if (error || !Array.isArray(data)) { summary.failures.list = 1; return summary; }
-  for (const row of data as { attempt_id: string; provider: string; created_at?: string }[]) {
+  const rows = data as { attempt_id: string; provider: string; created_at?: string }[];
+  if (rows.length > limit) summary.more = true;
+  for (const row of rows.slice(0, limit)) {
     if (row.provider !== provider.name) { summary.skipped++; continue; }
     if (opts.deadline !== undefined && Date.now() > opts.deadline) { summary.failures.out_of_time = (summary.failures.out_of_time ?? 0) + 1; break; }
     summary.checked++;
@@ -97,6 +112,7 @@ export async function sweepOpenAttempts(admin: Rpc, provider: PaymentProvider,
     const bucket = r.ok ? summary.outcomes : summary.failures;
     const key = r.ok ? r.outcome : r.code;
     bucket[key] = (bucket[key] ?? 0) + 1;
+    if (!r.ok && r.code === "provider_unavailable") await record(admin, { p_attempt: row.attempt_id, p_result: "pending" });
   }
   return summary;
 }

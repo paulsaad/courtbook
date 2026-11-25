@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { bearerMatches } from "@/lib/deletion/request";
 import { report } from "@/lib/report";
-import { getProvider } from "@/lib/payments";
+import { getProvider, paymentConfigProblem } from "@/lib/payments";
 import { runPaymentReconciliation } from "@/lib/payments/reconcile";
 
 /**
@@ -33,8 +33,13 @@ async function run(request: Request) {
     await report("paymentReconcile", "payment", { code: "run" });
     return NextResponse.json({ error: "failed" }, { status: 500 });
   }
+  // M12.3: an incoherent payment configuration (an unknown provider name, the unimplemented Whish adapter) is a problem
+  // on every run, named by code — never a quiet fallback.
+  const config = paymentConfigProblem();
+  if (config) summary.problems.push(`config_${config}`);
   for (const p of summary.problems) await report(p === "conflicts" ? "paymentConflict" : "paymentReconcile", "payment", { code: p });
   const body = {
+    coverage: summary.coverage,
     checked: summary.sweep.checked, skipped: summary.sweep.skipped, outcomes: summary.sweep.outcomes, sweepFailures: summary.sweep.failures,
     health: summary.health ? { otherProviderAttempts: summary.health.other_provider_attempts, overdueAttempts: summary.health.overdue_attempts, openIssues: summary.health.open_issues } : null,
     window: summary.window ? { advanced: summary.window.advanced } : null,
