@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { report } from "@/lib/report";
-import { getProvider } from "@/lib/payments";
+import { getProvider, chargeCoverage } from "@/lib/payments";
 import { PaymentStartRefused } from "@/lib/payments/provider";
 import { paymentCode, recordEvidence, verifyAndRecord } from "@/lib/payments/attempts";
 import { attemptReturnUrl, isSafeRedirect, isUuid, paymentSiteOrigin, providerCallbackUrl } from "@/lib/payments/urls";
@@ -108,6 +108,9 @@ export async function POST(request: Request) {
   const provider = getProvider();
   const abandon = async (why: string) => { await admin.rpc("abandon_payment_attempt", { p_attempt: a.attempt_id, p_note: why }); };
   if (a.provider !== provider.name) { await abandon("provider not configured on this deployment"); return fail("payments_not_configured", 503); }
+  // review 25 Nov: real money needs charge-level reconciliation (the provider's own charge list) or an approved
+  // alternative; without it no payment starts (getProvider's gate refuses too — this says why, as a configuration code)
+  if (chargeCoverage(provider) === "missing") { await abandon("no charge-level reconciliation for this provider"); return fail("payments_not_configured", 503); }
 
   const origin = paymentSiteOrigin();
   if (!origin && provider.name !== "simulated") { await abandon("PAYMENT_SITE_URL not configured"); return fail("payments_not_configured", 503); }

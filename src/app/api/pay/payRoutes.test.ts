@@ -52,9 +52,11 @@ const provider = {
   callbackAttemptId: vi.fn() as ((r: Request) => Promise<string | null>) | undefined,
   start: vi.fn(), verify: vi.fn(), refund: vi.fn(),
 };
+let coverage: "full" | "simulated" | "approved_attempts_only" | "missing" = "full";
 vi.mock("@/lib/payments", () => ({
   getProvider: () => provider,
   providerNamed: (n: string) => (n === provider.name ? provider : null),
+  chargeCoverage: () => coverage,
 }));
 
 const { PaymentStartRefused } = await import("@/lib/payments/provider");
@@ -118,6 +120,16 @@ describe("POST /api/pay/start", () => {
     expect(res.status).toBe(503);
     expect(provider.startAttempt).not.toHaveBeenCalled();
     expect(serviceCalls()).toEqual(["abandon_payment_attempt"]);
+  });
+  it("review 25 Nov: a real provider without charge-level reconciliation (no charge list, no approved alternative) starts nothing: 503, the attempt closed, the provider never called", async () => {
+    userRpc.start_payment_attempt = attempt();
+    coverage = "missing";
+    try {
+      const res = await start.POST(post("/api/pay/start", { paymentId: PAY, requestKey: KEY }));
+      expect([res.status, (await res.json()).error]).toEqual([503, "payments_not_configured"]);
+      expect(provider.startAttempt).not.toHaveBeenCalled();
+      expect(serviceCalls()).toEqual(["abandon_payment_attempt"]);
+    } finally { coverage = "full"; }
   });
   it("a provider that definitely refused: attempt closed, a final fixed code, nothing of the provider's text", async () => {
     userRpc.start_payment_attempt = attempt({ attempt_no: 2 });

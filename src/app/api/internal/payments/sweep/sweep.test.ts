@@ -10,7 +10,9 @@ vi.mock("@/lib/report", () => ({ report: async (...a: unknown[]) => { reported.p
 const { FakeGateway } = await import("@/lib/payments/testing/fakeGateway");
 const gateway = new FakeGateway(() => Date.now());
 let configProblem: string | null = null;
-vi.mock("@/lib/payments", () => ({ getProvider: () => gateway, paymentConfigProblem: () => configProblem }));
+let approval: string | null = null;
+let current: typeof gateway | Record<string, unknown> = gateway;
+vi.mock("@/lib/payments", () => ({ getProvider: () => current, paymentConfigProblem: () => configProblem, attemptsOnlyApproval: () => approval }));
 const route = await import("./route");
 
 const SECRET = "s".repeat(40);
@@ -39,6 +41,23 @@ describe("GET /api/internal/payments/sweep", () => {
     expect(body).toEqual({ coverage: "full", checked: 1, skipped: 0, outcomes: { pending: 1 }, sweepFailures: {}, health: { otherProviderAttempts: 0, overdueAttempts: 0, openIssues: 0 },
       window: { advanced: true }, charges: { seen: 1, outcomes: { unmatched: 1 }, conflicts: 0, failures: {} } });
     expect(JSON.stringify(body)).not.toMatch(/0d000000|G-\d|X-\d/);
+  });
+  it("review 25 Nov: a real provider without its own charge list fails every run (500, reported) unless an approved alternative is configured; then 200 with a warning", async () => {
+    const noList = { ...gateway, name: "whish", listCharges: undefined, attemptStatus: gateway.attemptStatus.bind(gateway), startAttempt: gateway.startAttempt.bind(gateway) };
+    current = noList;
+    try {
+      const res = await route.GET(req(`Bearer ${SECRET}`));
+      const body = await res.json();
+      expect([res.status, body.coverage, body.problems]).toEqual([500, "attempts_only", ["coverage_attempts_only"]]);
+      expect(reported).toContainEqual(["paymentReconcile", "payment", { code: "coverage_attempts_only" }]);
+      approval = "approval-ref-2026-12-01";
+      reported.length = 0;
+      const ok = await route.GET(req(`Bearer ${SECRET}`));
+      const okBody = await ok.json();
+      expect([ok.status, okBody.warnings, okBody.problems]).toEqual([200, ["coverage_attempts_only_approved"], undefined]);
+      expect(JSON.stringify(okBody)).not.toContain("approval-ref");                 // the reference is not echoed
+      expect(reported).toEqual([]);
+    } finally { current = gateway; approval = null; }
   });
   it("M12.3: an incoherent payment configuration is a problem on every run, by code (500), even when everything else is clean", async () => {
     answers.attempts_to_check = () => ({ data: [] });
