@@ -37,8 +37,11 @@ server (closeAppleAccount):
      c. apple only: exchange the code → verify the id_token → sub must be one of (a)
                                                                     any failure → nothing closed
      d. close_my_account as the person (the database decides; any refusal → nothing revoked)
-     e. the existing deletion processing (B–E), unchanged
-     f. apple: revoke → failure = alert "appleRevokeFailed", still closed       fallback: alert "appleRevocationSkipped"
+        answer lost (timeout, thrown error)? → the account's deletion record decides:
+          closed → continue · not closed → nothing changed · unreadable → "close_result_unknown" + alert, no revoke
+     e. apple: revoke AT ONCE → failure = alert "appleRevokeFailed", still closed   fallback: alert "appleRevocationSkipped"
+     f. the outcome is marked on the sign-in record (app_metadata.apple_revocation), best effort
+     g. the existing deletion processing (B–E), unchanged; it may be slow or time out: the revocation is already done
 ```
 
 E1-b: the server never grants recency. A confirmation with Apple counts only because step 1 is a real Supabase
@@ -56,11 +59,22 @@ fallback) satisfies the same rule in the same way.
 | Apple down (exchange or keys) | `apple_unavailable`; the app offers the fallback | no | no | — |
 | Staff, admin, processing paused | the database's code | no | no | — |
 | Revocation fails after closing | `closed, revocation failed` | yes | no | `appleRevokeFailed` |
-| Processing fails after closing | `closed`; revocation still runs | yes | yes | (the pipeline records its own failure) |
+| Processing fails or hangs after closing | `closed`; the revocation already ran before it | yes | yes | (the pipeline records its own failure) |
+| Closure answer lost, record says closed | `closed, revocation done` | yes | yes | — |
+| Closure answer lost, record says not closed | `failed` (definite) | no | no | — |
+| Closure answer lost, record unreadable | `close_result_unknown` (never "nothing changed") | unknown | no | `appleCloseResultUnknown` |
 | Fallback | `closed, revocation skipped` | yes | no | `appleRevocationSkipped` |
 
 Tokens: the refresh token (or the access token if Apple returns no refresh token) exists only in memory during the
 request, inside `AppleToken`, which prints and serialises as `[apple token]`. Nothing about Apple is stored.
+
+## Second review (25 Nov), and how it is handled
+
+| # | Point | How |
+| --- | --- | --- |
+| 1 | Revoke right after a successful closure, before the potentially long processing; deletion continues regardless | Order is now close → revoke → mark → process. A test shows a processing step that never returns cannot stop the revocation (it has already happened) |
+| 2 | Ambiguous `close_my_account` result | A thrown error or a lost answer is "unknown", not "failed". The account's deletion record then decides (`closureFromRecords`: closing, closed, held, data_removed, done = closed; an old app's `requested` = not closed). Closed → revoke and continue. Not closed → definitely nothing changed. Unreadable → `close_result_unknown` with an alert, and no revocation. **Regression test: a committed closure with a lost response, then revoke and process** |
+| — | Older app versions bypassing the new flow | `processDeletion` (pipeline) has an optional hook that runs before D, while the sign-in record still exists. An Apple-linked sign-in with no recorded outcome raises `appleRevocationSkipped` once and is marked. It is limited to 3 s, and failures are ignored, so D is never delayed beyond that or blocked. **The hook is not in `serviceDeps()` yet (unwired)** |
 
 ## Tests (no network; fake Apple)
 
@@ -95,9 +109,8 @@ request, inside `AppleToken`, which prints and serialises as `[apple token]`. No
 2. **The app's deletion screen for Apple accounts**: the Apple sheet, the Supabase sign-in, the call, the fallback
    offer, and the "remove CourtBook in Settings → Apple ID → Sign in with Apple" text after a skipped or failed
    revocation. JavaScript only, so it can go over the air.
-3. **Old app versions.** They close Apple accounts through the existing direct path, with no revocation. Proposal:
-   the deletion processing raises `appleRevocationSkipped` when it deletes a sign-in that has an Apple identity and no
-   recorded revocation.
+3. **Old app versions:** the pipeline hook is built and tested. Wiring it into `serviceDeps()` goes with the route:
+   read the user with the admin API, `appleLinkState()`, alert, and set the mark.
 4. **Alert routing** into the existing monitoring (W2a).
 5. **Company credentials** at release, set by Paul or the Apple account holder, never in chat. Then one real
    revocation with a test Apple ID on staging (separate approval).

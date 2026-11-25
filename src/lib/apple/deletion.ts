@@ -12,16 +12,30 @@ import type { AppleToken, ExchangeResult, RevokeResult, VerifyResult } from "./r
  *    'reauth_required' unless the session's sign-in is within 10 minutes). For an Apple confirmation to count, the app
  *    signs in to Supabase again with the fresh Apple identity token (Supabase verifies it and issues a new session);
  *    this module only checks recency first, read-only, so Apple is not contacted for a request that would be refused.
- *  - Order (point 2): verify the Apple identity → close (the existing rules, unchanged) → the existing deletion
- *    processing → revoke. Nothing is closed unless the Apple step succeeded; nothing is revoked unless the account
- *    was closed.
+ *  - Order (point 2; second review 25 Nov): verify the Apple identity → close (the existing rules, unchanged) →
+ *    revoke AT ONCE → the existing deletion processing. The token exists only in this request, so the revocation is
+ *    attempted before the processing, which can be slow or time out. Nothing is closed unless the Apple step
+ *    succeeded; nothing is revoked unless the closure is confirmed; the deletion continues whatever the revocation does.
+ *  - An ambiguous closure (second review): close_my_account may have committed even though its answer was lost (a
+ *    timeout, a dropped connection, a thrown error). Then the account's deletion record decides: closed → continue
+ *    (revoke, process); not closed → nothing changed, safely; still unknown → "close_result_unknown" and an alert,
+ *    never "nothing changed", and no revocation (it is attempted only for a confirmed closure).
  *  - E1-c / point 3: once closed, a revocation failure never undoes or blocks the deletion; it raises an alert. When
  *    Apple cannot be used at all (cancelled, unavailable, misconfigured), the person can still delete with the
  *    existing email-code confirmation ("fallback"); the account is closed by the same database rules, revocation is
  *    recorded as skipped with an alert, and the app tells them how to remove CourtBook from their Apple ID settings.
  */
 
-export type CloseOutcome = { ok: true } | { ok: false; code: string };
+/** ok:false = a definite answer from the database (its refusal or error: nothing committed). A thrown error or
+ *  ok:"unknown" = the answer was lost; the closure may or may not have committed. */
+export type CloseOutcome = { ok: true } | { ok: false; code: string } | { ok: "unknown" };
+
+/** Closed states of an account_deletions record (0086). 'requested' (an old app's unconfirmed request) is not closed. */
+export const CLOSED_STATES = ["closing", "closed", "held", "data_removed", "done"] as const;
+/** From the account's deletion records, read server-side (service key) by subject id. */
+export function closureFromRecords(rows: { status?: unknown }[] | null | undefined): "closed" | "open" {
+  return (rows ?? []).some((r) => (CLOSED_STATES as readonly unknown[]).includes(r?.status)) ? "closed" : "open";
+}
 
 export type AppleDeletionDeps = {
   /** Apple user ids on the signed-in account's identities (provider "apple"), read server-side. null: lookup failed. */
@@ -32,10 +46,14 @@ export type AppleDeletionDeps = {
   verify: (idToken: string) => Promise<VerifyResult>;
   /** close_my_account as the signed-in person: every existing rule applies (recent sign-in, staff/admin, processing). */
   close: () => Promise<CloseOutcome>;
+  /** After an ambiguous close: is the account closed now? From its deletion record (closureFromRecords). null: unknown. */
+  closureStatus: () => Promise<"closed" | "open" | null>;
+  /** Marks the sign-in record with the revocation outcome, so the deletion processing does not alert again. Best effort. */
+  markRevocation: (outcome: "done" | "failed" | "skipped") => Promise<void>;
   /** The existing deletion processing (B–E). It records its own failures; a throw here changes nothing below. */
   process: () => Promise<void>;
   revoke: (token: AppleToken) => Promise<RevokeResult>;
-  alert: (event: "appleRevokeFailed" | "appleRevocationSkipped" | "appleIdentityRejected", code: string) => Promise<void>;
+  alert: (event: "appleRevokeFailed" | "appleRevocationSkipped" | "appleIdentityRejected" | "appleCloseResultUnknown", code: string) => Promise<void>;
 };
 
 /** What the app sends. Deliberately no Apple user id: the expected identity is never client-supplied. */
@@ -43,7 +61,8 @@ export type AppleDeletionInput = { method: "apple"; code: string } | { method: "
 
 export type AppleDeletionResult =
   | { closed: true; revocation: "done" | "failed" | "skipped" }
-  | { closed: false; code: string };
+  | { closed: false; code: string }                            // definite: nothing changed
+  | { closed: "unknown"; code: "close_result_unknown" };       // the closure may have happened: never "nothing changed"
 
 export async function closeAppleAccount(input: AppleDeletionInput, deps: AppleDeletionDeps): Promise<AppleDeletionResult> {
   const method = input?.method === "apple" ? "apple" : input?.method === "fallback" ? "fallback" : null;
@@ -74,20 +93,30 @@ export async function closeAppleAccount(input: AppleDeletionInput, deps: AppleDe
   }
 
   // the database decides; nothing about Apple can override its refusals
-  const closed = await deps.close().catch((): CloseOutcome => ({ ok: false, code: "failed" }));
-  if (!closed.ok) return { closed: false, code: closed.code };   // not closed → nothing revoked (the token is dropped)
-
-  // closed from here on, whatever happens next
-  await deps.process().catch(() => undefined);
-
-  if (!token) {
-    await deps.alert("appleRevocationSkipped", "fallback").catch(() => undefined);
-    return { closed: true, revocation: "skipped" };
+  const closed = await deps.close().catch((): CloseOutcome => ({ ok: "unknown" }));
+  if (closed.ok === false) return { closed: false, code: closed.code };   // a definite refusal: nothing revoked
+  if (closed.ok === "unknown") {
+    const now = await deps.closureStatus().catch(() => null);
+    if (now === "open") return { closed: false, code: "failed" };       // confirmed not closed: nothing changed
+    if (now !== "closed") {
+      await deps.alert("appleCloseResultUnknown", method).catch(() => undefined);
+      return { closed: "unknown", code: "close_result_unknown" };
+    }
   }
-  const r = await deps.revoke(token).catch((): RevokeResult => ({ ok: false, code: "apple_unavailable" }));
-  if (r.ok) return { closed: true, revocation: "done" };
-  await deps.alert("appleRevokeFailed", r.code).catch(() => undefined);
-  return { closed: true, revocation: "failed" };
+
+  // closed from here on, whatever happens next. Revoke first: the token lives only in this request.
+  let revocation: "done" | "failed" | "skipped";
+  if (!token) {
+    revocation = "skipped";
+    await deps.alert("appleRevocationSkipped", "fallback").catch(() => undefined);
+  } else {
+    const r = await deps.revoke(token).catch((): RevokeResult => ({ ok: false, code: "apple_unavailable" }));
+    revocation = r.ok ? "done" : "failed";
+    if (!r.ok) await deps.alert("appleRevokeFailed", r.code).catch(() => undefined);
+  }
+  await deps.markRevocation(revocation).catch(() => undefined);
+  await deps.process().catch(() => undefined);
+  return { closed: true, revocation };
 }
 
 type Identity = { provider?: unknown; provider_id?: unknown; identity_data?: { sub?: unknown } | null };
@@ -105,4 +134,13 @@ export function appleSubsFromUser(user: { identities?: Identity[] | null } | nul
     if (sub) out.add(sub);
   }
   return [...out];
+}
+
+/** The app_metadata key on the sign-in record holding the revocation outcome (it disappears with the record at D). */
+export const REVOCATION_MARK = "apple_revocation";
+
+/** For the deletion processing's check before D (pipeline AppleRevocationHook.state). */
+export function appleLinkState(user: { identities?: Identity[] | null; app_metadata?: Record<string, unknown> | null } | null | undefined):
+  { apple: boolean; marked: boolean } {
+  return { apple: appleSubsFromUser(user).length > 0, marked: typeof user?.app_metadata?.[REVOCATION_MARK] === "string" };
 }

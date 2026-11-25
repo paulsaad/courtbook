@@ -26,7 +26,32 @@ export type DeletionDeps = {
   rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<RpcResult>;
   banUser: (id: string) => PromiseLike<AuthResult>;
   deleteUser: (id: string) => PromiseLike<AuthResult>;
+  /** E1 (prepared, NOT in serviceDeps yet): before D removes the sign-in, notice an Apple-linked account whose Apple
+   *  tokens were not revoked (an older app closed it directly) and raise `appleRevocationSkipped`. Never blocks D. */
+  appleRevocation?: AppleRevocationHook;
 };
+
+export type AppleRevocationHook = {
+  /** The sign-in's Apple link and whether a revocation outcome is already recorded on it. null: could not read. */
+  state: (id: string) => Promise<{ apple: boolean; marked: boolean } | null>;
+  alert: (code: string) => Promise<void>;
+  /** Records that the skip was alerted, so a later run does not alert again. */
+  mark: (id: string) => Promise<void>;
+};
+/** The Apple check may take at most this long; then D goes ahead without it (review 25 Nov: never delay deletion). */
+export const APPLE_CHECK_MS = 3_000;
+
+async function noteAppleRevocation(subject: string, hook: AppleRevocationHook, ms = APPLE_CHECK_MS): Promise<void> {
+  const work = (async () => {
+    const st = await hook.state(subject);
+    if (!st || !st.apple || st.marked) return;
+    await hook.alert("old_app_or_direct_close");
+    await hook.mark(subject);
+  })().catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([work, new Promise<void>((r) => { timer = setTimeout(r, ms); })]);
+  clearTimeout(timer);
+}
 
 export type Outcome =
   | { result: "done" }
@@ -110,8 +135,9 @@ export async function processDeletion(subject: string, deps: DeletionDeps): Prom
     const data = await deps.rpc("delete_account_data", { p_subject: subject, p_cancel_only: false });
     if (data.error) return await fail("data", dbCode(data.error));
 
-    // D
+    // D (first, E1: notice an Apple link that was never revoked, while the sign-in record still exists; never blocks)
     stop = await renew("auth_delete"); if (stop) return stop;
+    if (deps.appleRevocation) await noteAppleRevocation(subject, deps.appleRevocation);
     const del = await deps.deleteUser(subject);
     if (del.error && !notFound(del.error)) return await fail("auth_delete", "failed");
 
