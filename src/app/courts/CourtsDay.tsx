@@ -73,6 +73,8 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
   const nearOn = near.status === "on";
   const view: Prefs = nearOn ? { ...prefs, gov: null, district: null, town: null, townName: null } : prefs;
   const [points, setPoints] = useState<Map<string, LatLng> | null>(null);
+  // the club points could not be read: the list is then not sorted, and must not say "Nearest first"
+  const [pointsFailed, setPointsFailed] = useState(false);
   const days = Array.from({ length: 15 }, (_, i) => shiftDate(today, i));
   const dayOf = (d: string) => new Date(`${d}T12:00:00+02:00`);
 
@@ -105,16 +107,17 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
   }, [loaded]);
   // the clubs' public map points, once, when Near me is on
   useEffect(() => {
-    if (near.status !== "on" || points) return;
+    if (near.status !== "on" || points || pointsFailed) return;
     let alive = true;
-    createClient().from("clubs").select("id, lat, lng").eq("active", true).then(({ data }) => {
+    createClient().from("clubs").select("id, lat, lng").eq("active", true).then(({ data, error }) => {
       if (!alive) return;
+      if (error || !data) { setPointsFailed(true); return; }
       const m = new Map<string, LatLng>();
       for (const r of (data ?? []) as { id: string; lat: unknown; lng: unknown }[]) { const p = clubPoint(r.lat, r.lng); if (p) m.set(r.id, p); }
       setPoints(m);
     });
     return () => { alive = false; };
-  }, [near.status, points]);
+  }, [near.status, points, pointsFailed]);
   useEffect(() => { stripRef.current?.querySelector<HTMLElement>("[data-on=true]")?.scrollIntoView({ inline: "center", block: "nearest" }); }, [date]);
   // keep the address bar honest without a navigation (refresh lands on the same day)
   useEffect(() => {
@@ -247,7 +250,13 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
         {typed && <button type="button" onClick={() => { setTyped(""); setQuery(""); }} aria-label="Clear" className="px-1 text-muted">✕</button>}
       </form>
       {query && <div className="px-5 pt-2 text-[13px] text-muted">Showing clubs matching “{query}”</div>}
-      {near.status === "on" && <div className="px-5 pt-2 text-[13px] text-muted">Nearest first. Distances are straight-line, not by road.</div>}
+      {near.status === "on" && points && <div className="px-5 pt-2 text-[13px] text-muted">Nearest first. Distances are straight-line, not by road.</div>}
+      {near.status === "on" && pointsFailed && (
+        <p className="mx-5 mt-2 flex items-center justify-between gap-2 rounded-xl bg-sand-soft px-3 py-2 text-sm">
+          Couldn&apos;t load club locations, so the list isn&apos;t sorted by distance.
+          <button type="button" onClick={() => setPointsFailed(false)} className="shrink-0 font-semibold underline">Try again</button>
+        </p>
+      )}
       {notice && <p className="mx-5 mt-3 flex items-center justify-between rounded-xl bg-sand-soft px-3 py-2 text-sm">{notice}<button onClick={() => setNotice(null)} aria-label="Dismiss" className="px-1 text-muted">✕</button></p>}
 
       <div className={`flex flex-col gap-3.5 px-5 pb-28 pt-3.5 ${busy || loading ? "opacity-60" : ""}`}>
