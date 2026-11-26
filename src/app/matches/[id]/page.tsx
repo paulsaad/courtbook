@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { playerGatePath } from "@/lib/playerGate";
 import { createClient } from "@/lib/supabase/server";
 import { allLoaded, loaded } from "@/lib/load";
+import { isMalformedId } from "@/lib/ids";
 import { nowMs } from "@/lib/time";
 import MatchActions from "./MatchActions";
 import MatchChat from "./MatchChat";
@@ -68,6 +69,7 @@ type DetailRow = Omit<MatchRow, "pending" | "organizer_id"> & { pending: number 
 // the board, exactly as before.
 async function loadMatch(supabase: Supa, id: string): Promise<{ m: MatchRow; tz: string | null } | null> {
   const detail = await supabase.rpc("match_detail", { p_match: id });
+  if (isMalformedId(detail.error)) return null;   // a malformed id names no game: Not found (as #78)
   if (!detail.error) {
     const d = ((detail.data ?? []) as DetailRow[])[0];
     if (!d) return null;
