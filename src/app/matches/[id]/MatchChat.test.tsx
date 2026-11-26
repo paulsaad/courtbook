@@ -116,7 +116,8 @@ describe("web chat: report and block", () => {
     fireEvent.click(screen.getByText("Block Sami"));
     const ask = screen.getByRole("alertdialog", { name: "Block Sami?" });
     expect(ask.textContent).toContain("They aren't told.");
-    expect(within(ask).getByText("See blocked players").getAttribute("href")).toBe("/profile/blocked");
+    expect(ask.textContent).toContain("You can unblock them in Blocked players.");
+    expect(within(ask).getByRole("link", { name: "Blocked players" }).getAttribute("href")).toBe("/profile/blocked");
     expect(ops()).toEqual([]);   // nothing happens before the confirmation
     fireEvent.click(within(ask).getByText("Block"));
     expect(await screen.findByText(/You blocked Sami\. You won't see their messages\./)).toBeTruthy();

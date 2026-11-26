@@ -21,8 +21,8 @@ export const REPORT_BLOCK_OFFER = "You can also block this player now.";
 export const REPORT_DANGER = "If anyone is in danger, contact the police or emergency services now.";
 
 export const BLOCKED_PATH = "/profile/blocked";
-/** The app's sentence, with "in Profile" replaced by the page the website has (linked next to it). */
-export const BLOCK_EXPLAINED = "You won't see their messages or games, and they can't join yours. They aren't told. You can unblock them in Blocked players.";
+/** The app's sentence; its "You can unblock them in Profile" is shown with a link to the website's page (SafetyConfirm). */
+export const BLOCK_EXPLAINED = "You won't see their messages or games, and they can't join yours. They aren't told.";
 export const UNBLOCK_EXPLAINED = "You'll see their messages and games again, and they can ask to join yours. They aren't told.";
 
 /**

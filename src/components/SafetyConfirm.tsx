@@ -30,7 +30,7 @@ export default function SafetyConfirm({ title, text, action, destructive, linkBl
     <div className="fixed inset-0 z-30 flex items-end bg-ink/45 lg:items-center lg:justify-center lg:p-6" onClick={() => { if (!busy) onClose(); }}>
       <section ref={ref} role="alertdialog" aria-modal="true" aria-label={title} className="sheet-enter w-full rounded-t-3xl bg-paper px-5 pt-5 shadow-2xl outline-none lg:max-w-md lg:rounded-3xl" style={{ paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom))" }} onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-semibold">{title}</h2>
-        <p className="mt-2 text-sm">{text}{linkBlocked && <> <Link href={BLOCKED_PATH} className="text-action underline">See blocked players</Link></>}</p>
+        <p className="mt-2 text-sm">{text}{linkBlocked && <> You can unblock them in <Link href={BLOCKED_PATH} className="text-action underline">Blocked players</Link>.</>}</p>
         {problem && <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{problem}</p>}
         <div className="mt-4 flex gap-2">
           <button type="button" onClick={onClose} disabled={busy} className="flex-1 rounded-xl border border-grid bg-white px-4 py-3 font-medium">Cancel</button>
