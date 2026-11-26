@@ -228,6 +228,77 @@ Run the guard on the exact commit before any push to `staging-web`.
 fast-forward of `staging-web`, because WP is built on WE). 0093 (#56) may come before or after WP. Rebuild with the
 same merge if needed, and compare `git rev-parse HEAD^{tree}` with the tree above before pushing.
 
+## 2c. The whole rollout to the A17 test, in order (prepared 26 Nov; nothing run; each step needs Paul's go)
+
+This is the one plan: steps A–E are §1 above, 0093 is `docs/ops/pilot-0093-staging.md`, and the Android build is
+`docs/ops/android-pilot-build.md` (#85). This section only adds the order, the checks before and after each step, and
+the parts no other document covered (WP deploy, the build and the install). Stop rules of §0 apply to every step.
+
+### Gate 0 — before anything (no action)
+
+- The trial's final evaluation (27 Nov, 17:55 UTC) is written and Paul has decided on it. The evaluation must cover
+  the fifth account `1ddfb189` and the missing Vercel execution records (checks 2, 5, 6). **Nothing below starts
+  before that.** M12 stays off staging (run everything from `staging-pilot-0093`, which has no M12).
+
+### Verified read-only on 26 Nov (re-verify on the day; any difference = stop and report)
+
+| Fact | Value on 26 Nov |
+| --- | --- |
+| `staging-web` (what the staging website runs) | `59a2f11` |
+| Workflow branch | `staging-pilot-0093` @ `30ff70c`: offers every action used below; no migration beyond 0093 |
+| 0087–0093 on the workflow branch | byte-identical to `int/pilot-26nov` `c863ea6` (all seven files) |
+| WB / WD / WE (local only, never pushed) | commits `6e499a5` / `afce917` / `b85b566`, trees `5ebad83` / `4343228` / `b734653`; each a fast-forward of `staging-web`; guard PASS |
+| WP (local only) | built by `staging-web-wp.sh origin/int/pilot-26nov`: tree **`2febb5f…`**, a fast-forward of `staging-web` through WE; guard PASS |
+| Secrets used (presence only; values never shown) | `STAGING_DB_URL` (in use 26 Nov by the trial checks); `EXPO_TOKEN`, `STAGING_SUPABASE_URL`, `STAGING_ANON_KEY`, `SENTRY_DSN`, `SENTRY_AUTH_TOKEN` (all non-empty in the last staging build, run 45154497268, 23 Nov). The secret list itself is not readable from the agent's environment |
+| Staging app signing key in EAS | `app.courtbook.mobile.staging`: JKS keystore created **2026-11-15T14:52:16Z**, default (printed by the 23 Nov build's credentials check) |
+
+### The steps
+
+| # | Step (workflow action, from `staging-pilot-0093`) | Before (read only) | After (read only) | Stop if |
+| --- | --- | --- | --- | --- |
+| A | §1 A: `check`, `rc87_preflight`, `coords_audit`, `m86_worker_check` | `check`: pending = 0087–0093 only; trial worker healthy | — | §1 A |
+| B | `apply` `0087 0088 0089` + deploy **WB** | A passed | §1 B checks; `m86_worker_check`; Vercel `deletion-retry` schedule **Enabled**; the next Sentry check-in arrives on time | §1 B |
+| C | `apply` `0090` | — | §1 C (`api` PASS) | §1 C |
+| D | `apply` `0091` + deploy **WD** | — | §1 D checks; worker checks as B | §1 D |
+| E | `apply` `0092` + deploy **WE** | — | postcheck "every required check ok"; §1 E browser checks; worker checks as B | §1 E (0092 stays applied if its postcheck fails) |
+| F | deploy **WP** (push the WP commit to `staging-web`; a fast-forward of WE) | Rebuild WP on the day; `git rev-parse HEAD^{tree}` = the tree recorded in §2b (or explain the difference); `staging-web-wp.sh --check <WP commit>` PASS; `staging-web` still at WE | Vercel deployment of that exact commit **Ready**; `deletion-retry` schedule Enabled; `m86_worker_check` heartbeat < 35 min; next Sentry check-in on time; browser: sign in, a club grid, Reserve at the desk, cancel, desk calendar walk-in and cancel (throwaway names) | Any worker check fails (redeploying WE needs Paul's go) |
+| G | 0093: `pilot-0093-staging.md` steps 0–5 | its step 0–1 | its steps 3–5 | its stop conditions |
+| H | Final read-only state | — | `check` (0001–0093 applied, nothing pending); `m86_worker_check`; `coords_audit` | anything unexpected |
+| I | **Android build**: GitHub → Actions → "Mobile build (Expo)" → from `int/pilot-26nov-staging`, app **staging**, platform **android** | The run's own first steps must print: `App: staging · EAS environment: development · channel: staging · database project: pwznauyioqykdwodwpvx`; the signing line for `app.courtbook.mobile.staging` with keystore **created 2026-11-15T14:52:16Z (default)**; tests, bundling, legal gate (warning mode) and STG artwork gate pass | On expo.dev, the build page shows: application id `app.courtbook.mobile.staging`, version **0.4.0**, version code **≥ 1**, channel **staging**, runtime 0.4.0 | A different keystore date or package; the database line names any other project; version code below 1 |
+| J | **Install on the A17** (Paul) | Note the installed app: CourtBook Staging 0.3.0 (build 1), runtime 0.3.0, channel staging | Profile/About shows 0.4.0, runtime 0.4.0, channel staging, still signed in; the two other CourtBook apps unchanged | Android says the app conflicts with an existing package: **do not uninstall**; report (it would mean a different signing key) |
+
+Then the "Galaxy A17 pilot acceptance checklist" steps 1–13 and the "club desk acceptance checklist" steps 1–9.
+
+### Why J upgrades in place and keeps the app's data (checked 26 Nov)
+
+- **Same package** `app.courtbook.mobile.staging` and **same signing key** (the only Android keystore EAS holds for it,
+  created 15 Nov, used by the 23 Nov build `88f8d7bc…` that the phone most likely runs). Android keeps an app's data
+  when a newer APK with the same package and key is installed over it.
+- **Version code:** `appVersionSource: remote` and the `staging` profile does not auto-increment, so the new build
+  reuses EAS's stored code (the phone shows build 1). Android refuses only a *lower* code; an equal one installs as an
+  update. Step I's after-check confirms it.
+- **What the app stores on the phone did not change:** the sign-in session storage (`lib/supabase.ts`,
+  `lib/secureStorage.ts`) is identical between the JavaScript the phone runs (update from `ed68d21`, published 23 Nov
+  19:11) and 0.4.0; the only stored key 0.4.0 adds is Nearby's `discovery_prefs_v1`. Expected: still signed in.
+- **Updates:** runtime follows the app version, so 0.4.0 ignores the 0.3.0 updates on the `staging` channel and starts
+  on its own built-in code. No update is published to `staging` for runtime 0.4.0 without a separate go.
+
+### Why the other CourtBook apps on the phone cannot be touched
+
+- **A different package is a different app on Android.** Only an APK with package `app.courtbook.mobile.staging`
+  can replace "CourtBook Staging". The live/test app is `app.courtbook.mobile` (its own key, created 21 Nov); a
+  website installed to the home screen is not an APK at all.
+- **Updates go by channel and runtime.** The staging build listens only to channel `staging`; the live/test-phone app
+  listens to `preview` (and store builds to `production`). Nothing in steps A–J publishes an update.
+- **The staging build changes only EAS's `development` environment** (the staging database URL and key, set from the
+  `STAGING_*` secrets). The live app's `preview` environment is not touched (`eas-app-env.sh`).
+
+### If J must be undone (only with Paul's go)
+
+Install the 23 Nov build `88f8d7bc…` again from expo.dev (same package, same key, same version code, so it installs
+over 0.4.0 and keeps the data). The database steps stay as they are (0087–0093 are forward-only on staging, except
+0093's own rollback in its procedure).
+
 ## 3. Evidence (local)
 
 - `.github/tests/staging-rc87-split-steps.sh`: this exact split, run with the workflow's own step scripts on a scratch
