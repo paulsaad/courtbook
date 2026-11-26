@@ -2,7 +2,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { createClient } from "@/lib/supabase/client";
+import { NOTICES_READ_EVENT } from "@/lib/noticeRead";
 import { IconBell, IconCalendar, IconCourt, IconHome, IconUser } from "./Icons";
 import { Wordmark } from "./Brand";
 
@@ -31,6 +33,18 @@ export const DESKTOP_LINKS = [
  * Player navigation. Phones and tablets (< 1024 px): the bottom tab bar, exactly as before (hidden on
  * staff/admin/auth/pay/coach routes and when signed out). Desktop (≥ 1024 px): a top bar instead.
  */
+/**
+ * H7 (Session B's round-3 handover): the desktop top bar was in the page after the content, so the first Tab landed
+ * in the content and "Skip to content" and the top navigation came last (WCAG 2.4.3). It is now placed in the
+ * layout's #top-nav slot, before #main, so keyboard and screen-reader order match what is shown. The phone bar
+ * stays after the content. Rendered only on the client (after the sign-in check), so the slot exists; without a
+ * slot (tests, other layouts) it stays where it was.
+ */
+function inTopSlot(bar: React.ReactElement) {
+  const slot = document.getElementById("top-nav");
+  return slot ? createPortal(bar, slot) : bar;
+}
+
 export default function TabBar() {
   const path = usePathname();
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
@@ -38,14 +52,21 @@ export default function TabBar() {
   useEffect(() => {
     const supabase = createClient();
     let alive = true;
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
+    const load = () => supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!alive) return;
       setSignedIn(!!user);
       if (!user) return;
       const { count } = await supabase.from("notifications").select("*", { count: "exact", head: true }).eq("profile_id", user.id).is("read_at", null);
-      if (alive) setUnread(count ?? 0);
-    });
-    return () => { alive = false; };
+      if (alive && typeof count === "number") setUnread(count);
+    }, () => {});
+    void load();
+    // H18: the count is also read again when the page is shown again (notices read or received on another device)
+    // and when a game page has just marked its notices read (H11; a #91 refresh keeps the same path). One head-only
+    // count per event; no polling.
+    const onVisible = () => { if (document.visibilityState === "visible") void load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener(NOTICES_READ_EVENT, load);
+    return () => { alive = false; document.removeEventListener("visibilitychange", onVisible); window.removeEventListener(NOTICES_READ_EVENT, load); };
   }, [path]);
   return (
     <>
@@ -68,7 +89,7 @@ export default function TabBar() {
           </div>
         </nav>
       )}
-      {signedIn !== null && !under(path, DESKTOP_HIDDEN) && <DesktopBar path={path} signedIn={signedIn} unread={unread} />}
+      {signedIn !== null && !under(path, DESKTOP_HIDDEN) && inTopSlot(<DesktopBar path={path} signedIn={signedIn} unread={unread} />)}
     </>
   );
 }
