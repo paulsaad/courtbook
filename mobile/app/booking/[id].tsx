@@ -114,10 +114,15 @@ export default function Booking() {
         {!payKnown ? (
           <TicketRow label="Payment" value={pay.isError ? "Couldn't load" : "Checking…"} note={pay.isError ? "Pull back and open the booking again" : undefined} />
         ) : deskLike ? (
-          <TicketRow label="Payment" value={`${money(price)} at the club`} note="Nothing was charged in the app" />
+          // N5 (as the website's H9, #93): only a confirmed booking is paid at the club; a cancelled, no-show or expired
+          // one has nothing to settle there
+          b.status === "confirmed"
+            ? <TicketRow label="Payment" value={`${money(price)} at the club`} note="Nothing was charged in the app" />
+            : <TicketRow label="Payment" value="Nothing was paid through CourtBook" />
         ) : feeOnly ? (
           <>
-            <TicketRow label="Court price" value={money(price)} note="Pay at the club" />
+            {/* N5, as at the desk: the court is paid at the club only while the booking is confirmed */}
+            {b.status === "confirmed" && <TicketRow label="Court price" value={money(price)} note="Pay at the club" />}
             <TicketRow label="CourtBook fee" value={feeLine(pay.data?.status, fee).value} note={feeLine(pay.data?.status, fee).note} />
           </>
         ) : (

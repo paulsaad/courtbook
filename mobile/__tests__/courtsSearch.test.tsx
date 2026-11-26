@@ -74,7 +74,8 @@ describe("Courts search", () => {
     await fireEvent(screen.getByTestId("courts-search-input"), "submitEditing");
     await waitFor(() => expect(queries()).toEqual([null, "beirut"]));
     await waitFor(() => expect(screen.queryByText("Tripoli Club")).toBeNull());
-    expect(screen.getByText("Beirut Club")).toBeTruthy();
+    // wait for the new list: under a loaded CI runner, Tripoli is gone while the list is still loading (flaked on #99)
+    expect(await screen.findByText("Beirut Club")).toBeTruthy();
     expect(screen.getByTestId("courts-search-note").props.children.join("")).toBe("Showing clubs matching “beirut”");
   });
 
