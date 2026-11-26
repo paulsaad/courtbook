@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { emailSafe } from "@/lib/emailSafe";
 
 /**
  * Best-effort email fan-out for in-app notifications. Called by the app after actions that
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
   const origin = new URL(request.url).origin;
   const transport = nodemailer.createTransport({ host: "smtp.gmail.com", port: 465, secure: true, auth: { user: smtpUser, pass: smtpPass } });
   const done: string[] = [];
-  for (const n of list) {
+  for (const n of list.map(emailSafe)) {
     try {
       await transport.sendMail({
         from: `CourtBook <${smtpUser}>`,
