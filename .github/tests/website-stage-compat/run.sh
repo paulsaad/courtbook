@@ -11,6 +11,8 @@
 # hand-resolved ones). controls.json are deliberately wrong calls that must be caught.
 #
 #   REPO_ROOT=$PWD bash .github/tests/website-stage-compat/run.sh 59a2f11:0089:0086 6e499a5:0089:0092 ...
+#   F1 (#101): its two move calls are resolved by name (see the python block). F1_SQL=1 also checks F1's 8-argument
+#   call: use it only at F1's own database step, with F1's SQL present at the stage checked.
 # Needs: local PostgreSQL (psql as the postgres user through sudo), node, and npm ci (for typescript).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd); root=${REPO_ROOT:-$(cd "$here/../../.." && pwd)}
@@ -40,10 +42,29 @@ for a in "$@"; do
   mkdir -p "$work/$ref"; git -C "$root" archive "$ref" src | tar -x -C "$work/$ref"
   REPO_ROOT=$root node "$here/extract.mjs" "$work/$ref/src" >"$work/$ref.raw.json"
   python3 - "$work/$ref.raw.json" "$here/manual.json" "$work/$ref.json" <<'PY'
-import json, sys
+import json, os, sys
 c = json.load(open(sys.argv[1])); man = json.load(open(sys.argv[2]))
-keep = [x for x in c if not ((x["kind"] == "rpc" and x["fn"] is None) or (x.get("unresolved") and x["kind"] == "rpc"
-        and x["fn"] in ("club_discovery", "open_matches", "post_match")) or any(o.get("unresolved") for o in x.get("ops", [])))]
+# F1 (#101) moves through moveBooking(db, args, seen): its two calls are not object literals, so they are resolved
+# here, and only in a website that has them (older websites are checked exactly as before):
+#   move_booking_priced(args)              0091's five arguments: the fallback, checked at every stage;
+#   move_booking_priced({...args,...seen}) F1's eight arguments: meant NOT to exist until F1's own SQL (the page then
+#                                          gets PGRST202 and falls back), so it is checked only when F1_SQL=1, in the
+#                                          one-off run at F1's own database step.
+F1_FALLBACK = ["p_booking", "p_court", "p_start", "p_end", "p_expected_price"]
+F1_CALL = F1_FALLBACK + ["p_seen_court", "p_seen_start", "p_seen_end"]
+def f1(x):
+    if not (x["kind"] == "rpc" and x["fn"] == "move_booking_priced" and x.get("unresolved")): return None
+    if x["unresolved"].startswith("not an object literal (args)"): return [dict(x, keys=F1_FALLBACK, unresolved=None, file=x["file"] + " (F1 fallback, resolved)")]
+    if x["unresolved"].startswith("spread or computed property (...seen)"):
+        return [dict(x, keys=F1_CALL, unresolved=None, file=x["file"] + " (F1 call, resolved)")] if os.environ.get("F1_SQL") == "1" else []
+    return None
+keep = []
+for x in c:
+    r = f1(x)
+    if r is not None: keep += r; continue
+    if not ((x["kind"] == "rpc" and x["fn"] is None) or (x.get("unresolved") and x["kind"] == "rpc"
+            and x["fn"] in ("club_discovery", "open_matches", "post_match")) or any(o.get("unresolved") for o in x.get("ops", []))):
+        keep.append(x)
 json.dump(keep + man, open(sys.argv[3], "w"))
 PY
   out=$(python3 "$here/check.py" "$work/$ref.json" "$s" "$r"); echo "$out"
