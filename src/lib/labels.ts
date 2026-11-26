@@ -1,11 +1,13 @@
 /**
- * Words for the database's codes on player screens: "padel" → "Padel", "beginner" → "Beginner".
- * Sport and level codes are lower-case words, so a capital first letter is their display name (the same
- * rule as the app's sportName). Unknown or empty codes are shown as they are.
+ * Words for the database's codes on player screens: "padel" → "Padel", "beginner" → "Beginner",
+ * "table_tennis" → "Table tennis". Sport and level codes are lower-case words joined by "_", so this is their
+ * display name — the same rule as the app's sportName (and the sports-catalogue draft #66). Empty stays empty.
  */
 export function codeLabel(code: string | null | undefined): string {
   if (!code) return "";
-  return code === "other" ? "Other" : code[0].toUpperCase() + code.slice(1);
+  if (code === "other") return "Other";
+  const words = code.replace(/_/g, " ");
+  return words[0].toUpperCase() + words.slice(1);
 }
 
 /** "padel, tennis" → "Padel, Tennis". */

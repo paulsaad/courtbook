@@ -7,6 +7,7 @@ describe("codes shown as words on player screens", () => {
     expect(codeLabel("beginner")).toBe("Beginner");
     expect(codeLabel("other")).toBe("Other");
   });
+  it("a code of two words (a sport added later)", () => expect(codeLabel("table_tennis")).toBe("Table tennis"));
   it("lists", () => {
     expect(codeList(["padel", "tennis"])).toBe("Padel, Tennis");
     expect(codeList(["beginner", "intermediate"])).toBe("Beginner, Intermediate");
