@@ -188,8 +188,8 @@ trees: compare with `git rev-parse <commit>^{tree}` before pushing.
 
 ### 2b. The approved pilot website on staging: WP (26 Nov, after Paul's integration approvals)
 
-Paul approved #73–#78 (with #81), #80, #82–#84, #86, #88–#98 for the pilot integration on 26 Nov:
-`int/pilot-26nov` @ `a098e10`. That is the website the pilot runs, so staging should carry it after WE.
+Paul approved #73–#78 (with #81), #80, #82–#84, #86, #88–#100 for the pilot integration on 26 Nov:
+`int/pilot-26nov` @ `c863ea6`. That is the website the pilot runs, so staging should carry it after WE.
 
 **Do not deploy `int/pilot-26nov-staging` to `staging-web`.** It does not contain `staging-web`'s deletion schedule (the
 cron in `vercel.json`, the Sentry check-ins in the retry route, `src/lib/deletion/monitor.ts`, the staging label in
@@ -198,7 +198,7 @@ own line instead:
 
 | Build | Merges | Result (local, not pushed) | Local results |
 | --- | --- | --- | --- |
-| **WP** | WE `b85b566` + `int/pilot-26nov` @ `a098e10` | **tree `32ca2da1be8e4de0a0ab48125777b22897d1cc32`** (commit ids differ per build) | tsc 0 · lint 0 errors · vitest **1005 passed** (1 skipped) · `next build` 0 |
+| **WP** | WE `b85b566` + `int/pilot-26nov` @ `c863ea6` | **tree `2febb5f2e15d1bcc1a0f7b87959a5c17be6a2f72`** (commit ids differ per build; website files identical to tree `32ca2da…`, only app files changed) | tsc 0 · lint 0 errors · vitest **1005 passed** (1 skipped) · `next build` 0 |
 
 **Build and guard:** `docs/ops/staging-web-wp.sh <pilot ref>` makes WP locally (never pushes). It resolves the one
 known test conflict and prints the tree. It refuses unless the schedule files are byte-identical to `staging-web`.
