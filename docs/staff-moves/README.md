@@ -56,6 +56,13 @@ These refusals are certain (the database answered), so "not saved" is true. New 
    signatures (`run.sh`, `staff_ops`, `fixes`, `races`, `m2`/`m86` deletion races, `audit`, `api/journey.mjs`,
    `staging_smoke.sh`, `staging_api.mjs`): today they run against 0001–0093, so they are left as they are.
 
+**Checked against real PostgREST 12.2.3** (`supabase/tests/api/f1_rollout.mjs`, 13/13, with the website's own
+`moveBooking`): before the change the fallback moves as today; with the change applied but PostgREST's schema cache
+not yet reloaded, a stale view still cannot move the booking (the fallback's 0091 call refuses `move_needs_reload`),
+and a fresh view is refused too until the cache reloads (a refusal, never an unchecked move; the desk refreshes and
+tries again); after the reload, stale views are refused `booking_changed_elsewhere` with no fallback, old pages'
+5- and 4-argument calls are refused, signed out and another club's desk are refused.
+
 A page opened before step 1 and still open after step 2 gets "Something went wrong. Refresh and try again." on a move
 (and the website reports it as unexpected). Refreshing fixes it.
 

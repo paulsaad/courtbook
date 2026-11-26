@@ -17,6 +17,7 @@ import { paymentsByBooking } from "@/lib/staffPayments";
 import { isNetworkFailure } from "@/lib/actionError";
 import { DESK_UNCONFIRMED, DESK_UNREACHABLE, deskStateShown, landed, type Reader } from "./landed";
 import { changedElsewhere, describeChange, type Current } from "./changed";
+import { moveBooking } from "./moveBooking";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string>;
   /** the address named a view or sport (then it is used as is, and remembered on desktop) */
@@ -66,22 +67,6 @@ async function withContacts(
   })) as unknown as Booking[];
   // the payment of each app booking (a failed read leaves it unknown, never "paid")
   return paymentsByBooking(supabase as never, out);
-}
-
-/**
- * F1: moves a booking only if it is still where this sheet saw it (the database compares under the booking's lock).
- * Rollout: this website goes live before the database change. Until the change is applied the database has only
- * 0091's call, and PostgREST answers PGRST202 ("no function with these arguments"); the page then makes 0091's call,
- * exactly as before. Once the change is applied, 0091's call refuses every move, so this fallback can never skip the
- * comparison. Remove it once the change is live on every database.
- */
-type MoveArgs = { p_booking: string; p_court: string; p_start: string; p_end: string; p_expected_price: number };
-type SeenArgs = { p_seen_court: string | null; p_seen_start: string; p_seen_end: string };
-async function moveBooking(args: MoveArgs, seen: SeenArgs) {
-  const db = createClient();
-  const r = await db.rpc("move_booking_priced", { ...args, ...seen });
-  if (r.error?.code === "PGRST202") return db.rpc("move_booking_priced", args);
-  return r;
 }
 
 export default function DayCalendar({ club, courts: allCourts, bookings: initialBookings, blocks: initialBlocks, date, view, sport, court: courtParam, loadFailed, sportNames, explicit = false, focusTime = null }: Props) {
@@ -627,7 +612,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                   // F1: what this sheet was opened with. The database moves the booking only if it is still there.
                   const seen = { court_id: sheet.booking.court_id, start_at: sheet.booking.start_at, end_at: sheet.booking.end_at };
                   // 0091: the price the desk was shown and confirmed; the database refuses if it is no longer right
-                  return run(() => moveBooking({ p_booking: id, p_court: courtId, p_start: s0, p_end: e0, p_expected_price: price },
+                  return run(() => moveBooking(createClient(), { p_booking: id, p_court: courtId, p_start: s0, p_end: e0, p_expected_price: price },
                     { p_seen_court: seen.court_id, p_seen_start: seen.start_at, p_seen_end: seen.end_at }),
                     undefined, { find: (db) => landed.moved(db, id, courtId, s0, e0), shows: `this booking on ${anyCourtName(courtId)} at ${hhmm(s0, club.timezone)}` },
                     async (message) => {
