@@ -16,12 +16,14 @@ let bookAnswers: { data: unknown; error: unknown }[] = [];
 const bookCalls: Record<string, unknown>[] = [];
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
+    // a signed-in player whose name and contact phone are complete (so #73's details check, when present, passes)
+    auth: { getUser: async () => ({ data: { user: { id: "me" } } }) },
     rpc: async (fn: string, args: Record<string, unknown>) => {
       if (fn !== "book_at_desk") return { data: 20, error: null };   // the price quote
       bookCalls.push(args);
       return bookAnswers.shift() ?? { data: [{ booking_id: "b1" }], error: null };
     },
-    from: () => { const b: Record<string, unknown> = {}; for (const m of ["select", "eq", "in", "gte", "lt", "gt", "order", "or", "not"]) b[m] = () => b; b.then = (r: (v: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(r); return b; },
+    from: () => { const b: Record<string, unknown> = {}; for (const m of ["select", "eq", "in", "gte", "lt", "gt", "order", "or", "not"]) b[m] = () => b; b.maybeSingle = async () => ({ data: { name: "Rana", phone: "+96170123456" }, error: null }); b.then = (r: (v: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(r); return b; },
   }),
 }));
 

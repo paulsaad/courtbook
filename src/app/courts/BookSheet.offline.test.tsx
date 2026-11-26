@@ -9,12 +9,14 @@ let bookAnswers: { data: unknown; error: unknown }[] = [];
 const bookCalls: Record<string, unknown>[] = [];
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
+    // a signed-in player whose name and contact phone are complete (so #73's details check, when present, passes)
+    auth: { getUser: async () => ({ data: { user: { id: "me" } } }) },
     rpc: async (fn: string, args: Record<string, unknown>) => {
       if (fn !== "book_at_desk") return { data: 20, error: null };
       bookCalls.push(args);
       return bookAnswers.shift() ?? { data: [{ booking_id: "b1" }], error: null };
     },
-    from: () => { const b: Record<string, unknown> = {}; for (const m of ["select", "eq"]) b[m] = () => b; b.single = async () => ({ data: { payment_mode: "at_desk" }, error: null }); return b; },
+    from: () => { const b: Record<string, unknown> = {}; for (const m of ["select", "eq"]) b[m] = () => b; b.maybeSingle = async () => ({ data: { name: "Rana", phone: "+96170123456" }, error: null }); b.single = async () => ({ data: { payment_mode: "at_desk" }, error: null }); return b; },
   }),
 }));
 import BookSheet from "./BookSheet";
