@@ -2,17 +2,20 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { clubLocalToUtc, dayBounds, hhmm, shiftDate, slotTimes, todayIn, toMin } from "@/lib/time";
 import { explainBookingError } from "@/lib/report";
 import { type Club, type Court } from "@/lib/types";
 import { readPrefs } from "@/lib/prefs";
-import { newToken, reserve as reserveSlot } from "@/lib/reserve";
+import { BOOKING_OFFLINE, newToken, reserve as reserveSlot } from "@/lib/reserve";
+import { selectionKey, tokenFor } from "@/lib/selection";
 import { useDialog } from "@/components/useDialog";
 import { bookingDurations } from "@/lib/durations";
+import { defaultLength } from "@/lib/labels";
 import { bookingPanelText } from "@/lib/fees";
+import { UNREADABLE, detailsPath, missingBeforeBooking } from "@/lib/playerDetails";
 
 export type Occ = { id?: string | null; court_id: string; start_at: string; end_at: string; status?: string; mine?: boolean; kind: "booking" | "block" };
 type ClubX = Club & { booking_window_days: number; service_fee_usd: number; location_url: string | null; hold_minutes: number };
@@ -54,6 +57,8 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
     const pickLen = lengths.filter((m) => m <= want).pop() ?? lengths[0] ?? club.slot_minutes;
     return Math.round(pickLen / club.slot_minutes);
   });
+  // a new pick starts at 1 h where the club allows it (Paul, 26 Nov; the app does the same), else at the shortest
+  const startSlots = Math.round(defaultLength(lengths, club.slot_minutes) / club.slot_minutes);
   const [notice, setNotice] = useState<string | null>(null);
   const namesRef = useRef<HTMLDivElement>(null);
   // quote: loading → ok(value) | error(message); Reserve needs ok
@@ -63,7 +68,8 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
   const [busy, setBusy] = useState(false);
   const dialogRef = useDialog<HTMLDivElement>(!!pick, () => setPick(null), { canClose: !busy, modal: false });
   const stripRef = useRef<HTMLDivElement>(null);
-  const tokenRef = useRef<string | null>(null);   // one token per attempt, reused if it is retried
+  const tokenRef = useRef<{ key: string; token: string } | null>(null);   // one token per selection, reused if that selection is retried
+  const inFlight = useRef(false);
 
   // remembered sport from Home, if this club has it
   useEffect(() => {
@@ -139,23 +145,50 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
     return () => { cancelled = true; };
   }, [pick, slots, date, club.timezone, club.slot_minutes, quoteTick]);
 
+  // The selection as of the latest render, so a details check that finishes later can see whether the player changed it.
+  const selKey = pick ? selectionKey(pick.courtId, clubLocalToUtc(date, pick.time, club.timezone), slots * club.slot_minutes) : "";
+  const latestKey = useRef(selKey);
+  useLayoutEffect(() => { latestKey.current = selKey; }, [selKey]);   // after each commit, before anything else can run
+
   async function reserve() {
+    // one Reserve at a time: a second tap can land before `busy` disables the button
+    if (inFlight.current) return;
     if (!pick || !known || quote.state !== "ok" || slots < minSlots || slots > maxSlotsHere) return;
-    const start = clubLocalToUtc(date, pick.time, club.timezone);
+    // Frozen at the tap: only this exact court, start and length may be booked, whatever happens meanwhile.
+    const sel = { courtId: pick.courtId, start: clubLocalToUtc(date, pick.time, club.timezone), minutes: slots * club.slot_minutes };
+    const key = selectionKey(sel.courtId, sel.start, sel.minutes);
+    const here = `/club/${club.slug}?at=${sel.start.toISOString()}&court=${sel.courtId}&dur=${sel.minutes}`;
     if (!signedIn) {
       // sign in, then come back with this slot selected
-      router.push(`/login?next=${encodeURIComponent(`/club/${club.slug}?at=${start.toISOString()}&court=${pick.courtId}&dur=${slots * club.slot_minutes}`)}`);
+      router.push(`/login?next=${encodeURIComponent(here)}`);
       return;
     }
+    inFlight.current = true;
+    let leaving = false;
     setBusy(true); setError(null);
-    const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
-    const token = tokenRef.current ?? (tokenRef.current = newToken());   // a retry must not take a second court
-    const r = await reserveSlot({ mode: club.payment_mode, clubId: club.id, courtId: pick.courtId, start, end, token });
-    if (!r.ok) { setBusy(false); setError(explainBookingError(r.message, r.code)); router.refresh(); return; }
-    router.push(r.value.href);
+    try {
+      // a first booking needs the player's name and contact phone (asked once); back here with this slot selected
+      const missing = await missingBeforeBooking(createClient());
+      // The player picked another time, court or length while the details were read: book nothing. The new
+      // selection is on screen with its own Reserve (the app does the same, #70).
+      if (latestKey.current !== key) return;
+      if (missing === "unreadable") { setError(UNREADABLE); return; }
+      if (missing.length) { leaving = true; router.push(detailsPath(here)); return; }
+      const token = tokenFor(tokenRef, key, newToken);   // a retry of this selection must not take a second court
+      const r = await reserveSlot({ mode: club.payment_mode, clubId: club.id, courtId: sel.courtId, start: sel.start,
+        end: new Date(sel.start.getTime() + sel.minutes * 60000), token });
+      // #75: offline, say so and stay; a refresh would fail too and replace the page (and the selection) with the
+      // browser's offline page. Retrying this same selection reuses its token, so it is safe.
+      if (!r.ok) { setError(explainBookingError(r.message, r.code, r.offline ? BOOKING_OFFLINE : undefined)); if (!r.offline) router.refresh(); return; }
+      leaving = true;
+      router.push(r.value.href);
+    } finally {
+      // leaving the page keeps Reserve off; otherwise it is free again for the selection on screen
+      if (!leaving) { inFlight.current = false; setBusy(false); }
+    }
   }
 
-  const changeDate = (d: string) => { setDate(d); setPick(null); setError(null); setNotice(null); tokenRef.current = null; };
+  const changeDate = (d: string) => { setDate(d); setPick(null); setError(null); setNotice(null); };
   const endLabel = (t: string, n: number) => { const m = toMin(t) + n * club.slot_minutes; return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; };
   // the app's words too (mobile/lib/courts.ts durationLabel): "30 min", "1 h", "1 h 30"
   const fmtDur = (m: number) => (m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60}`);
@@ -227,16 +260,18 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
                   const mine = myHoldAt(c.id, t);
                   if (mine) {
                     return (
-                      <button key={t} onClick={() => router.push(`/pay/${mine.id}`)} className="absolute inset-x-0 border-t border-dashed border-turf bg-turf-soft text-xs font-medium text-turf" style={{ top: i * ROW_PX, height: ROW_PX }}>
+                      <button key={t} onClick={() => router.push(`/pay/${mine.id}`)} aria-label={`${c.name}, ${t}, your hold: pay`} className="absolute inset-x-0 border-t border-dashed border-turf bg-turf-soft text-xs font-medium text-turf" style={{ top: i * ROW_PX, height: ROW_PX }}>
                         {i % labelEvery === 0 ? "Your hold · pay" : ""}
                       </button>
                     );
                   }
                   const selected = pick?.courtId === c.id && toMin(t) >= toMin(pick.time) && toMin(t) < toMin(pick.time) + slots * club.slot_minutes;
                   const bookable = known && !taken && !past && freeRun(c.id, t) >= minSlots;
+                  // a screen reader hears what the colour shows (axe "button-name"; the Courts sheet already names its times)
+                  const state = selected ? "selected" : taken ? "booked" : past ? "past" : !known ? "checking" : bookable ? "free" : "too short to book";
                   return (
-                    <button key={t} disabled={!bookable}
-                      onClick={() => { setPick({ courtId: c.id, time: t }); setSlots(Math.min(minSlots, freeRun(c.id, t))); setQuote({ state: "loading" }); setError(null); setNotice(null); }}
+                    <button key={t} disabled={!bookable} aria-label={`${c.name}, ${t}, ${state}`} aria-pressed={bookable ? selected : undefined}
+                      onClick={() => { setPick({ courtId: c.id, time: t }); setSlots(Math.min(startSlots, freeRun(c.id, t))); setQuote({ state: "loading" }); setError(null); setNotice(null); }}
                       className={`absolute inset-x-0 border-t text-xs first:border-t-0 ${i % labelEvery === 0 ? "border-grid" : "border-dashed border-grid/50"} ${
                         selected ? "bg-turf text-white" : taken ? "hatch bg-slate-soft text-muted" : past ? "bg-paper text-muted/60" : bookable ? "active:bg-turf-soft" : "text-muted/60"}`}
                       style={{ top: i * ROW_PX, height: ROW_PX }}>

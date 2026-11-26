@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from "react-native";
 import { PendingReservationBanner } from "../../components/PendingReservation";
 import { router, useLocalSearchParams } from "expo-router";
 import { hhmm } from "@shared/time";
@@ -24,7 +24,7 @@ import { areaKey, distanceLabel, sameArea, sortByDistance, type PlayingArea } fr
 import { locationNote } from "../../lib/nearby";
 import { useNearby } from "../../lib/deviceLocation";
 import { useAreaList, useClubPoints } from "../../lib/clubDirectory";
-import { color, font, radius, space } from "../../lib/theme";
+import { color, font, MAX_FONT_SCALE, radius, space, TOUCH } from "../../lib/theme";
 
 /**
  * Courts: which clubs have free times on a day, compared without opening each one (approved
@@ -64,7 +64,10 @@ export default function Courts() {
   // way to narrow the list (spec addendum R2). Not remembered anywhere.
   const govs = useAreaList(!userId);
   const saved = playing.data?.areas ?? [];
-  const q = useDaySlots(date, sport, browseArea);
+  // "Club or town" (the website's Courts search): typed, then searched on the keyboard's Search key
+  const [typed, setTyped] = useState("");
+  const [search, setSearch] = useState("");
+  const q = useDaySlots(date, sport, browseArea, search);
   const clubs = useMemo(() => clubsFromSlots(q.data ?? []), [q.data]);
   const free = clubs.filter((c) => c.starts.length > 0);
   // Near me: nearest first by straight-line distance; clubs without a map point keep their order after the others
@@ -112,6 +115,20 @@ export default function Courts() {
                 onPress={() => void near.toggle()} icon={<Icon name="compass" size={16} color={nearOn ? color.onDark : color.cedar} />} />
         </ScrollView>
         {note ? <Text variant="secondary" style={{ paddingHorizontal: space.lg }} testID="near-note">{note}</Text> : null}
+        <View style={styles.search} testID="courts-search">
+          <Icon name="search" size={18} color={color.muted} />
+          <TextInput
+            value={typed} onChangeText={setTyped} onSubmitEditing={() => setSearch(typed.trim())} returnKeyType="search" enterKeyHint="search"
+            placeholder="Club or town" placeholderTextColor={color.booked} accessibilityLabel="Search clubs or towns" autoCorrect={false}
+            maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.searchInput} testID="courts-search-input"
+          />
+          {typed ? (
+            <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => { setTyped(""); setSearch(""); }} style={styles.clear} testID="courts-search-clear">
+              <Icon name="close" size={18} color={color.muted} />
+            </Pressable>
+          ) : null}
+        </View>
+        {search ? <Text variant="secondary" style={{ paddingHorizontal: 20 }} testID="courts-search-note">Showing clubs matching “{search}”</Text> : null}
         <DateStrip days={days} selected={date} onSelect={setDate} />
       </View>
 
@@ -136,7 +153,11 @@ export default function Courts() {
       ) : q.isError && !q.data ? (
         <ErrorState error={q.error} onRetry={() => void q.refetch()} />
       ) : open.length === 0 ? (
-        <Empty title="Nothing free that day" body="Try another day or another sport." />
+        search ? (
+          <Empty title={`No free courts matching “${search}”`} body="Check the spelling, try another day, or clear the search." action="Clear search" onAction={() => { setTyped(""); setSearch(""); }} />
+        ) : (
+          <Empty title="Nothing free that day" body="Try another day or another sport." />
+        )
       ) : (
         <View style={styles.list}>
           {open.map((c) => <ClubCard key={c.id} club={c} date={date} sport={sport} cover={covers.data?.get(c.id) ?? null} userId={userId} km={c.km} />)}
@@ -214,6 +235,9 @@ const styles = StyleSheet.create({
   cardTopRow: { flexDirection: "row", alignItems: "flex-start" },
   filters: { backgroundColor: color.card, borderBottomWidth: 1, borderBottomColor: color.line, paddingTop: space.md, paddingBottom: space.md, gap: space.md },
   chips: { gap: 8, paddingHorizontal: 20 },
+  search: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 20, paddingLeft: 14, borderWidth: 1, borderColor: color.line, borderRadius: radius.pill, backgroundColor: color.card, minHeight: TOUCH },
+  searchInput: { flex: 1, minWidth: 0, fontFamily: font.regular, fontSize: 16, color: color.ink, paddingVertical: 8 },
+  clear: { width: TOUCH, height: TOUCH, alignItems: "center", justifyContent: "center" },
   summary: { paddingHorizontal: 20, paddingTop: space.lg, gap: 4 },
   list: { padding: 20, paddingTop: space.md, gap: 10 },
   card: { backgroundColor: color.card, borderRadius: radius.lg, borderWidth: 1, borderColor: color.line, padding: 14 },

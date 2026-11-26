@@ -12,6 +12,13 @@ import { createClient } from "@/lib/supabase/client";
  *  attempt by the caller and reused if the caller retries that same attempt. */
 export type Reserved = { bookingId: string; href: string };
 
+/** The phone could not reach CourtBook (no connection, or it dropped). Chrome, Safari and Firefox wording. */
+export const isNetworkFailure = (message: string | undefined) => /failed to fetch|load failed|networkerror|network request failed/i.test(message ?? "");
+export const BOOKING_OFFLINE = "Couldn't reach CourtBook. Check your connection and try again.";
+type Failed = { ok: false; message: string; code?: string; offline?: boolean };
+const failed = (error: { message: string; code?: string }): Failed =>
+  ({ ok: false, message: error.message, code: error.code, ...(isNetworkFailure(error.message) ? { offline: true } : {}) });
+
 export async function reserve(opts: {
   mode: string | null | undefined;
   clubId: string;
@@ -19,13 +26,13 @@ export async function reserve(opts: {
   start: Date;
   end: Date;
   token: string;
-}): Promise<{ ok: true; value: Reserved } | { ok: false; message: string; code?: string }> {
+}): Promise<{ ok: true; value: Reserved } | Failed> {
   const supabase = createClient();
   if (opts.mode === "at_desk") {
     const { data, error } = await supabase.rpc("book_at_desk", {
       p_court: opts.courtId, p_start: opts.start.toISOString(), p_end: opts.end.toISOString(), p_token: opts.token,
     });
-    if (error) return { ok: false, message: error.message, code: error.code };
+    if (error) return failed(error);
     const row = (Array.isArray(data) ? data[0] : data) as { booking_id: string };
     return { ok: true, value: { bookingId: row.booking_id, href: `/bookings/${row.booking_id}?new=1` } };
   }
@@ -33,7 +40,7 @@ export async function reserve(opts: {
   const { data, error } = await supabase.rpc("hold_slot", {
     p_club: opts.clubId, p_court: opts.courtId, p_start: opts.start.toISOString(), p_end: opts.end.toISOString(), p_token: opts.token,
   });
-  if (error) return { ok: false, message: error.message, code: error.code };
+  if (error) return failed(error);
   const row = (Array.isArray(data) ? data[0] : data) as { booking_id: string; payment_id: string | null };
   // no payment: a $0 fee at a fee_online club, confirmed already (0094)
   if (!row.payment_id) return { ok: true, value: { bookingId: row.booking_id, href: `/bookings/${row.booking_id}?new=1` } };

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { explainBookingError } from "@/lib/report";
+import { BOOKING_OFFLINE, isNetworkFailure } from "@/lib/reserve";
 
 /** `keptFee`: the CourtBook booking fee paid online at a fee_online club (M12.1). It is not refunded when the player
  *  cancels, at any time (decision D1); the court itself was never paid through CourtBook. */
@@ -21,7 +22,10 @@ export default function CancelButton({ bookingId, freeCancel, cutoffHours, cutof
   async function cancel() {
     setBusy(true); setError(null);
     const { error } = await createClient().rpc("cancel_booking", { p_booking: bookingId, p_club_caused: false });
-    if (error) { setBusy(false); setError(explainBookingError(error.message, error.code)); return; }
+    // No connection: say so (W5, Paul 26 Nov; the same sentence as Reserve offline) and stay on this panel. Nothing
+    // else is sent and nothing is reloaded; "Yes, cancel" tries again, and a cancel that did arrive answers
+    // "This booking is no longer active."
+    if (error) { setBusy(false); setError(explainBookingError(error.message, error.code, isNetworkFailure(error.message) ? BOOKING_OFFLINE : undefined)); return; }
     router.replace("/bookings");
     router.refresh();
   }

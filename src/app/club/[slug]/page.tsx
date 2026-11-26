@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { dayBounds, todayIn } from "@/lib/time";
 import { loadClubHead } from "@/lib/clubHead";
 import { loaded } from "@/lib/load";
-import { playerGatePath } from "@/lib/playerGate";
+import { clubReturnPath, playerGatePath } from "@/lib/playerGate";
 import type { Club, Court } from "@/lib/types";
 import ClubHeader from "./ClubHeader";
 import PlayerGrid, { type Occ } from "./PlayerGrid";
@@ -17,8 +17,8 @@ export default async function ClubPage({ params, searchParams }: { params: Promi
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (user) {
-    const q = new URLSearchParams(); if (at) q.set("at", at); if (court) q.set("court", court); if (dur) q.set("dur", dur);
-    const gate = await playerGatePath(supabase, user.id, `/club/${slug}${q.size ? `?${q}` : ""}`, "this club");
+    // browsing a club never asks for a name (Reserve asks for the name and contact phone); the 18+ step stays
+    const gate = await playerGatePath(supabase, user.id, clubReturnPath(slug, { date: qDate, at, court, dur }), "this club", { requireName: false });
     if (gate) redirect(gate);
   }
 

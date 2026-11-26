@@ -65,7 +65,7 @@ export function safeText(v: unknown): string {
  */
 export const ROUTE_SEGMENTS = new Set([
   "activity", "areas", "booking", "bookings", "chat", "club", "courts", "design-preview", "e2e-games", "edit", "game", "games",
-  "help", "match", "post", "profile", "sign-in",
+  "help", "match", "my-details", "post", "profile", "sign-in",
   // M12.4
   "pay", "payment-return",
 ]);
@@ -87,6 +87,8 @@ export const API_SEGMENTS = new Set([
   "send_feedback", "unblock_player",
   // M12.4: the hold the player is paying for, and the CourtBook server's app payment endpoints (paths only)
   "my_active_hold", "release_hold", "api", "native", "pay", "start", "status",
+  // player profile completion and levels in the app (26 Nov)
+  "set_player_level",
 ]);
 const KNOWN_HOST = /^(?:[a-z0-9-]+\.supabase\.co|u\.expo\.dev|courtbook-three\.vercel\.app)$/;
 
