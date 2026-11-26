@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { explainBookingError } from "@/lib/report";
 import { newToken, reserve as reserveSlot } from "@/lib/reserve";
 import { useDialog } from "@/components/useDialog";
+import { DEMO_NOTE } from "@/lib/fees";
 
 export type SheetClub = { id: string; name: string; slug: string; slot_minutes: number; min_minutes: number; max_minutes: number; service_fee_usd: number; hold_minutes: number; cancel_cutoff_hours: number; timezone: string };
 
@@ -110,7 +111,7 @@ export default function BookSheet({ club, date, at, courts, initialCourtId, init
         <p className="mt-2 text-center text-xs text-muted">
           {atDesk
             ? `Confirmed straight away · nothing is paid through the app · free cancellation until ${club.cancel_cutoff_hours} h before`
-            : `Slot held ${club.hold_minutes} minutes while you pay · free cancellation until ${club.cancel_cutoff_hours} h before`}
+            : `${mode === "simulated" ? `${DEMO_NOTE} · ` : ""}Slot held ${club.hold_minutes} minutes while you pay · free cancellation until ${club.cancel_cutoff_hours} h before`}
         </p>
       </section>
     </div>

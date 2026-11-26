@@ -246,7 +246,7 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
       </div>
       <form onSubmit={(e) => { e.preventDefault(); setQuery(typed.trim()); }} className="mx-5 mt-2 flex items-center gap-2 rounded-full border border-grid bg-white px-4 py-2 text-sm">
         <IconSearch size={18} className="text-muted" />
-        <input value={typed} onChange={(e) => setTyped(e.target.value)} enterKeyHint="search" placeholder="Club or town" className="flex-1 bg-transparent text-base outline-none" />
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} enterKeyHint="search" placeholder="Club or town" className="min-w-0 flex-1 bg-transparent text-base outline-none" />
         {typed && <button type="button" onClick={() => { setTyped(""); setQuery(""); }} aria-label="Clear" className="px-1 text-muted">✕</button>}
       </form>
       {query && <div className="px-5 pt-2 text-[13px] text-muted">Showing clubs matching “{query}”</div>}
