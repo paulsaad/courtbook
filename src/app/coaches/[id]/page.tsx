@@ -6,6 +6,7 @@ import { loaded } from "@/lib/load";
 import { todayIn } from "@/lib/time";
 import { normalizePhone, waNumber } from "@/lib/phone";
 import { codeList } from "@/lib/labels";
+import { isUuid } from "@/lib/ids";
 
 type Card = { coach_id: string; name: string | null; sports: string[]; levels: string[]; price_usd: number; bio: string | null; whatsapp: string | null; clubs: { id: string; name: string; slug: string; timezone: string }[] };
 type Win = { day: string; start_time: string; end_time: string; source: string };
@@ -16,6 +17,7 @@ export default async function CoachPage({ params, searchParams }: { params: Prom
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?next=/coaches/${id}`);
+  if (!isUuid(id)) notFound();
   const { data } = loaded(await supabase.rpc("coach_card", { p_coach: id }), "this coach");
   const card = ((data ?? []) as Card[])[0];
   if (!card) notFound();
