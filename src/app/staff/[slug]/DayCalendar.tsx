@@ -15,7 +15,7 @@ import { DESKTOP_QUERY, useDialog, useIsDesktop } from "@/components/useDialog";
 import { matchBookings, readPrefs, writePrefs } from "./findBooking";
 import { paymentsByBooking } from "@/lib/staffPayments";
 import { isNetworkFailure } from "@/lib/actionError";
-import { DESK_NOT_SAVED, DESK_UNCHECKED, landed, type Reader } from "./landed";
+import { DESK_UNCONFIRMED, DESK_UNREACHABLE, deskStateShown, landed, type Reader } from "./landed";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string>;
   /** the address named a view or sport (then it is used as is, and remembered on desktop) */
@@ -90,6 +90,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const [draft, setDraft] = useState<Selection | null>(null);
   // A save succeeded and the calendar has not shown a fresh read since (see run()).
   const [savedUnseen, setSavedUnseen] = useState(false);
+  // R1: after an unconfirmed desk action, what the calendar now shows (never "saved" for this request)
+  const [notice, setNotice] = useState<string | null>(null);
   const viewRef = useRef(view);
   useEffect(() => { viewRef.current = view; }, [view]);
   /** Opens a sheet, unless saving is in progress or the desk keeps its unsaved details. True if it opened. */
@@ -316,22 +318,28 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   async function run(
     fn: () => PromiseLike<{ error: { message: string; code?: string } | null }>,
     explain: (m: string) => string = friendlyError,
-    check?: (db: Reader) => Promise<boolean | null>,
+    check?: { find: (db: Reader) => Promise<boolean | null>; shows: string },
   ) {
     setBusy(true);
     setError(null);
+    setNotice(null);
     const { error } = await fn();
     if (error) {
-      // R1: the grid is read again first, so it shows what is actually saved; then the action's own result is
-      // looked for. If an earlier try (whose answer was lost) saved it, it is shown as done — never as "That slot
-      // was just taken." or "This booking is no longer active." for the desk's own change.
+      // R1: the grid is read again first, so it shows what is actually saved; then the action's result is looked for.
       await reload();
       setRefresh((n) => n + 1);   // the week view holds its own copy of the rows
-      const done = check ? await check(createClient() as unknown as Reader).catch(() => null) : null;
-      if (done === true) { await saved(); return; }
+      const found = check ? await check.find(createClient() as unknown as Reader).catch(() => null) : undefined;
       setBusy(false);
       savedFocus.current = null;
-      if (isNetworkFailure(error.message)) setError(done === false ? DESK_NOT_SAVED : DESK_UNCHECKED);
+      if (found === true && check) {
+        // A matching result is there, but it may be another staff member's doing the same thing (Paul's review,
+        // correction A): close the sheet so the grid shows it, and say what the calendar shows — never "saved".
+        addDirty.current = false;
+        setSheet(null);
+        setNotice(deskStateShown(check.shows));
+        return;
+      }
+      if (isNetworkFailure(error.message)) setError(found === null ? DESK_UNREACHABLE : DESK_UNCONFIRMED);   // correction B: never "not saved"
       else setError(explainBookingError(error.message, error.code, explain(error.message)));   // reports only the unexpected
       return;
     }
@@ -545,6 +553,9 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const monthName = formatInTimeZone(clubLocalToUtc(date, "12:00", club.timezone), club.timezone, "MMMM yyyy");
   const courtName = (id: string | null) => courts.find((c) => c.id === id)?.name ?? "";
 
+  // any court of the club, including one the sport filter hides (a move can go to another sport's court)
+  const anyCourtName = (id: string | null) => allCourts.find((c) => c.id === id)?.name ?? "the court";
+
 
   /** What a sheet holds — the same on phones (bottom sheet) and desktop (side panel). */
   function sheetBody(sheet: NonNullable<Sheet>) {
@@ -573,14 +584,14 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                     const bs = clubLocalToUtc(day, blockStart, club.timezone).toISOString();
                     const be = (blockEnd === "24:00" ? nextDayStart(day, club.timezone) : clubLocalToUtc(day, blockEnd, club.timezone)).toISOString();
                     return run(() => createClient().rpc("staff_block", { p_club: club.id, p_court: courtId, p_start: bs, p_end: be, p_reason: name || null }),
-                      (m) => blockErrorText(m, club), (db) => landed.block(db, courtId, bs, be));
+                      (m) => blockErrorText(m, club), { find: (db) => landed.block(db, courtId, bs, be), shows: `a block on ${anyCourtName(courtId)} from ${blockStart} to ${blockEnd}` });
                   }
                   const start = clubLocalToUtc(day, sheet.time, club.timezone);
                   const s0 = start.toISOString();
                   const e0 = new Date(start.getTime() + slots * club.slot_minutes * 60000).toISOString();
                   // the database checks staff rights, the court, the hours, the grid and the duration, and prices it
                   return run(() => createClient().rpc("staff_book", { p_club: club.id, p_court: courtId, p_start: s0, p_end: e0, p_name: name, p_phone: phone || null }),
-                    undefined, (db) => landed.walkIn(db, courtId, s0, e0, name));
+                    undefined, { find: (db) => landed.walkIn(db, courtId, s0, e0, name), shows: `a booking for ${name.trim()} on ${anyCourtName(courtId)} at ${hhmm(s0, club.timezone)}` });
                 }}
               />
             )}
@@ -596,12 +607,12 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                   const id = sheet.booking.id, s0 = start.toISOString(), e0 = end.toISOString();
                   // 0091: the price the desk was shown and confirmed; the database refuses if it is no longer right
                   return run(() => createClient().rpc("move_booking_priced", { p_booking: id, p_court: courtId, p_start: s0, p_end: e0, p_expected_price: price }),
-                    undefined, (db) => landed.moved(db, id, courtId, s0, e0));
+                    undefined, { find: (db) => landed.moved(db, id, courtId, s0, e0), shows: `this booking on ${anyCourtName(courtId)} at ${hhmm(s0, club.timezone)}` });
                 }}
                 onCancel={(clubCaused) => run(() => createClient().rpc("cancel_booking", { p_booking: sheet.booking.id, p_club_caused: clubCaused }),
-                  undefined, (db) => landed.status(db, sheet.booking.id, "cancelled"))}
+                  undefined, { find: (db) => landed.status(db, sheet.booking.id, "cancelled"), shows: "this booking as cancelled" })}
                 onNoShow={() => run(() => createClient().rpc("mark_no_show", { p_booking: sheet.booking.id }),
-                  undefined, (db) => landed.status(db, sheet.booking.id, "no_show"))}
+                  undefined, { find: (db) => landed.status(db, sheet.booking.id, "no_show"), shows: "this booking as a no-show" })}
               />
             )}
 
@@ -609,7 +620,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
               <div className="flex flex-col gap-3">
                 <h2 className="text-lg font-semibold">{sheet.block.reason ?? "Blocked"}</h2>
                 <p className="text-sm text-muted">{courtName(sheet.block.court_id)} · {hhmm(sheet.block.start_at, club.timezone)}–{hhmm(sheet.block.end_at, club.timezone)}</p>
-                <button disabled={busy} onClick={() => run(() => createClient().from("blocks").delete().eq("id", sheet.block.id), undefined, (db) => landed.blockGone(db, sheet.block.id))} className={secondaryDanger}>Remove block</button>
+                <button disabled={busy} onClick={() => run(() => createClient().from("blocks").delete().eq("id", sheet.block.id), undefined, { find: (db) => landed.blockGone(db, sheet.block.id), shows: "this block as removed" })} className={secondaryDanger}>Remove block</button>
               </div>
             )}
 
@@ -745,6 +756,13 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
           <span className="flex-1">{savedUnseen ? "Saved. " : ""}Couldn&apos;t load the latest {view === "week" ? "week" : "bookings"}. What you see may be out of date, so adding is off until this works.</span>
           {/* the flag is cleared by a successful read, never by tapping Retry */}
           <button disabled={viewLoading} onClick={() => { setRefresh((n) => n + 1); void reload(); }} className="shrink-0 rounded-lg border border-danger/40 px-3 py-1 disabled:opacity-50">{viewLoading ? "Checking…" : "Retry"}</button>
+        </div>
+      )}
+
+      {notice && (
+        <div role="status" className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-sand bg-sand-soft px-3 py-2 text-sm">
+          <span className="flex-1">{notice}</span>
+          <button onClick={() => setNotice(null)} className="shrink-0 rounded-lg border border-grid bg-white px-3 py-1">OK</button>
         </div>
       )}
 
