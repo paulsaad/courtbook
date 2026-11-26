@@ -15,6 +15,9 @@ export const AUTH_TEXT = {
 } as const;
 
 function offline(e: NonNullable<AuthErrorLike>): boolean {
+  // auth-js (2.119) also names a server answer of 500–530 "AuthRetryableFetchError": that is the server failing (for a
+  // code email, "Error sending … email"), not this phone being offline. Only no answer at all (status 0) is offline.
+  if (typeof e.status === "number" && e.status >= 500) return false;
   return e.name === "AuthRetryableFetchError" || e.status === 0 || /failed to fetch|network request failed|networkerror|load failed/i.test(e.message ?? "");
 }
 function rate(e: NonNullable<AuthErrorLike>): boolean {
@@ -26,6 +29,7 @@ export function sendCodeError(e: AuthErrorLike): string {
   if (!e) return AUTH_TEXT.sendFailed;
   if (offline(e)) return AUTH_TEXT.offline;
   if (rate(e)) return AUTH_TEXT.rate;
+  if (typeof e.status === "number" && e.status >= 500) return AUTH_TEXT.sendFailed;   // e.g. the email could not be sent
   if (e.code === "email_address_invalid" || e.code === "validation_failed" || /invalid.*email|email.*invalid|valid email/i.test(e.message ?? "")) return AUTH_TEXT.badEmail;
   return AUTH_TEXT.sendFailed;
 }
