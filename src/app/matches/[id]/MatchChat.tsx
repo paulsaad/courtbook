@@ -1,13 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { COMMUNITY_RULES, COMMUNITY_RULES_TITLE, friendlyError } from "@/lib/types";
+import { BLOCK_EXPLAINED, BLOCKED_PATH, blockPlayer, reportMessage } from "@/lib/gameSafety";
+import SafetyConfirm from "@/components/SafetyConfirm";
+import ReportSheet from "./ReportSheet";
 
 type Msg = { id: string; profile_id: string; name: string | null; body: string; created_at: string; deleted?: boolean; /** M3-S: the reader blocked the sender (text withheld) */ blocked?: boolean };
 
 // what the thread looks like right now, so we only re-render when it really changed
+/** Report and block are offered only on another player's message that is still shown. */
+const canReport = (m: Msg, meId: string) => m.profile_id !== meId && !m.deleted && !m.blocked;
+
 const signature = (rows: Msg[]) => rows.map((r) => `${r.id}:${r.deleted ? 1 : 0}${r.blocked ? 1 : 0}`).join(",");
 
 export default function MatchChat({ matchId, meId, tz, initial, finished, hidden }: { matchId: string; meId: string; tz: string; initial: Msg[]; finished: boolean; hidden: boolean }) {
@@ -18,6 +25,14 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
   const [error, setError] = useState<string | null>(null);
   const [rules, setRules] = useState(false);   // M3-S: shown when the server asks for the rules first
   const bottom = useRef<HTMLDivElement>(null);
+  // report and block (M3-S, as the app's long-press menu): only on other players' visible messages
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [reporting, setReporting] = useState<Msg | null>(null);
+  const [blocking, setBlocking] = useState<Msg | null>(null);
+  const [blockedName, setBlockedName] = useState<string | null>(null);
+  // a message's options only while it can still be reported: not after it is deleted, withheld or gone
+  // a new copy of the thread (poll or reload) closes a menu whose message can no longer be reported
+  const closeStaleMenu = (rows: Msg[]) => setMenuFor((open) => (open && rows.some((m) => m.id === open && canReport(m, meId)) ? open : null));
 
   // poll the whole thread every 5 s, not just what is newer: a message deleted further up
   // would never come back through an incremental read (boring and reliable; realtime can replace it later)
@@ -28,10 +43,24 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
       if (!alive || error || !data) return;
       const rows = data as Msg[];
       setMsgs((cur) => (signature(cur) === signature(rows) ? cur : rows));
+      setMenuFor((open) => (open && rows.some((m) => m.id === open && canReport(m, meId)) ? open : null));
     }, 5000);
     return () => { alive = false; clearInterval(id); };
-  }, [matchId]);
+  }, [matchId, meId]);
   useEffect(() => { bottom.current?.scrollIntoView({ block: "nearest" }); }, [msgs.length]);
+
+  // the whole thread again, now: after a block the server withholds that player's messages
+  async function reload() {
+    const { data, error } = await createClient().rpc("match_messages_list", { p_match: matchId, p_after: null });
+    if (!error && data) { setMsgs(data as Msg[]); closeStaleMenu(data as Msg[]); }
+  }
+  async function block(m: Msg): Promise<string | null> {
+    const p = await blockPlayer((fn, args) => createClient().rpc(fn, args), m.profile_id);
+    if (p) return p;
+    setBlockedName(m.name ?? "this player");
+    await reload();
+    return null;
+  }
 
   async function removeMessage(id: string) {
     setMsgs((cur) => cur.map((m) => (m.id === id ? { ...m, body: "", deleted: true } : m)));
@@ -84,8 +113,20 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
         {msgs.length === 0 && <p className="text-muted">No messages yet. Agree on balls, who brings what, where to meet.</p>}
         {msgs.map((x) => (
           <div key={x.id} className={`group max-w-[85%] rounded-2xl px-3 py-2 ${x.deleted ? "self-start border border-dashed border-grid bg-white text-muted" : x.profile_id === meId ? "self-end bg-turf text-white" : "self-start bg-paper"}`}>
-            {x.profile_id !== meId && !x.deleted && !x.blocked && <div className="text-xs font-medium opacity-70">{x.name ?? "Player"}</div>}
-            {x.deleted ? <div className="text-xs italic">Message deleted</div> : x.blocked ? <div className="text-xs italic text-muted">Message from a player you blocked</div> : <div>{x.body}</div>}
+            {x.profile_id !== meId && !x.deleted && !x.blocked && (
+              <div className="flex items-start justify-between gap-2">
+                <div className="text-xs font-medium opacity-70">{x.name ?? "Player"}</div>
+                <button type="button" onClick={() => setMenuFor(menuFor === x.id ? null : x.id)} aria-expanded={menuFor === x.id}
+                  aria-label={`Options for ${x.name ?? "this player"}'s message`} className="-my-2 -mr-2 flex h-9 w-10 shrink-0 items-center justify-center rounded-full text-base leading-none text-muted">⋯</button>
+              </div>
+            )}
+            {x.deleted ? <div className="text-xs italic">Message deleted</div> : x.blocked ? <div className="text-xs italic text-muted"><span>Message from a player you blocked</span> · <Link href={BLOCKED_PATH} className="not-italic underline">Blocked players</Link></div> : <div>{x.body}</div>}
+            {menuFor === x.id && canReport(x, meId) && (
+              <div className="mt-1 flex flex-col items-start gap-1 border-t border-grid pt-1" role="group" aria-label="Message options">
+                <button type="button" onClick={() => { setMenuFor(null); setReporting(x); }} className="min-h-9 text-sm font-medium text-ink">Report message</button>
+                <button type="button" onClick={() => { setMenuFor(null); setBlocking(x); }} className="min-h-9 text-sm font-medium text-danger">Block {x.name ?? "this player"}</button>
+              </div>
+            )}
             {!x.deleted && x.profile_id === meId && <button onClick={() => removeMessage(x.id)} className="mt-0.5 text-[10px] text-white/80 underline">Delete</button>}
             <div className={`mt-0.5 text-[10px] ${x.profile_id === meId ? "text-white/70" : "text-muted"}`}>{formatInTimeZone(new Date(x.created_at), tz, "EEE HH:mm")}</div>
           </div>
@@ -102,11 +143,25 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
           </div>
         </div>
       )}
+      {blockedName && (
+        <p role="status" className="mt-3 rounded-lg bg-paper px-3 py-2 text-sm">
+          You blocked {blockedName}. You won&apos;t see their messages. <Link href={BLOCKED_PATH} className="text-action underline">Blocked players</Link>
+        </p>
+      )}
       {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
       <form onSubmit={send} className="mt-3 flex gap-2">
-        <input className="flex-1 rounded-xl border border-grid px-3 py-2.5 text-base outline-none focus:border-action" placeholder="Message" maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
+        <input aria-label="Message" className="min-w-0 flex-1 rounded-xl border border-grid px-3 py-2.5 text-base outline-none focus:border-action" placeholder="Message" maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
         <button disabled={busy || !text.trim()} className="rounded-xl bg-action px-4 font-medium text-white disabled:opacity-50">Send</button>
       </form>
+      {reporting && (
+        <ReportSheet name={reporting.name} onClose={() => setReporting(null)}
+          onSend={(reason, note) => reportMessage((fn, args) => createClient().rpc(fn, args), reporting.id, reason, note)}
+          onBlock={() => { setBlocking(reporting); setReporting(null); }} />
+      )}
+      {blocking && (
+        <SafetyConfirm title={`Block ${blocking.name ?? "this player"}?`} text={BLOCK_EXPLAINED} action="Block" destructive linkBlocked
+          onConfirm={() => block(blocking)} onClose={() => setBlocking(null)} />
+      )}
     </section>
   );
 }
