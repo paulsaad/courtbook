@@ -26,8 +26,13 @@ checks(item, ok, detail) as (
     not deletion_processing_active(), coalesce((select last_run_at::text from deletion_worker), 'no run yet')
   union all select '0090: the booking block check leaves the row being written alone',
     pg_get_functiondef('reject_booking_over_block'::regproc) like '%id <> new.id%', ''
-  union all select '0091: the older move call cannot change a price',
-    pg_get_functiondef('move_booking(uuid,uuid,timestamptz,timestamptz)'::regprocedure) like '%move_booking_priced(p_booking, p_court, p_start, p_end, null)%', ''
+  union all select '0091: the older move call cannot change a price (after F1: it refuses every move, and the desk''s call compares what it saw)',
+    pg_get_functiondef('move_booking(uuid,uuid,timestamptz,timestamptz)'::regprocedure) like '%move_booking_priced(p_booking, p_court, p_start, p_end, null)%'
+    or (to_regprocedure('move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric,uuid,timestamptz,timestamptz)') is not null
+        and pg_get_functiondef('move_booking(uuid,uuid,timestamptz,timestamptz)'::regprocedure) like '%move_needs_reload%'
+        and pg_get_functiondef('move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric)'::regprocedure) like '%move_needs_reload%'
+        and coalesce(pg_get_functiondef(to_regprocedure('move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric,uuid,timestamptz,timestamptz)')), '') like '%booking_changed_elsewhere%'),
+    case when to_regprocedure('move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric,uuid,timestamptz,timestamptz)') is null then '0091' else 'F1' end
   union all select '0092 (step 6b; ok before it is applied): booked courts stay active for every caller, no live booking lands on an inactive court, published clubs stay priced, visitors cannot set prices',
     to_regprocedure('set_club_base_prices(uuid,numeric,jsonb,boolean)') is null
     or (exists (select 1 from pg_trigger where tgname = 'courts_keep_booked_active' and tgrelid = 'courts'::regclass)

@@ -135,7 +135,7 @@ for (const mode of MODES) {
   const moving = await one("select id from bookings where false");
   const [{ staff_book: id }] = (await (async () => { const s = await session(S1); const r = await s.run("select staff_book($1,$2,$3,$4,'Move me',null)", [CLUB, court, T12, T13]); await s.end(); return r.rows; })());
   void moving;
-  const [ra, rb] = await race(mode, [S1, "select move_booking($1,$2,$3,$4)", [id, court, T10, T11]], [P1, ...hold(CLUB, court, T10, T11)]);
+  const [ra, rb] = await race(mode, [S1, "select move_booking_priced($1,$2,$3,$4,null,(select court_id from bookings where id = $1), (select start_at from bookings where id = $1), (select end_at from bookings where id = $1))", [id, court, T10, T11]], [P1, ...hold(CLUB, court, T10, T11)]);
   const live = await q("select start_at from bookings where court_id = $1 and status in ('confirmed','pending') and period && tstzrange($2, $3)", [court, T10, T11]);
   rep(`S5 moving a booking into a slot versus a new reservation of it [${mode}]: exactly one gets it`, (ra.ok !== rb.ok) && live.length === 1, `${short(ra)} | ${short(rb)} | in slot=${live.length}`);
 }
