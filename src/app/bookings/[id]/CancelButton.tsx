@@ -23,7 +23,13 @@ export default function CancelButton({ bookingId, freeCancel, cutoffHours, cutof
     // No connection: say so (W5, Paul 26 Nov; the same sentence as Reserve offline) and stay on this panel. Nothing
     // else is sent and nothing is reloaded; "Yes, cancel" tries again, and a cancel that did arrive answers
     // "This booking is no longer active."
-    if (error) { setBusy(false); setError(explainBookingError(error.message, error.code, isNetworkFailure(error.message) ? BOOKING_OFFLINE : undefined)); return; }
+    if (error) {
+      setBusy(false); setError(explainBookingError(error.message, error.code, isNetworkFailure(error.message) ? BOOKING_OFFLINE : undefined));
+      // H14: the booking is no longer confirmed (an earlier cancel arrived with its answer lost, or the club changed
+      // it): show the page as it now is ("Status: cancelled", no cancel/share/open-to-players), not this panel
+      if (error.message?.includes("not_confirmed")) router.refresh();
+      return;
+    }
     router.replace("/bookings");
     router.refresh();
   }
