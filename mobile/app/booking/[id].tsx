@@ -99,7 +99,11 @@ export default function Booking() {
         <TicketRow label="Club" value={b.club.name} />
         <TicketRow label="Court" value={[b.court?.name, durationLabel(minutes)].filter(Boolean).join(" · ")} />
         {atDesk ? (
-          <TicketRow label="Payment" value={`${money(price)} at the club`} note="Nothing was charged in the app" />
+          // N5 (as the website's H9, #93): only a confirmed booking is paid at the club; a cancelled, no-show or expired
+          // one has nothing to settle there
+          b.status === "confirmed"
+            ? <TicketRow label="Payment" value={`${money(price)} at the club`} note="Nothing was charged in the app" />
+            : <TicketRow label="Payment" value="Nothing was paid through CourtBook" />
         ) : (
           <TicketRow
             label="Paid"
