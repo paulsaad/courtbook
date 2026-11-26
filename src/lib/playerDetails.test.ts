@@ -33,11 +33,11 @@ describe("player details before a court booking (website, as the app)", () => {
   it("the details step returns to the exact selection", () => {
     expect(detailsPath("/club/batroun?at=2026-12-01T16:00:00.000Z&court=k1&dur=60")).toBe("/details?next=%2Fclub%2Fbatroun%3Fat%3D2026-12-01T16%3A00%3A00.000Z%26court%3Dk1%26dur%3D60");
   });
-  // The app (#70) holds the same rules in mobile/lib/myProfile.ts and mobile/app/my-details.tsx. On a tree that has
+  // The app (#70) holds the same rules in mobile/lib/myProfile.ts, mobile/app/my-details.tsx and the club screen. On a tree that has
   // both (the pilot integration), every sentence a player reads must be identical on the website and in the app.
-  const app = resolve(__dirname, "../../mobile/lib/myProfile.ts"), screen = resolve(__dirname, "../../mobile/app/my-details.tsx");
-  it.skipIf(!existsSync(app) || !existsSync(screen))("same words as the app (needs #70 in the tree)", () => {
-    const a = readFileSync(app, "utf8") + readFileSync(screen, "utf8");
+  const files = ["../../mobile/lib/myProfile.ts", "../../mobile/app/my-details.tsx", "../../mobile/app/club/[id].tsx"].map((f) => resolve(__dirname, f));
+  it.skipIf(!files.every((f) => existsSync(f) && readFileSync(f, "utf8").length > 0) || !existsSync(files[0]))("same words as the app (needs #70 in the tree)", () => {
+    const a = files.map((f) => readFileSync(f, "utf8")).join("\n");
     for (const s of [PHONE_HELP, PHONE_PRIVACY, whyWeAsk(["name", "phone"]), whyWeAsk(["name"]), whyWeAsk(["phone"]),
       "Enter your name, as the club should see it.", "Enter a phone number the club can reach you on.",
       "That doesn't look like a full phone number. For a number outside Lebanon, start with + and the country code.",
