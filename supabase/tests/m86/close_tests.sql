@@ -184,7 +184,7 @@ insert into t values
   ('F3 no feedback message', pg_temp.r(pg_temp.u(1), $$select send_feedback('suggestion', 'x', null)::text$$) like 'ERR%account_closed%', ''),
   ('F3 no marking notices read', pg_temp.r(pg_temp.u(1), format($$select mark_notifications_read(array[%L]::uuid[])::text$$, pg_temp.u(301))) like 'ERR%account_closed%', ''),
   ('F3 no re-entering a name in the profile', pg_temp.r(pg_temp.u(1), $$update profiles set name = 'Back again' where id = auth.uid()$$) like 'ERR%account_closed%', ''),
-  ('F3 no changing levels', pg_temp.r(pg_temp.u(1), $$update player_levels set level = 6 where profile_id = auth.uid()$$) like 'ERR%account_closed%', ''),
+  ('F3 no changing levels', pg_temp.r(pg_temp.u(1), $$update player_levels set level = 6 where profile_id = auth.uid()$$) similar to 'ERR%(account_closed|permission denied)%', ''),   -- refused by the lock-out, or (table-privilege hardening) by the missing privilege
   ('F3 no coach listing', pg_temp.r(pg_temp.u(1), $$insert into coaches (profile_id, sports, active) values (auth.uid(), '{padel}', true)$$) like 'ERR%account_closed%', ''),
   ('F3 assert_active (used by every game function) answers account_closed (backup to the lock-out)',
      (select pg_temp.as_postgres_with(pg_temp.u(1), 'select assert_active()')) like 'ERR account_closed%', ''),

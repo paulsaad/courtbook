@@ -15,7 +15,9 @@ P="$PSQL -X -q -At -d $DB"
 $PSQL -q -c "drop database if exists $DB" -c "create database $DB" >/dev/null
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql >/dev/null || exit 1
 for f in $(ls supabase/migrations/*.sql | sort); do
-  case $(basename "$f") in 0076_*|0077_*) continue;; esac
+  # the table-privilege migration follows 0093 and assumes 0077's policies (no direct inserts); stage A below rehearses
+  # the time BEFORE 0077, when the old website inserted blocks directly, so it is left out of this build
+  case $(basename "$f") in 0076_*|0077_*|*_table_privileges.sql) continue;; esac
   $PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || { echo "MIGRATION FAILED: $f"; exit 1; }
 done
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/seed.sql >/dev/null || exit 1

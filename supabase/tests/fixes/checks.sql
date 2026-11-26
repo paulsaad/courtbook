@@ -82,8 +82,11 @@ reset role;
 insert into r select 'S1c the game and its player are intact',
   exists (select 1 from matches where id = 'f0000000-0000-4000-8000-00000000aa01')
   and exists (select 1 from match_players where match_id = 'f0000000-0000-4000-8000-00000000aa01'), '';
-insert into r select 'S1d organisers can still read and update their game (cancel path unchanged)',
-  has_table_privilege('authenticated', 'matches', 'SELECT') and has_table_privilege('authenticated', 'matches', 'UPDATE')
+-- (since 0072 an organiser cancels through set_match_status; no policy lets a player UPDATE matches directly, and the
+-- table-privilege hardening removes that unused grant, so the cancel path is checked, not the grant)
+insert into r select 'S1d organisers can still read and cancel their game (cancel path unchanged)',
+  has_table_privilege('authenticated', 'matches', 'SELECT')
+  and (has_table_privilege('authenticated', 'matches', 'UPDATE') or has_function_privilege('authenticated', 'set_match_status(uuid, match_status)', 'EXECUTE'))
   and has_table_privilege('service_role', 'matches', 'DELETE'), '';
 
 -- ===================== S5 — 0069: a user can change only read_at of their own notices

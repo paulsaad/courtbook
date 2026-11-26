@@ -110,10 +110,13 @@ do \$\$ begin insert into bookings (club_id, court_id, player_id, start_at, end_
   values ((select id from clubs where slug = 'batroun'), (select id from courts where name = 'Padel 2'), '$P1', $(AT 5 10:00), $(AT 5 11:00), 'confirmed', 'app', '$P1');
   insert into r values ('PRIV3 a player cannot insert a booking directly', false, 'pass', 'allowed');
 exception when others then insert into r values ('PRIV3 a player cannot insert a booking directly', true, 'pass', sqlerrm); end \$\$;
-with u as (update bookings set status = 'confirmed', hold_expires_at = null where id = (select booking_id from h) returning 1)
-insert into r select 'PRIV4 a player cannot confirm their own hold by updating it', count(*) = 0, 'pass', count(*)::text || ' row(s) changed' from u;
-with u as (update payments set status = 'paid', paid_at = now() where id = (select payment_id from h) returning 1)
-insert into r select 'PRIV5 a player cannot mark their own payment paid', count(*) = 0, 'pass', count(*)::text || ' row(s) changed' from u;
+-- refused either way: 0 rows under row security, or no UPDATE privilege at all (table-privilege hardening)
+do \$\$ declare n int; begin update bookings set status = 'confirmed', hold_expires_at = null where id = (select booking_id from h); get diagnostics n = row_count;
+  insert into r values ('PRIV4 a player cannot confirm their own hold by updating it', n = 0, 'pass', n || ' row(s) changed');
+exception when insufficient_privilege then insert into r values ('PRIV4 a player cannot confirm their own hold by updating it', true, 'pass', sqlerrm); end \$\$;
+do \$\$ declare n int; begin update payments set status = 'paid', paid_at = now() where id = (select payment_id from h); get diagnostics n = row_count;
+  insert into r values ('PRIV5 a player cannot mark their own payment paid', n = 0, 'pass', n || ' row(s) changed');
+exception when insufficient_privilege then insert into r values ('PRIV5 a player cannot mark their own payment paid', true, 'pass', sqlerrm); end \$\$;
 do \$\$ begin perform confirm_payment((select payment_id from h), 'SIM-X', 31); insert into r values ('PRIV6 a player cannot call confirm_payment', false, 'pass', 'allowed');
 exception when insufficient_privilege then insert into r values ('PRIV6 a player cannot call confirm_payment', true, 'pass', sqlerrm); end \$\$;
 do \$\$ begin perform staff_book((select id from clubs where slug = 'batroun'), (select id from courts where name = 'Padel 2'), $(AT 5 12:00), $(AT 5 13:00), 'Me', null);
