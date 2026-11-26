@@ -16,6 +16,7 @@ import { matchBookings, readPrefs, writePrefs } from "./findBooking";
 import { paymentsByBooking } from "@/lib/staffPayments";
 import { isNetworkFailure } from "@/lib/actionError";
 import { DESK_UNCONFIRMED, DESK_UNREACHABLE, deskStateShown, landed, type Reader } from "./landed";
+import { changedElsewhere, describeChange, type Current } from "./changed";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string>;
   /** the address named a view or sport (then it is used as is, and remembered on desktop) */
@@ -65,6 +66,22 @@ async function withContacts(
   })) as unknown as Booking[];
   // the payment of each app booking (a failed read leaves it unknown, never "paid")
   return paymentsByBooking(supabase as never, out);
+}
+
+/**
+ * F1: moves a booking only if it is still where this sheet saw it (the database compares under the booking's lock).
+ * Rollout: this website goes live before the database change. Until the change is applied the database has only
+ * 0091's call, and PostgREST answers PGRST202 ("no function with these arguments"); the page then makes 0091's call,
+ * exactly as before. Once the change is applied, 0091's call refuses every move, so this fallback can never skip the
+ * comparison. Remove it once the change is live on every database.
+ */
+type MoveArgs = { p_booking: string; p_court: string; p_start: string; p_end: string; p_expected_price: number };
+type SeenArgs = { p_seen_court: string | null; p_seen_start: string; p_seen_end: string };
+async function moveBooking(args: MoveArgs, seen: SeenArgs) {
+  const db = createClient();
+  const r = await db.rpc("move_booking_priced", { ...args, ...seen });
+  if (r.error?.code === "PGRST202") return db.rpc("move_booking_priced", args);
+  return r;
 }
 
 export default function DayCalendar({ club, courts: allCourts, bookings: initialBookings, blocks: initialBlocks, date, view, sport, court: courtParam, loadFailed, sportNames, explicit = false, focusTime = null }: Props) {
@@ -319,6 +336,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     fn: () => PromiseLike<{ error: { message: string; code?: string } | null }>,
     explain: (m: string) => string = friendlyError,
     check?: { find: (db: Reader) => Promise<boolean | null>; shows: string },
+    refused?: (message: string) => Promise<boolean>,
   ) {
     setBusy(true);
     setError(null);
@@ -340,6 +358,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         return;
       }
       if (isNetworkFailure(error.message)) setError(found === null ? DESK_UNREACHABLE : DESK_UNCONFIRMED);   // correction B: never "not saved"
+      else if (refused && await refused(error.message)) return;   // the action explained it (F1: the booking changed elsewhere)
       else setError(explainBookingError(error.message, error.code, explain(error.message)));   // reports only the unexpected
       return;
     }
@@ -598,16 +617,32 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
 
             {sheet.kind === "booking" && (
               <BookingSheet
-                key={sheet.booking.id}
+                key={`${sheet.booking.id}|${sheet.booking.court_id}|${sheet.booking.start_at}|${sheet.booking.end_at}`}
                 club={club} courts={allCourts} booking={sheet.booking} times={times} busy={busy}
                 onMove={(courtId, time, slots, price) => {
                   // the day comes from the booking, never from the page: the sheet can be opened
                   // from a week whose URL says another day (covered by src/lib/time.test.ts)
                   const { start, end } = moveTarget(sheet.booking.start_at, club.timezone, time, slots, club.slot_minutes);
                   const id = sheet.booking.id, s0 = start.toISOString(), e0 = end.toISOString();
+                  // F1: what this sheet was opened with. The database moves the booking only if it is still there.
+                  const seen = { court_id: sheet.booking.court_id, start_at: sheet.booking.start_at, end_at: sheet.booking.end_at };
                   // 0091: the price the desk was shown and confirmed; the database refuses if it is no longer right
-                  return run(() => createClient().rpc("move_booking_priced", { p_booking: id, p_court: courtId, p_start: s0, p_end: e0, p_expected_price: price }),
-                    undefined, { find: (db) => landed.moved(db, id, courtId, s0, e0), shows: `this booking on ${anyCourtName(courtId)} at ${hhmm(s0, club.timezone)}` });
+                  return run(() => moveBooking({ p_booking: id, p_court: courtId, p_start: s0, p_end: e0, p_expected_price: price },
+                    { p_seen_court: seen.court_id, p_seen_start: seen.start_at, p_seen_end: seen.end_at }),
+                    undefined, { find: (db) => landed.moved(db, id, courtId, s0, e0), shows: `this booking on ${anyCourtName(courtId)} at ${hhmm(s0, club.timezone)}` },
+                    async (message) => {
+                      if (!changedElsewhere(message)) return false;
+                      // read the booking again (with its contact, as the calendar shows it) and say what changed
+                      const supabase = createClient();
+                      const { data, error: e } = await supabase.from("bookings").select(STAFF_BOOKING_COLUMNS).eq("id", id).maybeSingle();
+                      const rows = !e && data ? await withContacts(supabase, club.id, [data as Record<string, unknown>]) : null;
+                      const now = rows?.[0] ?? null;
+                      const { text, stillActive } = describeChange(seen, now as Current | null, anyCourtName, club.timezone);
+                      addDirty.current = false;
+                      if (stillActive && now) { setSheet({ kind: "booking", booking: now }); setError(text); }
+                      else { setSheet(null); setNotice(text); }
+                      return true;
+                    });
                 }}
                 onCancel={(clubCaused) => run(() => createClient().rpc("cancel_booking", { p_booking: sheet.booking.id, p_club_caused: clubCaused }),
                   undefined, { find: (db) => landed.status(db, sheet.booking.id, "cancelled"), shows: "this booking as cancelled" })}

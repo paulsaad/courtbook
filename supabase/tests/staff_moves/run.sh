@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# F1: a staff move applies only if the booking is still where the desk saw it. DRAFT; LOCAL ONLY (scratch databases,
+# never staging or live).
+#   PSQL="sudo -u postgres psql" PG_MODULE=/tmp/pgdeps/node_modules bash supabase/tests/staff_moves/run.sh
+# 1. scratch database 0001..last + seed + fixtures (fictional people)
+# 2. controls BEFORE the draft: preflight passes; postcheck STOPS; tests.sql fails; the race harness SEES the defect
+#    (both moves applied) in every round
+# 3. the draft; postcheck passes; tests.sql 15/15; race harness (≥ 20 simultaneous rounds + delayed orders, and move
+#    versus cancel); the draft again (idempotent): postcheck and tests.sql still pass
+# 4. rollback: both functions exactly as 0091; the 8-argument one gone; the defect is back (race control passes)
+# 5. mutants of the draft: each must make tests.sql or the race harness fail
+set -u
+cd "$(dirname "$0")/../../.."
+PSQL=${PSQL:-psql}
+PG_MODULE=${PG_MODULE:-/tmp/pgdeps/node_modules}
+export PGOPTIONS='-c client_min_messages=warning'
+DRAFT=docs/staff-moves/sql/move_checks_what_desk_saw.draft.sql
+DOWN=docs/staff-moves/sql/move_checks_what_desk_saw.down.draft.sql
+T=courtbook_staffmoves
+trap '$PSQL -q -d postgres -c "drop database if exists courtbook_staffmoves" >/dev/null 2>&1' EXIT
+q() { $PSQL -d $T -X -q -At "$@" 2>&1; }
+build() {
+  $PSQL -q -d postgres -c "drop database if exists $T" -c "create database $T" >/dev/null || exit 2
+  $PSQL -q -d $T -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql >/dev/null 2>&1 || exit 2
+  for f in $(ls supabase/migrations/*.sql | sort); do $PSQL -q -d $T -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || { echo "cannot build: $f"; exit 2; }; done
+  $PSQL -q -d $T -f supabase/seed.sql >/dev/null 2>&1 || true
+  (cd supabase/tests/staff_moves && $PSQL -d $T -X -q -At -v ON_ERROR_STOP=1 -f fixtures.sql >/dev/null 2>&1) || { echo "fixtures failed"; exit 2; }
+}
+tests() { (cd supabase/tests/staff_moves && $PSQL -d $T -X -q -At -f tests.sql 2>&1) | grep -v '^$'; }
+race() { sudo -u postgres env PG_MODULE="$PG_MODULE" DB="postgresql:///$T?host=/var/run/postgresql" MODE="$1" ROUNDS="${ROUNDS:-20}" node supabase/tests/staff_moves/race.mjs 2>&1; }
+passed() { echo "$1" | grep -q "checks: 15, failures: 0" && ! echo "$1" | grep -qE "^(FAIL|psql)|ERROR"; }
+stops() { echo "$1" | grep -q "|STOP$"; }
+
+# full run against a given draft file; returns 0 only if everything passed
+run() {
+  local draft=$1 ok=0 out
+  build
+  pre=$(q -F'|' -f supabase/live/staff_moves_preflight.sql); echo "$pre" | sed 's/^/  pre  /'
+  stops "$pre" && { echo "  preflight STOPPED"; ok=1; }
+  stops "$(q -F'|' -f supabase/live/staff_moves_postcheck.sql)" && echo "  control: postcheck before the draft STOPS (as it must)" || { echo "  control FAILED: postcheck passed before the draft"; ok=1; }
+  passed "$(tests)" && { echo "  control FAILED: tests.sql passed before the draft"; ok=1; } || echo "  control: tests.sql fails before the draft (as it must)"
+  out=$(race control); echo "$out" | grep -E "^(ok|FAIL)  +control" | sed 's/^/  /'
+  echo "$out" | grep -q "^ok    control" || ok=1
+  q -v ON_ERROR_STOP=1 -1 -f "$draft" >/dev/null || { echo "  draft failed to load"; return 1; }
+  post=$(q -F'|' -f supabase/live/staff_moves_postcheck.sql); echo "$post" | sed 's/^/  post /'
+  stops "$post" && ok=1
+  out=$(tests); echo "$out" | sed 's/^/  /'; passed "$out" || ok=1
+  out=$(race draft); echo "$out" | grep -vE "^ok    R[12]\." | sed 's/^/  /'   # the summary lines and any failure
+  echo "$out" | grep -qE "^race checks: [0-9]+, failures: 0$" || ok=1
+  echo "$out" | grep -q "^FAIL" && ok=1
+  q -v ON_ERROR_STOP=1 -1 -f "$draft" >/dev/null || { echo "  second run failed"; ok=1; }
+  if stops "$(q -F'|' -f supabase/live/staff_moves_postcheck.sql)" || ! passed "$(tests)"; then echo "  second run: postcheck or tests FAIL"; ok=1
+  else echo "  idempotent: the draft again, postcheck and tests.sql still pass"; fi
+  return $ok
+}
+status=PASS
+echo "== the draft"
+run "$DRAFT" || status=FAIL
+
+echo "== rollback (on the migrated database)"
+q -v ON_ERROR_STOP=1 -1 -f "$DOWN" >/dev/null || { echo "  rollback failed to load"; status=FAIL; }
+pre=$(q -F'|' -f supabase/live/staff_moves_preflight.sql)
+stops "$pre" && { echo "$pre" | sed 's/^/  /'; echo "  R1 FAIL: the preflight does not see the 0091 state"; status=FAIL; } \
+  || echo "  R1 both functions exactly as 0091, the 8-argument one gone (the preflight passes again)"
+out=$(race control); echo "$out" | grep -q "^ok    control" && echo "  R2 without the comparison the defect is back (race control: both moves applied)" || { echo "  R2 FAIL"; status=FAIL; }
+
+echo "== mutants (each must make the run fail)"
+caught=0; total=0
+mut() {
+  total=$((total+1)); tmp=$(mktemp /tmp/staffmoves.XXXXXX.sql); chmod 644 "$tmp"
+  python3 - "$DRAFT" "$tmp" "$2" "$3" <<'PY' || { echo "  NOT APPLIED $1"; status=FAIL; rm -f "$tmp"; return; }
+import sys; s=open(sys.argv[1]).read(); f=sys.argv[3]; t=sys.argv[4]
+assert s.count(f)==1, s.count(f); open(sys.argv[2],'w').write(s.replace(f,t))
+PY
+  if run "$tmp" >/dev/null 2>&1; then echo "  MISSED  $1"; status=FAIL; else caught=$((caught+1)); echo "  caught  $1"; fi
+  rm -f "$tmp"
+}
+mut "X1 no comparison at all" "  if b.court_id is distinct from p_seen_court                                                        -- F1" "  if false and b.court_id is distinct from p_seen_court                                                        -- F1"
+mut "X2 the court only (time and length not compared)" "     or b.start_at is distinct from p_seen_start                                                     -- F1
+     or b.end_at is distinct from p_seen_end then                                                    -- F1" "     then                                                    -- F1"
+mut "X3 the comparison reads the row before locking it" "  perform lock_courts(array_remove(array[v_court, p_court], null));
+  select * into b from bookings where id = p_booking for update;" "  select * into b from bookings where id = p_booking;
+  if b.court_id is distinct from p_seen_court or b.start_at is distinct from p_seen_start or b.end_at is distinct from p_seen_end then raise exception 'booking_changed_elsewhere'; end if;
+  perform pg_sleep(0.05);
+  perform lock_courts(array_remove(array[v_court, p_court], null));
+  select * into b from bookings where id = p_booking for update;
+  b.court_id := p_seen_court; b.start_at := p_seen_start; b.end_at := p_seen_end;"
+mut "X4 the comparison before the staff check (another club learns where it is)" "  if not is_staff_of(b.club_id) then raise exception 'forbidden'; end if;
+  if b.status" "  if b.court_id is distinct from p_seen_court then raise exception 'booking_changed_elsewhere'; end if;
+  if not is_staff_of(b.club_id) then raise exception 'forbidden'; end if;
+  if b.status"
+mut "X5 a missing seen value matches (= instead of is distinct from)" "  if b.court_id is distinct from p_seen_court                                                        -- F1" "  if b.court_id <> p_seen_court                                                        -- F1"
+mut "X6 the 0091 call still moves (no refusal)" "begin
+  raise exception 'move_needs_reload';
+end \$\$;" "declare b bookings%rowtype;
+begin
+  select * into b from bookings where id = p_booking;
+  return move_booking_priced(p_booking, p_court, p_start, p_end, p_expected_price, b.court_id, b.start_at, b.end_at);
+end \$\$;"
+mut "X7 anon may call it" "revoke all on function move_booking_priced(uuid, uuid, timestamptz, timestamptz, numeric, uuid, timestamptz, timestamptz) from public, anon;" "revoke all on function move_booking_priced(uuid, uuid, timestamptz, timestamptz, numeric, uuid, timestamptz, timestamptz) from public; grant execute on function move_booking_priced(uuid, uuid, timestamptz, timestamptz, numeric, uuid, timestamptz, timestamptz) to anon;"
+echo "mutants caught: $caught/$total"
+echo "staff moves check what the desk saw: $status"
+[ "$status" = PASS ]
