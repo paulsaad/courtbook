@@ -10,6 +10,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { clubLocalToUtc, hhmm, todayIn } from "@/lib/time";
 import { friendlyError } from "@/lib/types";
+import { codeLabel } from "@/lib/labels";
 
 export type MatchRow = {
   match_id: string; club_id: string; club_name: string; club_slug: string; sport: string; start_at: string; end_at: string | null;
@@ -30,7 +31,7 @@ export function MatchCard({ m, tz }: { m: MatchRow; tz: string }) {
         <span className="font-medium">{formatInTimeZone(new Date(m.start_at), tz, "EEE d MMM · HH:mm")}{m.end_at ? `–${hhmm(m.end_at, tz)}` : ""}</span>
         <span className={`rounded-full px-2 py-0.5 text-xs ${m.status === "open" ? "bg-turf-soft text-turf" : "bg-slate-soft text-muted"}`}>{m.status === "open" ? `${spots} spot${spots === 1 ? "" : "s"} left` : m.status === "cancelled" ? "Cancelled" : m.closed_reason === "full" ? "Full" : m.closed_reason === "no_court" ? "Court cancelled" : "Private"}</span>
       </div>
-      <div className="mt-1 text-sm text-muted">{m.sport} · {rangeLabel(m.level_min, m.level_max, m.level_legacy)}{m.court_name ? ` · ${m.court_name} booked` : ""} · by {m.organizer_name ?? "player"}{m.i_organize ? " (you)" : m.my_status === "accepted" ? " · you're in" : m.my_status === "pending" ? " · requested" : ""}{m.i_organize && m.pending > 0 ? ` · ${m.pending} waiting` : ""}</div>
+      <div className="mt-1 text-sm text-muted">{codeLabel(m.sport)} · {rangeLabel(m.level_min, m.level_max, m.level_legacy)}{m.court_name ? ` · ${m.court_name} booked` : ""} · by {m.organizer_name ?? "player"}{m.i_organize ? " (you)" : m.my_status === "accepted" ? " · you're in" : m.my_status === "pending" ? " · requested" : ""}{m.i_organize && m.pending > 0 ? ` · ${m.pending} waiting` : ""}</div>
       {!m.i_organize && m.level_min != null && (() => { const f = fitLabel(m.my_level, m.level_min, m.level_max); return <div className={`mt-1 text-xs ${f.tone === "ok" ? "text-turf" : f.tone === "warn" ? "text-sand" : "text-muted"}`}>{f.text}</div>; })()}
       {m.note && <p className="mt-2 text-sm">{m.note}</p>}
     </Link>

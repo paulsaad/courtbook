@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { loaded } from "@/lib/load";
 import { todayIn } from "@/lib/time";
 import { normalizePhone, waNumber } from "@/lib/phone";
+import { codeList } from "@/lib/labels";
 
 type Card = { coach_id: string; name: string | null; sports: string[]; levels: string[]; price_usd: number; bio: string | null; whatsapp: string | null; clubs: { id: string; name: string; slug: string; timezone: string }[] };
 type Win = { day: string; start_time: string; end_time: string; source: string };
@@ -33,7 +34,7 @@ export default async function CoachPage({ params, searchParams }: { params: Prom
       <Link href={club ? `/club/${club.slug}/coaches` : "/"} className="text-sm text-muted">‹ Coaches</Link>
       <div>
         <div className="flex items-baseline justify-between"><h1 className="text-2xl font-semibold tracking-tight">{card.name ?? "Coach"}</h1><span className="text-lg font-semibold">${Number(card.price_usd).toFixed(0)}/h</span></div>
-        <p className="text-sm text-muted">{card.sports.join(", ")}{card.levels.length ? ` · ${card.levels.join(", ")}` : ""}</p>
+        <p className="text-sm text-muted">{codeList(card.sports)}{card.levels.length ? ` · ${codeList(card.levels)}` : ""}</p>
         {card.bio && <p className="mt-2">{card.bio}</p>}
         {card.clubs.length > 1 && (
           <div className="mt-3 flex gap-2">{card.clubs.map((c) => <Link key={c.id} href={`/coaches/${id}?club=${c.slug}`} className={`rounded-full border px-3 py-1 text-sm ${c.id === club?.id ? "border-ink bg-ink text-white" : "border-grid bg-white"}`}>{c.name}</Link>)}</div>

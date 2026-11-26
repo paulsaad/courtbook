@@ -14,6 +14,7 @@ import { areaFromPrefs, prefsFromArea, usePlaying } from "@/lib/playing";
 import { clubPoint, coarsen, distanceLabel, sortByDistance, type LatLng, type PlayingArea } from "@/lib/places";
 import { IconSearch } from "@/components/Icons";
 import BookSheet, { type SheetClub } from "./BookSheet";
+import { placeLine } from "@/app/club/[slug]/ClubHeader";
 
 export type DaySlot = {
   club_id: string; club_name: string; slug: string; town: string | null; district: string | null; price_from: number | null; sports: string[];
@@ -279,7 +280,7 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
                   {c.is_demo && (
                     <span className="mt-0.5 inline-block rounded-full bg-sand-soft px-2 py-0.5 text-[11px] font-semibold text-sand">Fictional demo club</span>
                   )}
-                  <div className="text-sm text-muted">{c.km != null && <span aria-label={distanceLabel(c.km).a11y}>{distanceLabel(c.km).text} · </span>}{[c.town, c.district].filter(Boolean).join(" · ") || "Lebanon"}{c.price_from != null ? ` · from $${Number(c.price_from).toFixed(0)}/h` : ""}{!prefs.sport && c.sports.length > 1 ? ` · ${c.sports.map(sportName).join(", ")}` : ""}</div>
+                  <div className="text-sm text-muted">{c.km != null && <span aria-label={distanceLabel(c.km).a11y}>{distanceLabel(c.km).text} · </span>}{placeLine(c.town, c.district)}{c.price_from != null ? ` · from $${Number(c.price_from).toFixed(0)}/h` : ""}{!prefs.sport && c.sports.length > 1 ? ` · ${c.sports.map(sportName).join(", ")}` : ""}</div>
                 </div>
                 <span className="text-muted">›</span>
               </Link>

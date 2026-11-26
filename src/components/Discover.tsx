@@ -8,6 +8,7 @@ import type { Governorate, Sport } from "@/lib/geo";
 import { EMPTY, readPrefs, writePrefs, type Prefs } from "@/lib/prefs";
 import AreaPicker from "./AreaPicker";
 import { rangeLabel } from "@/lib/levels";
+import { placeLine } from "@/app/club/[slug]/ClubHeader";
 
 export type ClubCard = {
   club_id: string; name: string; slug: string; town: string | null; district: string | null; governorate: string | null;
@@ -114,7 +115,7 @@ export default function Discover({ areas, sports, initialClubs, initialMatches, 
                   {c.is_demo && !c.cover_url && (
                     <span className="mt-1 inline-block rounded-full bg-sand-soft px-2.5 py-0.5 text-xs font-semibold text-sand">Fictional demo club</span>
                   )}
-                  <p className="text-sm text-muted">{[c.town, c.district].filter(Boolean).join(" · ") || "Lebanon"}</p>
+                  <p className="text-sm text-muted">{placeLine(c.town, c.district)}</p>
                 </div>
                 {c.price_from != null && <span className="shrink-0 text-sm"><span className="text-muted">from </span><b>${Number(c.price_from).toFixed(0)}</b><span className="text-muted">/h</span></span>}
               </div>

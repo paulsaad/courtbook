@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { allLoaded, loaded } from "@/lib/load";
 import { loadClubHead } from "@/lib/clubHead";
 import ClubHeader from "../ClubHeader";
+import { codeList } from "@/lib/labels";
 
 type CoachRow = { coach_id: string; name: string | null; sports: string[]; levels: string[]; price_usd: number; bio: string | null; whatsapp: string | null };
 
@@ -27,7 +28,7 @@ export default async function ClubCoaches({ params }: { params: Promise<{ slug: 
           <li key={c.coach_id}>
             <Link href={`/coaches/${c.coach_id}?club=${club.slug}`} className="block rounded-2xl border border-grid bg-white p-4 active:bg-paper">
               <div className="flex items-baseline justify-between"><span className="text-lg font-medium">{c.name ?? "Coach"}</span><span className="font-semibold">${Number(c.price_usd).toFixed(0)}/h</span></div>
-              <div className="mt-1 text-sm text-muted">{c.sports.join(", ")}{c.levels.length ? ` · ${c.levels.join(", ")}` : ""}</div>
+              <div className="mt-1 text-sm text-muted">{codeList(c.sports)}{c.levels.length ? ` · ${codeList(c.levels)}` : ""}</div>
               {c.bio && <p className="mt-2 line-clamp-2 text-sm">{c.bio}</p>}
             </Link>
           </li>

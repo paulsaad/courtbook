@@ -12,6 +12,7 @@ import { readPrefs } from "@/lib/prefs";
 import { newToken, reserve as reserveSlot } from "@/lib/reserve";
 import { useDialog } from "@/components/useDialog";
 import { bookingDurations } from "@/lib/durations";
+import { defaultLength } from "@/lib/labels";
 import { bookingPanelText } from "@/lib/fees";
 
 export type Occ = { id?: string | null; court_id: string; start_at: string; end_at: string; status?: string; mine?: boolean; kind: "booking" | "block" };
@@ -54,6 +55,8 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
     const pickLen = lengths.filter((m) => m <= want).pop() ?? lengths[0] ?? club.slot_minutes;
     return Math.round(pickLen / club.slot_minutes);
   });
+  // a new pick starts at 1 h where the club allows it (Paul, 26 Nov; the app does the same), else at the shortest
+  const startSlots = Math.round(defaultLength(lengths, club.slot_minutes) / club.slot_minutes);
   const [notice, setNotice] = useState<string | null>(null);
   const namesRef = useRef<HTMLDivElement>(null);
   // quote: loading → ok(value) | error(message); Reserve needs ok
@@ -236,7 +239,7 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
                   const bookable = known && !taken && !past && freeRun(c.id, t) >= minSlots;
                   return (
                     <button key={t} disabled={!bookable}
-                      onClick={() => { setPick({ courtId: c.id, time: t }); setSlots(Math.min(minSlots, freeRun(c.id, t))); setQuote({ state: "loading" }); setError(null); setNotice(null); }}
+                      onClick={() => { setPick({ courtId: c.id, time: t }); setSlots(Math.min(startSlots, freeRun(c.id, t))); setQuote({ state: "loading" }); setError(null); setNotice(null); }}
                       className={`absolute inset-x-0 border-t text-xs first:border-t-0 ${i % labelEvery === 0 ? "border-grid" : "border-dashed border-grid/50"} ${
                         selected ? "bg-turf text-white" : taken ? "hatch bg-slate-soft text-muted" : past ? "bg-paper text-muted/60" : bookable ? "active:bg-turf-soft" : "text-muted/60"}`}
                       style={{ top: i * ROW_PX, height: ROW_PX }}>
