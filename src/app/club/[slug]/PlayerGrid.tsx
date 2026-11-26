@@ -260,15 +260,17 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
                   const mine = myHoldAt(c.id, t);
                   if (mine) {
                     return (
-                      <button key={t} onClick={() => router.push(`/pay/${mine.id}`)} className="absolute inset-x-0 border-t border-dashed border-turf bg-turf-soft text-xs font-medium text-turf" style={{ top: i * ROW_PX, height: ROW_PX }}>
+                      <button key={t} onClick={() => router.push(`/pay/${mine.id}`)} aria-label={`${c.name}, ${t}, your hold: pay`} className="absolute inset-x-0 border-t border-dashed border-turf bg-turf-soft text-xs font-medium text-turf" style={{ top: i * ROW_PX, height: ROW_PX }}>
                         {i % labelEvery === 0 ? "Your hold · pay" : ""}
                       </button>
                     );
                   }
                   const selected = pick?.courtId === c.id && toMin(t) >= toMin(pick.time) && toMin(t) < toMin(pick.time) + slots * club.slot_minutes;
                   const bookable = known && !taken && !past && freeRun(c.id, t) >= minSlots;
+                  // a screen reader hears what the colour shows (axe "button-name"; the Courts sheet already names its times)
+                  const state = selected ? "selected" : taken ? "booked" : past ? "past" : !known ? "checking" : bookable ? "free" : "too short to book";
                   return (
-                    <button key={t} disabled={!bookable}
+                    <button key={t} disabled={!bookable} aria-label={`${c.name}, ${t}, ${state}`} aria-pressed={bookable ? selected : undefined}
                       onClick={() => { setPick({ courtId: c.id, time: t }); setSlots(Math.min(startSlots, freeRun(c.id, t))); setQuote({ state: "loading" }); setError(null); setNotice(null); }}
                       className={`absolute inset-x-0 border-t text-xs first:border-t-0 ${i % labelEvery === 0 ? "border-grid" : "border-dashed border-grid/50"} ${
                         selected ? "bg-turf text-white" : taken ? "hatch bg-slate-soft text-muted" : past ? "bg-paper text-muted/60" : bookable ? "active:bg-turf-soft" : "text-muted/60"}`}
