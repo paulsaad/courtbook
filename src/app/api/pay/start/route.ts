@@ -27,12 +27,13 @@ import { attemptReturnUrl, isSafeRedirect, isUuid, paymentSiteOrigin, providerCa
 const json = (body: Record<string, unknown>, status = 200) => NextResponse.json(body, { status });
 /** No attempt is unresolved after these: the browser may forget its key. */
 const FINAL = new Set(["bad_request", "not_authenticated", "not_found", "token_required", "wrong_payment_mode", "not_payable",
-  "hold_expired", "attempts_exhausted", "payments_not_configured", "gateway_error"]);
+  "hold_expired", "attempts_exhausted", "payments_not_configured", "gateway_error", "account_closed"]);
 const fail = (error: string, status: number, extra: Record<string, unknown> = {}) => json({ error, final: FINAL.has(error), ...extra }, status);
 
 const STATUS: Record<string, number> = {
   not_authenticated: 401, not_found: 404, token_required: 400, wrong_payment_mode: 409, not_payable: 409,
   hold_expired: 409, attempts_exhausted: 409, payments_not_configured: 503, attempt_in_progress: 409,
+  account_closed: 403,
 };
 
 type AttemptRow = { attempt_id: string; attempt_no: number; provider: string; amount_usd: number | string; currency: string; status: string; session_url: string | null; already: boolean };
