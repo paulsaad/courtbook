@@ -46,7 +46,18 @@ smoke() {   # passes if the only failure is S4 (it runs only between 11:00 and 2
   echo "$out" | tail -1
 }
 step "staging_smoke.sh (staging check, on a local copy)" smoke
-step "rc_0086_0091_postcheck (staging check, read only, on a local copy)" bash -c "sudo -u postgres psql -d courtbook_f1stage -X -At -f supabase/live/rc_0086_0091_postcheck.sql | tee /dev/stderr | awk -F'|' '\$2 != \"t\" {bad=1} END {exit bad}'"
+rc_post() {   # strict (review R106-1): psql must succeed, every row ok, all rows present, and the 0091 row must say F1
+  local out n
+  out=$(sudo -u postgres psql -d courtbook_f1stage -X -At -v ON_ERROR_STOP=1 -f supabase/live/rc_0086_0091_postcheck.sql 2>&1) || { echo "$out"; echo "FAIL psql stopped"; return 1; }
+  echo "$out"
+  n=$(echo "$out" | grep -c '|')
+  [ "$n" -ge "$RC_ROWS" ] || { echo "FAIL only $n rows (expected $RC_ROWS)"; return 1; }
+  echo "$out" | awk -F'|' 'NF < 3 || $2 != "t" {bad=1} END {exit bad}' || { echo "FAIL a row is not ok"; return 1; }
+  echo "$out" | grep -q "^0091: .*|t|F1$" || { echo "FAIL the 0091 row does not report F1"; return 1; }
+  echo "rc postcheck PASS: $n rows ok, 0091 row reports F1"
+}
+RC_ROWS=$(( $(grep -c "union all select" supabase/live/rc_0086_0091_postcheck.sql) + 1 ))
+step "rc_0086_0091_postcheck (staging check, read only, on a local copy)" rc_post
 $PSQL -q -d postgres -c "drop database if exists courtbook_f1stage" >/dev/null
 
 echo "== the same suites on 0001–0093 WITHOUT F1: they must fail (so they ship with the migration, never before)"
