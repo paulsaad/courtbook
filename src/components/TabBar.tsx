@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { createClient } from "@/lib/supabase/client";
 import { IconBell, IconCalendar, IconCourt, IconHome, IconUser } from "./Icons";
 import { Wordmark } from "./Brand";
@@ -31,6 +32,18 @@ export const DESKTOP_LINKS = [
  * Player navigation. Phones and tablets (< 1024 px): the bottom tab bar, exactly as before (hidden on
  * staff/admin/auth/pay/coach routes and when signed out). Desktop (≥ 1024 px): a top bar instead.
  */
+/**
+ * H7 (Session B's round-3 handover): the desktop top bar was in the page after the content, so the first Tab landed
+ * in the content and "Skip to content" and the top navigation came last (WCAG 2.4.3). It is now placed in the
+ * layout's #top-nav slot, before #main, so keyboard and screen-reader order match what is shown. The phone bar
+ * stays after the content. Rendered only on the client (after the sign-in check), so the slot exists; without a
+ * slot (tests, other layouts) it stays where it was.
+ */
+function inTopSlot(bar: React.ReactElement) {
+  const slot = document.getElementById("top-nav");
+  return slot ? createPortal(bar, slot) : bar;
+}
+
 export default function TabBar() {
   const path = usePathname();
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
@@ -68,7 +81,7 @@ export default function TabBar() {
           </div>
         </nav>
       )}
-      {signedIn !== null && !under(path, DESKTOP_HIDDEN) && <DesktopBar path={path} signedIn={signedIn} unread={unread} />}
+      {signedIn !== null && !under(path, DESKTOP_HIDDEN) && inTopSlot(<DesktopBar path={path} signedIn={signedIn} unread={unread} />)}
     </>
   );
 }
