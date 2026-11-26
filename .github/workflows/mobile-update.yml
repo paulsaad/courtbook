@@ -25,9 +25,9 @@ on:
         options: ["publish", "check", "rollback-to-previous", "rollback-to-built-in"]
         default: "publish"
       app:
-        description: "Which app: live (CourtBook, channel preview) or staging (CourtBook Staging, channel staging)"
+        description: "Which app: live (CourtBook test phones, channel preview), pilot (CourtBook from Google Play closed testing, channel pilot) or staging (CourtBook Staging, channel staging)"
         type: choice
-        options: ["live", "staging"]
+        options: ["live", "pilot", "staging"]
         default: "live"
       platform:
         description: "Which phones"
@@ -110,7 +110,7 @@ jobs:
       # Staging: a warning only.
       - name: Legal pages the app links to are final and public (only if the app links to them)
         if: (inputs.action == 'publish' || inputs.action == 'check')
-        run: node scripts/check-legal-pages.mjs --gate --mode "$([ "${{ inputs.app }}" = live ] && echo fail || echo warn)"
+        run: node scripts/check-legal-pages.mjs --gate --mode "$([ "${{ inputs.app }}" = staging ] && echo warn || echo fail)"
 
       # The runtime version is the app's "version" in app.json. An update only reaches builds with
       # the same runtime version, so it can never land on a build whose native code it was not made for.

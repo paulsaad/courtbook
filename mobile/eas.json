@@ -39,6 +39,15 @@
       "env": {
         "APP_VARIANT": "staging"
       }
+    },
+    "pilot": {
+      "distribution": "store",
+      "environment": "production",
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "channel": "pilot"
     }
   },
   "submit": {
