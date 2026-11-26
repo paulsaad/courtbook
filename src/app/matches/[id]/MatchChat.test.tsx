@@ -168,3 +168,10 @@ describe("web chat: report and block", () => {
     expect(container.ownerDocument.body.textContent).not.toMatch(/96170123456|sami@example\.com/);
   });
 });
+
+describe("web chat on a 360 px phone", () => {
+  it("the message box may shrink, so Send stays on screen (it was 260 px wide and pushed the page sideways)", () => {
+    render(<MatchChat {...props} initial={[]} />);
+    expect(screen.getByRole("textbox", { name: "Message" }).className.split(" ")).toEqual(expect.arrayContaining(["min-w-0", "flex-1"]));
+  });
+});

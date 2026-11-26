@@ -143,7 +143,7 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
       )}
       {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
       <form onSubmit={send} className="mt-3 flex gap-2">
-        <input className="flex-1 rounded-xl border border-grid px-3 py-2.5 text-base outline-none focus:border-action" placeholder="Message" maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
+        <input aria-label="Message" className="min-w-0 flex-1 rounded-xl border border-grid px-3 py-2.5 text-base outline-none focus:border-action" placeholder="Message" maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
         <button disabled={busy || !text.trim()} className="rounded-xl bg-action px-4 font-medium text-white disabled:opacity-50">Send</button>
       </form>
       {reporting && (
