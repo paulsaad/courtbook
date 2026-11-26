@@ -984,7 +984,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         <p data-testid="list-count" className="mx-4 mb-2 hidden text-sm text-muted lg:block">{dayCount(shownBookings.length, shownBlocks.length)}</p>
         <ul className="mx-4 mb-24 divide-y divide-grid rounded-xl border border-grid bg-white">
           {shownBookings.length === 0 && <li className="p-8 text-center text-muted">{shownCancelled.length ? "No active bookings this day." : "No bookings this day."} Tap a court slot in Courts view to add one.</li>}
-          {cancelled?.failed && cancelled.date === date && <li role="status" className="px-4 py-2 text-sm text-muted">Couldn&apos;t load the day&apos;s cancelled bookings. Active bookings above are up to date.</li>}
+          {cancelled?.failed && cancelled.date === date && <li role="status" className="px-4 py-2 text-sm text-muted">Couldn&apos;t load this day&apos;s cancelled bookings, so none are shown here.</li>}
           {listViewRows.map((r) => r.kind === "cancelled" ? (
             <li key={`x-${r.c.id}`} data-testid="cancelled-row"
               className="flex w-full items-center gap-3 bg-paper px-4 py-3 text-muted">
@@ -1105,13 +1105,13 @@ function bookingType(b: Booking) {
 function plural(n: number, one: string) {
   return `${n} ${one}${n === 1 ? "" : "s"}`;
 }
-/** "3 bookings", "3 bookings, 1 block", "No bookings". */
-/** F3: when it was cancelled, in club time: "at 14:05" on the shown day, otherwise "on Mon 10 Nov, 14:05". */
+/** F3: when it was cancelled, in club time: "cancelled at 14:05" on the shown day, otherwise "cancelled Mon 10 Nov, 14:05". */
 export function cancelledWhen(iso: string, day: string, tz: string) {
   const at = parseISO(iso);
   return formatInTimeZone(at, tz, "yyyy-MM-dd") === day ? `cancelled at ${formatInTimeZone(at, tz, "HH:mm")}` : `cancelled ${formatInTimeZone(at, tz, "EEE d MMM, HH:mm")}`;
 }
 
+/** "3 bookings", "3 bookings, 1 block", "No bookings". */
 function dayCount(bookings: number, blocks: number) {
   return `${bookings ? plural(bookings, "booking") : "No bookings"}${blocks ? `, ${plural(blocks, "block")}` : ""}`;
 }
