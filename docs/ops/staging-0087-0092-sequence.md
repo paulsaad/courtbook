@@ -188,8 +188,8 @@ trees: compare with `git rev-parse <commit>^{tree}` before pushing.
 
 ### 2b. The approved pilot website on staging: WP (26 Nov, after Paul's integration approvals)
 
-Paul approved #73–#78 (with #81) and #80 for the pilot integration on 26 Nov: `int/pilot-26nov` @ `133dd5e`. That is
-the website the pilot runs, so staging should carry it after WE.
+Paul approved #73–#78 (with #81), #80, #82–#84 and #86 for the pilot integration on 26 Nov: `int/pilot-26nov` @
+`5f7875f`. That is the website the pilot runs, so staging should carry it after WE.
 
 **Do not deploy `int/pilot-26nov-staging` to `staging-web`.** It does not contain `staging-web`'s deletion schedule (the
 cron in `vercel.json`, the Sentry check-ins in the retry route, `src/lib/deletion/monitor.ts`, the staging label in
@@ -198,7 +198,12 @@ own line instead:
 
 | Build | Merges | Result (local, not pushed) | Local results |
 | --- | --- | --- | --- |
-| **WP** | WE `b85b566` + `int/pilot-26nov` @ `133dd5e` | commit `4ef3a05`, **tree `b7abeab88c41d65b3f9701c886efba6b7ede5c39`** | tsc 0 · lint 0 errors · vitest **890 passed** (1 skipped) · `next build` 0 |
+| **WP** | WE `b85b566` + `int/pilot-26nov` @ `5f7875f` | **tree `e2c92b5b64283f3599a31b4fa2c299c95c025f61`** (commit ids differ per build) | tsc 0 · lint 0 errors · vitest **914 passed** (1 skipped) · `next build` 0 |
+
+**Build and guard:** `docs/ops/staging-web-wp.sh <pilot ref>` makes WP locally (never pushes). It resolves the one
+known test conflict and prints the tree. It refuses unless the schedule files are byte-identical to `staging-web`.
+`docs/ops/staging-web-wp.sh --check <ref>` runs the guard alone: it **refuses `int/pilot-26nov-staging`** (checked).
+Run the guard on the exact commit before any push to `staging-web`.
 
 - **One conflict,** in the test file `src/app/api/account/deletionRoutes.test.ts`, resolved to `staging-web`'s side
   (its monitor-aware clock and the Sentry monitor tests). No source file conflicted.
@@ -211,11 +216,9 @@ own line instead:
 
   | Website | At stage | Reference | Table calls | RPC calls | Missing | Regression | Refused for its role |
   | --- | --- | --- | --- | --- | --- | --- | --- |
-  | `int/pilot-26nov` `133dd5e` | 0086 (staging today) | 0093 | 118 | 146 | **9** | 9 | 0 |
-  | `int/pilot-26nov` `133dd5e` | 0092 | 0093 | 118 | 146 | 0 | 0 | 0 |
-  | `int/pilot-26nov` `133dd5e` | 0093 | 0093 | 118 | 146 | 0 | 0 | 0 |
-  | `int/pilot-26nov` `133dd5e` | 0093 + #72 (table privileges draft) | 0093 | 118 | 146 | 0 | 0 | 0 |
-  | **WP `4ef3a05`** | 0092 and 0093 | 0093 | 118 | 146 | 0 | 0 | 0 |
+  | `int/pilot-26nov` `5f7875f` | 0086 (staging today) | 0093 | 118 | 146 | **9** | 9 | 0 |
+  | `int/pilot-26nov` `133dd5e` | 0092, 0093, 0093 + #72 (table privileges draft) | 0093 | 118 | 146 | 0 | 0 | 0 |
+  | **WP (tree `e2c92b5…`)** | 0092 and 0093 | 0093 | 118 | 146 | 0 | 0 | 0 |
 
   At 0086 the nine missing calls are the 0087–0092 functions (favourites, playing areas, `quote_move`,
   `move_booking_priced`, `set_club_base_prices`). **So WP may be deployed only after step E (0092).** It works the
