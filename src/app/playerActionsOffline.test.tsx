@@ -83,11 +83,13 @@ describe("player actions with no connection", () => {
     expect(router.refresh).not.toHaveBeenCalled();
   });
 
-  it("a server refusal keeps the shared wording", async () => {
-    answer = { data: null, error: { message: "match_full" } };
+  it("a server refusal keeps the shared wording and refreshes the game", async () => {
+    // local database: a retried join after a lost answer is refused (match_closed) although the player is in
+    answer = { data: null, error: { message: "match_closed" } };
     render(<MatchActions m={m} participants={[]} />);
     fireEvent.click(screen.getByText("Join"));
     expect((await screen.findByRole("alert")).textContent).not.toBe(OFFLINE);
+    expect(router.refresh).toHaveBeenCalledTimes(1);
   });
 
   it("Open to players on a booking", async () => {

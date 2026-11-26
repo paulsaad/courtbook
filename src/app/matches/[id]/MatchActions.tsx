@@ -5,7 +5,7 @@ import { useState } from "react";
 import LevelRange from "@/components/LevelRange";
 import { createClient } from "@/lib/supabase/client";
 import PlayersNeeded from "@/components/PlayersNeeded";
-import { actionError } from "@/lib/actionError";
+import { actionError, isNetworkFailure } from "@/lib/actionError";
 import type { MatchRow } from "@/components/MatchBoard";
 
 type Participant = { profile_id: string; name: string | null; level: number | null; level_legacy: string | null; is_organizer: boolean; status: string };
@@ -22,6 +22,9 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
       // M3-S: an organiser accepting a player one of them blocked (the shared copy is for the joiner)
       const acceptBlocked = fn === "decide_join" && args.p_accept === true && error.message?.includes("blocked");
       setError(acceptBlocked ? "You can't accept this player." : actionError(error.message));
+      // a refusal means the game changed (filled, closed, or this was a retry of a join that already
+      // went through): show it as it is now. Not after a network failure: the refresh would fail too.
+      if (!isNetworkFailure(error.message)) router.refresh();
       return false;
     }
     fetch("/api/notify/email", { method: "POST" }).catch(() => {});   // best-effort email fan-out
