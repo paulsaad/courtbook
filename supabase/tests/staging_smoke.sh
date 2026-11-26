@@ -131,9 +131,14 @@ else
 fi
 fails_with $U1 "S3l off the 30-minute grid (10:10): refused by the slot trigger" "select (case when move_booking_priced('$MB','$COURT2', $(at 10:10), $(at 11:10), quote_price('$COURT2', $(at 10:10), $(at 11:10)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" not_on_grid
 # since 0092 a time with no price is refused first (no_price_rule); before 0092 the hours check answered
-# as S3d: a constant price, so the move function answers, not the quote. It prices the new time before the slot
-# trigger runs, so with no price rule before opening it refuses no_price_rule; with one, the trigger refuses outside_opening_hours
-fails_with $U1 "S3m before opening (06:00): refused" "select (case when move_booking_priced('$MB','$COURT2', $(at 06:00), $(at 07:00), 0, (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" "no_price_rule\|outside_opening_hours"
+# the move function must answer, not the quote (review R106-2): the desk's price is the quote where the club has a
+# price for 06:00, else a constant 0 (the quote itself would refuse no_price_rule). With no price the move function
+# refuses no_price_rule while pricing the new time; with one, its price check passes and the slot trigger refuses
+# outside_opening_hours. Either way the refusal comes from the move function.
+fails_with $U1 "S3m before opening (06:00): refused" "do \$m\$ declare p numeric; begin
+  begin p := quote_price('$COURT2', $(at 06:00), $(at 07:00)); exception when others then p := 0; end;
+  perform move_booking_priced('$MB','$COURT2', $(at 06:00), $(at 07:00), p, b.court_id, b.start_at, b.end_at) from bookings b where b.id = '$MB';
+end \$m\$;" "no_price_rule\|outside_opening_hours"
 fails_with $U1 "S3n not whole slots (1 h 15): refused" "select (case when move_booking_priced('$MB','$COURT2', $(at 10:00), $(at 11:15), quote_price('$COURT2', $(at 10:00), $(at 11:15)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" bad_duration
 OB=$(q $U1 "select staff_book('$CLUB','$COURT2', $(at 19:00), $(at 20:00), 'smoke-move', null);")
 fails_with $U1 "S3o onto another booking: refused" "select (case when move_booking_priced('$MB','$COURT2', $(at 19:30), $(at 20:30), quote_price('$COURT2', $(at 19:30), $(at 20:30)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" slot_taken
