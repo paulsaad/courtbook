@@ -13,7 +13,8 @@ export type Position = { court_id: string | null; start_at: string; end_at: stri
 export type Current = Position & { status: string };
 
 /** The refusals a move answers when the booking changed after the sheet was opened. */
-export const changedElsewhere = (message: string | undefined) => /booking_changed_elsewhere|not_confirmed/.test(message ?? "");
+// exactly these codes (review N3: "age_not_confirmed" must never match); the database raises them as the whole message
+export const changedElsewhere = (message: string | undefined) => /^(booking_changed_elsewhere|not_confirmed)$/.test((message ?? "").trim());
 
 const STATUS_WORDS: Record<string, string> = { cancelled: "was cancelled", no_show: "was marked as a no-show" };
 
@@ -25,7 +26,9 @@ export function describeChange(seen: Position, now: Current | null, courtName: (
   { text: string; stillActive: boolean } {
   if (!now) return { text: `${ERRORS.booking_changed_elsewhere} Check the calendar before moving it again.`, stillActive: false };
   if (now.status !== "confirmed") {
-    return { text: `This booking ${STATUS_WORDS[now.status] ?? "is no longer active"} on another screen, so your move was not saved.`, stillActive: false };
+    // cancelled or marked no-show: someone did that; a hold still paying or expired: nobody did (review N4)
+    const words = STATUS_WORDS[now.status];
+    return { text: words ? `This booking ${words} on another screen, so your move was not saved.` : `${ERRORS.not_confirmed} Your move was not saved.`, stillActive: false };
   }
   const day = (iso: string) => formatInTimeZone(parseISO(iso), tz, "yyyy-MM-dd");
   const at = (p: Position, withDay: boolean) =>

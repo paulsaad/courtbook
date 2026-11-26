@@ -19,4 +19,14 @@ select 'P4 no policy lets a signed-in user update bookings directly', count(*)::
   from pg_policies where schemaname = 'public' and tablename = 'bookings' and cmd in ('UPDATE', 'ALL')
 union all
 select 'P5 exactly three move functions', count(*)::text, case when count(*) = 3 then 'OK' else 'STOP' end
-  from pg_proc where pronamespace = 'public'::regnamespace and proname in ('move_booking', 'move_booking_priced');
+  from pg_proc where pronamespace = 'public'::regnamespace and proname in ('move_booking', 'move_booking_priced')
+union all
+select 'P6 all three move functions: security definer, search_path=public, signed-in users only (not anon, not PUBLIC) (review N2)',
+  string_agg(p.oid::regprocedure::text || ' secdef=' || p.prosecdef || ' ' || coalesce(array_to_string(p.proconfig, ','), '-')
+    || ' auth=' || has_function_privilege('authenticated', p.oid, 'execute') || ' anon=' || has_function_privilege('anon', p.oid, 'execute')
+    || ' public=' || exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where a.grantee = 0 and a.privilege_type = 'EXECUTE'), '; '),
+  case when count(*) = 3 and bool_and(p.prosecdef and p.proconfig @> array['search_path=public']
+         and has_function_privilege('authenticated', p.oid, 'execute') and not has_function_privilege('anon', p.oid, 'execute')
+         and not exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where a.grantee = 0 and a.privilege_type = 'EXECUTE'))
+       then 'OK' else 'STOP' end
+  from pg_proc p where p.oid in (to_regprocedure('public.move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric)'), to_regprocedure('public.move_booking(uuid,uuid,timestamptz,timestamptz)'), to_regprocedure('public.move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric,uuid,timestamptz,timestamptz)'));

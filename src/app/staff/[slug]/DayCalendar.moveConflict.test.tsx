@@ -177,6 +177,35 @@ describe("F1: a refused move reloads and says what changed (never 'saved')", () 
   });
 });
 
+describe("F1 review follow-ups (N3, N4, N5)", () => {
+  it("N5 / correction A: refused, but the booking is now exactly where this desk wanted it: shown as calendar state, never 'saved' or 'not saved'", async () => {
+    view();
+    db.moveAnswers = [{ data: null, error: { message: "booking_changed_elsewhere", code: "P0001" } }];
+    // another desk made the same move; timestamps as the browser sends them (toISOString), so R1's check matches
+    const there = { ...opened, court_id: p3.id, start_at: "2099-01-12T16:00:00.000Z", end_at: "2099-01-12T17:00:00.000Z" };
+    db.current = there; db.day = [there];
+    await mayaMovesToPadel3();
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain(
+      "Couldn't confirm this request, but the calendar now shows this booking on Padel 3 at 18:00. Check it before doing anything else."));
+    expect(page()).not.toMatch(/changed on another screen|not saved|\bSaved\b/);
+  });
+  it("N4: a hold still being paid (pending) is never blamed on another screen", async () => {
+    view();
+    db.moveAnswers = [{ data: null, error: { message: "not_confirmed", code: "P0001" } }];
+    db.current = { ...opened, status: "pending" };
+    await mayaMovesToPadel3();
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("This booking is no longer active. Your move was not saved."));
+    expect(page()).not.toMatch(/on another screen/);
+  });
+  it("N3: another code that merely contains 'not_confirmed' (age_not_confirmed) keeps its own words", async () => {
+    view();
+    db.moveAnswers = [{ data: null, error: { message: "age_not_confirmed", code: "P0001" } }];
+    await mayaMovesToPadel3();
+    await waitFor(() => expect(sheetText()).toContain("CourtBook is for people aged 18 and over."));
+    expect(page()).not.toMatch(/on another screen/);
+  });
+});
+
 describe("F1 rollout: before the database change, the page uses 0091's call", () => {
   it("PGRST202 (no function with these arguments): the same move is sent once more without the seen values", async () => {
     view();

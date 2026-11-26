@@ -37,41 +37,74 @@ async function session(who) {
   await c.query("begin");
   await c.query("set local role authenticated");
   await c.query("select set_config('request.jwt.claim.sub', $1, true)", [who]);
+  const now = async () => (await c.query("select (extract(epoch from clock_timestamp()) * 1e6)::bigint as t")).rows[0].t;
   return {
     pid: (await c.query("select pg_backend_pid() as p")).rows[0].p,
     async run(sql, args) { try { const r = await c.query(sql, args); return { ok: true, rows: r.rows }; } catch (e) { return { ok: false, err: e.message }; } },
+    /** the call, with the database clock (µs) just before it starts and just after it returns, inside the transaction */
+    async timed(sql, args) {
+      // a savepoint, so the clock can still be read after a refusal (which aborts the call, and only the call)
+      await c.query("savepoint timed");
+      const t0 = BigInt(await now());
+      const r = await this.run(sql, args);
+      if (!r.ok) await c.query("rollback to savepoint timed");
+      const t1 = BigInt(await now());
+      return { ...r, t0, t1 };
+    },
     async end() { try { await c.query("commit"); } catch { /* aborted: rolls back */ } await c.end(); },
   };
 }
-/** a, b = [who, sql, args]. Returns [resA, resB]. */
+// R101-2: evidence that the operations genuinely overlapped, kept per round
+const evidence = { simRounds: 0, barrierBoth: 0, overlapped: 0, waited: 0, heldRounds: 0, heldWaited: 0 };
+const waitingOn = (ctl, pids) => ctl.query(
+  "select count(*)::int as n from pg_locks where not granted and pid = any($1) and locktype <> 'advisory'", [pids]).then((r) => r.rows[0].n);
+/** a, b = [who, sql, args]. Returns [resA, resB, proof]; proof says how the two overlapped. */
 async function race(order, a, b) {
-  if (order === "sim") {
-    const ctl = new Client({ connectionString: DB }); await ctl.connect();
-    await ctl.query("select pg_advisory_lock($1)", [BARRIER]);
-    const [sa, sb] = await Promise.all([session(a[0]), session(b[0])]);
-    const go = (s, x) => s.run("select pg_advisory_xact_lock_shared($1)", [BARRIER])
-      .then(() => s.run(x[1], x[2])).then(async (r) => { await s.end(); return r; });
-    const pa = go(sa, a), pb = go(sb, b);
-    for (let i = 0; i < 200; i++) {   // both actors are waiting on the barrier
-      const n = Number((await ctl.query("select count(*) as n from pg_locks where locktype = 'advisory' and objid = $1 and not granted and pid = any($2)",
-        [BARRIER, [sa.pid, sb.pid]])).rows[0].n);
-      if (n === 2) break;
-      await sleep(10);
+  const ctl = new Client({ connectionString: DB }); await ctl.connect();
+  try {
+    if (order === "sim") {
+      evidence.simRounds++;
+      await ctl.query("select pg_advisory_lock($1)", [BARRIER]);
+      const [sa, sb] = await Promise.all([session(a[0]), session(b[0])]);
+      // each actor first queues on the shared barrier, then makes its call
+      const go = (s, x) => s.run("select pg_advisory_xact_lock_shared($1)", [BARRIER])
+        .then(() => s.timed(x[1], x[2])).then(async (r) => { await s.end(); return r; });
+      const pa = go(sa, a), pb = go(sb, b);
+      let both = false;
+      for (let i = 0; i < 500 && !both; i++) {   // up to 5 s for both actors to be queued on the barrier
+        const n = Number((await ctl.query("select count(*)::int as n from pg_locks where locktype = 'advisory' and objid = $1 and not granted and pid = any($2)",
+          [BARRIER, [sa.pid, sb.pid]])).rows[0].n);
+        both = n === 2;
+        if (!both) await sleep(10);
+      }
+      // while both are released together, look for one of them waiting on the other's row or court lock
+      await ctl.query("select pg_advisory_unlock($1)", [BARRIER]);
+      let sawWait = false;
+      const watch = (async () => { for (let i = 0; i < 50 && !sawWait; i++) { if (await waitingOn(ctl, [sa.pid, sb.pid]) > 0) sawWait = true; else await sleep(2); } })();
+      const [ra, rb] = await Promise.all([pa, pb]);
+      await watch;
+      // both calls were in progress at the same moment (database clock): each started before the other returned
+      const overlap = ra.t0 < rb.t1 && rb.t0 < ra.t1;
+      if (both) evidence.barrierBoth++;
+      if (overlap) evidence.overlapped++;
+      if (sawWait) evidence.waited++;
+      return [ra, rb, { order, barrier: both, overlap, sawWait, ok: both && overlap }];
     }
-    await ctl.query("select pg_advisory_unlock($1)", [BARRIER]);
-    const res = await Promise.all([pa, pb]);
-    await ctl.end();
-    return res;
-  }
-  const [first, second] = order === "ab" ? [a, b] : [b, a];
-  const s1 = await session(first[0]), s2 = await session(second[0]);
-  const r1 = await s1.run(first[1], first[2]);
-  const p2 = s2.run(second[1], second[2]);   // blocks on the first's locks while it is uncommitted
-  await sleep(250);
-  await s1.end();
-  const r2 = await p2;
-  await s2.end();
-  return order === "ab" ? [r1, r2] : [r2, r1];
+    evidence.heldRounds++;
+    const [first, second] = order === "ab" ? [a, b] : [b, a];
+    const s1 = await session(first[0]), s2 = await session(second[0]);
+    const r1 = await s1.timed(first[1], first[2]);
+    const p2 = s2.timed(second[1], second[2]);   // starts while the first is uncommitted
+    // the second must be seen WAITING on the first's lock before the first commits (it is not just later)
+    let waited = false;
+    for (let i = 0; i < 200 && !waited; i++) { if (await waitingOn(ctl, [s2.pid]) > 0) waited = true; else await sleep(5); }
+    await s1.end();
+    const r2 = await p2;
+    await s2.end();
+    if (waited) evidence.heldWaited++;
+    const [ra, rb] = order === "ab" ? [r1, r2] : [r2, r1];
+    return [ra, rb, { order, barrier: true, overlap: waited, sawWait: waited, ok: waited }];
+  } finally { await ctl.end(); }
 }
 const short = (r) => (r.ok ? "ok" : r.err.replace(/^.*?ERROR:\s*/, "").slice(0, 60));
 const where = async (id) => (await q("select court_id, status from bookings where id = $1", [id]))[0];
@@ -90,9 +123,11 @@ let both = 0, simRounds = 0;
 for (const [i, order] of ORDERS.entries()) {
   const x = await newCourt(), y = await newCourt(), z = await newCourt();
   const id = await walkIn(x);
-  const [rd, rm] = await race(order, [DINA, ...move(id, y, x)], [MAYA, ...move(id, z, x)]);
+  const [rd, rm, proof] = await race(order, [DINA, ...move(id, y, x)], [MAYA, ...move(id, z, x)]);
   const w = await where(id);
   if (order === "sim") simRounds++;
+  rep(`R1.${i + 1} [${order}] the two moves genuinely overlapped (${order === "sim" ? "both queued on the barrier; each started before the other returned" : "the second was seen waiting on the first's lock"})`,
+    proof.ok, JSON.stringify(proof));
   if (rd.ok && rm.ok) both++;
   if (MODE === "control") continue;
   const winner = rd.ok ? y : z, loser = rd.ok ? rm : rd;
@@ -108,7 +143,8 @@ if (MODE !== "control") {
   for (const [i, order] of ORDERS.entries()) {
     const x = await newCourt(), y = await newCourt();
     const id = await walkIn(x);
-    const [rmv, rc] = await race(order, [DINA, ...move(id, y, x)], [MAYA, "select cancel_booking($1)::text", [id]]);
+    const [rmv, rc, proof] = await race(order, [DINA, ...move(id, y, x)], [MAYA, "select cancel_booking($1)::text", [id]]);
+    rep(`R2.${i + 1} [${order}] the move and the cancel genuinely overlapped`, proof.ok, JSON.stringify(proof));
     const w = await where(id);
     const ok = rc.ok && w.status === "cancelled" && (rmv.ok ? w.court_id === y : /not_confirmed/.test(rmv.err) && w.court_id === x);
     if (rmv.ok) moved++; else refused++;
@@ -122,6 +158,9 @@ if (MODE !== "control") {
 const overlaps = Number(await one(`select count(*) from bookings a join bookings b on a.court_id = b.court_id and a.id < b.id
   and a.status in ('confirmed','pending') and b.status in ('confirmed','pending') and a.period && b.period`));
 rep("I1 no two live bookings overlap on any court", overlaps === 0, `${overlaps}`);
+console.log(`      overlap evidence: ${evidence.barrierBoth}/${evidence.simRounds} simultaneous rounds had both actors queued on the barrier; `
+  + `${evidence.overlapped}/${evidence.simRounds} overlapped on the database clock; ${evidence.waited}/${evidence.simRounds} showed one waiting on the other's lock; `
+  + `${evidence.heldWaited}/${evidence.heldRounds} delayed rounds showed the second waiting on the first's lock`);
 console.log(`race checks: ${oks + fails}, failures: ${fails}`);
 await admin.end();
 process.exit(fails ? 1 : 0);

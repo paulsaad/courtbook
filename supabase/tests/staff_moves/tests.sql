@@ -40,9 +40,16 @@ select pg_temp.keep('m5', pg_temp.r(pg_temp.u(2), format('select move_booking_pr
   pg_temp.b(), pg_temp.c('Padel 2'), pg_temp.at(3,'19:00'), pg_temp.at(3,'20:30'))));
 select pg_temp.keep('m5c', pg_temp.r(pg_temp.u(2), format('select move_booking_priced(%L,%L,%L,%L,45,%L,%L,null)::text',
   pg_temp.b(), pg_temp.c('Padel 2'), pg_temp.at(3,'19:00'), pg_temp.at(3,'20:30'), pg_temp.c('Padel 1'), pg_temp.at(3,'19:00'))));
-insert into t select 'M5 a missing seen value (all null, or only the end) is refused',
-  pg_temp.got('m5') = 'ERR booking_changed_elsewhere' and pg_temp.got('m5c') = 'ERR booking_changed_elsewhere' and pg_temp.pos(pg_temp.b()) = 'Padel 1 19:00-20:30 confirmed',
-  pg_temp.got('m5') || ' / ' || pg_temp.got('m5c');
+-- each seen value missing on its own, the other two right (R101-1: a "<>" on any line would let that null through)
+select pg_temp.keep('m5a', pg_temp.r(pg_temp.u(2), format('select move_booking_priced(%L,%L,%L,%L,45,null,%L,%L)::text',
+  pg_temp.b(), pg_temp.c('Padel 2'), pg_temp.at(3,'19:00'), pg_temp.at(3,'20:30'), pg_temp.at(3,'19:00'), pg_temp.at(3,'20:30'))));
+select pg_temp.keep('m5b', pg_temp.r(pg_temp.u(2), format('select move_booking_priced(%L,%L,%L,%L,45,%L,null,%L)::text',
+  pg_temp.b(), pg_temp.c('Padel 2'), pg_temp.at(3,'19:00'), pg_temp.at(3,'20:30'), pg_temp.c('Padel 1'), pg_temp.at(3,'20:30'))));
+insert into t select 'M5 a missing seen value is refused: all three, only the court, only the start, only the end',
+  pg_temp.got('m5') = 'ERR booking_changed_elsewhere' and pg_temp.got('m5a') = 'ERR booking_changed_elsewhere'
+  and pg_temp.got('m5b') = 'ERR booking_changed_elsewhere' and pg_temp.got('m5c') = 'ERR booking_changed_elsewhere'
+  and pg_temp.pos(pg_temp.b()) = 'Padel 1 19:00-20:30 confirmed',
+  pg_temp.got('m5') || ' / ' || pg_temp.got('m5a') || ' / ' || pg_temp.got('m5b') || ' / ' || pg_temp.got('m5c');
 
 -- the calls without what the desk saw are refused, for staff and players alike
 select pg_temp.keep('m6a', pg_temp.r(pg_temp.u(2), format('select move_booking_priced(%L,%L,%L,%L,45)::text', pg_temp.b(), pg_temp.c('Padel 3'), pg_temp.at(3,'19:00'), pg_temp.at(3,'20:30'))));

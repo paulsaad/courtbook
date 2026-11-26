@@ -6,9 +6,13 @@
 # 2. controls BEFORE the draft: preflight passes; postcheck STOPS; tests.sql fails; the race harness SEES the defect
 #    (both moves applied) in every round
 # 3. the draft; postcheck passes; tests.sql 15/15; race harness (≥ 20 simultaneous rounds + delayed orders, and move
-#    versus cancel); the draft again (idempotent): postcheck and tests.sql still pass
+#    versus cancel; every round must PROVE overlap: both actors queued on the barrier and each call started before the
+#    other returned on the database clock, or, delayed, the second seen waiting on the first's lock (review R101-2));
+#    the draft again (idempotent): postcheck and tests.sql still pass
 # 4. rollback: both functions exactly as 0091; the 8-argument one gone; the defect is back (race control passes)
-# 5. mutants of the draft: each must make tests.sql or the race harness fail
+# 5. mutants of the draft: each must be caught by BEHAVIOUR (tests.sql or the race harness). The postcheck's md5
+#    fingerprint would STOP every mutant (any edit changes the text), so it is reported separately as an integrity
+#    check and never counted as catching a defect (review R101-1). X3 must be caught by the race harness alone.
 set -u
 cd "$(dirname "$0")/../../.."
 PSQL=${PSQL:-psql}
@@ -64,32 +68,63 @@ stops "$pre" && { echo "$pre" | sed 's/^/  /'; echo "  R1 FAIL: the preflight do
   || echo "  R1 both functions exactly as 0091, the 8-argument one gone (the preflight passes again)"
 out=$(race control); echo "$out" | grep -q "^ok    control" && echo "  R2 without the comparison the defect is back (race control: both moves applied)" || { echo "  R2 FAIL"; status=FAIL; }
 
-echo "== mutants (each must make the run fail)"
+echo "== mutants: caught only by behaviour (tests.sql, race harness); the fingerprint is reported, never counted"
 caught=0; total=0
+# one mutant: a fresh database with the mutant applied, then each detector on its own
+behave() {
+  local draft=$1 t r f out
+  build
+  q -v ON_ERROR_STOP=1 -1 -f "$draft" >/dev/null 2>&1 || { echo "load-fail load-fail load-fail"; return; }
+  passed "$(tests)" && t=pass || t=CAUGHT
+  out=$(race draft); echo "$out" | grep -qE "^race checks: [0-9]+, failures: 0$" && r=pass || r=CAUGHT
+  stops "$(q -F'|' -f supabase/live/staff_moves_postcheck.sql)" && f=STOP || f=ok
+  echo "$t $r $f"
+}
 mut() {
+  local name=$1 race_only=${4:-}
   total=$((total+1)); tmp=$(mktemp /tmp/staffmoves.XXXXXX.sql); chmod 644 "$tmp"
-  python3 - "$DRAFT" "$tmp" "$2" "$3" <<'PY' || { echo "  NOT APPLIED $1"; status=FAIL; rm -f "$tmp"; return; }
+  if ! python3 -c '
 import sys; s=open(sys.argv[1]).read(); f=sys.argv[3]; t=sys.argv[4]
-assert s.count(f)==1, s.count(f); open(sys.argv[2],'w').write(s.replace(f,t))
-PY
-  if run "$tmp" >/dev/null 2>&1; then echo "  MISSED  $1"; status=FAIL; else caught=$((caught+1)); echo "  caught  $1"; fi
-  rm -f "$tmp"
+assert s.count(f)==1, s.count(f); open(sys.argv[2],"w").write(s.replace(f,t))' "$DRAFT" "$tmp" "$2" "$3"; then
+    echo "  NOT APPLIED $name"; status=FAIL; rm -f "$tmp"; return
+  fi
+  local res; res=$(behave "$tmp"); rm -f "$tmp"
+  set -- $res
+  local by=""; [ "$1" = CAUGHT ] && by="tests.sql"; [ "$2" = CAUGHT ] && by="${by:+$by + }race"
+  if [ -n "$by" ]; then caught=$((caught+1)); printf "  caught  %-64s by %-17s (fingerprint: %s)\n" "$name" "$by" "$3"
+  else printf "  MISSED  %-64s by behaviour       (fingerprint: %s, not counted)\n" "$name" "$3"; status=FAIL; fi
+  if [ -n "$race_only" ] && [ "$by" != "race" ]; then echo "          expected the race harness ALONE to catch this"; status=FAIL; fi
 }
 mut "X1 no comparison at all" "  if b.court_id is distinct from p_seen_court                                                        -- F1" "  if false and b.court_id is distinct from p_seen_court                                                        -- F1"
 mut "X2 the court only (time and length not compared)" "     or b.start_at is distinct from p_seen_start                                                     -- F1
      or b.end_at is distinct from p_seen_end then                                                    -- F1" "     then                                                    -- F1"
-mut "X3 the comparison reads the row before locking it" "  perform lock_courts(array_remove(array[v_court, p_court], null));
-  select * into b from bookings where id = p_booking for update;" "  select * into b from bookings where id = p_booking;
-  if b.court_id is distinct from p_seen_court or b.start_at is distinct from p_seen_start or b.end_at is distinct from p_seen_end then raise exception 'booking_changed_elsewhere'; end if;
-  perform pg_sleep(0.05);
-  perform lock_courts(array_remove(array[v_court, p_court], null));
+# X3: the comparison made on an UNLOCKED read before the row lock, and nothing else changed (staff check and order as
+# in the draft). Only real concurrency tells it apart from the draft, so the race harness alone must catch it.
+mut "X3 compares an unlocked read (before the lock), nothing else" "  perform lock_courts(array_remove(array[v_court, p_court], null));
   select * into b from bookings where id = p_booking for update;
-  b.court_id := p_seen_court; b.start_at := p_seen_start; b.end_at := p_seen_end;"
+  if not is_staff_of(b.club_id) then raise exception 'forbidden'; end if;
+  if b.status <> 'confirmed' then raise exception 'not_confirmed'; end if;
+  if b.court_id is null then raise exception 'not_a_court_booking'; end if;
+  if b.court_id is distinct from p_seen_court                                                        -- F1
+     or b.start_at is distinct from p_seen_start                                                     -- F1
+     or b.end_at is distinct from p_seen_end then                                                    -- F1
+    raise exception 'booking_changed_elsewhere';                                                     -- F1
+  end if;                                                                                            -- F1" "  select * into b from bookings where id = p_booking;
+  if not is_staff_of(b.club_id) then raise exception 'forbidden'; end if;
+  if b.status <> 'confirmed' then raise exception 'not_confirmed'; end if;
+  if b.court_id is null then raise exception 'not_a_court_booking'; end if;
+  if b.court_id is distinct from p_seen_court or b.start_at is distinct from p_seen_start or b.end_at is distinct from p_seen_end then
+    raise exception 'booking_changed_elsewhere';
+  end if;
+  perform lock_courts(array_remove(array[v_court, p_court], null));
+  select * into b from bookings where id = p_booking for update;" race-only
 mut "X4 the comparison before the staff check (another club learns where it is)" "  if not is_staff_of(b.club_id) then raise exception 'forbidden'; end if;
   if b.status" "  if b.court_id is distinct from p_seen_court then raise exception 'booking_changed_elsewhere'; end if;
   if not is_staff_of(b.club_id) then raise exception 'forbidden'; end if;
   if b.status"
-mut "X5 a missing seen value matches (= instead of is distinct from)" "  if b.court_id is distinct from p_seen_court                                                        -- F1" "  if b.court_id <> p_seen_court                                                        -- F1"
+mut "X5a a missing seen court matches (<> on the court line)" "  if b.court_id is distinct from p_seen_court                                                        -- F1" "  if b.court_id <> p_seen_court                                                        -- F1"
+mut "X5b a missing seen start matches (<> on the start line)" "     or b.start_at is distinct from p_seen_start                                                     -- F1" "     or b.start_at <> p_seen_start                                                     -- F1"
+mut "X5c a missing seen end matches (<> on the end line)" "     or b.end_at is distinct from p_seen_end then                                                    -- F1" "     or b.end_at <> p_seen_end then                                                    -- F1"
 mut "X6 the 0091 call still moves (no refusal)" "begin
   raise exception 'move_needs_reload';
 end \$\$;" "declare b bookings%rowtype;
@@ -98,6 +133,6 @@ begin
   return move_booking_priced(p_booking, p_court, p_start, p_end, p_expected_price, b.court_id, b.start_at, b.end_at);
 end \$\$;"
 mut "X7 anon may call it" "revoke all on function move_booking_priced(uuid, uuid, timestamptz, timestamptz, numeric, uuid, timestamptz, timestamptz) from public, anon;" "revoke all on function move_booking_priced(uuid, uuid, timestamptz, timestamptz, numeric, uuid, timestamptz, timestamptz) from public; grant execute on function move_booking_priced(uuid, uuid, timestamptz, timestamptz, numeric, uuid, timestamptz, timestamptz) to anon;"
-echo "mutants caught: $caught/$total"
+echo "mutants caught by behaviour: $caught/$total (the fingerprint column is an integrity check, not counted)"
 echo "staff moves check what the desk saw: $status"
 [ "$status" = PASS ]
