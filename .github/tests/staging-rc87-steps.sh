@@ -28,9 +28,10 @@ out=$(run_step "Release candidate 0087–0092 preflight after 0086, read only (r
 [ $rc = 0 ]; ok "rc87_preflight passes on 0001–0086$( [ $rc = 0 ] || echo " — $(echo "$out" | grep FAIL | head -3 | tr '\n' ' ')")" $rc
 # 26 Nov: an account being deleted (0086 status 'closing', as staging can have after the trial) must not stop step A
 psql -q -d $S -c "insert into auth.users (id, phone) values ('f0870000-0000-4000-8000-000000000001', '+96170870001');
-  select close_account_internal('f0870000-0000-4000-8000-000000000001', 'web');" >/dev/null
+  select close_account_internal('f0870000-0000-4000-8000-000000000001', 'web');
+  select record_deletion_worker_run('{}'::jsonb);   -- and the retry worker running, as on staging since step 3" >/dev/null
 out=$(run_step "Release candidate 0087–0092 preflight after 0086, read only (rc87_preflight)"); rc=$?
-[ $rc = 0 ]; ok "rc87_preflight passes with a deletion open in a 0086 state (closing)$( [ $rc = 0 ] || echo " — $(echo "$out" | grep FAIL | head -1)")" $rc
+[ $rc = 0 ]; ok "rc87_preflight passes with a deletion open in a 0086 state (closing) and the retry worker running$( [ $rc = 0 ] || echo " — $(echo "$out" | grep FAIL | head -1)")" $rc
 out=$(run_step "$APPLY" MIGRATIONS="0089"); [ $? != 0 ] && echo "$out" | grep -q "0087 is neither applied nor in this run" && [ "$(applied)" = 0 ]
 ok "0089 alone is refused (0087, 0088 missing); nothing applied" $?
 out=$(run_step "$APPLY" MIGRATIONS="0087 0094"); [ $? != 0 ] && [ "$(applied)" = 0 ]; ok "0087 with another number is refused; nothing applied" $?
