@@ -21,7 +21,7 @@ jest.mock("../lib/supabase", () => ({
   supabase: {
     rpc: (...a: unknown[]) => mockRpc(...(a as [string])),
     from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { ...mockDb.row }, error: null }) }) }) }),
-    auth: { signOut: jest.fn() },
+    auth: { signOut: jest.fn(), getSession: jest.fn(async () => ({ data: { session: { access_token: "tok" } }, error: null })), admin: { signOut: jest.fn() } },
   },
 }));
 const mockPush = jest.fn();
@@ -119,39 +119,50 @@ describe("Profile: Sign out (F2, Paul 26 Nov)", () => {
   });
 });
 
-describe("Profile: Sign out of all devices (F2 review S3, Paul 26 Nov)", () => {
-  const { supabase } = jest.requireMock("../lib/supabase") as { supabase: { auth: { signOut: jest.Mock } } };
+describe("Profile: Sign out of all devices (F2 review S3, Paul 26 Nov; re-review R103-1)", () => {
+  const { supabase } = jest.requireMock("../lib/supabase") as { supabase: { auth: { signOut: jest.Mock; admin: { signOut: jest.Mock } } } };
   const { Alert } = jest.requireActual("react-native") as typeof import("react-native");
   type Btn = { text: string; style?: string; onPress?: () => Promise<void> | void };
   let alert: jest.SpyInstance;
-  beforeEach(() => { supabase.auth.signOut.mockReset(); alert = jest.spyOn(Alert, "alert").mockImplementation(() => {}); });
+  beforeEach(() => { supabase.auth.signOut.mockReset(); supabase.auth.admin.signOut.mockReset(); alert = jest.spyOn(Alert, "alert").mockImplementation(() => {}); });
   afterEach(() => alert.mockRestore());
   const buttons = () => alert.mock.calls.at(-1)![2] as Btn[];
+  const { SIGN_OUT_ALL } = jest.requireActual("../shared/signOutText") as typeof import("../shared/signOutText");
 
   it("asks first, with the shared wording; Cancel signs nothing out", async () => {
     await show();
     await fireEvent.press(await screen.findByTestId("profile-signout-all"));
-    const { SIGN_OUT_ALL } = jest.requireActual("../shared/signOutText") as typeof import("../shared/signOutText");
     expect(alert.mock.calls.at(-1)!.slice(0, 2)).toEqual([SIGN_OUT_ALL.title, SIGN_OUT_ALL.body]);
     expect(buttons().map((b) => b.text)).toEqual([SIGN_OUT_ALL.cancel, SIGN_OUT_ALL.confirm]);
+    expect(supabase.auth.admin.signOut).not.toHaveBeenCalled();
     expect(supabase.auth.signOut).not.toHaveBeenCalled();
   });
 
-  it("confirmed: Supabase's global sign-out (every session), once", async () => {
-    supabase.auth.signOut.mockResolvedValue({ error: null });
+  it("confirmed: the server's global revocation (once), and only then this phone cleared (local)", async () => {
+    supabase.auth.admin.signOut.mockResolvedValue({ error: null });
     await show();
     await fireEvent.press(await screen.findByTestId("profile-signout-all"));
     await buttons()[1].onPress!();
-    expect(supabase.auth.signOut).toHaveBeenCalledTimes(1);
-    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: "global" });
+    expect(supabase.auth.admin.signOut).toHaveBeenCalledTimes(1);
+    expect(supabase.auth.admin.signOut).toHaveBeenCalledWith("tok", "global");
+    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: "local" });
   });
 
-  it("refused or offline: says nothing changed (still signed in everywhere); no fallback to this phone only", async () => {
-    supabase.auth.signOut.mockResolvedValue({ error: { name: "AuthRetryableFetchError", status: 0 } });
+  it("refused or offline: says the others may still be signed in; this phone is not signed out", async () => {
+    supabase.auth.admin.signOut.mockResolvedValue({ error: { name: "AuthApiError", status: 404, code: "not_found" } });
     await show();
     await fireEvent.press(await screen.findByTestId("profile-signout-all"));
     await buttons()[1].onPress!();
-    expect(await screen.findByText(/Couldn't sign out of all devices, so nothing changed/)).toBeTruthy();
-    expect(supabase.auth.signOut).toHaveBeenCalledTimes(1);   // never retried with scope local
+    expect(await screen.findByText(SIGN_OUT_ALL.failed)).toBeTruthy();
+    expect(supabase.auth.signOut).not.toHaveBeenCalled();
+  });
+
+  it("this phone's own sign-in already ended on the server: says so", async () => {
+    supabase.auth.admin.signOut.mockResolvedValue({ error: { name: "AuthSessionMissingError", status: 400 } });
+    await show();
+    await fireEvent.press(await screen.findByTestId("profile-signout-all"));
+    await buttons()[1].onPress!();
+    expect(await screen.findByText(SIGN_OUT_ALL.thisDeviceEnded)).toBeTruthy();
+    expect(supabase.auth.signOut).not.toHaveBeenCalled();
   });
 });

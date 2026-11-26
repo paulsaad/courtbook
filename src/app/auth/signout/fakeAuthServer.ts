@@ -19,6 +19,8 @@ const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url")
 
 export type FakeAuth = {
   url: string;
+  /** set to make /logout answer this instead (e.g. a gateway's 404, a 401, a 403 bad_jwt); null = normal */
+  logoutAnswer: { status: number; code?: string } | null;
   requests: { method: string; path: string }[];
   sessions: Session[];
   alive: () => Session[];
@@ -44,6 +46,7 @@ export async function startFakeAuth(user = { id: "f7000000-0000-4000-8000-000000
   const body = (req: IncomingMessage) => new Promise<Record<string, unknown>>((res) => {
     let d = ""; req.on("data", (c) => { d += c; }); req.on("end", () => { try { res(d ? JSON.parse(d) : {}); } catch { res({}); } });
   });
+  const fake = { logoutAnswer: null as FakeAuth["logoutAnswer"] };
   const server: Server = createServer(async (req, res) => {
     const u = new URL(req.url ?? "/", "http://x");
     requests.push({ method: req.method ?? "", path: u.pathname + u.search });
@@ -63,9 +66,12 @@ export async function startFakeAuth(user = { id: "f7000000-0000-4000-8000-000000
       if (!s || s.revoked) return send(403, { code: 403, error_code: "session_not_found", msg: "Session from session_id claim in JWT does not exist" });
       return send(200, tokens(s).user);
     }
+    if (u.pathname === "/auth/v1/logout" && fake.logoutAnswer) {
+      return send(fake.logoutAnswer.status, { code: fake.logoutAnswer.status, error_code: fake.logoutAnswer.code ?? "unexpected", msg: "forced by the test" });
+    }
     if (u.pathname === "/auth/v1/logout") {
       const s = sessionOf(req);
-      if (!s || s.revoked) return send(403, { code: 403, error_code: "session_not_found", msg: "Session not found" });
+      if (!s || s.revoked) return send(403, { code: 403, error_code: "session_not_found", msg: "Session from session_id claim in JWT does not exist" });
       const scope = u.searchParams.get("scope") ?? "global";
       for (const x of sessions) {
         if (x.userId !== s.userId) continue;
@@ -80,6 +86,7 @@ export async function startFakeAuth(user = { id: "f7000000-0000-4000-8000-000000
   const port = (server.address() as { port: number }).port;
   return {
     url: `http://127.0.0.1:${port}`, requests, sessions,
+    get logoutAnswer() { return fake.logoutAnswer; }, set logoutAnswer(v) { fake.logoutAnswer = v; },
     alive: () => sessions.filter((s) => !s.revoked),
     close: () => new Promise<void>((r) => server.close(() => r())),
   };

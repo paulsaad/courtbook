@@ -89,7 +89,7 @@ it("Sign out of all devices (F2 review S3): every session ends on the server; th
   const phone = await device(), desk = await device();
   const deskToken = (await desk.getSession()).data.session!.access_token;
   expect(await signOutAllDevices(phone)).toEqual({ ok: true });
-  expect(scopes()).toEqual(["global"]);
+  expect(scopes()).toEqual(["global", "local"]);   // revoked everywhere (confirmed by the server), then this phone cleared
   expect(auth.alive()).toHaveLength(0);
   expect((await phone.getSession()).data.session).toBeNull();
   expect((await desk.refreshSession()).error).toBeTruthy();
@@ -101,7 +101,26 @@ it("Sign out of all devices (F2 review S3): every session ends on the server; th
 it("Sign out of all devices with no connection: ok=false, nothing changed, this phone still signed in", async () => {
   const phone = await device();
   await auth.close();
-  expect(await signOutAllDevices(phone)).toEqual({ ok: false });
+  expect(await signOutAllDevices(phone)).toEqual({ ok: false, reason: "failed" });
   expect((await phone.getSession()).data.session).not.toBeNull();
   auth = await startFakeAuth();
+});
+
+// re-review R103-1: auth-js's global sign-out treats these answers as "already signed out" and reports success
+for (const [status, code] of [[401, "no_authorization"], [403, "bad_jwt"], [404, "not_found"]] as const) {
+  it(`Sign out of all devices, /logout answers ${status} ${code}: not done; this phone kept; the desk still signed in`, async () => {
+    const phone = await device(), desk = await device();
+    auth.logoutAnswer = { status, code };
+    expect(await signOutAllDevices(phone)).toEqual({ ok: false, reason: "failed" });
+    expect((await phone.getSession()).data.session).not.toBeNull();
+    auth.logoutAnswer = null;
+    expect(auth.alive()).toHaveLength(2);
+    expect((await desk.refreshSession()).error).toBeNull();
+  });
+}
+it("Sign out of all devices when this phone's own session already ended on the server: this_device_ended; the desk lives", async () => {
+  const phone = await device(), desk = await device();
+  auth.sessions[0].revoked = true;
+  expect(await signOutAllDevices(phone)).toEqual({ ok: false, reason: "this_device_ended" });
+  expect((await desk.refreshSession()).error).toBeNull();
 });

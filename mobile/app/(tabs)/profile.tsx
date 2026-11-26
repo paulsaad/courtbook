@@ -85,7 +85,8 @@ export default function Profile() {
         setBusy(true);
         const r = await signOutAllDevices(supabase.auth);
         setBusy(false);
-        if (!r.ok) setAllProblem(SIGN_OUT_ALL.failed);   // nothing changed: still signed in everywhere, this phone too
+        // this phone stays signed in; the others may be too (the server did not confirm)
+        if (!r.ok) setAllProblem(r.reason === "this_device_ended" ? SIGN_OUT_ALL.thisDeviceEnded : SIGN_OUT_ALL.failed);
       } },
     ]);
   }

@@ -72,13 +72,42 @@ describe("F2 S3: what 'Sign out everywhere' revokes, with two real sessions", ()
     fireEvent.click(screen.getByText(SIGN_OUT_ALL.button));
     fireEvent.click(screen.getByText(SIGN_OUT_ALL.confirm));
     await waitFor(() => expect(env.replace).toHaveBeenCalledWith("/"));
-    expect(scopes()).toEqual(["global"]);
+    expect(scopes()).toEqual(["global", "local"]);                         // revoked everywhere, confirmed; then this browser cleared
     expect(auth.alive()).toHaveLength(0);                                  // every session revoked on the server
     expect(tokens(phone)).toEqual([]);                                     // this browser: signed out now
     expect((await clients.get(desk)!.auth.refreshSession()).error).toBeTruthy();  // the desk cannot renew
     // NOT revoked: the desk's already-issued access token is a signed token, still unexpired (it is accepted by the
     // database until it expires; Supabase's default lifetime 1 h). Never claimed as immediate.
     expect(deskTokenBefore).toBeGreaterThan(3000);
+  });
+
+  // re-review R103-1: auth-js's own global sign-out treats these answers as "already signed out", clears this browser
+  // and reports success although nothing was revoked. The page must never say everything was signed out then.
+  for (const [status, code] of [[401, "no_authorization"], [403, "bad_jwt"], [404, "not_found"]] as const) {
+    it(`/logout answers ${status} ${code}: not reported as done; this browser stays signed in; the desk's session lives`, async () => {
+      const desk = await signIn(), phone = await signIn(); await useBrowser(phone);
+      auth.logoutAnswer = { status, code };
+      render(<SignOutEverywhere />);
+      fireEvent.click(screen.getByText(SIGN_OUT_ALL.button));
+      fireEvent.click(screen.getByText(SIGN_OUT_ALL.confirm));
+      await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(SIGN_OUT_ALL.failed));
+      expect(env.replace).not.toHaveBeenCalled();
+      expect(tokens(phone).length).toBeGreaterThan(0);
+      expect(auth.alive()).toHaveLength(2);
+      auth.logoutAnswer = null;
+      expect((await clients.get(desk)!.auth.refreshSession()).error).toBeNull();
+    });
+  }
+  it("this browser's own session already ended on the server (desk still signed in): says so, never 'done'", async () => {
+    const desk = await signIn(), phone = await signIn(); await useBrowser(phone);
+    auth.sessions[1].revoked = true;                                   // the phone's session, ended elsewhere
+    render(<SignOutEverywhere />);
+    fireEvent.click(screen.getByText(SIGN_OUT_ALL.button));
+    fireEvent.click(screen.getByText(SIGN_OUT_ALL.confirm));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(SIGN_OUT_ALL.thisDeviceEnded));
+    expect(env.replace).not.toHaveBeenCalled();
+    expect(auth.alive()).toHaveLength(1);
+    expect((await clients.get(desk)!.auth.refreshSession()).error).toBeNull();
   });
 
   it("Auth unreachable (offline): nothing changes anywhere, the page says so, this browser stays signed in", async () => {

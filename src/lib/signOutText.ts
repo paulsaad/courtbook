@@ -7,7 +7,8 @@
  *   - an access token already issued to another device is NOT revoked: it is a signed token checked on its own, so it
  *     keeps working until it expires (the project's JWT expiry; Supabase's default is 1 hour, and the copy below says
  *     so; check both projects' setting before release). The other device is signed out when it next renews.
- *   - if the Auth server cannot be reached (offline), nothing changes: every device, this one included, stays signed in.
+ *   - if the Auth server refuses or cannot be reached, this device stays signed in and the screen says the others may
+ *     still be signed in (src/lib/signOutAll.ts: the revocation is confirmed by the server before this device clears).
  * Ordinary "Sign out" ends this device only. Closing the account ends every session and also bans and deletes the
  * sign-in (account closure, unchanged).
  */
@@ -20,5 +21,7 @@ export const SIGN_OUT_ALL = {
     "someone else's device.",
   confirm: "Sign out everywhere",
   cancel: "Cancel",
-  failed: "Couldn't sign out of all devices, so nothing changed: you're still signed in everywhere. Check your connection and try again.",
+  // re-review R103-2: never "nothing changed" (the request may have reached the server and its answer been lost)
+  failed: "Couldn't sign out of all devices. Check your connection and try again. Until it works, treat your other devices as still signed in.",
+  thisDeviceEnded: "This device's sign-in has already ended, so your other devices couldn't be signed out from here. Sign in again, then use Sign out of all devices.",
 } as const;

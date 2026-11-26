@@ -4,13 +4,14 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { SIGN_OUT_ALL } from "@/lib/signOutText";
+import { signOutAllDevices } from "@/lib/signOutAll";
 
 /**
  * "Sign out of all devices" (F2 review S3, Paul 26 Nov), with a confirmation step. Supabase's global sign-out, from
  * this browser: every session of the account ends on the Auth server, and this browser's session is removed. What it
  * does not do (already-issued access tokens keep working until they expire, up to an hour by default) is in
- * src/lib/signOutText.ts and said in the confirmation. If the Auth server refuses or cannot be reached, auth-js keeps
- * this browser's session: nothing changed anywhere, and the page says so.
+ * src/lib/signOutText.ts and said in the confirmation. The Auth server must confirm the revocation before this browser
+ * is cleared (src/lib/signOutAll.ts); otherwise this browser stays signed in and the page says the others may be too.
  */
 export default function SignOutEverywhere() {
   const router = useRouter();
@@ -20,10 +21,10 @@ export default function SignOutEverywhere() {
 
   async function confirm() {
     setBusy(true); setProblem(null);
-    let failed = false;
-    try { failed = !!(await createClient().auth.signOut({ scope: "global" })).error; } catch { failed = true; }
+    // the server confirms the revocation before this browser is cleared (src/lib/signOutAll.ts, re-review R103-1)
+    const r = await signOutAllDevices(createClient().auth);
     setBusy(false);
-    if (failed) { setProblem(SIGN_OUT_ALL.failed); return; }
+    if (!r.ok) { setProblem(r.reason === "this_device_ended" ? SIGN_OUT_ALL.thisDeviceEnded : SIGN_OUT_ALL.failed); return; }
     router.replace("/"); router.refresh();
   }
 

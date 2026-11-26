@@ -12,17 +12,6 @@
 type Auth = { signOut: (opts: { scope: "local" }) => PromiseLike<unknown> };
 export const signOutThisDevice = (auth: Auth) => auth.signOut({ scope: "local" });
 
-/**
- * "Sign out of all devices" (F2 review S3): Supabase's global sign-out (see shared/signOutText.ts for exactly what is
- * and is not revoked). ok=false: the Auth server refused or could not be reached; auth-js then keeps this phone's
- * session and nothing changed anywhere, which the screen says (never a silent this-phone-only sign-out).
- */
-type AuthAll = { signOut: (opts: { scope: "global" }) => PromiseLike<{ error: unknown } | unknown> };
-export async function signOutAllDevices(auth: AuthAll): Promise<{ ok: boolean }> {
-  try {
-    const r = (await auth.signOut({ scope: "global" })) as { error?: unknown } | undefined;
-    return { ok: !r?.error };
-  } catch {
-    return { ok: false };
-  }
-}
+/** "Sign out of all devices": shared with the website (shared/signOutAll.ts: the Auth server confirms the revocation
+ *  before this phone is cleared; re-review R103-1). */
+export { signOutAllDevices } from "../shared/signOutAll";
