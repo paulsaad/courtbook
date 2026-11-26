@@ -7,7 +7,8 @@ import { Text } from "../../components/Text";
 import { Chip } from "../../components/Chip";
 import { Icon } from "../../components/Icon";
 import { DateStrip } from "../../components/DateStrip";
-import { SportMark, SPORTS } from "../../components/SportMark";
+import { SportMark } from "../../components/SportMark";
+import { useSports } from "../../lib/sports";
 import { CourtLines } from "../../components/CourtLines";
 import { Image } from "expo-image";
 import { useClubCovers } from "../../lib/clubInfo";
@@ -36,10 +37,11 @@ export default function Courts() {
   const days = useMemo(() => bookingDays(BEIRUT), []);
   const [date, setDate] = useState(days[0].key);
   const [sport, setSport] = useState<string | null>(null);
+  const catalogue = useSports();   // active sports, alphabetical (admin-managed catalogue)
   // Home's sport chips open this tab with ?sport=…; a later chip tap on Home changes it again
   const p = useLocalSearchParams<{ sport?: string }>();
   useEffect(() => {
-    if (p.sport && (SPORTS as readonly string[]).includes(p.sport)) setSport(p.sport);
+    if (p.sport && /^[a-z][a-z0-9_]{1,30}$/.test(p.sport)) setSport(p.sport);
   }, [p.sport]);
   const session = useSession();
   const userId = session.status === "signed-in" ? session.session.user.id : null;
@@ -86,8 +88,8 @@ export default function Courts() {
       <View style={styles.filters}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           <Chip tone="sport" label="All sports" selected={sport === null} onPress={() => setSport(null)} />
-          {SPORTS.filter((s) => s !== "other").map((s) => (
-            <Chip key={s} tone="sport" label={sportName(s)} selected={sport === s} onPress={() => setSport(s)} icon={<SportMark sport={s} size={20} />} />
+          {catalogue.map(({ code: s, name }) => (
+            <Chip key={s} tone="sport" label={name} selected={sport === s} onPress={() => setSport(s)} icon={<SportMark sport={s} size={20} />} />
           ))}
         </ScrollView>
         {userId && playing.data && (

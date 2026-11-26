@@ -11,7 +11,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
   if (!user) redirect("/login?next=/profile");
   const [{ data: p }, { data: sports }, { count: staffCount }, { count: coachCount }, { data: lv }] = allLoaded(await Promise.all([
     supabase.from("profiles").select("name, phone, level, sports, email_notifications, roles").eq("id", user.id).single(),
-    supabase.from("sports").select("code, name_en").eq("active", true).order("sort_order"),
+    supabase.from("sports").select("code, name_en").eq("active", true).order("name_en"),
     supabase.from("club_staff").select("*", { count: "exact", head: true }).eq("profile_id", user.id),
     supabase.from("coaches").select("*", { count: "exact", head: true }).eq("profile_id", user.id),
     supabase.rpc("my_levels"),

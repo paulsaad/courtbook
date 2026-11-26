@@ -39,7 +39,8 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
   const known = occ !== null;
   const loading = !known && !(fetched?.date === date && fetched.occ === null);
   const failed = !known && !loading;
-  const sports = [...new Set(allCourts.map((c) => c.sport))];
+  // only this club's sports, alphabetically by display name (F16)
+  const sports = [...new Set(allCourts.map((c) => c.sport))].sort((a, b) => (sportNames[a] ?? a).localeCompare(sportNames[b] ?? b));
   const [sport, setSport] = useState<string | null>(null);
   const courts = sport && sports.includes(sport) ? allCourts.filter((c) => c.sport === sport) : allCourts;
 

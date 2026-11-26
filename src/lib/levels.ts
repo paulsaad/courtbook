@@ -1,4 +1,4 @@
-// Player level guide — "player-levels-v1" (Paul's guide, 11 Nov 2026; squash added by Claude in the same style).
+// Player level guide — "player-levels-v1" (Paul's guide, 11 Nov 2026; squash and table tennis (draft, 26 Nov, for Paul's review) added by Claude in the same style).
 // Groups are derived from the number here and in SQL (level_group): Beginner 1–3 · Intermediate 4–6 · Advanced 7–10.
 
 export const GUIDE_VERSION = "player-levels-v1";
@@ -134,6 +134,21 @@ export const GUIDE: Record<string, { intro: string; levels: { level: number; tex
       { level: 8, text: "You handle sustained pressure and vary speed, direction and disguise. You read opponents early and change your plan during a game." },
       { level: 9, text: "Against very strong opponents, you consistently build openings through precise placement and quick recovery. You can turn difficult defensive situations into effective replies." },
       { level: 10, text: "Against elite opponents, you maintain shot quality and tactical control at very high rally speeds. You anticipate patterns and exploit small openings with precision." },
+    ],
+  },
+  table_tennis: {
+    intro: "Topspin makes the ball dip and kick forward; backspin makes it float and stay low. Assess your usual singles or doubles game. Table tennis is also called ping pong.",
+    levels: [
+      { level: 1, text: "You are starting table tennis and learning to hit the ball over the net onto the table. You need help with serving and scoring." },
+      { level: 2, text: "You can serve legally and return slow, easy balls. Rallies are short because your timing is still developing." },
+      { level: 3, text: "You can keep a gentle forehand and backhand rally going and follow the score. You are learning to return simple spin." },
+      { level: 4, text: "You can push and drive the ball at a comfortable pace and return most simple serves. You start to place the ball on purpose." },
+      { level: 5, text: "You play topspin on slower balls and handle basic backspin. You vary your serves, although strong spin still causes errors." },
+      { level: 6, text: "You link serve, receive and the third ball into a plan. You attack loose balls and defend moderate pace from both sides." },
+      { level: 7, text: "You read most serves and spins early and loop consistently from both wings. You control the pace and placement of rallies." },
+      { level: 8, text: "You handle fast, spinny rallies and change speed, spin and direction to your advantage. You adjust your plan during a match." },
+      { level: 9, text: "Against very strong opponents, you combine varied serves, early timing and quick footwork. You turn defensive positions into attacks." },
+      { level: 10, text: "Against elite opponents, you keep quality and control at very high speed and spin. You anticipate patterns and exploit small openings." },
     ],
   },
 };
