@@ -14,8 +14,15 @@ describe("Find a game date window", () => {
   it("just after Beirut midnight it is the new day (UTC is still the previous date)", () => {
     expect(playWindowEnd("today", new Date("2026-11-26T22:30:00Z"))).toBe("2026-11-27T22:00:00.000Z");
   });
-  it("This week is today and the next 6 days", () => {
+  // "This week" = today and the next 6 Beirut days, exactly as the app (mobile/lib/gameFilters.ts) and the M3 foundation
+  // report of 17 Nov. It is a rolling 7 days, not Monday–Sunday (Monday-start weeks are the staff calendar's Week view).
+  it("This week is today and the next 6 days (from Thursday: through Wednesday)", () => {
     expect(playWindowEnd("week", thu1419)).toBe("2026-12-02T22:00:00.000Z");
+  });
+  it("from Sunday it runs through Saturday, not just to the end of that Sunday", () => {
+    const sun2330 = new Date("2026-11-29T21:30:00Z");   // Sun 29 Nov 23:30 Beirut
+    expect(playWindowEnd("week", sun2330)).toBe("2026-12-05T22:00:00.000Z");   // end of Sat 5 Dec
+    expect(playWindowEnd("today", sun2330)).toBe("2026-11-29T22:00:00.000Z");
   });
   it("across the spring clock change (Beirut, last Sunday of March) the day still ends at local midnight", () => {
     expect(playWindowEnd("today", new Date("2027-03-28T10:00:00Z"))).toBe("2027-03-28T21:00:00.000Z");
