@@ -75,7 +75,9 @@ behave() {
   local draft=$1 t r f out
   build
   q -v ON_ERROR_STOP=1 -1 -f "$draft" >/dev/null 2>&1 || { echo "load-fail load-fail load-fail"; return; }
-  passed "$(tests)" && t=pass || t=CAUGHT
+  # tests.sql counts only when a named check fails; a file that stops on an error is reported, never counted
+  out=$(tests)
+  if echo "$out" | grep -q "^FAIL  M"; then t=CAUGHT; elif passed "$out"; then t=pass; else t=error; fi
   out=$(race draft); echo "$out" | grep -qE "^race checks: [0-9]+, failures: 0$" && r=pass || r=CAUGHT
   stops "$(q -F'|' -f supabase/live/staff_moves_postcheck.sql)" && f=STOP || f=ok
   echo "$t $r $f"
@@ -91,6 +93,7 @@ assert s.count(f)==1, s.count(f); open(sys.argv[2],"w").write(s.replace(f,t))' "
   local res; res=$(behave "$tmp"); rm -f "$tmp"
   set -- $res
   local by=""; [ "$1" = CAUGHT ] && by="tests.sql"; [ "$2" = CAUGHT ] && by="${by:+$by + }race"
+  [ "$1" = error ] && echo "          tests.sql stopped on an error without a named failing check (not counted)"
   if [ -n "$by" ]; then caught=$((caught+1)); printf "  caught  %-64s by %-17s (fingerprint: %s)\n" "$name" "$by" "$3"
   else printf "  MISSED  %-64s by behaviour       (fingerprint: %s, not counted)\n" "$name" "$3"; status=FAIL; fi
   if [ -n "$race_only" ] && [ "$by" != "race" ]; then echo "          expected the race harness ALONE to catch this"; status=FAIL; fi

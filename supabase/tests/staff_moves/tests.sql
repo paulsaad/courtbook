@@ -83,6 +83,8 @@ insert into t select 'M8 a desk''s direct UPDATE of the booking changes nothing 
   pg_temp.got('m8') || ' / ' || pg_temp.pos(pg_temp.b());
 
 -- the other rules still apply with a fresh view (they come after the comparison)
+-- the walk-in's id, or null if creating it was refused: M9e then fails by name instead of the file stopping
+create function pg_temp.wid() returns uuid language sql as $$ select case when pg_temp.got('w') ~ '^[0-9a-f-]{36}$' then pg_temp.got('w')::uuid end $$;
 select pg_temp.keep('w', pg_temp.r(pg_temp.u(2), format('select staff_book(%L,%L,%L,%L,''Walk-in Sami'')::text', pg_temp.club(), pg_temp.c('Padel 3'), pg_temp.at(3,'19:00'), pg_temp.at(3,'20:00'))));
 select pg_temp.keep('m9a', pg_temp.mv(2, pg_temp.b(), 'Padel 3', 3, '19:00', '20:30', 45, 'Padel 1', 3, '19:00', '20:30'));   -- onto Sami
 select pg_temp.keep('m9b', pg_temp.mv(2, pg_temp.b(), 'Padel 2', 3, '19:00', '20:00', 99, 'Padel 1', 3, '19:00', '20:30'));   -- wrong price
@@ -92,9 +94,9 @@ insert into t select 'M9 with a fresh view the other rules still refuse: slot_ta
   pg_temp.got('m9a') = 'ERR slot_taken' and pg_temp.got('m9b') = 'ERR price_changed' and pg_temp.got('m9c') = 'ERR bad_duration' and pg_temp.got('m9d') = 'ERR move_into_past'
   and pg_temp.pos(pg_temp.b()) = 'Padel 1 19:00-20:30 confirmed',
   pg_temp.got('m9a') || ' / ' || pg_temp.got('m9b') || ' / ' || pg_temp.got('m9c') || ' / ' || pg_temp.got('m9d');
-select pg_temp.keep('m9e', pg_temp.mv(2, pg_temp.got('w')::uuid, 'Padel 2', 3, '20:00', '21:30', 45, 'Padel 3', 3, '19:00', '20:00'));  -- walk-in: new length, new price
+select pg_temp.keep('m9e', pg_temp.mv(2, pg_temp.wid(), 'Padel 2', 3, '20:00', '21:30', 45, 'Padel 3', 3, '19:00', '20:00'));  -- walk-in: new length, new price
 insert into t select 'M9e a walk-in moved with what the desk saw and the confirmed new price: applied, priced',
-  pg_temp.got('m9e') like '%"price": 45%' and pg_temp.pos(pg_temp.got('w')::uuid) = 'Padel 2 20:00-21:30 confirmed', pg_temp.got('m9e');
+  pg_temp.got('m9e') like '%"price": 45%' and pg_temp.pos(pg_temp.wid()) = 'Padel 2 20:00-21:30 confirmed', pg_temp.got('m9e');
 
 -- ABA: moved away and back by others; this desk's view is current again, so its move applies (documented)
 select pg_temp.keep('m10a', pg_temp.mv(3, pg_temp.b(), 'Padel 3', 3, '19:00', '20:30', 45, 'Padel 1', 3, '19:00', '20:30'));
