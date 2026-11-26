@@ -58,6 +58,12 @@ with `59a2f11` (checked: an empty diff for those paths). So the trial's schedule
    After every deploy, also check in Vercel that the `deletion-retry` schedule is still **Enabled** for `staging-web`.
    If it shows Disabled, or the heartbeat goes stale: stop and report. Re-enabling needs Paul's go.
 
+   **The heartbeat is a consistency check, not proof of execution** (Paul, 26 Nov). It records only the latest run.
+   The worker's actual execution is verified independently at each check: Vercel's execution history for the
+   `deletion-retry` schedule (every slot since the previous check delivered, no gap over 30 minutes) and the Sentry
+   monitor's check-ins (no missed or error check-in). The postcheck row "app deletion gate follows the retry worker
+   heartbeat" (#65) only proves that the gate and the heartbeat agree.
+
 ## 1. Steps
 
 | # | Action | Writes | Website deployed with it | Check before the next step | Stop if |
@@ -213,7 +219,8 @@ trees: compare with `git rev-parse <commit>^{tree}` before pushing.
   - the step-E postcheck required the app's deletion gate to be shut, but the worker is running.
 
   On staging as it is, either would have halted the rollout. With 0092 already applied in the second case. **#65
-  must be merged into `staging-pilot-0093` before step A.**
+  was approved by Paul (26 Nov) and is in `staging-pilot-0093` (`30ff70c`).** Re-run on that head: rc87 steps
+  10/10, pilot 0093 steps 16/16, full sequence 45/45.
 
 ## 4. Rollback limits
 
