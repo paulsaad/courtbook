@@ -123,10 +123,10 @@ describe("F3: the List view shows the day's cancelled bookings", () => {
     expect(screen.getByText(/^No active bookings this day\./)).toBeTruthy();
   });
 
-  it("the cancelled read fails: says only that cancelled bookings are not shown (never that the rest is up to date)", async () => {
+  it("the cancelled read fails: says cancelled bookings may be missing and that it will retry (never that the rest is up to date)", async () => {
     db.cancelledFails = true;
     show("list");
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Couldn't load this day's cancelled bookings, so none are shown here."));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Couldn't load this day's cancelled bookings, so some may be missing below. The list will try again."));
     expect(document.body.textContent).not.toMatch(/up to date/i);
     expect(screen.getByText("Sami Walk In")).toBeTruthy();
     expect(rows()).toHaveLength(0);
@@ -163,7 +163,7 @@ describe("F3: the cancelled-read failure line and the day read", () => {
   it("both reads fail: the calendar's own out-of-date warning stays, and the cancelled line claims nothing about the rest", async () => {
     db.cancelledFails = true;
     render(<DayCalendar club={club} courts={[p1, t1]} bookings={[walkIn]} blocks={[] as Block[]} date={DATE} view="list" sport={null} court={null} loadFailed sportNames={{ padel: "Padel", tennis: "Tennis" }} />);
-    await waitFor(() => expect(screen.getAllByRole("status").some((s) => s.textContent === "Couldn't load this day's cancelled bookings, so none are shown here.")).toBe(true));
+    await waitFor(() => expect(screen.getAllByRole("status").some((s) => s.textContent === "Couldn't load this day's cancelled bookings, so some may be missing below. The list will try again.")).toBe(true));
     expect(document.body.textContent).toMatch(/What you see may be out of date/);
     expect(document.body.textContent).not.toMatch(/up to date\./i);
   });

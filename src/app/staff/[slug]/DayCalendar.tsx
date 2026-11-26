@@ -984,7 +984,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         <p data-testid="list-count" className="mx-4 mb-2 hidden text-sm text-muted lg:block">{dayCount(shownBookings.length, shownBlocks.length)}</p>
         <ul className="mx-4 mb-24 divide-y divide-grid rounded-xl border border-grid bg-white">
           {shownBookings.length === 0 && <li className="p-8 text-center text-muted">{shownCancelled.length ? "No active bookings this day." : "No bookings this day."} Tap a court slot in Courts view to add one.</li>}
-          {cancelled?.failed && cancelled.date === date && <li role="status" className="px-4 py-2 text-sm text-muted">Couldn&apos;t load this day&apos;s cancelled bookings, so none are shown here.</li>}
+          {cancelled?.failed && cancelled.date === date && <li role="status" className="px-4 py-2 text-sm text-muted">Couldn&apos;t load this day&apos;s cancelled bookings, so some may be missing below. The list will try again.</li>}
           {listViewRows.map((r) => r.kind === "cancelled" ? (
             <li key={`x-${r.c.id}`} data-testid="cancelled-row"
               className="flex w-full items-center gap-3 bg-paper px-4 py-3 text-muted">
