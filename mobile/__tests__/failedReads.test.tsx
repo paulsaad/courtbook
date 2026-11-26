@@ -68,15 +68,21 @@ describe("Home: the player's bookings could not be read", () => {
 describe("Club: a link to a club that isn't on CourtBook", () => {
   beforeEach(() => { mockNavigate.mockClear(); });
   it("no such club: 'Club not available' and Find a court, not 'Nothing free on this day'", async () => {
-    mockState.info = { ...mockState.info, error: { code: "PGRST116", message: "no rows" }, isError: true };
+    mockState.info = { ...mockState.info, error: { code: "PGRST116", message: "no rows" }, isError: true, isPending: false } as typeof mockState.info;
     await wrap(<Club />);
     expect(screen.queryByText("Nothing free on this day")).toBeNull();
     expect(screen.getByText("Club not available")).toBeTruthy();
     fireEvent.press(screen.getByText("Find a court"));
     expect(mockNavigate).toHaveBeenCalledWith("/courts");
   });
+  it("while the club itself is still loading: no 'Nothing free' flash", async () => {
+    mockState.info = { ...mockState.info, data: undefined, error: null, isError: false, isPending: true } as typeof mockState.info;
+    await wrap(<Club />);
+    expect(screen.queryByText("Nothing free on this day")).toBeNull();
+    expect(screen.queryByText("Club not available")).toBeNull();
+  });
   it("a club that exists with nothing free that day: unchanged", async () => {
-    mockState.info = { ...mockState.info, data: { club: { id: "gone-club", name: "Test Club" } }, error: null, isError: false };
+    mockState.info = { ...mockState.info, data: { club: { id: "gone-club", name: "Test Club" } }, error: null, isError: false, isPending: false } as typeof mockState.info;
     await wrap(<Club />);
     expect(screen.getByText("Nothing free on this day")).toBeTruthy();
     expect(screen.queryByText("Club not available")).toBeNull();

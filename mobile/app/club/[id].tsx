@@ -235,6 +235,9 @@ export default function Club() {
           <Loading label="Loading times" />
         ) : q.isError && !q.data ? (
           <ErrorState error={q.error} onRetry={() => void q.refetch()} />
+        ) : !club && info.isPending ? (
+          // the day has no times for this club yet: wait for the club itself before saying "nothing free"
+          <Loading label="Loading the club" />
         ) : !club && clubMissing(info.error) ? (
           // a link to a club that is not (or no longer) on CourtBook: not "nothing free" (player QA, 26 Nov)
           <Empty title="Club not available" body="This club isn't on CourtBook right now." action="Find a court" onAction={() => router.navigate("/courts")} />
