@@ -231,7 +231,7 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
           const on = d === date;
           return (
             <button key={d} data-on={on} onClick={() => setDate(d)} className="flex w-[50px] shrink-0 flex-col items-center gap-1.5 text-xs font-semibold">
-              <span className="text-[#8a918e]">{d === today ? "Today" : formatInTimeZone(dayOf(d), TZ, "EEEEE")}</span>
+              <span className="text-muted">{d === today ? "Today" : formatInTimeZone(dayOf(d), TZ, "EEEEE")}</span>
               <span className={`flex h-10 w-10 items-center justify-center rounded-full text-[17px] font-bold ${on ? "bg-cedar text-white" : ""}`}>{formatInTimeZone(dayOf(d), TZ, "d")}</span>
             </button>
           );

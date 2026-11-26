@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
-import { COMMUNITY_RULES, COMMUNITY_RULES_TITLE, friendlyError } from "@/lib/types";
+import { COMMUNITY_RULES, COMMUNITY_RULES_TITLE } from "@/lib/types";
+import { actionError } from "@/lib/actionError";
 import { BLOCK_EXPLAINED, BLOCKED_PATH, blockPlayer, reportMessage } from "@/lib/gameSafety";
 import SafetyConfirm from "@/components/SafetyConfirm";
 import ReportSheet from "./ReportSheet";
@@ -83,7 +84,7 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
     if (error) {
       // the text stays in the box; the rules are asked for once, then the same message is sent
       if (error.message?.includes("rules_not_accepted")) setRules(true);
-      else setError(friendlyError(error.message));
+      else setError(actionError(error.message));   // no connection: says so, not "Refresh" (H3; as #78)
       return;
     }
     if (data) { setMsgs((cur) => [...cur, { ...data, name: "You" }]); setText(""); fetch("/api/notify/email", { method: "POST" }).catch(() => {}); }
@@ -92,7 +93,7 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
     setBusy(true); setError(null);
     const { error } = await createClient().rpc("accept_community_rules");
     setBusy(false);
-    if (error) { setError(friendlyError(error.message)); return; }
+    if (error) { setError(actionError(error.message)); return; }
     setRules(false);
     await send();
   }
@@ -127,8 +128,8 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
                 <button type="button" onClick={() => { setMenuFor(null); setBlocking(x); }} className="min-h-9 text-sm font-medium text-danger">Block {x.name ?? "this player"}</button>
               </div>
             )}
-            {!x.deleted && x.profile_id === meId && <button onClick={() => removeMessage(x.id)} className="mt-0.5 text-[10px] text-white/80 underline">Delete</button>}
-            <div className={`mt-0.5 text-[10px] ${x.profile_id === meId ? "text-white/70" : "text-muted"}`}>{formatInTimeZone(new Date(x.created_at), tz, "EEE HH:mm")}</div>
+            {!x.deleted && x.profile_id === meId && <button onClick={() => removeMessage(x.id)} className="mt-0.5 text-[10px] text-white underline">Delete</button>}
+            <div className={`mt-0.5 text-[10px] ${x.profile_id === meId ? "text-white" : "text-muted"}`}>{formatInTimeZone(new Date(x.created_at), tz, "EEE HH:mm")}</div>
           </div>
         ))}
         <div ref={bottom} />
@@ -148,7 +149,7 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
           You blocked {blockedName}. You won&apos;t see their messages. <Link href={BLOCKED_PATH} className="text-action underline">Blocked players</Link>
         </p>
       )}
-      {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
       <form onSubmit={send} className="mt-3 flex gap-2">
         <input aria-label="Message" className="min-w-0 flex-1 rounded-xl border border-grid px-3 py-2.5 text-base outline-none focus:border-action" placeholder="Message" maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
         <button disabled={busy || !text.trim()} className="rounded-xl bg-action px-4 font-medium text-white disabled:opacity-50">Send</button>
