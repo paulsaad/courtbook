@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
+import { BOOKING_OFFLINE as OFFLINE, isNetworkFailure } from "@/lib/reserve";
 
 export type Note = { id: string; kind: string; match_id: string | null; body: string; created_at: string; read_at: string | null };
 
@@ -12,17 +13,27 @@ export default function ActivityList({ initial }: { initial: Note[] }) {
   const [rows, setRows] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const failure = (message: string | undefined, what: string) => (isNetworkFailure(message) ? OFFLINE : `Couldn't ${what}. Try again.`);
 
   async function remove(id: string) {
+    const at = rows.findIndex((x) => x.id === id);
+    const item = rows[at];
+    if (!item) return;
+    setProblem(null);
     setRows((r) => r.filter((x) => x.id !== id));                       // optimistic
     const { error } = await createClient().rpc("delete_notification", { p_id: id });
-    if (error) setRows(initial);
+    if (!error) return;
+    // put back only this item, where it was: never the page's first list (items already deleted would return)
+    setRows((r) => (r.some((x) => x.id === id) ? r : [...r.slice(0, at), item, ...r.slice(at)]));
+    setProblem(failure(error.message, "delete it"));
   }
   async function clearAll() {
-    setBusy(true);
+    setBusy(true); setProblem(null);
     const { error } = await createClient().rpc("clear_notifications");
     setBusy(false); setConfirmClear(false);
-    if (!error) setRows([]);
+    if (error) { setProblem(failure(error.message, "clear your activity")); return; }
+    setRows([]);
   }
 
   return (
@@ -33,13 +44,14 @@ export default function ActivityList({ initial }: { initial: Note[] }) {
           ? <span className="flex gap-3 text-sm"><button disabled={busy} onClick={clearAll} className="font-semibold text-cedar">Clear all</button><button onClick={() => setConfirmClear(false)} className="text-muted">Cancel</button></span>
           : <button onClick={() => setConfirmClear(true)} className="text-sm text-muted">Clear all</button>)}
       </div>
+      {problem && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{problem}</p>}
       <ul className="card divide-y divide-grid overflow-hidden">
         {rows.length === 0 && <li className="p-6 text-center text-sm text-muted">Nothing here. Join requests, messages and match changes show up on this screen. <Link href="/play" className="font-semibold text-turf">Find a game</Link></li>}
         {rows.map((n) => (
           <li key={n.id} className="flex items-start">
             <Link href={n.match_id ? `/matches/${n.match_id}` : "/"} className={`flex min-w-0 flex-1 items-start gap-3 px-4 py-3 ${n.read_at ? "" : "bg-turf-soft/40"}`}>
-              <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-turf" style={{ opacity: n.read_at ? 0 : 1 }} />
-              <span className="min-w-0 flex-1"><span className="block text-sm">{n.body}</span><span className="block text-xs text-muted">{formatInTimeZone(new Date(n.created_at), "Asia/Beirut", "EEE d MMM HH:mm")}</span></span>
+              <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-turf" style={{ opacity: n.read_at ? 0 : 1 }} aria-hidden="true" />
+              <span className="min-w-0 flex-1">{!n.read_at && <span className="sr-only">New: </span>}<span className="block text-sm">{n.body}</span><span className="block text-xs text-muted">{formatInTimeZone(new Date(n.created_at), "Asia/Beirut", "EEE d MMM HH:mm")}</span></span>
             </Link>
             <button onClick={() => remove(n.id)} aria-label="Delete this item" className="px-4 py-4 text-muted">✕</button>
           </li>

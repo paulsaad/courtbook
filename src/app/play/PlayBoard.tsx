@@ -50,13 +50,13 @@ export default function PlayBoard({ areas, sports, initial, clubs }: { areas: Go
         <AreaPicker areas={areas} value={{ gov: prefs.gov, district: prefs.district }} onChange={(a) => update({ ...prefs, gov: a.gov, district: a.district })} />
       </header>
       <div className="-mx-5 flex gap-2 overflow-x-auto px-5">
-        <button onClick={() => update({ ...prefs, sport: null })} className={chip(!prefs.sport)}>All sports</button>
-        {sports.filter((s) => s.code !== "other").map((s) => <button key={s.code} onClick={() => update({ ...prefs, sport: prefs.sport === s.code ? null : s.code })} className={chip(prefs.sport === s.code)}>{s.name_en}</button>)}
+        <button onClick={() => update({ ...prefs, sport: null })} aria-pressed={!prefs.sport} className={chip(!prefs.sport)}>All sports</button>
+        {sports.filter((s) => s.code !== "other").map((s) => <button key={s.code} onClick={() => update({ ...prefs, sport: prefs.sport === s.code ? null : s.code })} aria-pressed={prefs.sport === s.code} className={chip(prefs.sport === s.code)}>{s.name_en}</button>)}
       </div>
       <div className="-mx-5 flex gap-2 overflow-x-auto px-5">
-        {(["today", "week", "any"] as const).map((w) => <button key={w} onClick={() => setWhen(w)} className={chip(when === w)}>{w === "today" ? "Today" : w === "week" ? "This week" : "Any day"}</button>)}
-        <span className="w-px shrink-0 bg-grid" />
-        <button onClick={() => setFit(fit ? null : "mine")} className={chip(!!fit)}>My level</button>
+        {(["today", "week", "any"] as const).map((w) => <button key={w} onClick={() => setWhen(w)} aria-pressed={when === w} className={chip(when === w)}>{w === "today" ? "Today" : w === "week" ? "This week" : "Any day"}</button>)}
+        <span className="w-px shrink-0 bg-grid" aria-hidden="true" />
+        <button onClick={() => setFit(fit ? null : "mine")} aria-pressed={!!fit} className={chip(!!fit)}>My level</button>
       </div>
 
       <section className={`flex flex-col gap-3 ${busy ? "opacity-60" : ""}`}>
