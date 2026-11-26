@@ -25,6 +25,9 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rules, setRules] = useState(false);   // M3-S: shown when the server asks for the rules first
+  // H13: one id per message, made here and kept for its retries (as the app, mobile/lib/chat.ts). If the
+  // first try reached the database and only the answer was lost, the retry hits the primary key: sent once.
+  const outgoing = useRef<{ body: string; id: string } | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   // report and block (M3-S, as the app's long-press menu): only on other players' visible messages
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -77,17 +80,26 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
     e?.preventDefault();
     const body = text.trim();
     if (!body) return;
+    const retry = outgoing.current?.body === body;
+    if (!retry) outgoing.current = { body, id: crypto.randomUUID() };
+    const id = outgoing.current!.id;
     setBusy(true); setError(null);
     const supabase = createClient();
-    const { data, error } = await supabase.from("match_messages").insert({ match_id: matchId, profile_id: meId, body }).select("id, profile_id, body, created_at").single();
-    setBusy(false);
-    if (error) {
+    const { data, error } = await supabase.from("match_messages").insert({ id, match_id: matchId, profile_id: meId, body }).select("id, profile_id, body, created_at").single();
+    if (error && error.code !== "23505") {
       // the text stays in the box; the rules are asked for once, then the same message is sent
-      if (error.message?.includes("rules_not_accepted")) setRules(true);
-      else setError(actionError(error.message));   // no connection: says so, not "Refresh" (H3; as #78)
-      return;
-    }
-    if (data) { setMsgs((cur) => [...cur, { ...data, name: "You" }]); setText(""); fetch("/api/notify/email", { method: "POST" }).catch(() => {}); }
+      if (error.message?.includes("rules_not_accepted")) { setBusy(false); setRules(true); return; }
+      // on a retry, an earlier try may have arrived (its answer lost, then this one refused, e.g.
+      // slow_down): if the thread already holds this id, the message was sent
+      const thread = retry ? await supabase.rpc("match_messages_list", { p_match: matchId, p_after: null }) : null;
+      const rows = (thread && !thread.error ? thread.data : null) as Msg[] | null;
+      if (!rows?.some((m) => m.id === id)) { setBusy(false); setError(actionError(error.message)); return; }   // no connection: says so (H3)
+      setMsgs(rows); closeStaleMenu(rows);
+    } else if (data) setMsgs((cur) => (cur.some((m) => m.id === data.id) ? cur : [...cur, { ...data, name: "You" }]));
+    else await reload();   // 23505: this id is already in the thread (sent by the earlier try)
+    setBusy(false);
+    outgoing.current = null; setText("");
+    fetch("/api/notify/email", { method: "POST" }).catch(() => {});
   }
   async function acceptRules() {
     setBusy(true); setError(null);
