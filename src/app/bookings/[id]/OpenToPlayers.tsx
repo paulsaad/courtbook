@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { friendlyError } from "@/lib/types";
+import { actionError } from "@/lib/actionError";
 import LevelRange from "@/components/LevelRange";
 import PlayersNeeded from "@/components/PlayersNeeded";
 import { rangeLabel } from "@/lib/levels";
@@ -24,7 +24,7 @@ export default function OpenToPlayers({ bookingId, sport, sportName, match }: { 
     setBusy(true); setError(null);
     const { error } = await fn();
     setBusy(false);
-    if (error) { setError(friendlyError(error.message)); return false; }
+    if (error) { setError(actionError(error.message)); return false; }
     setForm(false); setConfirmPrivate(false); router.refresh();
     return true;
   }
@@ -53,7 +53,7 @@ export default function OpenToPlayers({ bookingId, sport, sportName, match }: { 
           </div>
           <Link href={`/matches/${match.match_id}`} className="shrink-0 text-sm font-semibold text-turf">Open ›</Link>
         </div>
-        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+        {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
         {match.joined === 0 ? (
           confirmPrivate
             ? <div className="flex gap-2"><button disabled={busy} onClick={() => setStatus("cancelled")} className="btn btn-primary flex-1">Make it private</button><button onClick={() => setConfirmPrivate(false)} className="btn btn-secondary px-5">Keep</button></div>
@@ -83,7 +83,7 @@ export default function OpenToPlayers({ bookingId, sport, sportName, match }: { 
         <h2 className="font-bold">Private booking</h2>
         <p className="mt-1 text-sm text-muted">Only you can see it. Missing players? Open it and others can ask to join your {sportName.toLowerCase()} game.</p>
       </div>
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
       {!form ? (
         <button onClick={() => setForm(true)} className="btn btn-primary">Open to other players</button>
       ) : (

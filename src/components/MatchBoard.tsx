@@ -9,7 +9,7 @@ import { fitLabel, rangeLabel } from "@/lib/levels";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { clubLocalToUtc, hhmm, todayIn } from "@/lib/time";
-import { friendlyError } from "@/lib/types";
+import { actionError } from "@/lib/actionError";
 import { codeLabel } from "@/lib/labels";
 
 export type MatchRow = {
@@ -56,7 +56,7 @@ export default function MatchBoard({ club, rows, myBookings, sports }: { club: C
       p_players_needed: f.needed, p_note: f.note, p_booking: f.bookingId || null, p_join_mode: f.joinMode,
     });
     setBusy(false);
-    if (error) { setError(friendlyError(error.message)); return; }
+    if (error) { setError(actionError(error.message)); return; }
     router.push(`/matches/${data as string}`);
   }
 
@@ -69,7 +69,7 @@ export default function MatchBoard({ club, rows, myBookings, sports }: { club: C
 
       {open && (
         <form onSubmit={post} className="flex flex-col gap-3 rounded-2xl border border-grid bg-white p-4">
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+          {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
           <div className="flex flex-wrap gap-2">{sports.map((sp) => <button type="button" key={sp.code} onClick={() => setF({ ...f, sport: sp.code })} className={chip(f.sport === sp.code)}>{sp.name_en}</button>)}</div>
           {myBookings.length > 0 && (
             <label className="flex flex-col gap-1 text-sm">Link one of your bookings (optional)
