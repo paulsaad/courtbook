@@ -41,6 +41,9 @@ jest.mock("../lib/queries", () => ({
   ...jest.requireActual("../lib/queries"),
   useDaySlots: () => ({ isPending: false, isError: false, isSuccess: true, isFetching: false, isRefetching: false, dataUpdatedAt: Date.now(), refetch: jest.fn(), data: [] }),
   useClubMode: () => ({ data: undefined, isPending: false, isSuccess: true }),
+  // M12.4: the club screen reads the payment mode through useClubPayment, and any held court
+  useClubPayment: () => ({ data: undefined, isPending: false, isSuccess: true }),
+  useActiveHold: () => ({ data: null, isPending: false, isSuccess: true }),
   useTilePrices: () => ({ data: undefined }),
   useQuote: () => ({ isSuccess: false, isError: false, data: undefined }),
 }));

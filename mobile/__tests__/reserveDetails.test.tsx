@@ -51,6 +51,9 @@ jest.mock("../lib/queries", () => {
       })),
     }),
     useClubMode: () => ({ data: "at_desk", isPending: false, isSuccess: true }),
+    // M12.4: the club screen reads the payment mode through useClubPayment, and any held court
+    useClubPayment: () => ({ data: { mode: "at_desk", fee: 0, holdMinutes: 10 }, isPending: false, isSuccess: true }),
+    useActiveHold: () => ({ data: null, isPending: false, isSuccess: true }),
     useTilePrices: () => ({ data: undefined }),
     useQuote: () => ({ isSuccess: true, isError: false, data: 20 }),
   };
