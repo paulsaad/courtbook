@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import * as Updates from "expo-updates";
 import { supabase } from "../../lib/supabase";
+import { signOutThisDevice } from "../../lib/signOut";
 import { useSession } from "../../lib/session";
 import { currentBuild } from "../../lib/buildInfo";
 import { initials, useProfileName } from "../../lib/profile";
@@ -69,7 +70,8 @@ export default function Profile() {
   async function signOut() {
     setBusy(true);
     // The session provider empties the cache on every sign-out, however it happens.
-    await supabase.auth.signOut();
+    // F2: this phone only (lib/signOut.ts); account closure still signs out everywhere (lib/accountClosing.ts)
+    await signOutThisDevice(supabase.auth);
     setBusy(false);
   }
 

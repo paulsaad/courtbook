@@ -107,3 +107,14 @@ describe("Profile: sports and levels (optional)", () => {
     expect(mockPush).toHaveBeenCalledWith("/my-details");
   });
 });
+
+describe("Profile: Sign out (F2, Paul 26 Nov)", () => {
+  it("ends this phone's session only: scope local, never the default (global)", async () => {
+    const { supabase } = jest.requireMock("../lib/supabase") as { supabase: { auth: { signOut: jest.Mock } } };
+    supabase.auth.signOut.mockClear();
+    await show();
+    await fireEvent.press(await screen.findByText("Sign out"));
+    await waitFor(() => expect(supabase.auth.signOut).toHaveBeenCalledTimes(1));
+    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: "local" });
+  });
+});

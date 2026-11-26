@@ -70,6 +70,7 @@ describe("POST /api/account/close", () => {
     expect(await res.json()).toEqual({ closed: true });
     expect(calls[0]).toEqual({ client: "user", fn: "close_my_account", args: { p_via: "web" } });
     expect(signOut).toHaveBeenCalledTimes(1);
+    expect(signOut).toHaveBeenCalledWith({ scope: "global" });   // F2: closure ends every session, not just this browser
     expect(services()).toEqual(["claim_deletion", "auth.ban", "record_deletion_step", "record_deletion_step", "delete_account_data", "record_deletion_step", "auth.delete", "record_deletion_step", "finish_account_deletion"]);
     for (const c of calls.filter((c) => c.client === "service")) expect(JSON.stringify(c.args)).toContain(ME);
   });

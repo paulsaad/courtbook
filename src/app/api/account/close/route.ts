@@ -41,7 +41,8 @@ export async function POST(request: Request) {
   }
 
   // closed from here on, whatever happens next
-  try { await supabase.auth.signOut(); } catch { /* the ban (B) and the database lock-out still apply */ }
+  // every session of the account, on every device (F2: ordinary sign-out is this device only; closure is not)
+  try { await supabase.auth.signOut({ scope: "global" }); } catch { /* the ban (B) and the database lock-out still apply */ }
 
   try {
     const out = await processDeletion(user.id, await serviceDeps());
