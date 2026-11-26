@@ -9,6 +9,7 @@ import { explainBookingError } from "@/lib/report";
 import { newToken, reserve as reserveSlot } from "@/lib/reserve";
 import { useDialog } from "@/components/useDialog";
 import { DEMO_NOTE } from "@/lib/fees";
+import { UNREADABLE, detailsPath, missingBeforeBooking } from "@/lib/playerDetails";
 
 export type SheetClub = { id: string; name: string; slug: string; slot_minutes: number; min_minutes: number; max_minutes: number; service_fee_usd: number; hold_minutes: number; cancel_cutoff_hours: number; timezone: string };
 
@@ -68,12 +69,16 @@ export default function BookSheet({ club, date, at, courts, initialCourtId, init
 
   async function reserve() {
     if (current.state !== "ok" || !valid || mode === null) return;
+    const q = new URLSearchParams({ date, at, court: court.id, dur: String(minutes) });   // encodes '+' inside timestamps
     if (!signedIn) {
-      const q = new URLSearchParams({ date, at, court: court.id, dur: String(minutes) });   // encodes '+' inside timestamps
       router.push(`/login?next=${encodeURIComponent(`/courts?${q}`)}`);
       return;
     }
     setBusy(true); setError(null);
+    // a first booking needs the player's name and contact phone (asked once); back here with this slot selected
+    const missing = await missingBeforeBooking(createClient());
+    if (missing === "unreadable") { setBusy(false); setError(UNREADABLE); return; }
+    if (missing.length) { router.push(detailsPath(`/courts?${q}`)); return; }
     const token = tokenRef.current ?? (tokenRef.current = newToken());   // a retry must not take a second court
     const r = await reserveSlot({ mode, clubId: club.id, courtId: court.id, start, end, token });
     if (!r.ok) { setBusy(false); setError(explainBookingError(r.message, r.code)); router.refresh(); return; }

@@ -14,6 +14,7 @@ import { useDialog } from "@/components/useDialog";
 import { bookingDurations } from "@/lib/durations";
 import { defaultLength } from "@/lib/labels";
 import { bookingPanelText } from "@/lib/fees";
+import { UNREADABLE, detailsPath, missingBeforeBooking } from "@/lib/playerDetails";
 
 export type Occ = { id?: string | null; court_id: string; start_at: string; end_at: string; status?: string; mine?: boolean; kind: "booking" | "block" };
 type ClubX = Club & { booking_window_days: number; service_fee_usd: number; location_url: string | null; hold_minutes: number };
@@ -145,12 +146,17 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
   async function reserve() {
     if (!pick || !known || quote.state !== "ok" || slots < minSlots || slots > maxSlotsHere) return;
     const start = clubLocalToUtc(date, pick.time, club.timezone);
+    const here = `/club/${club.slug}?at=${start.toISOString()}&court=${pick.courtId}&dur=${slots * club.slot_minutes}`;
     if (!signedIn) {
       // sign in, then come back with this slot selected
-      router.push(`/login?next=${encodeURIComponent(`/club/${club.slug}?at=${start.toISOString()}&court=${pick.courtId}&dur=${slots * club.slot_minutes}`)}`);
+      router.push(`/login?next=${encodeURIComponent(here)}`);
       return;
     }
     setBusy(true); setError(null);
+    // a first booking needs the player's name and contact phone (asked once); back here with this slot selected
+    const missing = await missingBeforeBooking(createClient());
+    if (missing === "unreadable") { setBusy(false); setError(UNREADABLE); return; }
+    if (missing.length) { router.push(detailsPath(here)); return; }
     const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
     const token = tokenRef.current ?? (tokenRef.current = newToken());   // a retry must not take a second court
     const r = await reserveSlot({ mode: club.payment_mode, clubId: club.id, courtId: pick.courtId, start, end, token });
