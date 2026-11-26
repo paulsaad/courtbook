@@ -23,8 +23,9 @@ export default function AreaPicker({ areas, value, onChange, trigger }: { areas:
   return (
     <>
       {trigger ? trigger(() => { setGov(value.gov); setOpen(true); }, areaLabel(areas, value)) : (
-        <button onClick={() => { setGov(value.gov); setOpen(true); }} aria-haspopup="dialog" aria-label={`Area: ${areaLabel(areas, value)}`} className="flex max-w-[60%] items-center gap-1 truncate text-left text-sm font-medium">
-          <span className="text-turf" aria-hidden="true">◉</span><span className="truncate">{areaLabel(areas, value)}</span><span className="text-muted" aria-hidden="true">▾</span>
+        <button onClick={() => { setGov(value.gov); setOpen(true); }} aria-haspopup="dialog" aria-label={`Area: ${areaLabel(areas, value)}`} className="flex min-w-0 max-w-[60%] items-center gap-1 text-left text-sm font-medium">
+          {/* H8: at 150 % text the name was cut ("All Leb…"); it now wraps */}
+          <span className="text-turf" aria-hidden="true">◉</span><span className="min-w-0 break-words">{areaLabel(areas, value)}</span><span className="text-muted" aria-hidden="true">▾</span>
         </button>
       )}
       {open && (
