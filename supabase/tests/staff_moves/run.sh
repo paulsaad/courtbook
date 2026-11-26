@@ -31,7 +31,7 @@ build() {
   (cd supabase/tests/staff_moves && $PSQL -d $T -X -q -At -v ON_ERROR_STOP=1 -f fixtures.sql >/dev/null 2>&1) || { echo "fixtures failed"; exit 2; }
 }
 tests() { (cd supabase/tests/staff_moves && $PSQL -d $T -X -q -At -f tests.sql 2>&1) | grep -v '^$'; }
-race() { sudo -u postgres env PG_MODULE="$PG_MODULE" DB="postgresql:///$T?host=/var/run/postgresql" MODE="$1" ROUNDS="${ROUNDS:-20}" node supabase/tests/staff_moves/race.mjs 2>&1; }
+race() { sudo -u postgres env PG_MODULE="$PG_MODULE" DB="postgresql:///$T?host=/var/run/postgresql" MODE="$1" DISCARD_FIRST_PROOF="${DISCARD_FIRST_PROOF:-}" ROUNDS="${ROUNDS:-20}" node supabase/tests/staff_moves/race.mjs 2>&1; }
 passed() { echo "$1" | grep -q "checks: 15, failures: 0" && ! echo "$1" | grep -qE "^(FAIL|psql)|ERROR"; }
 stops() { echo "$1" | grep -q "|STOP$"; }
 
@@ -71,6 +71,25 @@ out=$(race control); echo "$out" | grep -q "^ok    control" && echo "  R2 withou
 echo "== mutants: caught only by behaviour (tests.sql, race harness); the fingerprint is reported, never counted"
 caught=0; total=0
 # one mutant: a fresh database with the mutant applied, then each detector on its own
+# the race harness's verdict from its output (stdin): CAUGHT only on a behavioural failure; error if it crashed (no
+# summary line); inconclusive if its only failures are overlap proofs; otherwise pass. Self-tested below.
+race_verdict() {
+  local out; out=$(cat)
+  if ! echo "$out" | grep -qE "^race checks: [0-9]+, failures: [0-9]+$"; then echo error
+  elif echo "$out" | grep -qE "^FAIL  (R1\.[0-9]+(#[0-9]+)? \[[a-z]+\] two desks move it at once|R2\.[0-9]+(#[0-9]+)? \[[a-z]+\] move versus cancel|I1 )"; then echo CAUGHT
+  elif echo "$out" | grep -q "^FAIL"; then echo inconclusive
+  else echo pass; fi
+}
+for c in "pass|ok    R1.1 [sim] x\nrace checks: 3, failures: 0" \
+         "CAUGHT|FAIL  R1.2#3 [ab] two desks move it at once: exactly one applied  [x]\nrace checks: 3, failures: 1" \
+         "CAUGHT|FAIL  R2.1 [sim] move versus cancel: the cancel stands  [x]\nrace checks: 3, failures: 1" \
+         "CAUGHT|FAIL  I1 no two live bookings overlap on any court  [1]\nrace checks: 3, failures: 1" \
+         "inconclusive|FAIL  R1.1 [sim] the two moves genuinely overlapped (x)  [y]\nrace checks: 3, failures: 1" \
+         "error|FAIL  R1.1 [sim] two desks move it at once: exactly one applied  [x]\nError: connection refused" \
+         "error|"; do
+  want=${c%%|*}; got=$(printf "${c#*|}" | race_verdict)
+  [ "$got" = "$want" ] || { echo "race_verdict self-test: wanted $want, got $got"; exit 1; }
+done
 behave() {
   local draft=$1 t r f out
   build
@@ -78,7 +97,10 @@ behave() {
   # tests.sql counts only when a named check fails; a file that stops on an error is reported, never counted
   out=$(tests)
   if echo "$out" | grep -q "^FAIL  M"; then t=CAUGHT; elif passed "$out"; then t=pass; else t=error; fi
-  out=$(race draft); echo "$out" | grep -qE "^race checks: [0-9]+, failures: 0$" && r=pass || r=CAUGHT
+  # the race counts only on a BEHAVIOURAL failure (two desks: exactly one applied; move versus cancel; I1). A run with
+  # no summary line crashed (error, never a catch); a run whose only failures are overlap proofs is inconclusive
+  # (review R101-a): neither is counted
+  r=$(race draft | race_verdict)
   stops "$(q -F'|' -f supabase/live/staff_moves_postcheck.sql)" && f=STOP || f=ok
   echo "$t $r $f"
 }
@@ -94,10 +116,22 @@ assert s.count(f)==1, s.count(f); open(sys.argv[2],"w").write(s.replace(f,t))' "
   set -- $res
   local by=""; [ "$1" = CAUGHT ] && by="tests.sql"; [ "$2" = CAUGHT ] && by="${by:+$by + }race"
   [ "$1" = error ] && echo "          tests.sql stopped on an error without a named failing check (not counted)"
+  [ "$2" = error ] && echo "          the race harness crashed (no summary line): not counted"
+  [ "$2" = inconclusive ] && echo "          the race harness failed only overlap proofs (a loaded machine?): not counted; re-run on an idle machine"
+  if [ "$race_only" = noop ]; then   # the standing control: behaviour identical to the draft must NOT be "caught"
+    total=$((total-1))
+    if [ "$1 $2" != "pass pass" ]; then printf "  FAIL    %-64s tests.sql %s, race %s: both must pass\n" "$name" "$1" "$2"; status=FAIL
+    elif [ -n "$by" ]; then printf "  FAIL    %-64s reported caught by %s: the counter is unreliable\n" "$name" "$by"; status=FAIL
+    else printf "  ok      %-64s not caught, as it must not be (fingerprint: %s, not counted)\n" "$name" "$3"; fi
+    return
+  fi
   if [ -n "$by" ]; then caught=$((caught+1)); printf "  caught  %-64s by %-17s (fingerprint: %s)\n" "$name" "$by" "$3"
   else printf "  MISSED  %-64s by behaviour       (fingerprint: %s, not counted)\n" "$name" "$3"; status=FAIL; fi
-  if [ -n "$race_only" ] && [ "$by" != "race" ]; then echo "          expected the race harness ALONE to catch this"; status=FAIL; fi
+  if [ "$race_only" = race-only ] && [ "$by" != "race" ]; then echo "          expected the race harness ALONE to catch this"; status=FAIL; fi
 }
+# control (review R101-a / R101-1): a no-op edit, a comment INSIDE the function body. Its behaviour is the draft's, so
+# nothing may report it caught; its fingerprint does change (STOP), which shows a checksum mismatch is never counted
+mut "X0 no-op (a comment in the body): must NOT be counted" "  select * into b from bookings where id = p_booking for update;" "  select * into b from bookings where id = p_booking for update;  -- no-op mutant" noop
 mut "X1 no comparison at all" "  if b.court_id is distinct from p_seen_court                                                        -- F1" "  if false and b.court_id is distinct from p_seen_court                                                        -- F1"
 mut "X2 the court only (time and length not compared)" "     or b.start_at is distinct from p_seen_start                                                     -- F1
      or b.end_at is distinct from p_seen_end then                                                    -- F1" "     then                                                    -- F1"

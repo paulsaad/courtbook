@@ -75,10 +75,20 @@ A page opened before step 1 and still open after step 2 gets "Something went wro
     still refuses; move-away-and-back; cancel then move; rights;
   - `race.mjs`: 20 simultaneous rounds + 6 delayed (one desk's transaction still open), move against move and move
     against cancel; every round exactly one move applied, the other refused, the booking where the winner put it; the
-    cancel always stands;
+    cancel always stands. Overlap is proved, not assumed: both actors wait on an advisory-lock barrier and are released
+    together; each round records both transactions' times on the database clock and must show them overlapping; the
+    delayed rounds must show the second actor waiting on the first's row lock (`pg_locks`). A round whose first try
+    does not provably overlap is tried again on fresh courts (up to 3 tries; the count is printed). The behaviour
+    checks run on every try;
   - idempotent; rollback restores 0091 exactly and the defect returns;
-  - 7 mutants, all caught (no comparison; court only; check before the lock; check before the staff check; `=` instead
-    of `is distinct from`; old call still moves; anon allowed).
+  - mutants, counted **only by behaviour**: a mutant is caught when `tests.sql` reports a named failing check, or the
+    race harness reports a behavioural failure (two desks: exactly one applied; move versus cancel; I1). Not counted:
+    `tests.sql` stopping on an error, the race harness crashing (no summary line), or failing only overlap proofs
+    (inconclusive: re-run on an idle machine). The postcheck fingerprint (STOP/ok) is printed as an integrity check
+    and never counted. 9/9 caught: no comparison; court only; an unlocked read compared (race only); check before the
+    staff check; a missing seen court, start or end matches (three, one per line, review R101-1); old call still
+    moves; anon allowed. Control X0 (a comment in the function body) must be reported not caught: its fingerprint
+    changes (STOP), which shows a checksum mismatch alone proves nothing. The verdict parser self-tests at start.
 - `supabase/tests/staff_moves/compat.sh` — the existing suites with the draft as a temporary 0094 and the test-only
   `legacy_adapter.sql` (0091's calls as wrappers that pass the current position): run.sh, staff_ops, fixes, races,
   deletion races. Shows the draft changes nothing but the comparison.

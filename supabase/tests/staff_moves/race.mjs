@@ -118,41 +118,60 @@ const move = (id, to, seen) => MODE === "control"
 
 const ORDERS = [...Array(ROUNDS).fill("sim"), "ab", "ab", "ab", "ba", "ba", "ba"];
 
+// Each round: if the two calls did not provably overlap (possible on a loaded machine), it is tried again on fresh
+// courts, up to TRIES times, and fails only if no try overlapped. Every try's BEHAVIOUR is checked, overlapped or not
+// (a wrong result is a defect either way). Repeats are counted and printed (review R101-a).
+const TRIES = 3;
+let retried = 0;
+// test-only: DISCARD_FIRST_PROOF=1 treats every first try as not overlapped, to exercise the retry path
+const discard = (t, proof) => (process.env.DISCARD_FIRST_PROOF === "1" && t === 1 ? false : proof.ok);
+const ovLabel = (order) => order === "sim" ? "both queued on the barrier; each started before the other returned" : "the second was seen waiting on the first's lock";
+
 // R1. two desks move the same booking (both opened it on court X)
-let both = 0, simRounds = 0;
+let both = 0, simRounds = 0, rounds = 0;
 for (const [i, order] of ORDERS.entries()) {
-  const x = await newCourt(), y = await newCourt(), z = await newCourt();
-  const id = await walkIn(x);
-  const [rd, rm, proof] = await race(order, [DINA, ...move(id, y, x)], [MAYA, ...move(id, z, x)]);
-  const w = await where(id);
-  if (order === "sim") simRounds++;
-  rep(`R1.${i + 1} [${order}] the two moves genuinely overlapped (${order === "sim" ? "both queued on the barrier; each started before the other returned" : "the second was seen waiting on the first's lock"})`,
-    proof.ok, JSON.stringify(proof));
-  if (rd.ok && rm.ok) both++;
-  if (MODE === "control") continue;
-  const winner = rd.ok ? y : z, loser = rd.ok ? rm : rd;
-  rep(`R1.${i + 1} [${order}] two desks move it at once: exactly one applied, the other refused, the booking where the winner put it`,
-    rd.ok !== rm.ok && !loser.ok && /booking_changed_elsewhere/.test(loser.err) && w.court_id === winner && w.status === "confirmed",
-    `${short(rd)} | ${short(rm)} | on ${w.court_id === y ? "Y" : w.court_id === z ? "Z" : w.court_id === x ? "X" : "?"}`);
+  let overlapped = false, last = null;
+  for (let t = 1; t <= TRIES && !overlapped; t++) {
+    if (t > 1) retried++;
+    const x = await newCourt(), y = await newCourt(), z = await newCourt();
+    const id = await walkIn(x);
+    const [rd, rm, proof] = await race(order, [DINA, ...move(id, y, x)], [MAYA, ...move(id, z, x)]);
+    const w = await where(id);
+    overlapped = discard(t, proof); last = proof; rounds++;
+    if (order === "sim") simRounds++;
+    if (rd.ok && rm.ok) both++;
+    if (MODE === "control") continue;
+    const winner = rd.ok ? y : z, loser = rd.ok ? rm : rd;
+    rep(`R1.${i + 1}${t > 1 ? `#${t}` : ""} [${order}] two desks move it at once: exactly one applied, the other refused, the booking where the winner put it`,
+      rd.ok !== rm.ok && !loser.ok && /booking_changed_elsewhere/.test(loser.err) && w.court_id === winner && w.status === "confirmed",
+      `${short(rd)} | ${short(rm)} | on ${w.court_id === y ? "Y" : w.court_id === z ? "Z" : w.court_id === x ? "X" : "?"}`);
+  }
+  rep(`R1.${i + 1} [${order}] the two moves genuinely overlapped (${ovLabel(order)})`, overlapped, JSON.stringify(last));
 }
-if (MODE === "control") rep(`control: without the comparison both moves are applied in ${both}/${ORDERS.length} rounds (all ${simRounds} simultaneous included)`, both === ORDERS.length, `${both}`);
+if (MODE === "control") rep(`control: without the comparison both moves are applied in ${both}/${rounds} tries (all ${simRounds} simultaneous included)`, both === rounds, `${both}`);
 
 // R2. a desk moves it while it is being cancelled
 if (MODE !== "control") {
   let moved = 0, refused = 0;
   for (const [i, order] of ORDERS.entries()) {
-    const x = await newCourt(), y = await newCourt();
-    const id = await walkIn(x);
-    const [rmv, rc, proof] = await race(order, [DINA, ...move(id, y, x)], [MAYA, "select cancel_booking($1)::text", [id]]);
-    rep(`R2.${i + 1} [${order}] the move and the cancel genuinely overlapped`, proof.ok, JSON.stringify(proof));
-    const w = await where(id);
-    const ok = rc.ok && w.status === "cancelled" && (rmv.ok ? w.court_id === y : /not_confirmed/.test(rmv.err) && w.court_id === x);
-    if (rmv.ok) moved++; else refused++;
-    rep(`R2.${i + 1} [${order}] move versus cancel: the cancel stands; the move either came first (cancelled where it was moved) or was refused not_confirmed (cancelled where it was)`,
-      ok, `${short(rmv)} | ${short(rc)} | ${w.status} on ${w.court_id === y ? "Y" : w.court_id === x ? "X" : "?"}`);
+    let overlapped = false, last = null;
+    for (let t = 1; t <= TRIES && !overlapped; t++) {
+      if (t > 1) retried++;
+      const x = await newCourt(), y = await newCourt();
+      const id = await walkIn(x);
+      const [rmv, rc, proof] = await race(order, [DINA, ...move(id, y, x)], [MAYA, "select cancel_booking($1)::text", [id]]);
+      overlapped = discard(t, proof); last = proof;
+      const w = await where(id);
+      const ok = rc.ok && w.status === "cancelled" && (rmv.ok ? w.court_id === y : /not_confirmed/.test(rmv.err) && w.court_id === x);
+      if (rmv.ok) moved++; else refused++;
+      rep(`R2.${i + 1}${t > 1 ? `#${t}` : ""} [${order}] move versus cancel: the cancel stands; the move either came first (cancelled where it was moved) or was refused not_confirmed (cancelled where it was)`,
+        ok, `${short(rmv)} | ${short(rc)} | ${w.status} on ${w.court_id === y ? "Y" : w.court_id === x ? "X" : "?"}`);
+    }
+    rep(`R2.${i + 1} [${order}] the move and the cancel genuinely overlapped`, overlapped, JSON.stringify(last));
   }
-  console.log(`      (move first in ${moved} rounds, cancel first in ${refused})`);
+  console.log(`      (move first in ${moved} tries, cancel first in ${refused})`);
 }
+console.log(`      rounds tried again because the first try did not provably overlap: ${retried}`);
 
 // global invariant: no two live bookings overlap on a court
 const overlaps = Number(await one(`select count(*) from bookings a join bookings b on a.court_id = b.court_id and a.id < b.id
