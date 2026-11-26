@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { LoadError } from "@/lib/load";
-import { playerGatePath, safeNext } from "./playerGate";
+import { clubReturnPath, playerGatePath, safeNext } from "./playerGate";
 
 type Res = { data: unknown; error: { code?: string; message?: string } | null };
 function client(profile: Res, age: Res) {
@@ -27,6 +27,19 @@ describe("playerGatePath (18+ and first-time profile)", () => {
   });
   it("any other failure stops the page (never treated as confirmed)", async () => {
     await expect(playerGatePath(client(ok({ name: "A" }), { data: null, error: { code: "08006", message: "connection lost" } }), "u", "/play")).rejects.toBeInstanceOf(LoadError);
+  });
+  it("browsing clubs and courts (requireName false): no name is asked, the 18+ step still is (N6)", async () => {
+    expect(await playerGatePath(client(ok({ name: null }), ok({ confirmed: true })), "u", "/club/batroun", "this club", { requireName: false })).toBeNull();
+    expect(await playerGatePath(client(ok({ name: null }), ok({ confirmed: false })), "u", "/club/batroun", "this club", { requireName: false })).toBe("/age?next=%2Fclub%2Fbatroun");
+  });
+  it("games and chat (default): still the profile step first", async () => {
+    expect(await playerGatePath(client(ok({ name: null }), ok({ confirmed: true })), "u", "/play")).toBe("/profile?next=%2Fplay");
+  });
+  it("the club page's way back keeps the chosen date and selection (N6: the date was dropped)", () => {
+    expect(clubReturnPath("batroun", { date: "2026-12-01" })).toBe("/club/batroun?date=2026-12-01");
+    expect(clubReturnPath("batroun", { date: "2026-12-01", at: "2026-12-01T16:00:00.000Z", court: "k1", dur: "60" }))
+      .toBe("/club/batroun?date=2026-12-01&at=2026-12-01T16%3A00%3A00.000Z&court=k1&dur=60");
+    expect(clubReturnPath("batroun", {})).toBe("/club/batroun");
   });
   it("the way back stays on this site", () => {
     for (const bad of ["https://evil.test", "//evil.test", "/\\evil.test", "", null, undefined]) expect(safeNext(bad)).toBe("/");
