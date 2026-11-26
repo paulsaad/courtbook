@@ -9,7 +9,7 @@ import { clubLocalToUtc, dayBounds, hhmm, shiftDate, slotTimes, todayIn, toMin }
 import { explainBookingError } from "@/lib/report";
 import { type Club, type Court } from "@/lib/types";
 import { readPrefs } from "@/lib/prefs";
-import { newToken, reserve as reserveSlot } from "@/lib/reserve";
+import { BOOKING_OFFLINE, newToken, reserve as reserveSlot } from "@/lib/reserve";
 import { useDialog } from "@/components/useDialog";
 import { bookingDurations } from "@/lib/durations";
 import { defaultLength } from "@/lib/labels";
@@ -154,7 +154,9 @@ export default function PlayerGrid({ signedIn, club, courts: allCourts, occ: ini
     const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
     const token = tokenRef.current ?? (tokenRef.current = newToken());   // a retry must not take a second court
     const r = await reserveSlot({ mode: club.payment_mode, clubId: club.id, courtId: pick.courtId, start, end, token });
-    if (!r.ok) { setBusy(false); setError(explainBookingError(r.message, r.code)); router.refresh(); return; }
+    // offline: say so and stay; a refresh would fail too and replace the page (and the selection) with the
+    // browser's offline page. The same token makes the retry safe.
+    if (!r.ok) { setBusy(false); setError(explainBookingError(r.message, r.code, r.offline ? BOOKING_OFFLINE : undefined)); if (!r.offline) router.refresh(); return; }
     router.push(r.value.href);
   }
 
