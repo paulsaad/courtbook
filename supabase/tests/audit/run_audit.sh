@@ -23,9 +23,14 @@ bash supabase/tests/audit/build_db.sh "$REF" || exit 2
 src_has() { if [ "$REF" = WORKTREE ]; then ls supabase/migrations/"$1"_*.sql >/dev/null 2>&1
             else git ls-tree --name-only "$REF" supabase/migrations/ | grep -q "/$1_"; fi; }
 fixed_by() { if src_has "$1"; then echo pass; else echo "known:$2"; fi; }
+# G1 (grants): players' unused table privileges; fixed by the table-privilege migration, recognised by its file name
+# until it is numbered (docs/privileges/README.md)
+src_has_name() { if [ "$REF" = WORKTREE ]; then ls supabase/migrations/*_"$1".sql >/dev/null 2>&1
+                 else git ls-tree --name-only "$REF" supabase/migrations/ | grep -q "_$1.sql$"; fi; }
+G1=$(if src_has_name table_privileges; then echo pass; else echo known:G1; fi)
 R2=$(fixed_by 0068 R2); S1=$(fixed_by 0069 S1); S5=$(fixed_by 0069 S5); D1=$(fixed_by 0070 D1); D3=$(fixed_by 0071 D3)
 MATCHES_DELETE=$([ "$S1" = pass ] || echo "matches.DELETE,")  # S1 removes that policy
-echo "== expectations for this schema: R2 $R2, S1 $S1, S5 $S5, D1 $D1, D3 $D3"
+echo "== expectations for this schema: R2 $R2, S1 $S1, S5 $S5, D1 $D1, D3 $D3, G1 $G1"
 
 fails=0; xpass=0; known=0; oks=0
 report() { # id, pass(t/f), expectation(pass|known:<F>), detail
@@ -65,6 +70,25 @@ insert into r select 'CAT4 anonymous visitors cannot write any public table',
 insert into r select 'CAT4b ... nor hold table-level write, truncate or trigger privileges',
   count(*) = 0, 'pass', string_agg(table_name || ':' || privilege_type, ',') from information_schema.table_privileges
   where grantee = 'anon' and table_schema = 'public' and privilege_type <> 'SELECT';
+-- G1, ongoing grant audit (table-privilege migration): what players and visitors hold beyond what the app uses
+insert into r select 'CAT4c players and visitors hold no TRUNCATE, TRIGGER or REFERENCES on any table or view (G1)',
+  count(*) = 0, '$G1', string_agg(r || ':' || c.relname || ':' || p, ',' order by r, c.relname, p)
+  from pg_class c, unnest(array['anon','authenticated']) r, unnest(array['TRUNCATE','TRIGGER','REFERENCES']) p
+  where c.relnamespace = 'public'::regnamespace and c.relkind in ('r','p','v','m') and has_table_privilege(r, c.oid, p);
+insert into r select 'CAT4d every INSERT, UPDATE or DELETE a player holds is usable through a policy (G1)',
+  count(*) = 0, '$G1', string_agg(c.relname || ':' || k.cmd, ',' order by c.relname, k.cmd)
+  from pg_class c, unnest(array['INSERT','UPDATE','DELETE']) as k(cmd)
+  where c.relnamespace = 'public'::regnamespace and c.relkind in ('r','p') and has_table_privilege('authenticated', c.oid, k.cmd)
+    and not exists (select 1 from pg_policies pp where pp.schemaname = 'public' and pp.tablename = c.relname and pp.cmd in (k.cmd, 'ALL')
+                    and pp.permissive = 'PERMISSIVE' and pp.roles && array['authenticated','public']::name[]);
+insert into r select 'CAT4e every table and view is owned by postgres, the migration owner the default-privilege rule assumes',
+  count(*) = 0, 'pass', string_agg(c.relname || ':' || pg_get_userbyid(c.relowner), ',' order by c.relname)
+  from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r','p','v','m') and pg_get_userbyid(c.relowner) <> 'postgres';
+insert into r select 'CAT4f tables postgres creates later give players and visitors no TRUNCATE, TRIGGER or REFERENCES (G1)',
+  not exists (select 1 from pg_default_acl d, aclexplode(d.defaclacl) a
+              where d.defaclnamespace = 'public'::regnamespace and d.defaclobjtype = 'r' and pg_get_userbyid(d.defaclrole) = 'postgres'
+                and a.grantee in ('anon'::regrole, 'authenticated'::regrole) and a.privilege_type in ('TRUNCATE','TRIGGER','REFERENCES')),
+  '$G1', (select string_agg(defaclacl::text, ' ') from pg_default_acl where defaclnamespace = 'public'::regnamespace and defaclobjtype = 'r');
 -- 0078 (M7): club_readable_by_me, club_id_readable_by_me, club_id_visible_to_me added (RLS helpers, boolean only); clubs admin, courts staff and price_rules staff FOR ALL split into INSERT/UPDATE/DELETE
 insert into r select 'CAT5 anonymous visitors can run exactly the public-browse functions',
   string_agg(p.proname, ',' order by p.proname) = 'areas,club_day_slots,club_discovery,club_id_readable_by_me,club_id_visible_to_me,club_readable_by_me,club_sports,next_free_slot,quote_price', 'pass',
@@ -110,10 +134,13 @@ do \$\$ begin insert into bookings (club_id, court_id, player_id, start_at, end_
   values ((select id from clubs where slug = 'batroun'), (select id from courts where name = 'Padel 2'), '$P1', $(AT 5 10:00), $(AT 5 11:00), 'confirmed', 'app', '$P1');
   insert into r values ('PRIV3 a player cannot insert a booking directly', false, 'pass', 'allowed');
 exception when others then insert into r values ('PRIV3 a player cannot insert a booking directly', true, 'pass', sqlerrm); end \$\$;
-with u as (update bookings set status = 'confirmed', hold_expires_at = null where id = (select booking_id from h) returning 1)
-insert into r select 'PRIV4 a player cannot confirm their own hold by updating it', count(*) = 0, 'pass', count(*)::text || ' row(s) changed' from u;
-with u as (update payments set status = 'paid', paid_at = now() where id = (select payment_id from h) returning 1)
-insert into r select 'PRIV5 a player cannot mark their own payment paid', count(*) = 0, 'pass', count(*)::text || ' row(s) changed' from u;
+-- refused either way: 0 rows under row security, or no UPDATE privilege at all (table-privilege hardening)
+do \$\$ declare n int; begin update bookings set status = 'confirmed', hold_expires_at = null where id = (select booking_id from h); get diagnostics n = row_count;
+  insert into r values ('PRIV4 a player cannot confirm their own hold by updating it', n = 0, 'pass', n || ' row(s) changed');
+exception when insufficient_privilege then insert into r values ('PRIV4 a player cannot confirm their own hold by updating it', true, 'pass', sqlerrm); end \$\$;
+do \$\$ declare n int; begin update payments set status = 'paid', paid_at = now() where id = (select payment_id from h); get diagnostics n = row_count;
+  insert into r values ('PRIV5 a player cannot mark their own payment paid', n = 0, 'pass', n || ' row(s) changed');
+exception when insufficient_privilege then insert into r values ('PRIV5 a player cannot mark their own payment paid', true, 'pass', sqlerrm); end \$\$;
 do \$\$ begin perform confirm_payment((select payment_id from h), 'SIM-X', 31); insert into r values ('PRIV6 a player cannot call confirm_payment', false, 'pass', 'allowed');
 exception when insufficient_privilege then insert into r values ('PRIV6 a player cannot call confirm_payment', true, 'pass', sqlerrm); end \$\$;
 do \$\$ begin perform staff_book((select id from clubs where slug = 'batroun'), (select id from courts where name = 'Padel 2'), $(AT 5 12:00), $(AT 5 13:00), 'Me', null);

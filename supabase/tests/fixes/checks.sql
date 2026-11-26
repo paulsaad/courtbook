@@ -36,6 +36,10 @@ insert into matches (id, club_id, sport, organizer_id, start_at, end_at, players
   select 'f0000000-0000-4000-8000-00000000aa01', id, 'padel', 'f0000000-0000-4000-8000-0000000000a3', pg_temp.at(4, '18:00'), pg_temp.at(4, '19:30'), 3
   from clubs where slug = 'batroun';
 insert into match_players (match_id, profile_id) values ('f0000000-0000-4000-8000-00000000aa01', 'f0000000-0000-4000-8000-0000000000a2');
+-- a second game by the same organiser, only for S1d's real cancel (S1a may delete aa01 on a schema without 0069)
+insert into matches (id, club_id, sport, organizer_id, start_at, end_at, players_needed)
+  select 'f0000000-0000-4000-8000-00000000aa02', id, 'padel', 'f0000000-0000-4000-8000-0000000000a3', pg_temp.at(5, '18:00'), pg_temp.at(5, '19:30'), 3
+  from clubs where slug = 'batroun';
 -- (notices carry no match_id, so the S1 checks cannot affect them through the cascade)
 insert into notifications (id, profile_id, kind, body, emailed_at) values
   ('f0000000-0000-4000-8000-00000000ee01', 'f0000000-0000-4000-8000-0000000000a2', 'join_accepted', 'You are in', now()),
@@ -82,9 +86,28 @@ reset role;
 insert into r select 'S1c the game and its player are intact',
   exists (select 1 from matches where id = 'f0000000-0000-4000-8000-00000000aa01')
   and exists (select 1 from match_players where match_id = 'f0000000-0000-4000-8000-00000000aa01'), '';
-insert into r select 'S1d organisers can still read and update their game (cancel path unchanged)',
-  has_table_privilege('authenticated', 'matches', 'SELECT') and has_table_privilege('authenticated', 'matches', 'UPDATE')
-  and has_table_privilege('service_role', 'matches', 'DELETE'), '';
+-- The cancel path, done for real: the organiser cancels through set_match_status() and the game's status becomes
+-- 'cancelled' (a grant check is not enough: no policy in today's schema lets a player UPDATE matches directly, and the
+-- table-privilege hardening removes that unused grant). The cancel runs in a sub-block that is then undone, so the
+-- later checks still see the game as it was. It uses its own game (aa02), so it does not depend on S1a.
+set role authenticated; select set_config('request.jwt.claim.sub', 'f0000000-0000-4000-8000-0000000000a3', false) \g /dev/null
+do $$
+declare st text;
+begin
+  begin
+    perform set_match_status('f0000000-0000-4000-8000-00000000aa02', 'cancelled');
+    select status::text into st from matches where id = 'f0000000-0000-4000-8000-00000000aa02';
+    raise exception 'S1D_UNDO:%', coalesce(st, 'not visible');
+  exception when others then
+    st := case when sqlerrm like 'S1D_UNDO:%' then substring(sqlerrm from 10) else 'ERR ' || sqlerrm end;
+  end;
+  insert into r values ('S1d the organiser can still cancel their game (set_match_status → cancelled)', st = 'cancelled', st);
+end $$;
+reset role;
+insert into r select 'S1e the game is intact again after the S1d cancel was undone',
+  (select status::text from matches where id = 'f0000000-0000-4000-8000-00000000aa02') <> 'cancelled'
+  and has_table_privilege('authenticated', 'matches', 'SELECT') and has_table_privilege('service_role', 'matches', 'DELETE'),
+  (select status::text from matches where id = 'f0000000-0000-4000-8000-00000000aa02');
 
 -- ===================== S5 — 0069: a user can change only read_at of their own notices
 set role authenticated; select set_config('request.jwt.claim.sub', 'f0000000-0000-4000-8000-0000000000a2', false) \g /dev/null
