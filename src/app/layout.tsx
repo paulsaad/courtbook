@@ -22,6 +22,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="min-h-screen antialiased">
+        {/* Desktop (≥ 1024 px): the top bar goes here, before the content (keyboard order, H7); see TabBar. */}
+        <div id="top-nav" />
         {/* Desktop (≥ 1024 px): room for the fixed top bar instead of the bottom tab bar. */}
         <div id="main" tabIndex={-1} className="pb-[calc(3.5rem+env(safe-area-inset-bottom))] outline-none lg:pb-0 lg:pt-16">{children}</div>
         <TabBar />

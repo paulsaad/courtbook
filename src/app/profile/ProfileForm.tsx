@@ -80,7 +80,8 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage, 
         <span className="flex h-28 w-28 items-center justify-center rounded-full border-4 border-white bg-turf text-[40px] font-extrabold text-white shadow-[0_0_0_1px_#e6e8e5]" aria-hidden="true">{initials}</span>
         <div className="text-2xl font-extrabold tracking-tight">{initial.name}</div>
         <div className="text-sm text-muted">{manage.email}{initial.phone ? ` · ${initial.phone}` : ""}</div>
-        <button onClick={() => setEditing(true)} className="chip mt-1">Edit name, phone, sports</button>
+        {/* H8: the chip's text may wrap at large text (it pushed the page 25 px sideways at 200 %) */}
+        <button onClick={() => setEditing(true)} className="chip chip-wrap mt-1">Edit name, phone, sports</button>
       </div>
       <section className="flex flex-col gap-2.5">
         <h2 className="text-xl font-bold">Your sports</h2>
