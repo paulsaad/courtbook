@@ -90,7 +90,7 @@ describe("F2: account closure still ends every session", () => {
 describe("F2: when Supabase Auth cannot be reached (what 'local' changes, and what it does not)", () => {
   // A browser with no connection cannot reach /auth/signout at all (a form POST to our server): it stays signed in,
   // before and after F2. These tests cover the server reaching our route but not Supabase Auth.
-  it("local: this browser's session cookies are cleared anyway; the session stays valid on the Auth server until it expires", async () => {
+  it("local: this browser's session cookies are cleared anyway; the server session is not revoked (valid until revoked: by default it never expires)", async () => {
     const phone = await signIn();
     await auth.close();                                               // Supabase Auth unreachable from now on
     const res = await as(phone, () => signOutRoute(new Request("http://localhost:3000/auth/signout", { method: "POST" })));

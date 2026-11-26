@@ -1,9 +1,10 @@
 import { useState, useSyncExternalStore } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import * as Updates from "expo-updates";
 import { supabase } from "../../lib/supabase";
-import { signOutThisDevice } from "../../lib/signOut";
+import { signOutAllDevices, signOutThisDevice } from "../../lib/signOut";
+import { SIGN_OUT_ALL } from "@shared/signOutText";
 import { useSession } from "../../lib/session";
 import { currentBuild } from "../../lib/buildInfo";
 import { initials, useProfileName } from "../../lib/profile";
@@ -74,6 +75,20 @@ export default function Profile() {
     await signOutThisDevice(supabase.auth);
     setBusy(false);
   }
+  // F2 review S3: every device (Supabase global sign-out), after a confirmation; see shared/signOutText.ts
+  const [allProblem, setAllProblem] = useState<string | null>(null);
+  function signOutEverywhere() {
+    setAllProblem(null);
+    Alert.alert(SIGN_OUT_ALL.title, SIGN_OUT_ALL.body, [
+      { text: SIGN_OUT_ALL.cancel, style: "cancel" },
+      { text: SIGN_OUT_ALL.confirm, style: "destructive", onPress: async () => {
+        setBusy(true);
+        const r = await signOutAllDevices(supabase.auth);
+        setBusy(false);
+        if (!r.ok) setAllProblem(SIGN_OUT_ALL.failed);   // nothing changed: still signed in everywhere, this phone too
+      } },
+    ]);
+  }
 
   return (
     <ScrollView style={styles.page} contentContainerStyle={styles.content}>
@@ -103,6 +118,8 @@ export default function Profile() {
           </View>
           <Button label={missing.length ? "Add your details" : "Edit your details"} variant="quiet" onPress={() => router.push("/my-details")} testID="profile-edit-details" />
           <Button label="Sign out" variant="secondary" busy={busy} onPress={signOut} />
+          <Button label={SIGN_OUT_ALL.button} variant="quiet" disabled={busy} onPress={signOutEverywhere} testID="profile-signout-all" />
+          {allProblem ? <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.problem} accessibilityRole="alert">{allProblem}</Text> : null}
         </View>
       )}
       {userId ? (
@@ -227,6 +244,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", justifyContent: "space-between", gap: space.md },
   detailRows: { gap: 2 },
   missing: { ...text.body, color: color.warnInk },
+  problem: { ...text.caption, color: color.danger },
   levelChips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
   previewLink: { minHeight: 48, justifyContent: "center", alignItems: "center" },
   activity: { flexDirection: "row", alignItems: "center", gap: space.md, minHeight: TOUCH + 8 },

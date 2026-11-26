@@ -10,7 +10,7 @@
 import { request, type IncomingMessage } from "node:http";
 import { AuthClient as GoTrueClient } from "@supabase/supabase-js";   // auth-js, as the app ships it
 import { startFakeAuth, type FakeAuth } from "../../src/app/auth/signout/fakeAuthServer";
-import { signOutThisDevice } from "../lib/signOut";
+import { signOutAllDevices, signOutThisDevice } from "../lib/signOut";
 import { closeMyAccount } from "../lib/accountClosing";
 
 let auth: FakeAuth;
@@ -72,7 +72,7 @@ it("no connection: Sign out still signs this phone out (the session is removed b
   await auth.close();                                                 // nothing answers: the phone is offline
   await signOutThisDevice(phone);
   expect((await phone.getSession()).data.session).toBeNull();
-  expect(auth.alive()).toHaveLength(1);                               // not revoked on the server; it expires there
+  expect(auth.alive()).toHaveLength(1);                               // not revoked on the server: valid until revoked (by default it never expires)
   auth = await startFakeAuth();
 });
 
@@ -81,6 +81,27 @@ it("control: no connection with the previous call (global): the phone stayed sig
   await auth.close();
   const { error } = await phone.signOut();
   expect(error).toBeTruthy();
+  expect((await phone.getSession()).data.session).not.toBeNull();
+  auth = await startFakeAuth();
+});
+
+it("Sign out of all devices (F2 review S3): every session ends on the server; the desk cannot renew; its issued access token is not revoked", async () => {
+  const phone = await device(), desk = await device();
+  const deskToken = (await desk.getSession()).data.session!.access_token;
+  expect(await signOutAllDevices(phone)).toEqual({ ok: true });
+  expect(scopes()).toEqual(["global"]);
+  expect(auth.alive()).toHaveLength(0);
+  expect((await phone.getSession()).data.session).toBeNull();
+  expect((await desk.refreshSession()).error).toBeTruthy();
+  // not revoked: a signed token, unexpired, accepted by the database until it expires (Supabase default 1 h)
+  const exp = JSON.parse(Buffer.from(deskToken.split(".")[1], "base64url").toString()).exp;
+  expect(exp - Math.floor(Date.now() / 1000)).toBeGreaterThan(3000);
+});
+
+it("Sign out of all devices with no connection: ok=false, nothing changed, this phone still signed in", async () => {
+  const phone = await device();
+  await auth.close();
+  expect(await signOutAllDevices(phone)).toEqual({ ok: false });
   expect((await phone.getSession()).data.session).not.toBeNull();
   auth = await startFakeAuth();
 });

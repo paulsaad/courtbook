@@ -118,3 +118,40 @@ describe("Profile: Sign out (F2, Paul 26 Nov)", () => {
     expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: "local" });
   });
 });
+
+describe("Profile: Sign out of all devices (F2 review S3, Paul 26 Nov)", () => {
+  const { supabase } = jest.requireMock("../lib/supabase") as { supabase: { auth: { signOut: jest.Mock } } };
+  const { Alert } = jest.requireActual("react-native") as typeof import("react-native");
+  type Btn = { text: string; style?: string; onPress?: () => Promise<void> | void };
+  let alert: jest.SpyInstance;
+  beforeEach(() => { supabase.auth.signOut.mockReset(); alert = jest.spyOn(Alert, "alert").mockImplementation(() => {}); });
+  afterEach(() => alert.mockRestore());
+  const buttons = () => alert.mock.calls.at(-1)![2] as Btn[];
+
+  it("asks first, with the shared wording; Cancel signs nothing out", async () => {
+    await show();
+    await fireEvent.press(await screen.findByTestId("profile-signout-all"));
+    const { SIGN_OUT_ALL } = jest.requireActual("../shared/signOutText") as typeof import("../shared/signOutText");
+    expect(alert.mock.calls.at(-1)!.slice(0, 2)).toEqual([SIGN_OUT_ALL.title, SIGN_OUT_ALL.body]);
+    expect(buttons().map((b) => b.text)).toEqual([SIGN_OUT_ALL.cancel, SIGN_OUT_ALL.confirm]);
+    expect(supabase.auth.signOut).not.toHaveBeenCalled();
+  });
+
+  it("confirmed: Supabase's global sign-out (every session), once", async () => {
+    supabase.auth.signOut.mockResolvedValue({ error: null });
+    await show();
+    await fireEvent.press(await screen.findByTestId("profile-signout-all"));
+    await buttons()[1].onPress!();
+    expect(supabase.auth.signOut).toHaveBeenCalledTimes(1);
+    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: "global" });
+  });
+
+  it("refused or offline: says nothing changed (still signed in everywhere); no fallback to this phone only", async () => {
+    supabase.auth.signOut.mockResolvedValue({ error: { name: "AuthRetryableFetchError", status: 0 } });
+    await show();
+    await fireEvent.press(await screen.findByTestId("profile-signout-all"));
+    await buttons()[1].onPress!();
+    expect(await screen.findByText(/Couldn't sign out of all devices, so nothing changed/)).toBeTruthy();
+    expect(supabase.auth.signOut).toHaveBeenCalledTimes(1);   // never retried with scope local
+  });
+});
