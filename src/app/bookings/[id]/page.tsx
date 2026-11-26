@@ -72,15 +72,17 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
       <div className="rounded-2xl border border-grid bg-white p-4 text-sm">
         <div className="flex justify-between py-1"><span>Court</span><span>${Number(b.price_usd ?? 0).toFixed(2)}</span></div>
         {atDesk ? (
-          <div className="mt-2 flex justify-between border-t border-grid pt-3 font-semibold"><span>Pay at the club</span><span>${Number(b.price_usd ?? 0).toFixed(2)}</span></div>
+          // H9: only a confirmed booking is paid at the club; a cancelled one (or a no-show) has nothing to settle here
+          b.status === "confirmed" && <div className="mt-2 flex justify-between border-t border-grid pt-3 font-semibold"><span>Pay at the club</span><span>${Number(b.price_usd ?? 0).toFixed(2)}</span></div>
         ) : feeOnly ? (
           <>
             <div className="flex justify-between py-1"><span>Booking fee, paid online</span><span>${Number(b.fee_usd ?? 0).toFixed(2)}</span></div>
-            <div className="mt-2 flex justify-between border-t border-grid pt-3 font-semibold"><span>Pay at the club</span><span>${Number(b.price_usd ?? 0).toFixed(2)}</span></div>
-            <p className="mt-2 text-xs text-muted">
+            {/* H9, as at the desk: the court is paid at the club only while the booking is confirmed */}
+            {b.status === "confirmed" && <div className="mt-2 flex justify-between border-t border-grid pt-3 font-semibold"><span>Pay at the club</span><span>${Number(b.price_usd ?? 0).toFixed(2)}</span></div>}
+            {(pay?.status === "refund_due" || pay?.status === "refunded" || b.status === "confirmed") && <p className="mt-2 text-xs text-muted">
               {pay?.status === "refund_due" ? "The booking fee is being refunded." : pay?.status === "refunded" ? "The booking fee was refunded."
                 : `The court is paid to ${club.name} when you arrive. The booking fee is not refunded if you cancel; it is refunded if the club cancels.`}
-            </p>
+            </p>}
           </>
         ) : (
           <>
@@ -90,7 +92,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
             {pay?.status === "refunded" && <p className="mt-2 text-muted">Refunded.</p>}
           </>
         )}
-        {atDesk && <p className="mt-2 text-xs text-muted">Nothing is paid through CourtBook. Settle with {club.name} when you arrive.</p>}
+        {atDesk && <p className="mt-2 text-xs text-muted">{b.status === "confirmed" ? `Nothing is paid through CourtBook. Settle with ${club.name} when you arrive.` : "Nothing was paid through CourtBook."}</p>}
       </div>
 
       {upcoming && <OpenToPlayers bookingId={b.id} sport={court.sport} sportName={sportLabel.get(court.sport) ?? court.sport} match={match} />}
