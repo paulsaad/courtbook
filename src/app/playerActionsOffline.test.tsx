@@ -6,15 +6,17 @@
  * connection failed, the page stays as it is, and the error is announced (role="alert").
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const router = { push: vi.fn(), refresh: vi.fn(), replace: vi.fn() };
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => "/" }));
 vi.mock("next/link", () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }));
 let answer: { data: unknown; error: unknown } = { data: null, error: null };
 const calls: string[] = [];
+const args: Record<string, unknown>[] = [];
+let answers: { data: unknown; error: unknown }[] = [];
 vi.mock("@/lib/supabase/client", () => ({
-  createClient: () => ({ rpc: async (fn: string) => { calls.push(fn); return answer; } }),
+  createClient: () => ({ rpc: async (fn: string, a: Record<string, unknown>) => { calls.push(fn); args.push(a); return answers.shift() ?? answer; } }),
 }));
 
 import MatchActions from "./matches/[id]/MatchActions";
@@ -28,8 +30,41 @@ const m: MatchRow = {
   level_min: null, level_max: null, level_legacy: false, my_level: null, players_needed: 3, joined: 1, pending: 0, status: "open", closed_reason: null,
   note: null, join_mode: "open", organizer_id: "o", organizer_name: "Karim", my_status: null, i_organize: false, booking_id: null, court_name: null,
 };
-beforeEach(() => { answer = { data: null, error: { message: "TypeError: Failed to fetch" } }; calls.length = 0; router.push.mockReset(); router.refresh.mockReset(); vi.stubGlobal("fetch", vi.fn(async () => ({}))); });
+beforeEach(() => { answer = { data: null, error: { message: "TypeError: Failed to fetch" } }; calls.length = 0; args.length = 0; answers = []; router.push.mockReset(); router.refresh.mockReset(); vi.stubGlobal("fetch", vi.fn(async () => ({}))); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+const club = { id: "c1", name: "Club", slug: "c", timezone: "Asia/Beirut", open_time: "08:00", close_time: "23:00", slot_minutes: 30 };
+
+describe("posting a game: one key per post, so a retry cannot post it twice", () => {
+  // local database, 26 Nov: two post_match calls without a key (as the website sent them) made two identical games
+  it("Post a match: the retry after a lost answer sends the same key; after a refusal a new one", async () => {
+    answers = [
+      { data: null, error: { message: "TypeError: Failed to fetch" } },
+      { data: null, error: { message: "slot_in_past" } },
+      { data: "m9", error: null },
+    ];
+    const { container } = render(<MatchBoard club={club} rows={[]} myBookings={[]} sports={[{ code: "padel", name_en: "Padel" }]} />);
+    fireEvent.click(screen.getByText("Post a match"));
+    const form = container.querySelector("form")!;
+    fireEvent.submit(form); await screen.findByText(OFFLINE);
+    fireEvent.submit(form); await screen.findByText(/past|passed/i);
+    fireEvent.submit(form); await waitFor(() => expect(router.push).toHaveBeenCalledWith("/matches/m9"));
+    const keys = args.map((a) => a.p_token);
+    expect(typeof keys[0]).toBe("string");
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[1]);
+  });
+
+  it("Open to players: the retry sends the same key", async () => {
+    answers = [{ data: null, error: { message: "Load failed" } }, { data: "m9", error: null }];
+    render(<OpenToPlayers bookingId="b1" sport="padel" sportName="Padel" match={null} />);
+    fireEvent.click(screen.getByText("Open to other players"));
+    fireEvent.click(screen.getByText("Open to players")); await screen.findByText(OFFLINE);
+    fireEvent.click(screen.getByText("Open to players")); await waitFor(() => expect(router.refresh).toHaveBeenCalled());
+    expect(args[1].p_token).toBe(args[0].p_token);
+    expect(typeof args[0].p_token).toBe("string");
+  });
+});
 
 describe("player actions with no connection", () => {
   it("Join", async () => {
@@ -65,7 +100,6 @@ describe("player actions with no connection", () => {
   });
 
   it("Post a match", async () => {
-    const club = { id: "c1", name: "Club", slug: "c", timezone: "Asia/Beirut", open_time: "08:00", close_time: "23:00", slot_minutes: 30 };
     const { container } = render(<MatchBoard club={club} rows={[]} myBookings={[]} sports={[{ code: "padel", name_en: "Padel" }]} />);
     fireEvent.click(screen.getByText("Post a match"));
     fireEvent.submit(container.querySelector("form")!);
