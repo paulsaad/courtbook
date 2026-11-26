@@ -35,6 +35,11 @@ import { color, font, radius, space } from "../../lib/theme";
  * duration. Reserving goes through the database (book_at_desk with a retry token) — the app only
  * asks. Clubs that take payment in the app wait for the retry-safe hold (G2, migration 0065).
  */
+/** clubs.single() found no row: the id is not a published club this player can see (PostgREST PGRST116). */
+function clubMissing(error: unknown): boolean {
+  return (error as { code?: string } | null)?.code === "PGRST116";
+}
+
 export default function Club() {
   const p = useLocalSearchParams<{ id: string; name?: string; date?: string; sport?: string; at?: string; tab?: string }>();
   const insets = useSafeAreaInsets();
@@ -230,6 +235,9 @@ export default function Club() {
           <Loading label="Loading times" />
         ) : q.isError && !q.data ? (
           <ErrorState error={q.error} onRetry={() => void q.refetch()} />
+        ) : !club && clubMissing(info.error) ? (
+          // a link to a club that is not (or no longer) on CourtBook: not "nothing free" (player QA, 26 Nov)
+          <Empty title="Club not available" body="This club isn't on CourtBook right now." action="Find a court" onAction={() => router.navigate("/courts")} />
         ) : !club || tiles.every((t) => t.freeCourts.length === 0) ? (
           <Empty title="Nothing free on this day" body="Try another day, or a shorter time." />
         ) : (
