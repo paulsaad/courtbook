@@ -117,6 +117,24 @@ this change; that mode is not part of the matrix.
 **Ordering rule:** the draft is measured against the policies after 0093. It must be applied after them, never
 before 0077.
 
+## Staging checks (prepared 26 Nov; not wired into the staging workflow; not run)
+
+| File | What it checks (read only, one SELECT, every row must be ok) |
+| --- | --- |
+| `supabase/live/privileges_preflight.sql` | 7 rows. Run as `postgres`; every table and view owned by `postgres`; TRUNCATE/TRIGGER/REFERENCES held on **exactly** the 31 measured relations; **exactly** the 35 measured unusable write privileges; visitors SELECT only; column grants present; the draft not yet applied. Any difference: STOP and re-measure |
+| `supabase/live/privileges_postcheck.sql` | 8 rows. No TRUNCATE/TRIGGER/REFERENCES; every write privilege usable; the app's direct writes kept; column grants intact; SELECT kept; the server key unchanged; new-table defaults clean; the players' booking functions still executable |
+
+Rehearsed by `supabase/tests/privileges/live_checks.sh`, **7/7**:
+- L1: the preflight is all ok on 0001–0093.
+- L2: the postcheck fails exactly its 3 privilege rows before the change.
+- L3 and L4: drift stops the preflight, whether it is one extra TRUNCATE or one write privilege already gone. (L3 first
+  caught a gap: a lone extra TRUNCATE was not counted; fixed.)
+- L5: after the change, the postcheck is all ok.
+- L6: the preflight refuses a second application.
+- L7: after the rollback, the preflight is all ok again.
+
+Wiring these into the staging workflow is a workflow change, and needs Paul's approval.
+
 ## Before it could be scheduled
 
 - Independent review.
