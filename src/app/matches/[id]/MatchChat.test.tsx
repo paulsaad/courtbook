@@ -7,6 +7,8 @@ type Ev = { op: string; arg?: unknown };
 let events: Ev[] = [];
 let insertAnswers: { data: unknown; error: unknown }[] = [];
 let rpcAnswers: Record<string, { data: unknown; error: unknown }[]> = {};
+vi.mock("next/navigation", () => ({ useRouter: () => router }));
+const router = { refresh: vi.fn(), replace: vi.fn(), push: vi.fn() };
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
     rpc: async (fn: string, arg?: unknown) => {
