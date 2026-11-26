@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { COMMUNITY_RULES } from "@/lib/types";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 type Ev = { op: string; arg?: unknown };
 let events: Ev[] = [];
