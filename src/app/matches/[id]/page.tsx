@@ -7,6 +7,8 @@ import { nowMs } from "@/lib/time";
 import MatchActions from "./MatchActions";
 import MatchChat from "./MatchChat";
 import { MatchCard, type MatchRow } from "@/components/MatchBoard";
+import Avatar from "@/components/Avatar";
+import { photoUrl } from "@/lib/playerPhoto/shared";
 
 export default async function MatchPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -31,6 +33,11 @@ export default async function MatchPage({ params }: { params: Promise<{ id: stri
       supabase.rpc("match_is_hidden", { p_match: id }),
   ]), "this game");
   await supabase.rpc("mark_notifications_read", { p_ids: null }).then(() => {}, () => {});   // opening a match clears its notices (simple v0.1 rule)
+  // Photos are optional and must never stop the page: before the photo schema exists this call fails, and the list
+  // stays exactly as it was (no avatars at all). Once it exists, a player without a visible photo shows initials.
+  const { data: photoRows, error: photoError } = await supabase.rpc("match_photo_versions", { p_match: id }).then((r) => r, () => ({ data: null, error: true }));
+  const avatars = !photoError;
+  const photoOf = new Map(((photoRows ?? []) as { profile_id: string; version: number }[]).map((r) => [r.profile_id, photoUrl(r.profile_id, r.version)]));
   const participants = (people ?? []) as { profile_id: string; name: string | null; level: number | null; level_legacy: string | null; is_organizer: boolean; status: string }[];
   const accepted = participants.filter((p) => p.status === "accepted");
 
@@ -42,7 +49,7 @@ export default async function MatchPage({ params }: { params: Promise<{ id: stri
         <h2 className="mb-2 font-medium">Players {m.joined + 1}/{m.players_needed + 1}</h2>
         {accepted.length > 0 ? (
           <ul className="divide-y divide-grid text-sm">
-            {accepted.map((p) => <li key={p.profile_id} className="flex justify-between py-2"><span>{p.name ?? "Player"}{p.is_organizer ? " · organizer" : ""}</span><span className="text-muted">
+            {accepted.map((p) => <li key={p.profile_id} className="flex items-center justify-between gap-2 py-2"><span className="flex items-center gap-2">{avatars && <Avatar name={p.name} src={photoOf.get(p.profile_id) ?? null} size={28} />}{p.name ?? "Player"}{p.is_organizer ? " · organizer" : ""}</span><span className="text-muted">
               {p.level != null ? `Level ${p.level}`
                 : p.profile_id === user.id
                   ? <Link href="/profile" className="text-action underline">Level not set — set yours</Link>
