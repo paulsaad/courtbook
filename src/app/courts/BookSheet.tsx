@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { defaultLength } from "@/lib/labels";
 import { useRouter } from "next/navigation";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
@@ -25,7 +26,7 @@ export default function BookSheet({ club, date, at, courts, initialCourtId, init
   const court = courts.find((c) => c.id === courtId) ?? courts[0];
   // durations this court can take from this start: min..max in grid steps, within its free run
   const options = Array.from({ length: Math.floor(Math.min(court.free, club.max_minutes) / club.slot_minutes) }, (_, i) => (i + 1) * club.slot_minutes).filter((m) => m >= club.min_minutes);
-  const [wanted, setWanted] = useState(() => initialMinutes ?? options[0] ?? club.min_minutes);
+  const [wanted, setWanted] = useState(() => initialMinutes ?? (options.length ? defaultLength(options, club.slot_minutes) : club.min_minutes));
   // the duration in effect: the wanted one if this court allows it, else the longest valid one below it
   const minutes = options.includes(wanted) ? wanted : (options.filter((m) => m < wanted).pop() ?? options[0] ?? club.min_minutes);
   const valid = options.includes(minutes);
