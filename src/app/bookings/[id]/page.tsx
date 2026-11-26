@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
 import { allLoaded, loaded } from "@/lib/load";
+import { isMalformedId } from "@/lib/ids";
 import { hhmm, nowMs } from "@/lib/time";
 import CancelButton from "./CancelButton";
 import { clubPhoneFrom } from "@/lib/clubContactPhone";
@@ -16,12 +17,15 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: b } = loaded(await supabase
+  const read = await supabase
     .from("bookings")
     .select("id, club_id, status, start_at, end_at, price_usd, fee_usd, cancelled_at, clubs(name, slug, timezone, cancel_cutoff_hours, location_url, payment_mode, lat, lng), courts!bookings_court_id_fkey(name, sport)")
     .eq("id", id)
     .eq("player_id", user.id)
-    .single(), "this booking");
+    .single();
+  // a malformed id (a link cut short when shared, a typo) names no booking: Not found, not a failed read (as #78)
+  if (isMalformedId(read.error)) notFound();
+  const { data: b } = loaded(read, "this booking");
   if (!b) notFound();
   if (b.status === "pending") redirect(`/pay/${id}`);
 

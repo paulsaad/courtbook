@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { loaded } from "@/lib/load";
+import { isMalformedId } from "@/lib/ids";
 import PayPanel from "./PayPanel";
 
 export default async function PayPage({ params }: { params: Promise<{ id: string }> }) {
@@ -9,12 +10,14 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: b } = loaded(await supabase
+  const read = await supabase
     .from("bookings")
     .select("id, status, start_at, end_at, hold_expires_at, price_usd, fee_usd, clubs(name, slug, timezone), courts!bookings_court_id_fkey(name)")
     .eq("id", id)
     .eq("player_id", user.id)
-    .single(), "this booking");
+    .single();
+  if (isMalformedId(read.error)) notFound();   // a malformed id names no booking (as #78)
+  const { data: b } = loaded(read, "this booking");
   if (!b) notFound();
   if (b.status === "confirmed") redirect(`/bookings/${id}`);
 
