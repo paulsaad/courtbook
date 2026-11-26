@@ -64,6 +64,22 @@ print(' '.join(sorted(t['NSPrivacyAccessedAPIType'].replace('NSPrivacyAccessedAP
   echo "   identity: android $pkg; ios $bid; name '$name'; url schemes: $schemes"
   eval "id_$variant=\"\$pkg|\$bid|\$name|\$schemes\""
 done
+# Staging icon (25 Nov): the generated native icons and splash of the two apps must differ, so the
+# staging app can never look like the live one on a phone.
+art() { # sha256 of the generated iOS 1024 icon, Android xxxhdpi launcher foreground, and splash logo
+  local d=$1 a
+  a=$(ls -d "$d"/ios/*/ | grep -v -e Pods -e '.xcodeproj' -e '.xcworkspace' | head -1)
+  for f in "$(ls "$a"Images.xcassets/AppIcon.appiconset/*.png 2>/dev/null | head -1)" \
+           "$(ls "$d"/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.* 2>/dev/null | head -1)" \
+           "$(ls "$d"/android/app/src/main/res/drawable-xxxhdpi/splashscreen_logo.* 2>/dev/null | head -1)"; do
+    [ -n "$f" ] && [ -f "$f" ] && sha256sum "$f" | cut -c1-16 || echo missing
+  done | tr '\n' ' '
+}
+art_live=$(art "$work/live"); art_staging=$(art "$work/staging")
+echo "   artwork (ios icon, android foreground, splash) live: $art_live| staging: $art_staging"
+chk "S1 staging: generated icons and splash exist and differ from live, one by one" \
+  "$(paste -d' ' <(echo $art_live | tr ' ' '\n') <(echo $art_staging | tr ' ' '\n') | awk 'NF!=2 || $1=="missing" || $2=="missing" || $1==$2 {bad=1} END {if (!bad && NR==3) print "true"}')" \
+  "live: $art_live staging: $art_staging"
 chk "isolation: live is app.courtbook.mobile, 'CourtBook', scheme courtbook" "$(echo "$id_live" | grep -q "applicationId 'app.courtbook.mobile'|app.courtbook.mobile|CourtBook|courtbook " && echo true)" "$id_live"
 chk "isolation: staging is app.courtbook.mobile.staging, 'CourtBook Staging', scheme courtbook-staging, nothing shared" \
   "$(echo "$id_staging" | grep -q "applicationId 'app.courtbook.mobile.staging'|app.courtbook.mobile.staging|CourtBook Staging|courtbook-staging " && ! echo "$id_staging" | grep -qE "(^| )courtbook( |$)" && echo true)" "$id_staging"
