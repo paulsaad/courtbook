@@ -19,3 +19,8 @@ export function codeList(codes: readonly string[] | null | undefined): string {
 export function nextHeading(kind: string): string {
   return kind === "booking" ? "Your next booking" : "Your next game";
 }
+
+/** The length a new booking selection starts with: 1 h where the club's lengths include it, else the shortest (Paul, 26 Nov). */
+export function defaultLength(lengths: readonly number[], fallback: number): number {
+  return lengths.includes(60) ? 60 : lengths[0] ?? fallback;
+}
