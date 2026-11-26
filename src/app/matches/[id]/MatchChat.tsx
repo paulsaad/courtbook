@@ -128,8 +128,8 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
                 <button type="button" onClick={() => { setMenuFor(null); setBlocking(x); }} className="min-h-9 text-sm font-medium text-danger">Block {x.name ?? "this player"}</button>
               </div>
             )}
-            {!x.deleted && x.profile_id === meId && <button onClick={() => removeMessage(x.id)} className="mt-0.5 text-[10px] text-white/80 underline">Delete</button>}
-            <div className={`mt-0.5 text-[10px] ${x.profile_id === meId ? "text-white/70" : "text-muted"}`}>{formatInTimeZone(new Date(x.created_at), tz, "EEE HH:mm")}</div>
+            {!x.deleted && x.profile_id === meId && <button onClick={() => removeMessage(x.id)} className="mt-0.5 text-[10px] text-white underline">Delete</button>}
+            <div className={`mt-0.5 text-[10px] ${x.profile_id === meId ? "text-white" : "text-muted"}`}>{formatInTimeZone(new Date(x.created_at), tz, "EEE HH:mm")}</div>
           </div>
         ))}
         <div ref={bottom} />

@@ -84,7 +84,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
 
       {upcoming && (
         <>
-          <a href={`https://wa.me/?text=${waText}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#25D366] py-3.5 text-center font-medium text-white">Share on WhatsApp</a>
+          <a href={`https://wa.me/?text=${waText}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#25D366] py-3.5 text-center font-semibold text-ink">Share on WhatsApp</a>
           {directions && <a href={directions} target="_blank" rel="noreferrer" className="rounded-xl border border-grid bg-white py-3.5 text-center">Directions</a>}
           <CancelButton bookingId={b.id} freeCancel={freeCancel} cutoffHours={club.cancel_cutoff_hours} cutoffLabel={`${formatInTimeZone(cutoffAt, tz, "EEE d MMM HH:mm")}`} nothingPaid={atDesk}
             clubPhone={clubPhone} clubInfoHref={`/club/${club.slug}/info`} />
