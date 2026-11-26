@@ -20,6 +20,7 @@ export const PAYMENT_CODES = new Set([
   "not_authenticated", "not_found", "token_required", "wrong_payment_mode", "not_payable", "hold_expired", "attempts_exhausted",
   "attempt_not_found", "evidence_incomplete", "attempt_evidence_conflict", "duplicate_provider_ref", "charge_evidence_conflict",
   "bad_result", "bad_provider", "use_payment_attempts", "payments_not_configured",
+  "account_closed",   // 0097: a closing or closed account starts no new payment
 ]);
 
 /** The database's refusal as a known code, or `fallback`. The raw message never leaves the server. */

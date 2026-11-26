@@ -56,6 +56,7 @@ describe("verifyAndRecord", () => {
 describe("paymentCode", () => {
   it("passes known refusals and hides everything else", () => {
     expect(paymentCode({ message: "hold_expired" }, "x")).toBe("hold_expired");
+    expect(paymentCode({ message: "account_closed" }, "x")).toBe("account_closed");   // 0097
     expect(paymentCode({ message: "permission denied for function record_attempt_result" }, "x")).toBe("x");
     expect(paymentCode(null, "x")).toBe("x");
   });

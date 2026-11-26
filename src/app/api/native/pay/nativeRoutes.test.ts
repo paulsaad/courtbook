@@ -212,7 +212,7 @@ describe("POST /api/native/pay/start", () => {
   });
 
   it("expired hold, unsupported mode, used-up attempts: the database's refusals come back as final codes", async () => {
-    for (const [msg, code, http] of [["hold_expired", "hold_expired", 409], ["wrong_payment_mode", "wrong_payment_mode", 409], ["attempts_exhausted", "attempts_exhausted", 409], ["not_payable", "not_payable", 409]] as const) {
+    for (const [msg, code, http] of [["hold_expired", "hold_expired", 409], ["wrong_payment_mode", "wrong_payment_mode", 409], ["attempts_exhausted", "attempts_exhausted", 409], ["not_payable", "not_payable", 409], ["account_closed", "account_closed", 403]] as const) {
       userRpc.start_payment_attempt = { error: { message: msg, code: "P0001" } };
       const r = await start.POST(req("/api/native/pay/start", { paymentId: PAY, requestKey: KEY }, `Bearer ${GOOD}`));
       expect(r.status).toBe(http);

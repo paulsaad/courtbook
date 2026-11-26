@@ -170,7 +170,7 @@ describe("POST /api/pay/start", () => {
     expect(provider.startAttempt).not.toHaveBeenCalled();
   });
   it("database refusals come back by name with their status; anything else as a fixed code, reported without text", async () => {
-    for (const [code, status] of [["hold_expired", 409], ["attempts_exhausted", 409], ["not_found", 404], ["not_payable", 409]] as const) {
+    for (const [code, status] of [["hold_expired", 409], ["attempts_exhausted", 409], ["not_found", 404], ["not_payable", 409], ["account_closed", 403]] as const) {
       userRpc.start_payment_attempt = { error: { message: code } };
       const res = await start.POST(post("/api/pay/start", { paymentId: PAY, requestKey: KEY }));
       expect([res.status, await res.json()]).toEqual([status, { error: code, final: true }]);
