@@ -15,9 +15,9 @@ already held names, order and an active flag that admins could write.
 | Type | `sport` becomes a **domain over text**: a stable lower-case code, `^[a-z][a-z0-9_]{1,30}$`. Existing codes, columns, API payloads and app builds are unchanged. |
 | References | `courts.sport`, `matches.sport` and `player_levels.sport` **reference `sports.code`** (foreign key). The arrays `profiles.sports` and `coaches.sports` are checked by a trigger. |
 | Who manages it | **Admins only** (the existing RLS). Players and club staff cannot add or edit global sports. |
-| Codes | Permanent: a guard refuses changing one, even by an admin. Names, the Arabic name, aliases and the active flag can be edited. |
+| Codes | Permanent: a guard refuses changing one, even by an admin. Names, aliases and the active flag can be edited. |
 | Deactivating | Hides the sport from new choices: new courts, new games, profile and coach choices, discovery filters. **History is never touched**: courts, bookings, games and levels that use it stay as they are, and a court of a deactivated sport keeps working (deactivate the court to stop bookings). A sport in use cannot be deleted. |
-| Table tennis | Code `table_tennis`, Arabic name كرة الطاولة, aliases "ping pong", "ping-pong" and "pingpong". Discovery's text search matches a club's sports by name or alias. |
+| Table tennis | Code `table_tennis`, name "Table tennis", aliases "ping pong", "ping-pong" and "pingpong". **No Arabic name:** CourtBook is English only (Paul, 26 Nov), so the draft stops requiring the old `sports.name_ar` column (existing values untouched) and search does not use it. Discovery's text search matches a club's sports by name or alias. |
 | Ordering | `club_sports` returns a club's own sports alphabetically by display name. The website orders every sport list by `name_en`. The app loads the catalogue (active, alphabetical) with a built-in fallback, so a sport an admin adds appears **without an app update** (with the neutral mark until a build draws one). |
 | Functions | The 16 functions whose signatures used the enum are captured, dropped and re-created from their exact text with **identical grants**. Verified against a build without the draft: every function body and ACL is identical except the two intended changes, `club_sports` and `club_discovery`. |
 

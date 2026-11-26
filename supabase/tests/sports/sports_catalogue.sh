@@ -32,12 +32,12 @@ CLUB_B="(select id from clubs where slug = 'other')"
 BATROUN="(select id from clubs where slug = 'batroun')"
 
 check "C1 an admin adds a sport (cricket); club staff can then create a court of it" \
-  "$(q "$(as $ADMIN) insert into sports (code, name_en, name_ar, sort_order) values ('cricket', 'Cricket', 'كريكيت', 95);
+  "$(q "$(as $ADMIN) insert into sports (code, name_en, sort_order) values ('cricket', 'Cricket', 95);
         $(as $STAFF) insert into courts (club_id, name, sport) values ($CLUB_B, 'Cricket net', 'cricket'); select sport from courts where name = 'Cricket net';")" "^cricket$"
 check "C2 a player cannot add a sport" \
-  "$(q "$(as $P1) insert into sports (code, name_en, name_ar, sort_order) values ('cricket', 'Cricket', 'كريكيت', 95);")" "ERR .*(row-level security|permission denied)"
+  "$(q "$(as $P1) insert into sports (code, name_en, sort_order) values ('cricket', 'Cricket', 95);")" "ERR .*(row-level security|permission denied)"
 check "C3 club staff cannot add a global sport" \
-  "$(q "$(as $STAFF) insert into sports (code, name_en, name_ar, sort_order) values ('cricket', 'Cricket', 'كريكيت', 95);")" "ERR .*(row-level security|permission denied)"
+  "$(q "$(as $STAFF) insert into sports (code, name_en, sort_order) values ('cricket', 'Cricket', 95);")" "ERR .*(row-level security|permission denied)"
 check "C4 a sport's code is permanent (even for an admin)" \
   "$(q "$(as $ADMIN) update sports set code = 'ping_pong' where code = 'table_tennis';")" "ERR sport_code_permanent"
 check "C4b an admin renames a sport and edits its aliases" \
@@ -63,14 +63,14 @@ check "C7 an unknown sport on a court is refused" \
 check "C7b an unknown sport on a profile is refused" \
   "$(q "$(as $P1) update profiles set sports = '{curling}' where id = '$P1';")" "ERR unknown_sport"
 check "C7c a malformed code is refused by the type itself" \
-  "$(q "$(as $ADMIN) insert into sports (code, name_en, name_ar, sort_order) values ('Cricket!', 'Cricket', 'كريكيت', 95);")" "ERR .*(sport_check|violates check constraint)"
+  "$(q "$(as $ADMIN) insert into sports (code, name_en, sort_order) values ('Cricket!', 'Cricket', 95);")" "ERR .*(sport_check|violates check constraint)"
 check "C8 a sport used by a court cannot be deleted" \
   "$(q "$(as $ADMIN) delete from sports where code = 'padel';")" "ERR (sport_in_use|.*courts_sport_fkey|.*foreign key)"
 check "C8b a sport listed only on a profile cannot be deleted either" \
-  "$(q "insert into sports (code, name_en, name_ar, sort_order) values ('cricket', 'Cricket', 'كريكيت', 95); update profiles set sports = '{cricket}' where id = '$P1';
+  "$(q "insert into sports (code, name_en, sort_order) values ('cricket', 'Cricket', 95); update profiles set sports = '{cricket}' where id = '$P1';
         $(as $ADMIN) delete from sports where code = 'cricket';")" "ERR sport_in_use"
 check "C8c an unused sport can be deleted by an admin" \
-  "$(q "insert into sports (code, name_en, name_ar, sort_order) values ('cricket', 'Cricket', 'كريكيت', 95); $(as $ADMIN) delete from sports where code = 'cricket'; select count(*) from sports where code = 'cricket';")" "^0$"
+  "$(q "insert into sports (code, name_en, sort_order) values ('cricket', 'Cricket', 95); $(as $ADMIN) delete from sports where code = 'cricket'; select count(*) from sports where code = 'cricket';")" "^0$"
 check "C9 club_sports lists the club's own sports alphabetically by name" \
   "$(q "insert into courts (club_id, name, sport) values ($CLUB_B, 'Bad 1', 'badminton'), ($CLUB_B, 'TT 1', 'table_tennis'), ($CLUB_B, 'Ten 1', 'tennis');
         $(as $P1) select array_to_string(club_sports($CLUB_B), ',');")" "^badminton,padel,table_tennis,tennis$"
@@ -79,8 +79,8 @@ check "C10 discovery: 'ping pong' finds a club with a table tennis court" \
         $(as $P1) select string_agg(slug, ',') from club_discovery(null, null, null, 'ping pong');")" "batroun"
 check "C10b and without one the same search finds nothing" \
   "$(q "$(as $P1) select count(*) from club_discovery(null, null, null, 'ping pong');")" "^0$"
-check "C11 table tennis is an active catalogue sport with its Arabic name" \
-  "$(q "select name_en || '|' || name_ar || '|' || active from sports where code = 'table_tennis';")" "^Table tennis\|كرة الطاولة\|true$"
+check "C11 table tennis is an active catalogue sport, English name only (no Arabic name)" \
+  "$(q "select name_en || '|' || (name_ar is null) || '|' || active from sports where code = 'table_tennis';")" "^Table tennis\|true\|true$"
 check "C12 the old enum is gone; every sport column is the domain" \
   "$(q "select count(*) from pg_type where typname = 'sport_enum_retired'; select string_agg(distinct format_type(atttypid, atttypmod), ',') from pg_attribute a join pg_class c on c.oid = a.attrelid where c.relnamespace = 'public'::regnamespace and a.attname in ('sport', 'sports') and c.relkind = 'r' and a.attnum > 0;")" "^0 *$|sport"
 exit $status

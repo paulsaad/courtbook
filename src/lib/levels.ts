@@ -1,4 +1,4 @@
-// Player level guide — "player-levels-v1" (Paul's guide, 11 Nov 2026; squash and table tennis (draft, 26 Nov, for Paul's review) added by Claude in the same style).
+// Player level guide — "player-levels-v1" (Paul's guide, 11 Nov 2026; squash and table tennis (26 Nov; inclusion approved by Paul, wording open to his review) added by Claude in the same style).
 // Groups are derived from the number here and in SQL (level_group): Beginner 1–3 · Intermediate 4–6 · Advanced 7–10.
 
 export const GUIDE_VERSION = "player-levels-v1";

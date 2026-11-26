@@ -86,11 +86,14 @@ drop type sport_enum_retired;
 -- ------------------------------------------------------------------ 4. the catalogue
 alter table sports add column if not exists aliases text[] not null default '{}';
 alter table sports drop constraint if exists sports_names_present;
-alter table sports add constraint sports_names_present check (btrim(name_en) <> '' and btrim(name_ar) <> '');
+alter table sports add constraint sports_names_present check (btrim(name_en) <> '');
+-- CourtBook is English only (Paul, 26 Nov): a new sport needs no Arabic name. The column (0029) and the existing
+-- sports' values are left as they are; it simply stops being required. Nothing reads it for sports.
+alter table sports alter column name_ar drop not null;
 create unique index if not exists sports_name_en_unique on sports (lower(name_en));
 
 insert into sports (code, name_en, name_ar, sort_order, active, aliases)
-values ('table_tennis', 'Table tennis', 'كرة الطاولة', 80, true, '{"ping pong","ping-pong","pingpong"}')
+values ('table_tennis', 'Table tennis', null, 80, true, '{"ping pong","ping-pong","pingpong"}')
 on conflict (code) do nothing;
 
 -- every single-valued use references the catalogue
@@ -161,7 +164,7 @@ begin
   d := replace(d, 't.name_ar like ''%'' || q.text || ''%'')',
     't.name_ar like ''%'' || q.text || ''%'''
     || ' or exists (select 1 from courts k join sports s on s.code = k.sport where k.club_id = c.id and k.active and s.active'
-    || ' and (s.name_en ilike ''%'' || q.text || ''%'' or s.name_ar like ''%'' || q.text || ''%'''
+    || ' and (s.name_en ilike ''%'' || q.text || ''%'''
     || ' or exists (select 1 from unnest(s.aliases) a where a ilike ''%'' || q.text || ''%''))))');
   execute d;
 end $$;
