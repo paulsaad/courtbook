@@ -50,12 +50,14 @@ export default function TabBar() {
   return (
     <>
       {signedIn && !under(path, HIDDEN) && (
-        <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-grid bg-white/95 backdrop-blur lg:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+        <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-20 border-t border-grid bg-white/95 backdrop-blur lg:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
           <div className="mx-auto grid max-w-md grid-cols-4">
             {TABS.map(({ href, label, Icon, match }) => {
               const on = match(path);
               return (
-                <Link key={href} href={href === "/profile" && unread > 0 ? "/notifications" : href} className={`relative flex h-16 flex-col items-center justify-center gap-1 text-[11px] ${on ? "font-bold text-ink" : "font-medium text-[#8a918e]"}`}>
+                <Link key={href} href={href === "/profile" && unread > 0 ? "/notifications" : href} aria-current={on ? "page" : undefined}
+                  aria-label={href === "/profile" && unread > 0 ? `Profile, ${unread} unread notification${unread === 1 ? "" : "s"}` : undefined}
+                  className={`relative flex h-16 flex-col items-center justify-center gap-1 text-[11px] ${on ? "font-bold text-ink" : "font-medium text-[#5f6663]"}`}>
                   {on && <span className="absolute top-1.5 h-[3px] w-[18px] rounded-full bg-cedar" />}
                   <Icon size={26} className={on ? "text-turf" : ""} />
                   {label}

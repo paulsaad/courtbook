@@ -81,8 +81,8 @@ export default function MatchBoard({ club, rows, myBookings, sports }: { club: C
           )}
           {!f.bookingId && (
             <div className="flex gap-2">
-              <input className={`${input} flex-1`} type="date" min={today} required value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
-              <input className={input} type="time" step={1800} required value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} />
+              <input className={`${input} flex-1`} type="date" aria-label="Date" min={today} required value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
+              <input className={input} type="time" aria-label="Start time" step={1800} required value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} />
             </div>
           )}
           <div className="text-sm">Who is it for<div className="mt-1"><LevelRange value={f.range} onChange={(r) => setF({ ...f, range: r })} /></div></div>
