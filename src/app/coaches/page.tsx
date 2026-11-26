@@ -24,8 +24,8 @@ export default async function CoachesPage() {
             <Link href={`/coaches/${c.coach_id}?club=${c.club_slug}`} className="card flex items-center gap-3 p-4">
               <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-sand-soft text-sm font-extrabold text-sand" aria-hidden="true">{(c.name ?? "C").slice(0, 1).toUpperCase()}</span>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-base font-bold">{c.name ?? "Coach"}</div>
-                <div className="truncate text-sm text-muted">{c.sports.map((s) => names.get(s) ?? s).join(", ")} · {c.club_name}{c.town ? ` · ${c.town}` : ""}</div>
+                <div className="break-words text-base font-bold">{c.name ?? "Coach"}</div>
+                <div className="break-words text-sm text-muted">{c.sports.map((s) => names.get(s) ?? s).join(", ")} · {c.club_name}{c.town ? ` · ${c.town}` : ""}</div>
               </div>
               <span className="font-bold">${Number(c.price_usd).toFixed(0)}<span className="text-sm font-normal text-muted">/h</span></span>
             </Link>
