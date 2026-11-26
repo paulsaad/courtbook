@@ -6,14 +6,18 @@ import type { DaySlot } from "./courts";
 /** All Lebanon for now; the area filter comes with the Home screen. */
 export const BEIRUT = "Asia/Beirut";
 
-/** One day's free starts. An area narrows it: the function filters by governorate or district; a town by name (0088). */
-export function useDaySlots(date: string, sport: string | null, area: PlayingArea | null = null) {
+/**
+ * One day's free starts. An area narrows it: the function filters by governorate or district; a town by name (0088).
+ * A search ("Club or town", as on the website's Courts page) is passed to the same function's p_query.
+ */
+export function useDaySlots(date: string, sport: string | null, area: PlayingArea | null = null, search: string | null = null) {
   const f = areaFilter(area);
+  const query = search?.trim() || null;
   return useQuery({
-    queryKey: ["day-slots", date, sport, f.p_governorate, f.p_district, f.townName],
+    queryKey: ["day-slots", date, sport, f.p_governorate, f.p_district, f.townName, query],
     queryFn: async () => {
       const { data, error } = await supabase.rpc("club_day_slots", {
-        p_date: date, p_sport: sport, p_governorate: f.p_governorate, p_district: f.p_district, p_query: null,
+        p_date: date, p_sport: sport, p_governorate: f.p_governorate, p_district: f.p_district, p_query: query,
       });
       if (error) throw error;
       const rows = (data ?? []) as DaySlot[];

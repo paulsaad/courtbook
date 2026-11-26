@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, View, useWindowDimensions, type HostInstance, type ScrollViewInstance } from "react-native";
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { hhmm } from "@shared/time";
@@ -26,6 +26,7 @@ import { joinParts, timeRange, unit } from "../../lib/panelText";
 import { reserveButton } from "../../lib/reserveButton";
 import { useOnline } from "../../lib/online";
 import { haptic } from "../../lib/haptics";
+import { missingForBooking, useMyProfile } from "../../lib/myProfile";
 import { bookingDays, shortDate, sportName } from "../../lib/days";
 import { color, font, radius, space } from "../../lib/theme";
 
@@ -57,9 +58,15 @@ export default function Club() {
   const infoClub = info.data?.club;
   const durations = club ? durationOptions(club) : [];
   const [minutes, setMinutes] = useState<number | null>(null);
-  // Arriving from a time on the Courts list: that time was listed because it is free for the club's
-  // minimum, so start there; otherwise default to 1 h 30 where the club allows it.
-  const dur = minutes && durations.includes(minutes) ? minutes : p.at ? durations[0] ?? null : durations.includes(90) ? 90 : durations[0] ?? null;
+  // Default length: 1 h where the club allows it (Paul, 26 Nov), else its shortest. Arriving from a time on the Courts
+  // list (listed because it is free for the club's minimum), 1 h only if that start is really free for 1 h; otherwise
+  // the minimum, so the chosen time is never dropped.
+  const fromCourts = useMemo(
+    () => (p.at && club ? arrivalMinutes(durations, tilesFor(q.data ?? [], club.id, 60), p.at) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [p.at, club, q.data, durations.join(",")],
+  );
+  const dur = minutes && durations.includes(minutes) ? minutes : p.at ? fromCourts : defaultMinutes(durations);
   const tiles = useMemo(() => (club && dur ? tilesFor(q.data ?? [], club.id, dur) : []), [q.data, club, dur]);
 
   const [start, setStart] = useState<string | null>(p.at ?? null);
@@ -71,6 +78,9 @@ export default function Club() {
 
   const session = useSession();
   const online = useOnline();
+  const myDetails = useMyProfile(session.status === "signed-in" ? session.session.user.id : null);
+  const resumeKey = useRef<string | null>(null);
+  const [detailsProblem, setDetailsProblem] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const mode = useClubMode(club?.id ?? null);
   const res = useReservation({
@@ -99,7 +109,7 @@ export default function Club() {
   const quote = useQuote(court?.id ?? null, tile ? tile.start : null, dur);
   const livePrice = (tile && court && prices.data?.get(tile.start)?.get(court.id)?.price) ?? (quote.isSuccess ? quote.data : null);
   const selKey = tile && court && dur ? `${court.id}|${tile.start}|${dur}` : "";
-  useEffect(() => res.clearProblem(), [selKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { res.clearProblem(); setDetailsProblem(null); }, [selKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // What the panel shows: the frozen selection while one is out, otherwise the live one.
   const shown =
@@ -147,17 +157,59 @@ export default function Club() {
   const cutoff = club?.cancelCutoffHours ?? infoClub?.cancel_cutoff_hours ?? null;
   const isDemo = club?.isDemo ?? infoClub?.is_demo ?? false;
 
-  function onReserve() {
-    if (!tile || !court || !dur || !club || locked || res.blockedBy) return;
+  /** The selection on screen now, as the reservation sends it; null when nothing complete is selected. */
+  function selection() {
+    if (!tile || !court || !dur || !club || locked || res.blockedBy) return null;
+    return {
+      key: selKey, mode: mode.data ?? "", clubId: club.id, clubName: club.name, timezone: club.timezone,
+      courtId: court.id, courtName: court.name, date, start: tile.start, minutes: dur, price: livePrice ?? null,
+    };
+  }
+  function submitNow() {
+    const sel = selection();
+    if (sel) void res.submit(sel);
+  }
+  // The selection as of the latest render, so a check that finishes later can see whether the player changed it.
+  const latestKey = useRef(selKey);
+  latestKey.current = selKey;
+  const checking = useRef(false);
+
+  async function onReserve() {
+    // Frozen at the tap: only this exact selection may be booked, whatever happens while the details are read.
+    const sel = selection();
+    if (!sel || checking.current) return;
     if (session.status !== "signed-in") {
       router.push({ pathname: "/sign-in" });
       return;
     }
-    void res.submit({
-      key: selKey, mode: mode.data ?? "", clubId: club.id, clubName: club.name, timezone: club.timezone,
-      courtId: court.id, courtName: court.name, date, start: tile.start, minutes: dur, price: livePrice ?? null,
-    });
+    // The first court booking needs a name and a contact phone (Paul, 26 Nov). Only what is missing is asked, once;
+    // the details screen comes back here and this same selection is reserved (see the focus effect below).
+    setDetailsProblem(null);
+    let prof = myDetails.data;
+    if (!prof) {
+      checking.current = true;
+      try { prof = (await myDetails.refetch()).data; } finally { checking.current = false; }
+      // The player picked another time, court or length while the details were read: book nothing. The new
+      // selection is on screen with its own Reserve.
+      if (latestKey.current !== sel.key) return;
+    }
+    if (!prof) { setDetailsProblem("Couldn't check your details. Check your connection and try again."); return; }
+    if (missingForBooking(prof).length > 0) {
+      resumeKey.current = sel.key;
+      router.push({ pathname: "/my-details", params: { for: "booking" } });
+      return;
+    }
+    void res.submit(sel);
   }
+  // Back from "Before you book": details saved → reserve the very selection the player chose (only if it is unchanged
+  // and still on screen); closed without saving → nothing happens, and Reserve asks again next time.
+  useFocusEffect(useCallback(() => {
+    const key = resumeKey.current;
+    if (!key) return;
+    resumeKey.current = null;
+    if (key === selKey && myDetails.data && missingForBooking(myDetails.data).length === 0) submitNow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selKey, myDetails.data]));
 
   const atDesk = mode.data === "at_desk";
   const reserveBtn = reserveButton({
@@ -304,6 +356,8 @@ export default function Club() {
             </View>
             {res.problem ? (
               <Text style={res.phase === "idle" && !res.blockedBy ? styles.problem : styles.pending} accessibilityRole="alert" accessibilityLiveRegion="polite">{res.problem}</Text>
+            ) : detailsProblem ? (
+              <Text style={styles.problem} accessibilityRole="alert" accessibilityLiveRegion="polite" testID="details-problem">{detailsProblem}</Text>
             ) : atDesk ? (
               <Text variant="caption">Nothing is charged in the app.{cutoff !== null ? ` Free cancellation up to ${cutoff} h before.` : ""}</Text>
             ) : mode.isSuccess ? (
@@ -315,12 +369,26 @@ export default function Club() {
             label={reserveBtn.label}
             busy={res.phase === "sending" || res.phase === "checking"}
             disabled={reserveBtn.disabled}
-            onPress={res.phase === "uncertain" ? () => void res.check() : onReserve}
+            onPress={res.phase === "uncertain" ? () => void res.check() : () => void onReserve()}
           />
         </View>
       )}
     </View>
   );
+}
+
+/** The length a new selection starts with: 1 h where the club's rules allow it, otherwise its shortest. */
+export function defaultMinutes(durations: number[]): number | null {
+  return durations.includes(60) ? 60 : durations[0] ?? null;
+}
+
+/**
+ * Arriving from a time on the Courts list: 1 h when the club allows it and that start is free for 1 h on some court,
+ * otherwise the club's shortest (the length the Courts list used to list the time).
+ */
+export function arrivalMinutes(durations: number[], tilesAt60: { start: string; freeCourts: unknown[] }[], at: string): number | null {
+  if (durations.includes(60) && tilesAt60.some((t) => sameInstant(t.start, at) && t.freeCourts.length > 0)) return 60;
+  return durations[0] ?? null;
 }
 
 /** F6: the most of the screen the booking panel may take; beyond it its details scroll. */

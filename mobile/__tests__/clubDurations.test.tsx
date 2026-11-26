@@ -9,13 +9,15 @@ jest.mock("../lib/supabase", () => ({ supabase: { rpc: jest.fn(), from: jest.fn(
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), replace: jest.fn(), back: jest.fn() },
   Stack: { Screen: () => null },
+  useFocusEffect: () => {},
   useLocalSearchParams: () => ({ id: "c1", name: "Test Club" }),
 }));
 jest.mock("expo-haptics", () => ({ selectionAsync: jest.fn(async () => {}), notificationAsync: jest.fn(async () => {}), NotificationFeedbackType: { Success: "success" } }));
 jest.mock("expo-image", () => ({ Image: () => null }));
 jest.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQueries: jest.fn() }) }));
-jest.mock("../lib/session", () => ({ useSession: () => ({ status: "signed-in", userId: "me" }) }));
+jest.mock("../lib/session", () => ({ useSession: () => ({ status: "signed-in", userId: "me", session: { user: { id: "me" } } }) }));
 jest.mock("../lib/online", () => ({ useOnline: () => true }));
+jest.mock("../lib/myProfile", () => ({ useMyProfile: () => ({ data: { name: "Rana", phone: "+96170123456", sports: [] }, refetch: jest.fn() }), missingForBooking: () => [] }));
 jest.mock("../lib/clubInfo", () => ({ useClubInfo: () => ({ data: undefined, isRefetching: false, refetch: jest.fn() }) }));
 jest.mock("../lib/reservation", () => ({
   useReservation: () => ({ locked: false, pending: null, phase: "idle", problem: null, blockedBy: null, clearProblem: jest.fn(), submit: jest.fn(), check: jest.fn() }),

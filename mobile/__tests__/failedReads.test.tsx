@@ -18,6 +18,7 @@ const mockNavigate = jest.fn();
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), replace: jest.fn(), back: jest.fn(), navigate: (...a: unknown[]) => mockNavigate(...a) },
   Stack: { Screen: () => null },
+  useFocusEffect: () => {},
   useLocalSearchParams: () => ({ id: "gone-club" }),
 }));
 jest.mock("expo-haptics", () => ({ selectionAsync: jest.fn(async () => {}), notificationAsync: jest.fn(async () => {}), NotificationFeedbackType: { Success: "success" } }));
@@ -25,6 +26,7 @@ jest.mock("expo-image", () => ({ Image: () => null }));
 jest.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQueries: jest.fn() }) }));
 jest.mock("../lib/session", () => ({ useSession: () => ({ status: "signed-in", userId: "me", session: { user: { id: "me" } } }) }));
 jest.mock("../lib/online", () => ({ useOnline: () => true }));
+jest.mock("../lib/myProfile", () => ({ useMyProfile: () => ({ data: { name: "Rana", phone: "+96170123456", sports: [] }, refetch: jest.fn() }), missingForBooking: () => [] }));
 jest.mock("../lib/profile", () => ({ useProfileName: () => ({ data: "Rana Khoury" }), firstName: (n: string | null) => (n ? n.split(" ")[0] : null) }));
 jest.mock("../lib/activity", () => ({ useActivity: () => ({ data: [] }), unreadCount: () => 0, badgeText: () => null }));
 jest.mock("../components/HomeExtras", () => ({ AreasQuestionCard: () => null, YourClubsRow: () => null }));
