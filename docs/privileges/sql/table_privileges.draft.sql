@@ -35,7 +35,13 @@ begin
   end loop;
 end $$;
 
--- New tables made by migrations (run as postgres) no longer receive them either.
+-- New tables no longer receive them either. ASSUMPTION: this changes the defaults of the role postgres only, so it
+-- covers objects that postgres creates later. CourtBook's migrations run as postgres, and every table and view in
+-- public is owned by postgres (audit CAT4e; to be confirmed read-only on staging in this step's preflight). An object
+-- created by any other role (e.g. a table made in Supabase's dashboard table editor, which runs as supabase_admin)
+-- gets that role's defaults, ALL to anon and authenticated, and would bring these privileges back. Tables are created
+-- only through migrations; the audit's grant checks (CAT4c, CAT4d, CAT4f, finding G1; CAT4e for the owner) report any
+-- drift on every run of the local matrix.
 alter default privileges for role postgres in schema public revoke truncate, trigger, references on tables from anon, authenticated;
 
 -- 2 ------------------------------------------------------------------------------------------------------------------

@@ -23,7 +23,12 @@ rows. That leaves players (`authenticated`) holding privileges the app never use
 
 1. Revokes TRUNCATE, TRIGGER and REFERENCES from `anon` and `authenticated` on every table and view in `public`.
 2. Stops new tables (created by migrations as `postgres`) from receiving them by default. New tables still receive
-   SELECT, INSERT, UPDATE and DELETE by default.
+   SELECT, INSERT, UPDATE and DELETE by default. **Assumption: migrations run as `postgres`.** The default change
+   applies only to objects `postgres` creates. Every table and view in `public` is owned by `postgres` today (audit
+   CAT4e, local; the staging preflight must confirm it read-only). A table created by another role, such as one made in
+   Supabase's dashboard table editor (`supabase_admin`), would get that role's defaults (ALL to `anon` and
+   `authenticated`) and bring the privileges back. So tables are created only through migrations, and the audit checks
+   it continuously (below).
 3. Revokes the 35 unusable write privileges, listed table by table in the SQL.
 
 ## Unchanged
@@ -86,12 +91,28 @@ throwaway local tree:
 | Test | What it asserted | Now (same property) |
 | --- | --- | --- |
 | `blocks.sh` | Builds every migration except 0076/0077, then rehearses their rollout (stage A: the old website inserting blocks directly) | Leaves the privilege migration out of that build: it follows 0093 and assumes 0077's policies |
-| `fixes/checks.sql` S1d | Players still *hold* UPDATE on `matches` ("cancel path unchanged") | Players can cancel through `set_match_status` (no policy has let them UPDATE `matches` directly since 0072) |
+| `fixes/checks.sql` S1d | Players still *hold* UPDATE on `matches` ("cancel path unchanged") | **The organiser really cancels a game through `set_match_status()` and its status becomes `cancelled`** (on its own game `aa02`, undone afterwards; S1e checks the undo). No policy in today's schema lets a player UPDATE `matches` directly. The S1d check fails if players lose the cancel path |
 | `audit/run_audit.sh` PRIV4, PRIV5 | Updating one's own hold or payment changes 0 rows | Refused either way: 0 rows, or no privilege (the bare error aborted the audit's catalog block) |
 | `m86/close_tests.sql` F3 | A closed account's level change fails with `account_closed` | `account_closed` or permission denied |
 
-With these adaptations all four suites pass **both with and without** the draft: blocks OK; fixes 95 ok; audit
-62 ok + 1 known finding; deletion86 102 + 126 ok.
+With these adaptations all four suites pass **both with and without** the draft: blocks OK; fixes 96 ok (old
+schema: exactly the 16 guarded checks fail, as designed); deletion86 102 + 126 ok.
+
+**Ongoing grant audit (kept in `audit/run_audit.sh`, run by the local matrix on every tree):**
+- **CAT4c:** players and visitors hold no TRUNCATE, TRIGGER or REFERENCES.
+- **CAT4d:** every write privilege a player holds is usable through a policy.
+- **CAT4f:** new tables by `postgres` get no TRUNCATE, TRIGGER or REFERENCES.
+
+These three are finding **G1**: expected to pass once the privilege migration is in the tree, and reported as
+"known" until then. They are recognised by the file name `*_table_privileges.sql` until the migration is numbered.
+**CAT4e** (every table and view owned by `postgres`) must always pass.
+
+Audit results:
+- with the draft: 66 ok, 1 known finding (the existing T1);
+- without it: 63 ok, 4 known findings (G1 ×3 + T1).
+
+Running the audit against the default live-equivalent schema (0001–0066) shows 5 failures, identical with and without
+this change; that mode is not part of the matrix.
 
 **Ordering rule:** the draft is measured against the policies after 0093. It must be applied after them, never
 before 0077.
