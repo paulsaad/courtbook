@@ -5,7 +5,7 @@
 
 export const PHOTO = {
   size: 256,                       // stored square, in pixels
-  maxInput: 10 * 1024 * 1024,      // the upload, before re-encoding
+  maxInput: 4 * 1024 * 1024,       // the upload, before re-encoding (the browser shrinks first: playerPhoto/shrink.ts)
   maxOutput: 64 * 1024,            // the stored WebP; the table refuses anything larger
 } as const;
 

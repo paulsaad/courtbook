@@ -1,6 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
-import { PHOTO, photoUrl } from "@/lib/playerPhoto/shared";
+import { photoUrl } from "@/lib/playerPhoto/shared";
+import { UPLOAD_MAX, shrinkForUpload } from "@/lib/playerPhoto/shrink";
 
 /**
  * The profile header picture, with Add / Change / Remove. Same circle as before; a photo, when there is one, fills it.
@@ -14,13 +15,15 @@ export default function ProfilePhoto({ userId, initials, version: initialVersion
 
   async function upload(file: File) {
     setError(null);
-    if (file.size > PHOTO.maxInput) { setError("That photo is over 10 MB. Please pick a smaller one."); return; }
     setBusy(true);
     try {
+      const small = await shrinkForUpload(file);
+      if (small.size > UPLOAD_MAX) { setError("That photo is too large. Please pick a smaller one."); return; }
       const body = new FormData();
-      body.append("file", file);
+      body.append("file", small, "photo.jpg");
       const res = await fetch("/api/player-photo", { method: "POST", body });
       const json = await res.json().catch(() => ({}));
+      if (res.status === 413) { setError("That photo is too large. Please pick a smaller one."); return; }
       if (!res.ok) { setError(json.error ?? "Your photo could not be saved. Please try again."); return; }
       setVersion(json.version);
     } catch {

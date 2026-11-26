@@ -80,9 +80,32 @@ describe("processPhoto", () => {
   it("a renamed non-image is refused", async () => {
     expect(await processPhoto(Buffer.from("%PDF-1.4 not a photo at all"))).toEqual({ ok: false, reason: "not_image" });
   });
-  it("an input over 10 MB is refused before decoding", async () => {
+  it("an input over the upload cap (4 MB) is refused before decoding", async () => {
     expect(await processPhoto(Buffer.alloc(shared.PHOTO.maxInput + 1))).toEqual({ ok: false, reason: "too_large" });
   });
+});
+
+describe("pixel limit (decompression bomb)", () => {
+  it("a small file holding a valid image just over the pixel limit is refused, not decoded", async () => {
+    const { MAX_INPUT_PIXELS } = await import("@/lib/playerPhoto/process");
+    const w = 7000, h = Math.ceil(MAX_INPUT_PIXELS / w) + 10;      // just over the limit
+    const bomb = await sharp(Buffer.alloc(w * h), { raw: { width: w, height: h, channels: 1 } }).png({ compressionLevel: 9 }).toBuffer();
+    expect(bomb.byteLength).toBeLessThan(PHOTO_MAX_INPUT());          // passes the byte cap: only the pixel limit stops it
+    expect(await processPhoto(bomb)).toEqual({ ok: false, reason: "not_image" });
+  }, 30_000);
+  it("an image just under the limit is accepted (the limit is not set too low)", async () => {
+    const r = await processPhoto(await sharp(Buffer.alloc(4000 * 3000), { raw: { width: 4000, height: 3000, channels: 1 } }).png().toBuffer());
+    expect(r.ok).toBe(true);
+  }, 30_000);
+});
+const PHOTO_MAX_INPUT = () => shared.PHOTO.maxInput;
+
+describe("browser shrink sizes", () => {
+  it.each([[4032, 3024, 1024, 768], [3024, 4032, 768, 1024], [800, 600, 800, 600], [5000, 10, 1024, 2]])(
+    "%i×%i → %i×%i (longer side ≤ 1024, never enlarged)", async (w, h, ew, eh) => {
+      const { scaledSize } = await import("@/lib/playerPhoto/shrink");
+      expect(scaledSize(w, h)).toEqual({ width: ew, height: eh });
+    });
 });
 
 describe("byte helpers", () => {
@@ -131,6 +154,11 @@ describe("POST /api/player-photo", () => {
   it("a non-image is 415 and nothing is written", async () => {
     const res = await upload.POST(form(new Blob(["not an image"], { type: "image/jpeg" })));
     expect(res.status).toBe(415);
+    expect(calls).toEqual([]);
+  });
+  it("an upload over the cap is 413 and nothing is decoded or written", async () => {
+    const res = await upload.POST(form(new Blob([new Uint8Array(shared.PHOTO.maxInput + 1)], { type: "image/jpeg" })));
+    expect(res.status).toBe(413);
     expect(calls).toEqual([]);
   });
   it("no file is 400", async () => {

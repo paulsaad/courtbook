@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   const form = await request.formData().catch(() => null);
   const file = form?.get("file");
   if (!(file instanceof File)) return NextResponse.json({ error: "Choose a photo to upload." }, { status: 400 });
-  if (file.size > PHOTO.maxInput) return NextResponse.json({ error: "That photo is over 10 MB. Please pick a smaller one." }, { status: 413 });
+  if (file.size > PHOTO.maxInput) return NextResponse.json({ error: "That photo is too large. Please pick a smaller one." }, { status: 413 });
 
   const p = await processPhoto(Buffer.from(await file.arrayBuffer()));
   if (!p.ok) {

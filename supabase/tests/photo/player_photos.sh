@@ -42,6 +42,7 @@ as() { echo "set local role authenticated; set local request.jwt.claim.sub = '$1
 svc() { echo "set local role service_role; set local request.jwt.claim.sub = '';"; }
 IMG="decode('52494646' || '00000000' || '57454250' || repeat('00', 60), 'hex')"
 put() { echo "$(svc) do \$p\$ begin perform set_player_photo('$1', $IMG, 192, 192); end \$p\$; reset role;"; }
+fresh() { echo "set local role authenticated; set local request.jwt.claim.sub = '$1'; select set_config('request.jwt.claims', json_build_object('sub', '$1', 'role', 'authenticated', 'amr', json_build_array(json_build_object('method', 'otp', 'timestamp', extract(epoch from now())::bigint)))::text, true) is null;"; }
 seen() { echo "$(as $1) select count(*) from player_photo('$2');"; }
 
 check "P1 the server stores a photo; the owner sees it" \
@@ -78,22 +79,29 @@ check "P10b a stranger gets nothing from the participant list" \
   "$(q "$(put $A) $(put $B) $(as $D) select count(*) from match_photo_versions('$G1');")" "^0$"
 check "P11 the owner removes their photo" \
   "$(q "$(put $B) $(as $B) select remove_player_photo(); $(seen $B $B)")" "^t.0$"
-check "P12 closing the account deletes the photo in the same transaction" \
-  "$(q "$(put $B) insert into account_deletions (subject_id, requested_via, status) values ('$B', 'web', 'closing'); select count(*) from player_photos where profile_id = '$B';")" "^0$"
-check "P12b a cancellable old-style request keeps it (hidden while open)" \
-  "$(q "$(put $B) insert into account_deletions (subject_id, requested_via) values ('$B', 'web'); select count(*) from player_photos where profile_id = '$B'; $(seen $A $B)")" "^1.0$"
-check "P12c a closed account cannot upload" \
-  "$(q "insert into account_deletions (subject_id, requested_via, status) values ('$B', 'web', 'closing'); $(put $B)")" "ERR account_closed"
+check "P12 a player WITH a photo can close their account (the real close, under 0086's lock-out)" \
+  "$(q "$(put $B) $(fresh $B) select close_my_account('web')->>'status'; reset role;")" "^f closing$"
+check "P12b from closing on, the photo is hidden from everyone, the player included; the row waits for the data step" \
+  "$(q "$(put $B) $(fresh $B) select close_my_account('web') is not null; reset role; $(seen $A $B) $(seen $B $B) reset role; select count(*) from player_photos where profile_id = '$B';")" "^f t 0 0 1$"
+check "P12c the data step (delete_account_data, server key) deletes it" \
+  "$(q "$(put $B) $(fresh $B) select close_my_account('web') is not null; reset role;
+        $(svc) select delete_account_data('$B') is not null; reset role;
+        select status || ' ' || (select count(*) from player_photos where profile_id = '$B') from account_deletions where subject_id = '$B';")" "^f t t data_removed 0$"
 check "P12d an upload that raced the closure is removed at the data step" \
   "$(q "insert into account_deletions (subject_id, requested_via, status) values ('$B', 'web', 'closing');
         insert into player_photos (profile_id, image, width, height) values ('$B', $IMG, 192, 192);
         update account_deletions set status = 'data_removed' where subject_id = '$B';
         select count(*) from player_photos where profile_id = '$B';")" "^0$"
-check "P12e the real data step (delete_account_data) leaves no photo" \
-  "$(q "$(put $B) insert into account_deletions (subject_id, requested_via, status) values ('$B', 'web', 'closing');
-        insert into player_photos (profile_id, image, width, height) values ('$B', $IMG, 192, 192);
-        $(svc) select delete_account_data('$B') is not null; reset role;
-        select count(*) from player_photos where profile_id = '$B';")" "^t.0$"
+check "P12e a closed account cannot upload (server) or remove (as itself)" \
+  "$(q "$(put $B) $(fresh $B) select close_my_account('web') is not null; reset role; $(put $B)")" "ERR account_closed"
+check "P12f … nor remove it as itself (0086 lock-out on the table)" \
+  "$(q "$(put $B) $(fresh $B) select close_my_account('web') is not null; select remove_player_photo();")" "ERR account_closed"
+check "P12g a cancellable old-style request keeps the photo, hidden while open" \
+  "$(q "$(put $B) insert into account_deletions (subject_id, requested_via) values ('$B', 'web'); select count(*) from player_photos where profile_id = '$B'; $(seen $A $B)")" "^1 0$"
+check "P12h legal hold ('held'): kept, hidden" \
+  "$(q "$(put $B) insert into account_deletions (subject_id, requested_via, status, held_reason) values ('$B', 'web', 'held', 'legal_hold'); select count(*) from player_photos where profile_id = '$B'; $(seen $A $B)")" "^1 0$"
+check "P12i the table has 0086's closed-account lock-out (0086 test E1)" \
+  "$(q "select count(*) from pg_trigger where tgrelid = 'player_photos'::regclass and tgname = 'closed_account_lockout';")" "^1$"
 check "P13 non-WebP bytes are refused by the table itself" \
   "$(q "$(svc) select set_player_photo('$B', decode('89504e47' || repeat('00', 70), 'hex'), 192, 192);")" "ERR .*check constraint"
 check "P13b oversize is refused" \
@@ -102,4 +110,21 @@ check "P13c a replacement bumps the version" \
   "$(q "$(put $B) $(put $B) $(as $B) select version from player_photo('$B');")" "^2$"
 check "P14 my_photo_version is the caller's own only" \
   "$(q "$(put $B) $(put $B) $(as $B) select coalesce(my_photo_version(), 0); $(as $A) select coalesce(my_photo_version(), 0);")" "^2 0$"
+check "P15 exact table rights: nobody but the owner (anon, authenticated and service_role have none)" \
+  "$(q "select string_agg(r || '=' || coalesce((select string_agg(p, '+' order by p) from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p where has_table_privilege(r, 'player_photos', p)), '-'), ' ' order by r) from unnest(array['anon','authenticated','service_role']) r;")" \
+  "^anon=- authenticated=- service_role=-$"
+check "P15b exact function rights (anon none; players read, remove; only the server writes; internals for nobody)" \
+  "$(q "select string_agg(f || ':' || (case when has_function_privilege('anon', f, 'EXECUTE') then 'A' else '' end) || (case when has_function_privilege('authenticated', f, 'EXECUTE') then 'U' else '' end), ' ' order by f)
+        from unnest(array['can_see_player_photo(uuid,uuid)','match_photo_versions(uuid)','my_photo_version()','player_photo(uuid)','player_photo_on_closure()','remove_player_photo()','set_player_photo(uuid,bytea,integer,integer)']) f;")" \
+  "^can_see_player_photo\(uuid,uuid\): match_photo_versions\(uuid\):U my_photo_version\(\):U player_photo\(uuid\):U player_photo_on_closure\(\): remove_player_photo\(\):U set_player_photo\(uuid,bytea,integer,integer\):$"
+check "P15c RLS on, no policy; every function SECURITY DEFINER with a fixed search_path" \
+  "$(q "select (select relrowsecurity from pg_class where relname = 'player_photos') || ' ' || (select count(*) from pg_policies where tablename = 'player_photos') || ' ' ||
+        (select count(*) from pg_proc where proname in ('can_see_player_photo','player_photo','match_photo_versions','my_photo_version','set_player_photo','remove_player_photo','player_photo_on_closure') and prosecdef and proconfig @> array['search_path=public']);")" \
+  "^true 0 7$"
+check "P15d the server key cannot write or read the table directly" \
+  "$(q "$(svc) insert into player_photos (profile_id, image, width, height) values ('$B', $IMG, 192, 192);")" "ERR .*permission denied"
+check "P13d a stored photo at exactly the cap (65536 bytes) is accepted; one byte more is not" \
+  "$(q "$(svc) select set_player_photo('$B', decode('52494646' || '00000000' || '57454250' || repeat('00', 65524), 'hex'), 192, 192); select set_player_photo('$B', decode('52494646' || '00000000' || '57454250' || repeat('00', 65525), 'hex'), 192, 192);")" "^1 ERR .*check constraint"
+check "P13e dimensions outside 32–256 are refused" \
+  "$(q "$(svc) select set_player_photo('$B', $IMG, 512, 512);")" "ERR .*check constraint"
 exit $status

@@ -2,6 +2,9 @@ import "server-only";
 import sharp from "sharp";
 import { PHOTO } from "./shared";
 
+/** Refuse to decode anything larger than this many pixels (a small file can declare a huge image). */
+export const MAX_INPUT_PIXELS = 40_000_000;
+
 export type Processed =
   | { ok: true; webp: Buffer; width: number; height: number }
   | { ok: false; reason: "not_image" | "too_large" };
@@ -15,7 +18,7 @@ export async function processPhoto(input: Buffer): Promise<Processed> {
   if (input.byteLength > PHOTO.maxInput) return { ok: false, reason: "too_large" };
   try {
     for (const quality of [80, 65, 50]) {
-      const webp = await sharp(input, { failOn: "error", limitInputPixels: 50_000_000 })
+      const webp = await sharp(input, { failOn: "error", limitInputPixels: MAX_INPUT_PIXELS })
         .rotate()
         .resize(PHOTO.size, PHOTO.size, { fit: "cover", position: "centre" })
         .webp({ quality })

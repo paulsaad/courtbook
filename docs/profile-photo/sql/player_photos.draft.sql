@@ -9,7 +9,9 @@
 --   * Who may see it is decided here, per request, by player_photo() running as the viewer: the player themself, or a
 --     player who shares a non-cancelled game with them where both are the organizer or accepted — and neither has
 --     blocked the other, and the subject's account is neither closing nor suspended.
---   * Closing an account deletes the photo in the same transaction as the status change (trigger on account_deletions).
+--   * Closing an account hides the photo at once (can_see_player_photo checks deletion_requested); the account's data
+--     step deletes it (trigger on account_deletions → 'data_removed'), with the server key, like the rest of their data.
+--   * The table gets 0086's closed-account lock-out, as every table must (0086 test E1).
 
 -- 1 ------------------------------------------------------------------------------------------------------------------
 create table if not exists player_photos (
@@ -24,7 +26,10 @@ create table if not exists player_photos (
   updated_at timestamptz not null default now()
 );
 alter table player_photos enable row level security;   -- no policy: read and written only through the functions below
-revoke all on player_photos from public, anon, authenticated;
+-- service_role too: Supabase grants it every table by default, and nothing needs that here (the server writes through
+-- set_player_photo, the closure trigger runs as the owner). Without this, a direct write with the server key would
+-- skip every check below: the same gap as H1 on account_deletions, not repeated on a new table.
+revoke all on player_photos from public, anon, authenticated, service_role;
 
 -- 2 ------------------------------------------------------------------------------------------------------------------
 -- The one visibility rule. Internal: callers go through player_photo() / match_photo_versions(), which pass auth.uid().
@@ -118,15 +123,26 @@ revoke all on function remove_player_photo() from public, anon;
 grant execute on function remove_player_photo() to authenticated;
 
 -- 5 ------------------------------------------------------------------------------------------------------------------
--- Account closure: the photo goes when the account closes (or is held, or its data step runs), in the same
--- transaction as the status change. Not on 'requested' (the pre-0086 request that can still be cancelled) nor on
--- 'cancelled'. The later 'data_removed' transition deletes again, which also catches an upload that raced the closure
--- (set_player_photo saw the account open; the closure committed first; the upload committed after).
+-- 0086's lock-out: a closed account changes nothing, on every table (0086 test E1 requires it of a new table).
+do $$
+begin
+  if exists (select 1 from pg_proc where proname = 'refuse_writes_by_closed_account') then
+    execute 'drop trigger if exists closed_account_lockout on player_photos';
+    execute 'create trigger closed_account_lockout before insert or update or delete on player_photos '
+         || 'for each statement execute function refuse_writes_by_closed_account()';
+  end if;
+end $$;
+
+-- Account deletion: the photo is deleted at the account's data step, when its record becomes 'data_removed' (or
+-- 'done', which follows it). That step runs with the server key, so the lock-out above lets it through. It is NOT
+-- deleted at closing: closing runs as the person, and the lock-out refuses every write once their account is closed
+-- (deleting there would make closing itself fail). From closing until the data step the photo is hidden from everyone
+-- (can_see_player_photo), and an account under legal hold ('held') keeps it hidden, like the rest of its data.
+-- An upload that raced the closure is caught by the same data step.
 create or replace function player_photo_on_closure() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if new.status in ('closing', 'closed', 'held', 'data_removed', 'done')
-     and (tg_op = 'INSERT' or old.status is distinct from new.status) then
+  if new.status in ('data_removed', 'done') and (tg_op = 'INSERT' or old.status is distinct from new.status) then
     delete from player_photos where profile_id = new.subject_id;
   end if;
   return null;
