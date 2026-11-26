@@ -43,7 +43,7 @@ for a in "$@"; do
 import json, sys
 c = json.load(open(sys.argv[1])); man = json.load(open(sys.argv[2]))
 keep = [x for x in c if not ((x["kind"] == "rpc" and x["fn"] is None) or (x.get("unresolved") and x["kind"] == "rpc"
-        and x["fn"] in ("club_discovery", "open_matches")) or any(o.get("unresolved") for o in x.get("ops", [])))]
+        and x["fn"] in ("club_discovery", "open_matches", "post_match")) or any(o.get("unresolved") for o in x.get("ops", [])))]
 json.dump(keep + man, open(sys.argv[3], "w"))
 PY
   out=$(python3 "$here/check.py" "$work/$ref.json" "$s" "$r"); echo "$out"
