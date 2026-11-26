@@ -267,7 +267,13 @@ the parts no other document covered (WP deploy, the build and the install). Stop
 | I | **Android build**: GitHub → Actions → "Mobile build (Expo)" → from `int/pilot-26nov-staging`, app **staging**, platform **android** | The run's own first steps must print: `App: staging · EAS environment: development · channel: staging · database project: pwznauyioqykdwodwpvx`; the signing line for `app.courtbook.mobile.staging` with keystore **created 2026-11-15T14:52:16Z (default)**; tests, bundling, legal gate (warning mode) and STG artwork gate pass | On expo.dev, the build page shows: application id `app.courtbook.mobile.staging`, version **0.4.0**, version code **≥ 1**, channel **staging**, runtime 0.4.0 | A different keystore date or package; the database line names any other project; version code below 1 |
 | J | **Install on the A17** (Paul) | Note the installed app: CourtBook Staging 0.3.0 (build 1), runtime 0.3.0, channel staging | Profile/About shows 0.4.0, runtime 0.4.0, channel staging, still signed in; the two other CourtBook apps unchanged | Android says the app conflicts with an existing package: **do not uninstall**; report (it would mean a different signing key) |
 
+| K | **Test-session setup** for the checklists (each writes to staging: separate go) | — | Account **A** `paul.tester@courtbook.test` signs in (workflow action `tester`, which also puts the demo club at the desk); account **B** exists; a staff account for the desk device on the test club; the club is at the desk (`demo_at_desk`), cutoff **6 h**, at least 2 courts free tomorrow evening | — |
+
 Then the "Galaxy A17 pilot acceptance checklist" steps 1–13 and the "club desk acceptance checklist" steps 1–9.
+
+**On the A17 at step J / checklist 1.1:** because CourtBook Staging is already installed, Android asks **"Do you want to
+update this app?"** (not "install"). That is the expected in-place upgrade. If it asks to install a *new* app
+alongside, or refuses with "App not installed" / "package conflicts", stop and report: do not uninstall.
 
 ### Why J upgrades in place and keeps the app's data (checked 26 Nov)
 
