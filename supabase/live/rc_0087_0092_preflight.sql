@@ -22,9 +22,12 @@ with checks(part, item, ok, detail) as (
       and not exists (select 1 from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'closed_account_lockout')),
     coalesce((select string_agg(c.relname, ',') from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r','p') and c.relname not in ('account_deletions', 'deletion_worker')
       and not exists (select 1 from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'closed_account_lockout')), '')
-  union all select 1, 'account_deletions has only statuses 0086 knows (requested, cancelled, done)',
-    not exists (select 1 from account_deletions where status not in ('requested', 'cancelled', 'done')),
-    coalesce((select string_agg(distinct status, ',') from account_deletions where status not in ('requested', 'cancelled', 'done')), '')
+  -- 26 Nov: the list was copied from rc_0086_0091_preflight (BEFORE 0086, when only these three existed) and refused every
+  -- deletion open in a 0086 state (closing, closed, held, data_removed) — a false stop at step A, since 0087–0092 do not
+  -- touch deletion (open deletions are reported in part 2 below). Now: the statuses 0086 itself allows.
+  union all select 1, 'account_deletions has only statuses 0086 knows (requested, cancelled, closing, closed, held, data_removed, done)',
+    not exists (select 1 from account_deletions where status not in ('requested', 'cancelled', 'closing', 'closed', 'held', 'data_removed', 'done')),
+    coalesce((select string_agg(distinct status, ',') from account_deletions where status not in ('requested', 'cancelled', 'closing', 'closed', 'held', 'data_removed', 'done')), '')
   union all select 1, 'no booking overlaps another live booking or a block (the starting point is clean)',
     not exists (select 1 from bookings a join bookings b on a.court_id = b.court_id and a.id < b.id and a.status in ('confirmed','pending') and b.status in ('confirmed','pending') and a.period && b.period)
     and not exists (select 1 from bookings k join blocks x on x.court_id = k.court_id and x.period && k.period where k.status in ('confirmed','pending')), ''
