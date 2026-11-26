@@ -27,7 +27,7 @@ vi.mock("@/lib/supabase/client", () => ({
   }),
 }));
 
-import MatchChat from "./MatchChat";
+import MatchChat, { NOT_CONFIRMED } from "./MatchChat";
 
 const props = { matchId: "m1", meId: "me", tz: "Asia/Beirut", finished: false, hidden: false };
 const box = () => screen.getByPlaceholderText("Message") as HTMLInputElement;
@@ -62,7 +62,41 @@ describe("chat Send after a lost answer (H13)", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("the duplicate refusal alone proves the message is there: sent even when the thread can't be read just then", async () => {
+  it("an unrelated unique-constraint refusal (23505) is never a false success: text kept, 'not sent', same id next time", async () => {
+    insertAnswers = [{ data: null, error: { code: "23505", message: 'duplicate key value violates unique constraint "some_other_key"' } }];
+    render(<MatchChat {...props} initial={[]} />);
+    type("bringing water");
+    rpcAnswers.match_messages_list = [{ data: [row("00000000-0000-4000-8000-000000000099", "something else")], error: null }];
+    tapSend();
+    expect((await screen.findByRole("alert")).textContent).toBe(NOT_CONFIRMED);
+    expect(box().value).toBe("bringing water");
+    expect(screen.queryAllByText("bringing water")).toHaveLength(0);   // not shown as a message
+    expect(fetch).not.toHaveBeenCalled();   // no notice email poke for a message that wasn't sent
+    insertAnswers = [{ data: row("00000000-0000-4000-8000-000000000001", "bringing water"), error: null }];
+    tapSend();
+    await waitFor(() => expect(box().value).toBe(""));
+    expect(inserts().map((r) => r.id)).toEqual(["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000001"]);
+  });
+
+  it.each([
+    ["another sender", { profile_id: "karim", body: "bringing water" }],
+    ["different text", { profile_id: "me", body: "bringing juice" }],
+    ["a deleted message", { profile_id: "me", body: "", deleted: true }],
+  ])("23505 where the id holds %s: not sent, text kept; the next try uses a new id", async (_name, other) => {
+    insertAnswers = [{ data: null, error: { code: "23505", message: 'duplicate key value violates unique constraint "match_messages_pkey"' } }];
+    rpcAnswers.match_messages_list = [{ data: [{ ...row("00000000-0000-4000-8000-000000000001", ""), ...other }], error: null }];
+    render(<MatchChat {...props} initial={[]} />);
+    type("bringing water");
+    tapSend();
+    expect((await screen.findByRole("alert")).textContent).toBe(NOT_CONFIRMED);
+    expect(box().value).toBe("bringing water");
+    insertAnswers = [{ data: row("00000000-0000-4000-8000-000000000002", "bringing water"), error: null }];
+    tapSend();
+    await waitFor(() => expect(box().value).toBe(""));
+    expect(inserts().map((r) => r.id.slice(-1))).toEqual(["1", "2"]);
+  });
+
+  it("23505 while the thread can't be read is not proof: text kept, same id next time", async () => {
     insertAnswers = [lost, { data: null, error: { code: "23505", message: 'duplicate key value violates unique constraint "match_messages_pkey"' } }];
     render(<MatchChat {...props} initial={[]} />);
     type("bringing water");
@@ -70,8 +104,14 @@ describe("chat Send after a lost answer (H13)", () => {
     await screen.findByRole("alert");
     rpcAnswers.match_messages_list = [{ data: null, error: { message: "TypeError: Failed to fetch" } }];
     tapSend();
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(NOT_CONFIRMED));
+    expect(box().value).toBe("bringing water");
+    rpcAnswers.match_messages_list = [{ data: [row("00000000-0000-4000-8000-000000000001", "bringing water")], error: null }];
+    insertAnswers = [{ data: null, error: { code: "23505", message: 'duplicate key value violates unique constraint "match_messages_pkey"' } }];
+    tapSend();
     await waitFor(() => expect(box().value).toBe(""));
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(new Set(inserts().map((r) => r.id)).size).toBe(1);
+    expect(screen.getAllByText("bringing water")).toHaveLength(1);
   });
 
   it("a retry refused for another reason (slow_down) while the first try did arrive: shown as sent, not 'sending quickly'", async () => {

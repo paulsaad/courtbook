@@ -16,6 +16,9 @@ type Msg = { id: string; profile_id: string; name: string | null; body: string; 
 /** Report and block are offered only on another player's message that is still shown. */
 const canReport = (m: Msg, meId: string) => m.profile_id !== meId && !m.deleted && !m.blocked;
 
+/** A duplicate-key refusal that could not be matched to this exact message: not sent as far as we know. */
+export const NOT_CONFIRMED = "Your message wasn't sent. Try again.";
+
 const signature = (rows: Msg[]) => rows.map((r) => `${r.id}:${r.deleted ? 1 : 0}${r.blocked ? 1 : 0}`).join(",");
 
 export default function MatchChat({ matchId, meId, tz, initial, finished, hidden }: { matchId: string; meId: string; tz: string; initial: Msg[]; finished: boolean; hidden: boolean }) {
@@ -76,6 +79,15 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
     if (!error) { setGone(true); setMsgs([]); }
   }
 
+  /** Does the thread hold exactly this message (id, sender, text)? null when the thread can't be read. */
+  async function findSent(id: string, body: string): Promise<{ sent: boolean; otherMessage: boolean; rows: Msg[] } | null> {
+    const { data, error } = await createClient().rpc("match_messages_list", { p_match: matchId, p_after: null });
+    if (error || !data) return null;
+    const rows = data as Msg[];
+    const m = rows.find((r) => r.id === id);
+    const sent = !!m && m.profile_id === meId && m.body === body;   // a deleted message has empty text: never a match
+    return { sent, otherMessage: !!m && !sent, rows };
+  }
   async function send(e?: React.FormEvent) {
     e?.preventDefault();
     const body = text.trim();
@@ -86,17 +98,23 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
     setBusy(true); setError(null);
     const supabase = createClient();
     const { data, error } = await supabase.from("match_messages").insert({ id, match_id: matchId, profile_id: meId, body }).select("id, profile_id, body, created_at").single();
-    if (error && error.code !== "23505") {
+    if (error) {
       // the text stays in the box; the rules are asked for once, then the same message is sent
       if (error.message?.includes("rules_not_accepted")) { setBusy(false); setRules(true); return; }
-      // on a retry, an earlier try may have arrived (its answer lost, then this one refused, e.g.
-      // slow_down): if the thread already holds this id, the message was sent
-      const thread = retry ? await supabase.rpc("match_messages_list", { p_match: matchId, p_after: null }) : null;
-      const rows = (thread && !thread.error ? thread.data : null) as Msg[] | null;
-      if (!rows?.some((m) => m.id === id)) { setBusy(false); setError(actionError(error.message)); return; }   // no connection: says so (H3)
-      setMsgs(rows); closeStaleMenu(rows);
+      const duplicate = error.code === "23505";
+      // A duplicate key, or a retry refused for another reason (e.g. slow_down after a lost answer), counts as
+      // sent only if the thread holds exactly this message: this id, from me, with this text. Anything else is
+      // not proof (another unique rule, an id that names someone else's message): the text stays, try again.
+      const found = duplicate || retry ? await findSent(id, body) : null;
+      if (found?.sent) { setMsgs(found.rows); closeStaleMenu(found.rows); }
+      else {
+        if (found?.otherMessage) outgoing.current = null;   // this id is taken by a different message: a new id next time
+        setBusy(false);
+        setError(duplicate ? NOT_CONFIRMED : actionError(error.message));   // no connection: says so (H3)
+        return;
+      }
     } else if (data) setMsgs((cur) => (cur.some((m) => m.id === data.id) ? cur : [...cur, { ...data, name: "You" }]));
-    else await reload();   // 23505: this id is already in the thread (sent by the earlier try)
+    else await reload();
     setBusy(false);
     outgoing.current = null; setText("");
     fetch("/api/notify/email", { method: "POST" }).catch(() => {});
