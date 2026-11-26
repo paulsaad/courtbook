@@ -10,6 +10,7 @@ import { Cedar } from "@/components/Brand";
 import { IconBell } from "@/components/Icons";
 import type { OpenMatch } from "@/components/Discover";
 import type { AgendaRow } from "@/lib/agenda";
+import { nextHeading } from "@/lib/labels";
 
 const TZ = "Asia/Beirut";
 
@@ -58,7 +59,7 @@ export default async function Home() {
       <InstallHint />
       {nx && (
         <section className="flex flex-col gap-2.5">
-          <h2 className="text-xl font-bold">Your next game</h2>
+          <h2 className="text-xl font-bold">{nextHeading(nx.kind)}</h2>
           <Link href={nx.kind === "booking" ? `/bookings/${nx.id}` : `/matches/${nx.id}`} className="card flex flex-col gap-2.5 p-4">
             <div className="flex items-center gap-3">
               <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-turf-soft text-sm font-extrabold text-turf" aria-hidden="true">{nx.club_name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}</span>
