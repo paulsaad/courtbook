@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { createClient } from "@/lib/supabase/client";
+import { NOTICES_READ_EVENT } from "@/lib/noticeRead";
 import { IconBell, IconCalendar, IconCourt, IconHome, IconUser } from "./Icons";
 import { Wordmark } from "./Brand";
 
@@ -51,14 +52,21 @@ export default function TabBar() {
   useEffect(() => {
     const supabase = createClient();
     let alive = true;
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
+    const load = () => supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!alive) return;
       setSignedIn(!!user);
       if (!user) return;
       const { count } = await supabase.from("notifications").select("*", { count: "exact", head: true }).eq("profile_id", user.id).is("read_at", null);
-      if (alive) setUnread(count ?? 0);
-    });
-    return () => { alive = false; };
+      if (alive && typeof count === "number") setUnread(count);
+    }, () => {});
+    void load();
+    // H18: the count is also read again when the page is shown again (notices read or received on another device)
+    // and when a game page has just marked its notices read (H11; a #91 refresh keeps the same path). One head-only
+    // count per event; no polling.
+    const onVisible = () => { if (document.visibilityState === "visible") void load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener(NOTICES_READ_EVENT, load);
+    return () => { alive = false; document.removeEventListener("visibilitychange", onVisible); window.removeEventListener(NOTICES_READ_EVENT, load); };
   }, [path]);
   return (
     <>
