@@ -9,6 +9,7 @@ import { EMPTY, readPrefs, writePrefs, type Prefs } from "@/lib/prefs";
 import AreaPicker from "@/components/AreaPicker";
 import type { OpenMatch } from "@/components/Discover";
 import { fitLabel, rangeLabel } from "@/lib/levels";
+import { playWindowEnd } from "@/lib/playWindow";
 
 const TZ = "Asia/Beirut";
 const chip = (on: boolean) => `min-h-11 shrink-0 rounded-full border px-4 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
@@ -33,8 +34,7 @@ export default function PlayBoard({ areas, sports, initial, clubs }: { areas: Go
     (async () => {
       setBusy(true);
       const now = new Date();
-      const to = when === "today" ? new Date(now.getTime() + 24 * 3600e3) : when === "week" ? new Date(now.getTime() + 7 * 24 * 3600e3) : null;
-      const { data, error } = await createClient().rpc("open_matches", { p_sport: prefs.sport, p_fit: fit, p_to: to?.toISOString() ?? null, p_governorate: prefs.gov, p_district: prefs.district, p_limit: 50 });
+      const { data, error } = await createClient().rpc("open_matches", { p_sport: prefs.sport, p_fit: fit, p_to: playWindowEnd(when, now, TZ), p_governorate: prefs.gov, p_district: prefs.district, p_limit: 50 });
       if (!alive) return;
       if (error) { setFailed(true); setBusy(false); return; }
       setFailed(false); setRows((data ?? []) as OpenMatch[]); setBusy(false);
