@@ -12,6 +12,9 @@ import ReportSheet from "./ReportSheet";
 type Msg = { id: string; profile_id: string; name: string | null; body: string; created_at: string; deleted?: boolean; /** M3-S: the reader blocked the sender (text withheld) */ blocked?: boolean };
 
 // what the thread looks like right now, so we only re-render when it really changed
+/** Report and block are offered only on another player's message that is still shown. */
+const canReport = (m: Msg, meId: string) => m.profile_id !== meId && !m.deleted && !m.blocked;
+
 const signature = (rows: Msg[]) => rows.map((r) => `${r.id}:${r.deleted ? 1 : 0}${r.blocked ? 1 : 0}`).join(",");
 
 export default function MatchChat({ matchId, meId, tz, initial, finished, hidden }: { matchId: string; meId: string; tz: string; initial: Msg[]; finished: boolean; hidden: boolean }) {
@@ -27,6 +30,9 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
   const [reporting, setReporting] = useState<Msg | null>(null);
   const [blocking, setBlocking] = useState<Msg | null>(null);
   const [blockedName, setBlockedName] = useState<string | null>(null);
+  // a message's options only while it can still be reported: not after it is deleted, withheld or gone
+  // a new copy of the thread (poll or reload) closes a menu whose message can no longer be reported
+  const closeStaleMenu = (rows: Msg[]) => setMenuFor((open) => (open && rows.some((m) => m.id === open && canReport(m, meId)) ? open : null));
 
   // poll the whole thread every 5 s, not just what is newer: a message deleted further up
   // would never come back through an incremental read (boring and reliable; realtime can replace it later)
@@ -37,15 +43,16 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
       if (!alive || error || !data) return;
       const rows = data as Msg[];
       setMsgs((cur) => (signature(cur) === signature(rows) ? cur : rows));
+      setMenuFor((open) => (open && rows.some((m) => m.id === open && canReport(m, meId)) ? open : null));
     }, 5000);
     return () => { alive = false; clearInterval(id); };
-  }, [matchId]);
+  }, [matchId, meId]);
   useEffect(() => { bottom.current?.scrollIntoView({ block: "nearest" }); }, [msgs.length]);
 
   // the whole thread again, now: after a block the server withholds that player's messages
   async function reload() {
     const { data, error } = await createClient().rpc("match_messages_list", { p_match: matchId, p_after: null });
-    if (!error && data) setMsgs(data as Msg[]);
+    if (!error && data) { setMsgs(data as Msg[]); closeStaleMenu(data as Msg[]); }
   }
   async function block(m: Msg): Promise<string | null> {
     const p = await blockPlayer((fn, args) => createClient().rpc(fn, args), m.profile_id);
@@ -114,7 +121,7 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
               </div>
             )}
             {x.deleted ? <div className="text-xs italic">Message deleted</div> : x.blocked ? <div className="text-xs italic text-muted"><span>Message from a player you blocked</span> · <Link href={BLOCKED_PATH} className="not-italic underline">Blocked players</Link></div> : <div>{x.body}</div>}
-            {menuFor === x.id && (
+            {menuFor === x.id && canReport(x, meId) && (
               <div className="mt-1 flex flex-col items-start gap-1 border-t border-grid pt-1" role="group" aria-label="Message options">
                 <button type="button" onClick={() => { setMenuFor(null); setReporting(x); }} className="min-h-9 text-sm font-medium text-ink">Report message</button>
                 <button type="button" onClick={() => { setMenuFor(null); setBlocking(x); }} className="min-h-9 text-sm font-medium text-danger">Block {x.name ?? "this player"}</button>

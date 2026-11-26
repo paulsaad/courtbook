@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { COMMUNITY_RULES } from "@/lib/types";
 
 type Ev = { op: string; arg?: unknown };
@@ -159,6 +159,33 @@ describe("web chat: report and block", () => {
     fireEvent.click(within(done).getByText("Block Sami"));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("alertdialog", { name: "Block Sami?" })).toBeTruthy();
+  });
+
+  it("an open options menu closes when polling shows the message deleted or withheld", async () => {
+    vi.useFakeTimers();
+    try {
+      const karim = { id: "k1", profile_id: "karim", name: "Karim", body: "see you", created_at: "2026-11-20T10:04:00Z" };
+      rpcAnswers.match_messages_list = [
+        { data: [{ ...sami, body: "", deleted: true }, karim], error: null },
+        { data: [{ ...sami, body: "", deleted: true }, { ...karim, body: "", blocked: true }], error: null },
+        { data: [{ ...sami, body: "", deleted: true }, karim], error: null },
+      ];
+      render(<MatchChat {...props} initial={[sami, karim]} />);
+      fireEvent.click(screen.getByRole("button", { name: "Options for Sami's message" }));
+      expect(screen.getByText("Report message")).toBeTruthy();
+      await act(() => vi.advanceTimersByTimeAsync(5000));   // poll: Sami deleted it
+      expect(screen.queryByRole("group", { name: "Message options" })).toBeNull();
+      expect(screen.getByText("Message deleted")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Options for Karim's message" }));
+      expect(screen.getByText("Block Karim")).toBeTruthy();
+      await act(() => vi.advanceTimersByTimeAsync(5000));   // poll: Karim is now withheld (blocked from another device)
+      expect(screen.queryByRole("group", { name: "Message options" })).toBeNull();
+      await act(() => vi.advanceTimersByTimeAsync(5000));   // poll: visible again; the menu does not reopen by itself
+      expect(screen.getByText("see you")).toBeTruthy();
+      expect(screen.queryByRole("group", { name: "Message options" })).toBeNull();
+      expect(ops()).not.toContain("report_content");
+      expect(ops()).not.toContain("block_player");
+    } finally { vi.useRealTimers(); }
   });
 
   it("no private details: a message row carrying contact fields shows only the name and the text", () => {
