@@ -86,3 +86,24 @@ describe("F2: account closure still ends every session", () => {
     expect(await signedIn(phone)).toEqual({ user: false, refreshed: false });
   });
 });
+
+describe("F2: when Supabase Auth cannot be reached (what 'local' changes, and what it does not)", () => {
+  // A browser with no connection cannot reach /auth/signout at all (a form POST to our server): it stays signed in,
+  // before and after F2. These tests cover the server reaching our route but not Supabase Auth.
+  it("local: this browser's session cookies are cleared anyway; the session stays valid on the Auth server until it expires", async () => {
+    const phone = await signIn();
+    await auth.close();                                               // Supabase Auth unreachable from now on
+    const res = await as(phone, () => signOutRoute(new Request("http://localhost:3000/auth/signout", { method: "POST" })));
+    expect(res.status).toBe(303);
+    expect([...phone.keys()].filter((k) => k.includes("auth-token"))).toEqual([]);
+    expect(auth.alive()).toHaveLength(1);                             // never revoked: the request did not arrive
+    auth = await startFakeAuth();                                     // for afterEach
+  });
+  it("control: the previous call (global) left this browser signed in when Auth could not be reached", async () => {
+    const phone = await signIn();
+    await auth.close();
+    await client(phone).auth.signOut();
+    expect([...phone.keys()].filter((k) => k.includes("auth-token")).length).toBeGreaterThan(0);
+    auth = await startFakeAuth();
+  });
+});

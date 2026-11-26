@@ -66,3 +66,21 @@ it("control: the previous call (no scope = global) ended the desk browser's sess
   expect(scopes()).toEqual(["global"]);
   expect((await desk.refreshSession()).error).toBeTruthy();
 });
+
+it("no connection: Sign out still signs this phone out (the session is removed before the revoke request)", async () => {
+  const phone = await device();
+  await auth.close();                                                 // nothing answers: the phone is offline
+  await signOutThisDevice(phone);
+  expect((await phone.getSession()).data.session).toBeNull();
+  expect(auth.alive()).toHaveLength(1);                               // not revoked on the server; it expires there
+  auth = await startFakeAuth();
+});
+
+it("control: no connection with the previous call (global): the phone stayed signed in", async () => {
+  const phone = await device();
+  await auth.close();
+  const { error } = await phone.signOut();
+  expect(error).toBeTruthy();
+  expect((await phone.getSession()).data.session).not.toBeNull();
+  auth = await startFakeAuth();
+});
