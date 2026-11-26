@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import LevelRange from "./LevelRange";
 import PlayersNeeded from "./PlayersNeeded";
 import { fitLabel, rangeLabel } from "@/lib/levels";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { clubLocalToUtc, hhmm, todayIn } from "@/lib/time";
-import { friendlyError } from "@/lib/types";
+import { actionError, isNetworkFailure } from "@/lib/actionError";
 import { codeLabel } from "@/lib/labels";
 
 export type MatchRow = {
@@ -46,17 +46,22 @@ export default function MatchBoard({ club, rows, myBookings, sports }: { club: C
   const today = todayIn(club.timezone);
   const [f, setF] = useState({ sport: sports[0]?.code ?? "padel", range: [null, null] as [number | null, number | null], date: today, time: "18:00", needed: 3, note: "", bookingId: "", joinMode: "open" });
 
+  // one key per post (0073): a retry after a lost answer returns the game already posted instead of a
+  // second copy. Kept after a network failure, dropped after a refusal (nothing was posted then).
+  const tokenRef = useRef<string | null>(null);
   async function post(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setBusy(true); setError(null);
+    const token = tokenRef.current ?? (tokenRef.current = crypto.randomUUID());
     const start = f.bookingId ? null : clubLocalToUtc(f.date, f.time, club.timezone).toISOString();
     const end = f.bookingId || !start ? null : new Date(new Date(start).getTime() + 90 * 60000).toISOString();
     const { data, error } = await createClient().rpc("post_match", {
       p_club: club.id, p_sport: f.sport, p_start: start, p_end: end, p_level_min: f.range[0], p_level_max: f.range[1],
-      p_players_needed: f.needed, p_note: f.note, p_booking: f.bookingId || null, p_join_mode: f.joinMode,
+      p_players_needed: f.needed, p_note: f.note, p_booking: f.bookingId || null, p_join_mode: f.joinMode, p_token: token,
     });
     setBusy(false);
-    if (error) { setError(friendlyError(error.message)); return; }
+    if (error) { if (!isNetworkFailure(error.message)) tokenRef.current = null; setError(actionError(error.message)); return; }
     router.push(`/matches/${data as string}`);
   }
 
@@ -69,7 +74,7 @@ export default function MatchBoard({ club, rows, myBookings, sports }: { club: C
 
       {open && (
         <form onSubmit={post} className="flex flex-col gap-3 rounded-2xl border border-grid bg-white p-4">
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+          {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
           <div className="flex flex-wrap gap-2">{sports.map((sp) => <button type="button" key={sp.code} onClick={() => setF({ ...f, sport: sp.code })} className={chip(f.sport === sp.code)}>{sp.name_en}</button>)}</div>
           {myBookings.length > 0 && (
             <label className="flex flex-col gap-1 text-sm">Link one of your bookings (optional)

@@ -5,7 +5,7 @@ import { useState } from "react";
 import LevelRange from "@/components/LevelRange";
 import { createClient } from "@/lib/supabase/client";
 import PlayersNeeded from "@/components/PlayersNeeded";
-import { friendlyError } from "@/lib/types";
+import { actionError, isNetworkFailure } from "@/lib/actionError";
 import type { MatchRow } from "@/components/MatchBoard";
 
 type Participant = { profile_id: string; name: string | null; level: number | null; level_legacy: string | null; is_organizer: boolean; status: string };
@@ -21,7 +21,10 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
     if (error) {
       // M3-S: an organiser accepting a player one of them blocked (the shared copy is for the joiner)
       const acceptBlocked = fn === "decide_join" && args.p_accept === true && error.message?.includes("blocked");
-      setError(acceptBlocked ? "You can't accept this player." : friendlyError(error.message));
+      setError(acceptBlocked ? "You can't accept this player." : actionError(error.message));
+      // a refusal means the game changed (filled, closed, or this was a retry of a join that already
+      // went through): show it as it is now. Not after a network failure: the refresh would fail too.
+      if (!isNetworkFailure(error.message)) router.refresh();
       return false;
     }
     fetch("/api/notify/email", { method: "POST" }).catch(() => {});   // best-effort email fan-out
@@ -42,7 +45,7 @@ export default function MatchActions({ m, participants }: { m: MatchRow; partici
 
   return (
     <div className="flex flex-col gap-2">
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
       {m.i_organize && pending.length > 0 && (
         <section className="rounded-2xl border border-sand bg-sand-soft p-4">
           <h2 className="mb-2 font-medium">Want to join</h2>
