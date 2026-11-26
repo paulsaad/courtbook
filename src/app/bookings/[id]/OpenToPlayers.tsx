@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { friendlyError } from "@/lib/types";
+import { actionError, isNetworkFailure } from "@/lib/actionError";
 import LevelRange from "@/components/LevelRange";
 import PlayersNeeded from "@/components/PlayersNeeded";
 import { rangeLabel } from "@/lib/levels";
@@ -20,17 +20,19 @@ export default function OpenToPlayers({ bookingId, sport, sportName, match }: { 
   const [error, setError] = useState<string | null>(null);
   const [confirmPrivate, setConfirmPrivate] = useState(false);
 
+  // one key per "Open to players" (0073): a retry after a lost answer returns the game already opened
+  const tokenRef = useRef<string | null>(null);
   async function run(fn: () => PromiseLike<{ error: { message: string } | null }>) {
     setBusy(true); setError(null);
     const { error } = await fn();
     setBusy(false);
-    if (error) { setError(friendlyError(error.message)); return false; }
+    if (error) { if (!isNetworkFailure(error.message)) tokenRef.current = null; setError(actionError(error.message)); return false; }
     setForm(false); setConfirmPrivate(false); router.refresh();
     return true;
   }
   const open = () => run(() => createClient().rpc("post_match", {
     p_club: null, p_sport: sport, p_start: null, p_end: null,
-    p_level_min: f.range[0], p_level_max: f.range[1], p_players_needed: f.needed, p_note: f.note, p_booking: bookingId, p_join_mode: f.joinMode,
+    p_level_min: f.range[0], p_level_max: f.range[1], p_players_needed: f.needed, p_note: f.note, p_booking: bookingId, p_join_mode: f.joinMode, p_token: tokenRef.current ?? (tokenRef.current = crypto.randomUUID()),
   }));
   const setStatus = (status: string) => run(() => createClient().rpc("set_match_status", { p_match: match!.match_id, p_status: status }));
 
@@ -53,7 +55,7 @@ export default function OpenToPlayers({ bookingId, sport, sportName, match }: { 
           </div>
           <Link href={`/matches/${match.match_id}`} className="shrink-0 text-sm font-semibold text-turf">Open ›</Link>
         </div>
-        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+        {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
         {match.joined === 0 ? (
           confirmPrivate
             ? <div className="flex gap-2"><button disabled={busy} onClick={() => setStatus("cancelled")} className="btn btn-primary flex-1">Make it private</button><button onClick={() => setConfirmPrivate(false)} className="btn btn-secondary px-5">Keep</button></div>
@@ -83,7 +85,7 @@ export default function OpenToPlayers({ bookingId, sport, sportName, match }: { 
         <h2 className="font-bold">Private booking</h2>
         <p className="mt-1 text-sm text-muted">Only you can see it. Missing players? Open it and others can ask to join your {sportName.toLowerCase()} game.</p>
       </div>
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
       {!form ? (
         <button onClick={() => setForm(true)} className="btn btn-primary">Open to other players</button>
       ) : (
