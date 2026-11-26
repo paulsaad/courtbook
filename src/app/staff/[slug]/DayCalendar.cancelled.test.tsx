@@ -168,3 +168,18 @@ describe("F3: the cancelled-read failure line and the day read", () => {
     expect(document.body.textContent).not.toMatch(/up to date\./i);
   });
 });
+
+describe("F3: 'The list will try again' is true (re-review R102-1)", () => {
+  it("after a failed cancelled read, the automatic refresh (page shown again) reads it again and the line goes", async () => {
+    db.cancelledFails = true;
+    show("list");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/The list will try again/));
+    const before = cancelledReads().length;
+    db.cancelledFails = false;
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(cancelledReads().length).toBeGreaterThan(before);
+    expect(document.body.textContent).not.toMatch(/Couldn't load this day's cancelled bookings/);
+  });
+});
