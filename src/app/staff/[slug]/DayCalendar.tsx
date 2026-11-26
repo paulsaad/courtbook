@@ -14,6 +14,8 @@ import { blockEndOptions, blockStartOptions, bookingSlotOptions, minToHhmm, pick
 import { DESKTOP_QUERY, useDialog, useIsDesktop } from "@/components/useDialog";
 import { matchBookings, readPrefs, writePrefs } from "./findBooking";
 import { paymentsByBooking } from "@/lib/staffPayments";
+import { isNetworkFailure } from "@/lib/actionError";
+import { DESK_NOT_SAVED, DESK_UNCHECKED, landed, type Reader } from "./landed";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string>;
   /** the address named a view or sport (then it is used as is, and remembered on desktop) */
@@ -311,16 +313,31 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     return () => { alive = false; };
   }, [club.id]);
 
-  async function run(fn: () => PromiseLike<{ error: { message: string; code?: string } | null }>, explain: (m: string) => string = friendlyError) {
+  async function run(
+    fn: () => PromiseLike<{ error: { message: string; code?: string } | null }>,
+    explain: (m: string) => string = friendlyError,
+    check?: (db: Reader) => Promise<boolean | null>,
+  ) {
     setBusy(true);
     setError(null);
     const { error } = await fn();
     if (error) {
+      // R1: the grid is read again first, so it shows what is actually saved; then the action's own result is
+      // looked for. If an earlier try (whose answer was lost) saved it, it is shown as done — never as "That slot
+      // was just taken." or "This booking is no longer active." for the desk's own change.
+      await reload();
+      setRefresh((n) => n + 1);   // the week view holds its own copy of the rows
+      const done = check ? await check(createClient() as unknown as Reader).catch(() => null) : null;
+      if (done === true) { await saved(); return; }
       setBusy(false);
       savedFocus.current = null;
-      setError(explainBookingError(error.message, error.code, explain(error.message)));   // reports only the unexpected
+      if (isNetworkFailure(error.message)) setError(done === false ? DESK_NOT_SAVED : DESK_UNCHECKED);
+      else setError(explainBookingError(error.message, error.code, explain(error.message)));   // reports only the unexpected
       return;
     }
+    await saved();
+  }
+  async function saved() {
     // Saved. The write is never repeated: if the reads below fail, the banner says the calendar may be
     // out of date and that this was saved, and adding stays off until a read succeeds.
     setSavedUnseen(true);
@@ -546,30 +563,24 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                 onSave={(name, phone, slots, asBlock, blockStart, blockEnd) => {
                   // after the save, focus goes to what was saved (where it starts), once it is on the grid
                   savedFocus.current = { courtId: sheet.courtId, day: sheet.date ?? date, time: asBlock && blockStart ? blockStart : sheet.time };
-                  return run(async () => {
-                    const supabase = createClient();
-                    // in the week view the slot belongs to the column's day, not the page's date
-                    const day = sheet.date ?? date;
-                    if (asBlock && blockStart && blockEnd) {
-                      // a block is the wall-clock interval the desk chose (start and end selectors), so on the night the
-                      // clocks go back 22:00–24:00 is 3 real hours; the database checks staff rights, the court, the grid,
-                      // the hours, the past and overlaps (0076)
-                      const bs = clubLocalToUtc(day, blockStart, club.timezone);
-                      const be = blockEnd === "24:00" ? nextDayStart(day, club.timezone) : clubLocalToUtc(day, blockEnd, club.timezone);
-                      return supabase.rpc("staff_block", {
-                        p_club: club.id, p_court: sheet.courtId,
-                        p_start: bs.toISOString(), p_end: be.toISOString(), p_reason: name || null,
-                      });
-                    }
-                    const start = clubLocalToUtc(day, sheet.time, club.timezone);
-                    const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
-                    // the database checks staff rights, the court, the hours, the grid and the duration, and prices it
-                    return supabase.rpc("staff_book", {
-                      p_club: club.id, p_court: sheet.courtId,
-                      p_start: start.toISOString(), p_end: end.toISOString(),
-                      p_name: name, p_phone: phone || null,
-                    });
-                  }, asBlock ? (m) => blockErrorText(m, club) : undefined);
+                  // in the week view the slot belongs to the column's day, not the page's date
+                  const day = sheet.date ?? date;
+                  const courtId = sheet.courtId;
+                  if (asBlock && blockStart && blockEnd) {
+                    // a block is the wall-clock interval the desk chose (start and end selectors), so on the night the
+                    // clocks go back 22:00–24:00 is 3 real hours; the database checks staff rights, the court, the grid,
+                    // the hours, the past and overlaps (0076)
+                    const bs = clubLocalToUtc(day, blockStart, club.timezone).toISOString();
+                    const be = (blockEnd === "24:00" ? nextDayStart(day, club.timezone) : clubLocalToUtc(day, blockEnd, club.timezone)).toISOString();
+                    return run(() => createClient().rpc("staff_block", { p_club: club.id, p_court: courtId, p_start: bs, p_end: be, p_reason: name || null }),
+                      (m) => blockErrorText(m, club), (db) => landed.block(db, courtId, bs, be));
+                  }
+                  const start = clubLocalToUtc(day, sheet.time, club.timezone);
+                  const s0 = start.toISOString();
+                  const e0 = new Date(start.getTime() + slots * club.slot_minutes * 60000).toISOString();
+                  // the database checks staff rights, the court, the hours, the grid and the duration, and prices it
+                  return run(() => createClient().rpc("staff_book", { p_club: club.id, p_court: courtId, p_start: s0, p_end: e0, p_name: name, p_phone: phone || null }),
+                    undefined, (db) => landed.walkIn(db, courtId, s0, e0, name));
                 }}
               />
             )}
@@ -578,17 +589,19 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
               <BookingSheet
                 key={sheet.booking.id}
                 club={club} courts={allCourts} booking={sheet.booking} times={times} busy={busy}
-                onMove={(courtId, time, slots, price) =>
-                  run(() => {
-                    // the day comes from the booking, never from the page: the sheet can be opened
-                    // from a week whose URL says another day (covered by src/lib/time.test.ts)
-                    const { start, end } = moveTarget(sheet.booking.start_at, club.timezone, time, slots, club.slot_minutes);
-                    // 0091: the price the desk was shown and confirmed; the database refuses if it is no longer right
-                    return createClient().rpc("move_booking_priced", { p_booking: sheet.booking.id, p_court: courtId, p_start: start.toISOString(), p_end: end.toISOString(), p_expected_price: price });
-                  })
-                }
-                onCancel={(clubCaused) => run(() => createClient().rpc("cancel_booking", { p_booking: sheet.booking.id, p_club_caused: clubCaused }))}
-                onNoShow={() => run(() => createClient().rpc("mark_no_show", { p_booking: sheet.booking.id }))}
+                onMove={(courtId, time, slots, price) => {
+                  // the day comes from the booking, never from the page: the sheet can be opened
+                  // from a week whose URL says another day (covered by src/lib/time.test.ts)
+                  const { start, end } = moveTarget(sheet.booking.start_at, club.timezone, time, slots, club.slot_minutes);
+                  const id = sheet.booking.id, s0 = start.toISOString(), e0 = end.toISOString();
+                  // 0091: the price the desk was shown and confirmed; the database refuses if it is no longer right
+                  return run(() => createClient().rpc("move_booking_priced", { p_booking: id, p_court: courtId, p_start: s0, p_end: e0, p_expected_price: price }),
+                    undefined, (db) => landed.moved(db, id, courtId, s0, e0));
+                }}
+                onCancel={(clubCaused) => run(() => createClient().rpc("cancel_booking", { p_booking: sheet.booking.id, p_club_caused: clubCaused }),
+                  undefined, (db) => landed.status(db, sheet.booking.id, "cancelled"))}
+                onNoShow={() => run(() => createClient().rpc("mark_no_show", { p_booking: sheet.booking.id }),
+                  undefined, (db) => landed.status(db, sheet.booking.id, "no_show"))}
               />
             )}
 
@@ -596,7 +609,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
               <div className="flex flex-col gap-3">
                 <h2 className="text-lg font-semibold">{sheet.block.reason ?? "Blocked"}</h2>
                 <p className="text-sm text-muted">{courtName(sheet.block.court_id)} · {hhmm(sheet.block.start_at, club.timezone)}–{hhmm(sheet.block.end_at, club.timezone)}</p>
-                <button disabled={busy} onClick={() => run(() => createClient().from("blocks").delete().eq("id", sheet.block.id))} className={secondaryDanger}>Remove block</button>
+                <button disabled={busy} onClick={() => run(() => createClient().from("blocks").delete().eq("id", sheet.block.id), undefined, (db) => landed.blockGone(db, sheet.block.id))} className={secondaryDanger}>Remove block</button>
               </div>
             )}
 
