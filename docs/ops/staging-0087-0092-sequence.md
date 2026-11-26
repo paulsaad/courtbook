@@ -197,6 +197,24 @@ trees: compare with `git rev-parse <commit>^{tree}` before pushing.
   controls caught; WE at 0089 correctly refused.
 - The release candidate's full local matrix and the pilot build matrix include 0087–0092.
 
+- `.github/tests/staging-0087-0093-full.sh` (26 Nov): the **whole sequence on one continuous database with
+  staging-like state**. That state includes an account mid-deletion, the retry worker running, a pay-at-the-desk club
+  and bookings. Steps: A → B (with a **forced failure in 0088**: the run stops with 0087 applied and nothing of 0088,
+  then resumes with `0088 0089`) → C → D → E → 0093. After every step it checks five things:
+  - the read-only actions, run twice, change nothing (a hash of every table);
+  - pay at the desk books, repeats by token, and cancels;
+  - the retry worker finds and claims the open deletion;
+  - no overlapping bookings;
+  - the checks leave no trace.
+
+  After 0093, the account being deleted is refused at the desk. **45/45.**
+- **It found two false stops in the staging check files, fixed in draft #65:**
+  - the step-A preflight refused any deletion open in a 0086 status;
+  - the step-E postcheck required the app's deletion gate to be shut, but the worker is running.
+
+  On staging as it is, either would have halted the rollout. With 0092 already applied in the second case. **#65
+  must be merged into `staging-pilot-0093` before step A.**
+
 ## 4. Rollback limits
 
 - **No down migrations for 0087–0092.** They are additive or redefine functions, so going back means a forward fix.
