@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { COMMUNITY_RULES, COMMUNITY_RULES_TITLE } from "@/lib/types";
@@ -18,10 +19,14 @@ const canReport = (m: Msg, meId: string) => m.profile_id !== meId && !m.deleted 
 
 /** A duplicate-key refusal that could not be matched to this exact message: not sent as far as we know. */
 export const NOT_CONFIRMED = "Your message wasn't sent. Try again.";
+/** H15: the send was refused by row-level security: no longer the organiser or an accepted player (as the app). */
+export const NOT_IN_GAME = "You're no longer in this game.";
+const notMember = (e: { code?: string; message?: string }) => e.code === "42501" || /row-level security/i.test(e.message ?? "");
 
 const signature = (rows: Msg[]) => rows.map((r) => `${r.id}:${r.deleted ? 1 : 0}${r.blocked ? 1 : 0}`).join(",");
 
 export default function MatchChat({ matchId, meId, tz, initial, finished, hidden }: { matchId: string; meId: string; tz: string; initial: Msg[]; finished: boolean; hidden: boolean }) {
+  const router = useRouter();
   const [gone, setGone] = useState(hidden);
   const [msgs, setMsgs] = useState<Msg[]>(initial);
   const [text, setText] = useState("");
@@ -70,9 +75,16 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
   }
 
   async function removeMessage(id: string) {
+    const before = msgs.find((m) => m.id === id);
+    setError(null);
     setMsgs((cur) => cur.map((m) => (m.id === id ? { ...m, body: "", deleted: true } : m)));
     const { error } = await createClient().rpc("delete_match_message", { p_id: id });
-    if (error) setMsgs(initial);
+    // H16: it used to reset the whole thread to the page's first copy (newer messages vanished) and said nothing.
+    // Now only this message comes back, and the reason is shown (as the Activity fix, #83).
+    if (error) {
+      if (before) setMsgs((cur) => cur.map((m) => (m.id === id ? before : m)));
+      setError(actionError(error.message));
+    }
   }
   async function removeConversation() {
     const { error } = await createClient().rpc("hide_match", { p_match: matchId, p_hidden: true });
@@ -110,6 +122,8 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
       else {
         if (found?.otherMessage) outgoing.current = null;   // this id is taken by a different message: a new id next time
         setBusy(false);
+        // H15: left the game (or was removed) elsewhere: say so and show the game as it now is, not "Refresh"
+        if (notMember(error)) { setError(NOT_IN_GAME); router.refresh(); return; }
         setError(duplicate ? NOT_CONFIRMED : actionError(error.message));   // no connection: says so (H3)
         return;
       }
