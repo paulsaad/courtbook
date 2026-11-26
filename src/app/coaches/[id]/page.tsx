@@ -63,7 +63,7 @@ export default async function CoachPage({ params, searchParams }: { params: Prom
 
       <div className="fixed inset-x-0 bottom-0 mx-auto max-w-md p-4 md:max-w-2xl lg:max-w-[720px]">
         {waNum ? (
-          <a href={`https://wa.me/${waNum}?text=${waText}`} target="_blank" rel="noreferrer" className="block rounded-xl bg-[#25D366] py-3.5 text-center font-medium text-white shadow-lg">Message on WhatsApp</a>
+          <a href={`https://wa.me/${waNum}?text=${waText}`} target="_blank" rel="noreferrer" className="block rounded-xl bg-[#25D366] py-3.5 text-center font-semibold text-ink shadow-lg">Message on WhatsApp</a>
         ) : (
           <p className="rounded-xl border border-grid bg-white p-3 text-center text-sm text-muted">This coach has not shared a contact number yet.</p>
         )}
