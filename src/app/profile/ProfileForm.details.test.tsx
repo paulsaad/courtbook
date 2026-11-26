@@ -11,6 +11,7 @@ vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
     auth: { getUser: async () => ({ data: { user: { id: "u1" } } }) },
     from: () => ({ update: (p: unknown) => { updates.push(p); return { eq: async () => ({ error: null }) }; } }),
+    rpc: async () => ({ data: null, error: null }),
   }),
 }));
 import ProfileForm from "./ProfileForm";
@@ -51,5 +52,12 @@ describe("profile form: contact phone", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(updates).toHaveLength(1));
     expect(updates[0]).toMatchObject({ name: "Rana", phone: null });
+  });
+});
+
+describe("profile: Blocked players (Paul, 26 Nov; the page is #74's)", () => {
+  it("the Account section links to the player's blocked list", () => {
+    render(<ProfileForm initial={{ name: "Rana", phone: "+96170123456", level: "", sports: [], email_notifications: true }} next="/courts" firstTime={false} sports={[]} manage={manage} levels={{}} />);
+    expect(screen.getByRole("link", { name: /Blocked players/ }).getAttribute("href")).toBe("/profile/blocked");
   });
 });

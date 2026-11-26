@@ -100,6 +100,8 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage, 
         <div className="eyebrow px-4 pb-1.5 pt-3.5">Account</div>
         {row("Activity", "/notifications")}
         {row("Your bookings and matches", "/me")}
+        {/* the page comes with #74 (BLOCKED_PATH there); the app has the same list on its Profile */}
+        {row("Blocked players", "/profile/blocked")}
       </section>
       {!firstTime && areas.length > 0 && <PlayingAreasSection govs={areas} />}
       {(manage.staffHref || manage.isAdmin || manage.isCoach) && (
