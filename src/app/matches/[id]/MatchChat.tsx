@@ -110,7 +110,7 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
               <div className="flex items-start justify-between gap-2">
                 <div className="text-xs font-medium opacity-70">{x.name ?? "Player"}</div>
                 <button type="button" onClick={() => setMenuFor(menuFor === x.id ? null : x.id)} aria-expanded={menuFor === x.id}
-                  aria-label={`Options for ${x.name ?? "this player"}'s message`} className="-mr-2 -mt-1 flex h-7 w-9 items-center justify-center rounded-full text-base leading-none text-muted">⋯</button>
+                  aria-label={`Options for ${x.name ?? "this player"}'s message`} className="-my-2 -mr-2 flex h-9 w-10 shrink-0 items-center justify-center rounded-full text-base leading-none text-muted">⋯</button>
               </div>
             )}
             {x.deleted ? <div className="text-xs italic">Message deleted</div> : x.blocked ? <div className="text-xs italic text-muted"><span>Message from a player you blocked</span> · <Link href={BLOCKED_PATH} className="not-italic underline">Blocked players</Link></div> : <div>{x.body}</div>}
