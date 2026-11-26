@@ -5,7 +5,7 @@
  * Also: a new selection starts at 1 h where the club allows it.
  * The reservation itself (useReservation) is mocked: its safety is tested in reservation.test.tsx and the database suites.
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 const mockSubmit = jest.fn(async (_sel: { courtId: string; start: string }) => ({ kind: "confirmed" }));
@@ -36,7 +36,7 @@ jest.mock("../lib/reservation", () => ({
   useReservation: () => ({ locked: false, pending: null, phase: "idle", problem: null, blockedBy: null, clearProblem: jest.fn(), submit: mockSubmit, check: jest.fn() }),
 }));
 jest.mock("../components/game/ClubGames", () => ({ ClubGames: () => null }));
-const mockRules = { slot: 30, min: 30, max: 180 };
+const mockRules = { slot: 30, min: 30, max: 180, free: 240 };
 jest.mock("../lib/queries", () => {
   const actual = jest.requireActual("../lib/queries");
   return {
@@ -47,7 +47,7 @@ jest.mock("../lib/queries", () => {
         club_id: "c1", club_name: "Test Club", slug: "test", town: null, district: null, price_from: 20, sports: ["padel"],
         slot_minutes: mockRules.slot, min_minutes: mockRules.min, max_minutes: mockRules.max, service_fee_usd: 0, hold_minutes: 10,
         cancel_cutoff_hours: 6, timezone: "Asia/Beirut", court_id: "k1", court_name: "Court 1", court_sport: "padel",
-        start_at: day(h), free_minutes: 240, is_demo: false,
+        start_at: day(h), free_minutes: h === 8 ? mockRules.free : 240, is_demo: false,
       })),
     }),
     useClubMode: () => ({ data: "at_desk", isPending: false, isSuccess: true }),
@@ -56,7 +56,7 @@ jest.mock("../lib/queries", () => {
   };
 });
 
-import Club, { defaultMinutes } from "../app/club/[id]";
+import Club, { arrivalMinutes, defaultMinutes } from "../app/club/[id]";
 
 const show = () => render(
   <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 360, height: 800 }, insets: { top: 0, left: 0, right: 0, bottom: 0 } }}><Club /></SafeAreaProvider>,
@@ -66,7 +66,7 @@ beforeEach(() => {
   mockSubmit.mockClear(); mockPush.mockClear(); mockProfile.refetch.mockReset();
   mockProfile.data = { name: "Rana", phone: "+96170123456", sports: [] };
   mockParams = { id: "c1", name: "Test Club", at: day(8) };
-  Object.assign(mockRules, { slot: 30, min: 30, max: 180 });
+  Object.assign(mockRules, { slot: 30, min: 30, max: 180, free: 240 });
 });
 
 describe("Reserve and the player's details", () => {
@@ -126,6 +126,74 @@ describe("Reserve and the player's details", () => {
     await show();
     await fireEvent.press(screen.getByTestId("reserve-button"));
     await waitFor(() => expect(mockSubmit).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("the selection is frozen while the details are read (review of #70)", () => {
+  function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>((r) => { resolve = r; }); return { promise, resolve }; }
+
+  it("the player picks another time while the details load: nothing is booked", async () => {
+    mockProfile.data = undefined;
+    const d = deferred<{ data: unknown }>();
+    mockProfile.refetch.mockReturnValue(d.promise);
+    await show();
+    await fireEvent.press(screen.getByTestId("reserve-button"));       // 10:00 (Beirut) selected, details loading
+    await fireEvent.press(screen.getByText("12:00"));                   // the player changes the time meanwhile
+    await act(async () => { d.resolve({ data: { name: "Rana", phone: "+96170123456", sports: [] } }); });
+    await waitFor(() => expect(mockProfile.refetch).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mockSubmit).not.toHaveBeenCalled();                          // neither 10:00 nor 12:00 is booked by the old tap
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it("a second tap while the details load does not start a second check", async () => {
+    mockProfile.data = undefined;
+    const d = deferred<{ data: unknown }>();
+    mockProfile.refetch.mockReturnValue(d.promise);
+    await show();
+    await fireEvent.press(screen.getByTestId("reserve-button"));
+    await fireEvent.press(screen.getByTestId("reserve-button"));
+    await act(async () => { d.resolve({ data: { name: "Rana", phone: "+96170123456", sports: [] } }); });
+    await waitFor(() => expect(mockSubmit).toHaveBeenCalledTimes(1));
+    expect(mockProfile.refetch).toHaveBeenCalledTimes(1);
+    expect(mockSubmit.mock.calls[0][0]).toMatchObject({ courtId: "k1", start: day(8) });
+  });
+
+  it("unchanged selection: the one tapped is booked", async () => {
+    mockProfile.data = undefined;
+    const d = deferred<{ data: unknown }>();
+    mockProfile.refetch.mockReturnValue(d.promise);
+    await show();
+    await fireEvent.press(screen.getByTestId("reserve-button"));
+    await act(async () => { d.resolve({ data: { name: "Rana", phone: "+96170123456", sports: [] } }); });
+    await waitFor(() => expect(mockSubmit).toHaveBeenCalledTimes(1));
+    expect(mockSubmit.mock.calls[0][0]).toMatchObject({ start: day(8), minutes: 60 });
+  });
+});
+
+describe("arriving from a time on the Courts list (review of #70)", () => {
+  it("1 h free at that start: opens on 1 h (the club's minimum is 30 min)", async () => {
+    await show();                                                       // p.at = 10:00 Beirut, free 4 h
+    expect(screen.getByText(/10:00.*11:00/)).toBeTruthy();
+    await fireEvent.press(screen.getByTestId("reserve-button"));
+    await waitFor(() => expect(mockSubmit).toHaveBeenCalledTimes(1));
+    expect(mockSubmit.mock.calls[0][0]).toMatchObject({ start: day(8), minutes: 60 });
+  });
+  it("only 30 min free at that start: keeps the time and opens on 30 min", async () => {
+    mockRules.free = 30;
+    await show();
+    expect(screen.getByText(/10:00.*10:30/)).toBeTruthy();
+    expect(screen.queryByText(/is no longer free/)).toBeNull();
+    await fireEvent.press(screen.getByTestId("reserve-button"));
+    await waitFor(() => expect(mockSubmit).toHaveBeenCalledTimes(1));
+    expect(mockSubmit.mock.calls[0][0]).toMatchObject({ start: day(8), minutes: 30 });
+  });
+  it("the rule", () => {
+    const at = day(8);
+    expect(arrivalMinutes([30, 60, 90], [{ start: at, freeCourts: [{}] }], at)).toBe(60);
+    expect(arrivalMinutes([30, 60, 90], [{ start: at, freeCourts: [] }], at)).toBe(30);
+    expect(arrivalMinutes([30, 60, 90], [{ start: day(9), freeCourts: [{}] }], at)).toBe(30);
+    expect(arrivalMinutes([90, 120], [{ start: at, freeCourts: [{}] }], at)).toBe(90);
   });
 });
 
