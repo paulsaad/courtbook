@@ -77,3 +77,34 @@ the test runner).
 - Photos anywhere else (player lists, chat). Only the game's player list and the profile.
 - Moderation/reporting of an offensive photo: the existing report flow covers the player; an admin "remove photo"
   action is a small follow-up if Paul wants it before launch.
+
+## Rollback (26 Nov)
+
+`sql/player_photos.down.draft.sql` removes the feature exactly. Test:
+`PSQL="sudo -u postgres psql" bash supabase/tests/photo/player_photos_rollback.sh`, **8/8 on 0001–0092 and on the pilot
+line 0001–0093**.
+- **Exact:** up then down equals a plain build, all 1,773 schema and data items identical. A rollback that leaves one
+  function behind fails it.
+- **Guarded:** while any photo is stored, the rollback **refuses and changes nothing**, unless the person running it
+  confirms in the same transaction (`set local courtbook.discard_player_photos = 'yes'`). Removing the feature deletes
+  the photos.
+
+## Privacy and store forms
+
+See `PRIVACY.md`: what the policy and the Play/Apple forms must say, from what the code does, with the open legal
+questions marked. The feature must not reach players before they are updated.
+
+## Integration evidence (26 Nov, local test merge, nothing pushed)
+
+`int/pilot-26nov` (pilot line, 0001–0093) + #73 (website details step) + #66 + this PR:
+- **Merges:** the only conflict is one line in `src/app/failedReads.test.ts`, where #73 and this PR both edit the
+  profile page's entry. The resolution keeps both: the profile entry with its optional photo read, and the new
+  `/details` entry. `ProfileForm.tsx` and `profile/page.tsx` merge automatically: #73 changes the phone field, this PR
+  the header picture.
+- **Results:**
+  - website vitest 838 passed, both `tsc` clean, `check-shared`;
+  - app jest 829/829;
+  - `run.sh` 381/381 with both drafts;
+  - photo suite 36/36, now on 0001–0093;
+  - 0086 `deletion86`, `pipeline_e2e`, `races86` pass with the draft.
+
