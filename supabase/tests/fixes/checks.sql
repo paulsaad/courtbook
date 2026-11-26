@@ -148,7 +148,7 @@ insert into r select 'D3a staff cannot enter a desk booking that started yesterd
 insert into r select 'D3b staff still book ahead as before',
   pg_temp.err($$select staff_book((select id from clubs where slug = 'batroun'), (select id from courts where name = 'Padel 2'), pg_temp.at(2, '10:00'), pg_temp.at(2, '11:00'), 'Ahead', null)$$) = 'no error', '';
 insert into r select 'D3c a future booking cannot be moved to yesterday',
-  pg_temp.err($$select move_booking((select id from bookings where guest_name = 'Ahead'), (select id from courts where name = 'Padel 2'), pg_temp.at(-1, '10:00'), pg_temp.at(-1, '11:00'))$$) = 'move_into_past', '';
+  pg_temp.err($$select (case when move_booking_priced((select id from bookings where guest_name = 'Ahead'), (select id from courts where name = 'Padel 2'), pg_temp.at(-1, '10:00'), pg_temp.at(-1, '11:00'), null, (select court_id from bookings where id = (select id from bookings where guest_name = 'Ahead')), (select start_at from bookings where id = (select id from bookings where guest_name = 'Ahead')), (select end_at from bookings where id = (select id from bookings where guest_name = 'Ahead'))) is not null then ''::text end)$$) = 'move_into_past', '';
 insert into r select 'D3d ...and stays where it was', (select start_at from bookings where guest_name = 'Ahead') = pg_temp.at(2, '10:00'), '';
 reset role;
 

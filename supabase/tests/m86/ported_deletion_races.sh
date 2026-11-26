@@ -87,7 +87,7 @@ rep "RD2: the staff cancellation stands (club-caused refund); the deletion cance
 
 echo "== RD3 staff move a booking from court 2 to court 1 while the deletion starts (two courts, opposite order)"
 setup
-race "$S" "select move_booking('$B2', '$C1', $(at 6 4), $(at 6 4) + interval '60 min')" "$A" "$DEL"
+race "$S" "select (case when move_booking_priced('$B2', '$C1', $(at 6 4), $(at 6 4) + interval '60 min', null, (select court_id from bookings where id = '$B2'), (select start_at from bookings where id = '$B2'), (select end_at from bookings where id = '$B2')) is not null then ''::text end)" "$A" "$DEL"
 common RD3
 rep "RD3: the moved booking was cancelled at its new place" \
     "$([ "$(q "select status || '@' || (court_id = '$C1') from bookings where id = '$B2'")" = "cancelled@true" ] && echo true)" \

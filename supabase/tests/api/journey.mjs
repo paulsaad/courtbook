@@ -22,6 +22,11 @@ const q = async (sql, args = []) => (await db.query(sql, args)).rows;
 const one = async (sql, args = []) => Object.values((await q(sql, args))[0] ?? {})[0];
 const fault = (f) => fetch(`${API_URL}/__fault`, { method: "POST", body: JSON.stringify(f) });
 const section = (s) => console.log(`--- ${s}`);
+// F1: a desk's move carries what its screen shows; here the booking's current court and time, read as that desk
+const seenNow = async (client, id) => {
+  const { data } = await client.from("bookings").select("court_id, start_at, end_at").eq("id", id).maybeSingle();
+  return { p_seen_court: data?.court_id ?? null, p_seen_start: data?.start_at ?? null, p_seen_end: data?.end_at ?? null };
+};
 
 // ------------------------------------------------------------------ fixtures (a published desk club, players, staff)
 const U = (n) => `a1000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -186,7 +191,7 @@ const moneyWithoutBooking = () => one(`select count(*)::int from payments p join
   s = await H("18:00"); e = await H("19:00");
   const { data: wid } = await staff.rpc("staff_book", { p_club: CLUB, p_court: COURT2, p_start: iso(await H("20:00")), p_end: iso(await H("21:00")), p_name: "Move Me", p_phone: null });
   const mq = await staff.rpc("quote_move", { p_booking: wid, p_court: COURT2, p_start: iso(s), p_end: iso(e) });
-  const mv = await staff.rpc("move_booking_priced", { p_booking: wid, p_court: COURT2, p_start: iso(s), p_end: iso(e), p_expected_price: mq.data?.new });
+  const mv = await staff.rpc("move_booking_priced", { p_booking: wid, p_court: COURT2, p_start: iso(s), p_end: iso(e), p_expected_price: mq.data?.new, ...(await seenNow(staff, wid)) });
   const compete = await hold(p2, COURT2, s, e);
   rep("B11 a booking moved into a slot, then a player tries it: the move holds, the player is refused", !mv.error && compete.kind === "refused", { mv: mv.error?.message, compete });
 
@@ -230,13 +235,13 @@ const D3 = await DAY(6), S = (hhmm) => at(6, hhmm);
   const longer = new Date(new Date(w.s).getTime() + 2 * 3600e3);
   const qd = await staff.rpc("quote_move", { p_booking: w.id, p_court: COURT, p_start: iso(w.s), p_end: iso(longer) });
   rep("C4 extending the walk-in to 2 h: the new price is shown first (old → new)", qd.data?.kind === "reprice" && Number(qd.data.new) === 2 * Number(qd.data.current), qd.data);
-  const silent = await staff.rpc("move_booking", { p_booking: w.id, p_court: COURT, p_start: iso(w.s), p_end: iso(longer) });
+  const silent = await staff.rpc("move_booking_priced", { p_booking: w.id, p_court: COURT, p_start: iso(w.s), p_end: iso(longer), p_expected_price: null, ...(await seenNow(staff, w.id)) });
   rep("C5 ...it cannot change without that confirmation", /price_confirmation_needed/.test(silent.error?.message ?? ""), silent.error?.message);
-  const ext = await staff.rpc("move_booking_priced", { p_booking: w.id, p_court: COURT, p_start: iso(w.s), p_end: iso(longer), p_expected_price: qd.data.new });
+  const ext = await staff.rpc("move_booking_priced", { p_booking: w.id, p_court: COURT, p_start: iso(w.s), p_end: iso(longer), p_expected_price: qd.data.new, ...(await seenNow(staff, w.id)) });
   rep("C6 confirmed: 2 h at the new price, still no fee", !ext.error && (await row(w.id)).price === Number(qd.data.new) && (await row(w.id)).fee === 0, ext.error?.message);
   const to = await S("17:00"), toEnd = new Date(new Date(to).getTime() + 2 * 3600e3);
   const mq = await staff.rpc("quote_move", { p_booking: w.id, p_court: COURT2, p_start: iso(to), p_end: iso(toEnd) });
-  const mv = await staff.rpc("move_booking_priced", { p_booking: w.id, p_court: COURT2, p_start: iso(to), p_end: iso(toEnd), p_expected_price: mq.data?.new });
+  const mv = await staff.rpc("move_booking_priced", { p_booking: w.id, p_court: COURT2, p_start: iso(to), p_end: iso(toEnd), p_expected_price: mq.data?.new, ...(await seenNow(staff, w.id)) });
   const cal = (await staffDayFor(6)).find((x) => x.id === w.id);
   rep("C7 moved to another court and time: the calendar shows the new court and time", !mv.error && cal && cal.court_id === COURT2 && iso(cal.start_at) === iso(to), mv.error?.message ?? cal);
   rep("C8 ...the old time is free again for players, the new one is taken", await offered(anon, D3, COURT, iso(w.s)) && !(await offered(anon, D3, COURT2, iso(to))));
