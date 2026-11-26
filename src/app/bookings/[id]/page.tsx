@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { allLoaded, loaded } from "@/lib/load";
 import { hhmm, nowMs } from "@/lib/time";
 import CancelButton from "./CancelButton";
+import { clubPhoneFrom } from "@/lib/clubContactPhone";
 import OpenToPlayers, { type BookingMatch } from "./OpenToPlayers";
 
 export default async function BookingPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ new?: string }> }) {
@@ -17,7 +18,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
 
   const { data: b } = loaded(await supabase
     .from("bookings")
-    .select("id, status, start_at, end_at, price_usd, fee_usd, cancelled_at, clubs(name, slug, timezone, cancel_cutoff_hours, location_url, payment_mode, lat, lng), courts!bookings_court_id_fkey(name, sport)")
+    .select("id, club_id, status, start_at, end_at, price_usd, fee_usd, cancelled_at, clubs(name, slug, timezone, cancel_cutoff_hours, location_url, payment_mode, lat, lng), courts!bookings_court_id_fkey(name, sport)")
     .eq("id", id)
     .eq("player_id", user.id)
     .single(), "this booking");
@@ -41,6 +42,11 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
   const cutoffAt = new Date(new Date(b.start_at).getTime() - club.cancel_cutoff_hours * 3600_000);
   const freeCancel = b.status === "confirmed" && cutoffAt.getTime() > nowMs();
   const upcoming = b.status === "confirmed" && new Date(b.end_at).getTime() > nowMs();
+
+  // PR-9b: when the cancellation notice asks the player to tell the club, a way to: the club's own public contact
+  // phone (clubs.contact_phone; never a staff member's number). Read only then; no number or a failed read → Info link.
+  const tellClub = upcoming && atDesk && !freeCancel;
+  const clubPhone = tellClub ? clubPhoneFrom(await supabase.from("clubs").select("contact_phone").eq("id", b.club_id).maybeSingle()) : null;
 
   const waText = encodeURIComponent(`Court booked ✅ ${club.name}, ${court.name}\n${day}, ${time}\n${directions ?? ""}`.trim());
 
@@ -76,7 +82,8 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
         <>
           <a href={`https://wa.me/?text=${waText}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#25D366] py-3.5 text-center font-medium text-white">Share on WhatsApp</a>
           {directions && <a href={directions} target="_blank" rel="noreferrer" className="rounded-xl border border-grid bg-white py-3.5 text-center">Directions</a>}
-          <CancelButton bookingId={b.id} freeCancel={freeCancel} cutoffHours={club.cancel_cutoff_hours} cutoffLabel={`${formatInTimeZone(cutoffAt, tz, "EEE d MMM HH:mm")}`} nothingPaid={atDesk} />
+          <CancelButton bookingId={b.id} freeCancel={freeCancel} cutoffHours={club.cancel_cutoff_hours} cutoffLabel={`${formatInTimeZone(cutoffAt, tz, "EEE d MMM HH:mm")}`} nothingPaid={atDesk}
+            clubPhone={clubPhone} clubInfoHref={`/club/${club.slug}/info`} />
         </>
       )}
     </main>
