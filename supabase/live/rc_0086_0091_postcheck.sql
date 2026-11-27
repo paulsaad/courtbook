@@ -22,8 +22,13 @@ checks(item, ok, detail) as (
   union all select 'old apps keep their calls (request, cancel, status granted to signed-in players)',
     has_function_privilege('authenticated', 'request_account_deletion(text)', 'execute') and has_function_privilege('authenticated', 'cancel_account_deletion()', 'execute')
     and has_function_privilege('authenticated', 'my_account_deletion()', 'execute'), ''
-  union all select 'app deletion is gated until the retry worker runs (no heartbeat yet is expected)',
-    not deletion_processing_active(), coalesce((select last_run_at::text from deletion_worker), 'no run yet')
+  -- 26 Nov: written for step 1 (0086 applied, before the retry worker existed), this row REQUIRED the gate to be shut.
+  -- Since step 3 the worker runs on staging (the 72-hour trial), so after 0092 the automatic postcheck would fail on a
+  -- healthy worker — a false stop with 0092 already applied. The rule that matters: the app's deletion gate follows the
+  -- worker's heartbeat exactly (open within an hour of a run, shut otherwise). The state is shown either way.
+  union all select 'app deletion gate follows the retry worker heartbeat (open only within an hour of a run)',
+    deletion_processing_active() = coalesce((select last_run_at > now() - interval '1 hour' from deletion_worker), false),
+    case when deletion_processing_active() then 'open: last run ' else 'shut: ' end || coalesce((select last_run_at::text from deletion_worker), 'no run yet')
   union all select '0090: the booking block check leaves the row being written alone',
     pg_get_functiondef('reject_booking_over_block'::regproc) like '%id <> new.id%', ''
   union all select '0091: the older move call cannot change a price (after F1: it refuses every move, and the desk''s call compares what it saw)',

@@ -144,6 +144,18 @@ OB=$(q $U1 "select staff_book('$CLUB','$COURT2', $(at 19:00), $(at 20:00), 'smok
 fails_with $U1 "S3o onto another booking: refused" "select (case when move_booking_priced('$MB','$COURT2', $(at 19:30), $(at 20:30), quote_price('$COURT2', $(at 19:30), $(at 20:30)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" slot_taken
 fails_with $U2 "S3p a player who is not staff cannot move it" "select (case when move_booking_priced('$MB','$COURT2', $(at 21:00), $(at 22:00), quote_price('$COURT2', $(at 21:00), $(at 22:00)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" forbidden
 
+# the price rule (0091) and the reload rule (0099), stated explicitly: no move changes a price without confirming it,
+# and a page from before 0099 (4- or 5-argument call) is told to reload. The booking is now 16:30-17:30 on court 2.
+seen() { echo "(select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')"; }
+state() { q admin "select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'-'||to_char(end_at at time zone 'Asia/Beirut','HH24:MI')||' '||price_usd::numeric(10,2) from bookings where id='$MB';"; }
+S3BEFORE=$(state)
+fails_with $U1 "S3q a move that would change the price, with no confirmed price: refused" "select move_booking_priced('$MB','$COURT2', $(at 20:00), $(at 21:00), null, $(seen));" price_confirmation_needed
+fails_with $U1 "S3r a confirmed price that is not the database's: refused" "select move_booking_priced('$MB','$COURT2', $(at 20:00), $(at 21:00), 99, $(seen));" price_changed
+fails_with $U1 "S3s a desk that saw an older court or time: refused" "select move_booking_priced('$MB','$COURT2', $(at 20:00), $(at 21:00), quote_price('$COURT2', $(at 20:00), $(at 21:00)), '$COURT3', $(at 09:00), $(at 10:00));" booking_changed_elsewhere
+fails_with $U1 "S3t the pre-0099 4-argument call: refused" "select move_booking('$MB','$COURT2', $(at 20:00), $(at 21:00));" move_needs_reload
+fails_with $U1 "S3t2 the pre-0099 5-argument call: refused" "select move_booking_priced('$MB','$COURT2', $(at 20:00), $(at 21:00), quote_price('$COURT2', $(at 20:00), $(at 21:00)));" move_needs_reload
+check admin "S3u ...the booking is unchanged after every refusal (time and price)" "select '$(state)';" "$S3BEFORE"
+
 echo "--- S4. staff and past times on today's real clock (release fix 0071): walk-in cutoff, extend, past, ended"
 # Times are on the club's 30-minute grid relative to now (F = now rounded down to 30 min), on three courts.
 HAS_0071=$(q admin "select (prosrc like '%walk_in_too_old%')::text from pg_proc where proname='staff_book' and pronamespace='public'::regnamespace")
