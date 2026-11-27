@@ -14,6 +14,8 @@ import { blockEndOptions, blockStartOptions, bookingSlotOptions, minToHhmm, pick
 import { DESKTOP_QUERY, useDialog, useIsDesktop } from "@/components/useDialog";
 import { matchBookings, readPrefs, writePrefs } from "./findBooking";
 import { paymentsByBooking } from "@/lib/staffPayments";
+import { isNetworkFailure } from "@/lib/actionError";
+import { DESK_UNCONFIRMED, DESK_UNREACHABLE, deskStateShown, landed, type Reader } from "./landed";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string>;
   /** the address named a view or sport (then it is used as is, and remembered on desktop) */
@@ -80,12 +82,16 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const isDesktop = useIsDesktop();
   // Typed but unsaved booking details: switching slot, changing day or closing the panel asks first.
   const addDirty = useRef(false);
+  // phones (S1): the court names live in the sticky header and follow the grid's sideways scroll
+  const namesRef = useRef<HTMLDivElement>(null);
   const confirmDiscard = useCallback(() =>
     !addDirty.current || window.confirm("Discard the details you have entered?"), []);
   // What the open add form has chosen, drawn on the grid as "Not saved" until the database has saved it.
   const [draft, setDraft] = useState<Selection | null>(null);
   // A save succeeded and the calendar has not shown a fresh read since (see run()).
   const [savedUnseen, setSavedUnseen] = useState(false);
+  // R1: after an unconfirmed desk action, what the calendar now shows (never "saved" for this request)
+  const [notice, setNotice] = useState<string | null>(null);
   const viewRef = useRef(view);
   useEffect(() => { viewRef.current = view; }, [view]);
   /** Opens a sheet, unless saving is in progress or the desk keeps its unsaved details. True if it opened. */
@@ -309,16 +315,37 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     return () => { alive = false; };
   }, [club.id]);
 
-  async function run(fn: () => PromiseLike<{ error: { message: string; code?: string } | null }>, explain: (m: string) => string = friendlyError) {
+  async function run(
+    fn: () => PromiseLike<{ error: { message: string; code?: string } | null }>,
+    explain: (m: string) => string = friendlyError,
+    check?: { find: (db: Reader) => Promise<boolean | null>; shows: string },
+  ) {
     setBusy(true);
     setError(null);
+    setNotice(null);
     const { error } = await fn();
     if (error) {
+      // R1: the grid is read again first, so it shows what is actually saved; then the action's result is looked for.
+      await reload();
+      setRefresh((n) => n + 1);   // the week view holds its own copy of the rows
+      const found = check ? await check.find(createClient() as unknown as Reader).catch(() => null) : undefined;
       setBusy(false);
       savedFocus.current = null;
-      setError(explainBookingError(error.message, error.code, explain(error.message)));   // reports only the unexpected
+      if (found === true && check) {
+        // A matching result is there, but it may be another staff member's doing the same thing (Paul's review,
+        // correction A): close the sheet so the grid shows it, and say what the calendar shows — never "saved".
+        addDirty.current = false;
+        setSheet(null);
+        setNotice(deskStateShown(check.shows));
+        return;
+      }
+      if (isNetworkFailure(error.message)) setError(found === null ? DESK_UNREACHABLE : DESK_UNCONFIRMED);   // correction B: never "not saved"
+      else setError(explainBookingError(error.message, error.code, explain(error.message)));   // reports only the unexpected
       return;
     }
+    await saved();
+  }
+  async function saved() {
     // Saved. The write is never repeated: if the reads below fail, the banner says the calendar may be
     // out of date and that this was saved, and adding stays off until a read succeeds.
     setSavedUnseen(true);
@@ -526,6 +553,9 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   const monthName = formatInTimeZone(clubLocalToUtc(date, "12:00", club.timezone), club.timezone, "MMMM yyyy");
   const courtName = (id: string | null) => courts.find((c) => c.id === id)?.name ?? "";
 
+  // any court of the club, including one the sport filter hides (a move can go to another sport's court)
+  const anyCourtName = (id: string | null) => allCourts.find((c) => c.id === id)?.name ?? "the court";
+
 
   /** What a sheet holds — the same on phones (bottom sheet) and desktop (side panel). */
   function sheetBody(sheet: NonNullable<Sheet>) {
@@ -544,30 +574,24 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
                 onSave={(name, phone, slots, asBlock, blockStart, blockEnd) => {
                   // after the save, focus goes to what was saved (where it starts), once it is on the grid
                   savedFocus.current = { courtId: sheet.courtId, day: sheet.date ?? date, time: asBlock && blockStart ? blockStart : sheet.time };
-                  return run(async () => {
-                    const supabase = createClient();
-                    // in the week view the slot belongs to the column's day, not the page's date
-                    const day = sheet.date ?? date;
-                    if (asBlock && blockStart && blockEnd) {
-                      // a block is the wall-clock interval the desk chose (start and end selectors), so on the night the
-                      // clocks go back 22:00–24:00 is 3 real hours; the database checks staff rights, the court, the grid,
-                      // the hours, the past and overlaps (0076)
-                      const bs = clubLocalToUtc(day, blockStart, club.timezone);
-                      const be = blockEnd === "24:00" ? nextDayStart(day, club.timezone) : clubLocalToUtc(day, blockEnd, club.timezone);
-                      return supabase.rpc("staff_block", {
-                        p_club: club.id, p_court: sheet.courtId,
-                        p_start: bs.toISOString(), p_end: be.toISOString(), p_reason: name || null,
-                      });
-                    }
-                    const start = clubLocalToUtc(day, sheet.time, club.timezone);
-                    const end = new Date(start.getTime() + slots * club.slot_minutes * 60000);
-                    // the database checks staff rights, the court, the hours, the grid and the duration, and prices it
-                    return supabase.rpc("staff_book", {
-                      p_club: club.id, p_court: sheet.courtId,
-                      p_start: start.toISOString(), p_end: end.toISOString(),
-                      p_name: name, p_phone: phone || null,
-                    });
-                  }, asBlock ? (m) => blockErrorText(m, club) : undefined);
+                  // in the week view the slot belongs to the column's day, not the page's date
+                  const day = sheet.date ?? date;
+                  const courtId = sheet.courtId;
+                  if (asBlock && blockStart && blockEnd) {
+                    // a block is the wall-clock interval the desk chose (start and end selectors), so on the night the
+                    // clocks go back 22:00–24:00 is 3 real hours; the database checks staff rights, the court, the grid,
+                    // the hours, the past and overlaps (0076)
+                    const bs = clubLocalToUtc(day, blockStart, club.timezone).toISOString();
+                    const be = (blockEnd === "24:00" ? nextDayStart(day, club.timezone) : clubLocalToUtc(day, blockEnd, club.timezone)).toISOString();
+                    return run(() => createClient().rpc("staff_block", { p_club: club.id, p_court: courtId, p_start: bs, p_end: be, p_reason: name || null }),
+                      (m) => blockErrorText(m, club), { find: (db) => landed.block(db, courtId, bs, be), shows: `a block on ${anyCourtName(courtId)} from ${blockStart} to ${blockEnd}` });
+                  }
+                  const start = clubLocalToUtc(day, sheet.time, club.timezone);
+                  const s0 = start.toISOString();
+                  const e0 = new Date(start.getTime() + slots * club.slot_minutes * 60000).toISOString();
+                  // the database checks staff rights, the court, the hours, the grid and the duration, and prices it
+                  return run(() => createClient().rpc("staff_book", { p_club: club.id, p_court: courtId, p_start: s0, p_end: e0, p_name: name, p_phone: phone || null }),
+                    undefined, { find: (db) => landed.walkIn(db, courtId, s0, e0, name), shows: `a booking for ${name.trim()} on ${anyCourtName(courtId)} at ${hhmm(s0, club.timezone)}` });
                 }}
               />
             )}
@@ -576,17 +600,19 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
               <BookingSheet
                 key={sheet.booking.id}
                 club={club} courts={allCourts} booking={sheet.booking} times={times} busy={busy}
-                onMove={(courtId, time, slots, price) =>
-                  run(() => {
-                    // the day comes from the booking, never from the page: the sheet can be opened
-                    // from a week whose URL says another day (covered by src/lib/time.test.ts)
-                    const { start, end } = moveTarget(sheet.booking.start_at, club.timezone, time, slots, club.slot_minutes);
-                    // 0091: the price the desk was shown and confirmed; the database refuses if it is no longer right
-                    return createClient().rpc("move_booking_priced", { p_booking: sheet.booking.id, p_court: courtId, p_start: start.toISOString(), p_end: end.toISOString(), p_expected_price: price });
-                  })
-                }
-                onCancel={(clubCaused) => run(() => createClient().rpc("cancel_booking", { p_booking: sheet.booking.id, p_club_caused: clubCaused }))}
-                onNoShow={() => run(() => createClient().rpc("mark_no_show", { p_booking: sheet.booking.id }))}
+                onMove={(courtId, time, slots, price) => {
+                  // the day comes from the booking, never from the page: the sheet can be opened
+                  // from a week whose URL says another day (covered by src/lib/time.test.ts)
+                  const { start, end } = moveTarget(sheet.booking.start_at, club.timezone, time, slots, club.slot_minutes);
+                  const id = sheet.booking.id, s0 = start.toISOString(), e0 = end.toISOString();
+                  // 0091: the price the desk was shown and confirmed; the database refuses if it is no longer right
+                  return run(() => createClient().rpc("move_booking_priced", { p_booking: id, p_court: courtId, p_start: s0, p_end: e0, p_expected_price: price }),
+                    undefined, { find: (db) => landed.moved(db, id, courtId, s0, e0), shows: `this booking on ${anyCourtName(courtId)} at ${hhmm(s0, club.timezone)}` });
+                }}
+                onCancel={(clubCaused) => run(() => createClient().rpc("cancel_booking", { p_booking: sheet.booking.id, p_club_caused: clubCaused }),
+                  undefined, { find: (db) => landed.status(db, sheet.booking.id, "cancelled"), shows: "this booking as cancelled" })}
+                onNoShow={() => run(() => createClient().rpc("mark_no_show", { p_booking: sheet.booking.id }),
+                  undefined, { find: (db) => landed.status(db, sheet.booking.id, "no_show"), shows: "this booking as a no-show" })}
               />
             )}
 
@@ -594,7 +620,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
               <div className="flex flex-col gap-3">
                 <h2 className="text-lg font-semibold">{sheet.block.reason ?? "Blocked"}</h2>
                 <p className="text-sm text-muted">{courtName(sheet.block.court_id)} · {hhmm(sheet.block.start_at, club.timezone)}–{hhmm(sheet.block.end_at, club.timezone)}</p>
-                <button disabled={busy} onClick={() => run(() => createClient().from("blocks").delete().eq("id", sheet.block.id))} className={secondaryDanger}>Remove block</button>
+                <button disabled={busy} onClick={() => run(() => createClient().from("blocks").delete().eq("id", sheet.block.id), undefined, { find: (db) => landed.blockGone(db, sheet.block.id), shows: "this block as removed" })} className={secondaryDanger}>Remove block</button>
               </div>
             )}
 
@@ -617,16 +643,24 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     );
   }
 
+  /** A court's column heading: in the grid (desktop; screen readers everywhere) and in the phone header strip (S1). */
+  const courtHead = (c: Court, extra = "") => (
+    <div key={c.id} className={`px-1 text-center text-sm lg:sticky lg:top-0 lg:z-10 ${draftOn(c.id, date) ? "rounded-t-lg bg-draft-soft lg:bg-draft-soft" : "lg:bg-paper"} ${extra}`}>
+      <div className={`font-medium leading-tight lg:text-[15px] ${draftOn(c.id, date) ? "text-draft" : ""}`}>{c.name}</div>
+      <div className="text-xs text-muted">{sportNames[c.sport] ?? c.sport}</div>
+    </div>
+  );
+
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col lg:max-w-[1600px] lg:flex-row">
       {/* desktop: the calendar column scrolls on its own beside the panel; phones: no wrapper box */}
       <div className="contents lg:flex lg:h-[calc(100vh-4rem)] lg:min-w-0 lg:flex-1 lg:flex-col">
       <header className="sticky top-0 z-10 bg-paper/95 backdrop-blur lg:static lg:shrink-0">
-        <div className="flex items-center justify-between px-4 pt-3 text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 pt-3 text-sm">
           <Link href="/" className="text-muted">‹ {club.name}</Link>
-          <div className="flex gap-4">{/* on desktop these two are in the staff bar (WorkNav) */}<Link href={`/staff/${club.slug}/payments`} className="text-muted lg:hidden">Payments</Link><Link href={`/staff/${club.slug}/settings`} className="text-muted lg:hidden">Settings</Link><button onClick={() => openSheet({ kind: "close" })} className="text-danger">Close courts…</button></div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">{/* on desktop these two are in the staff bar (WorkNav) */}<Link href={`/staff/${club.slug}/payments`} className="text-muted lg:hidden">Payments</Link><Link href={`/staff/${club.slug}/settings`} className="text-muted lg:hidden">Settings</Link><button onClick={() => openSheet({ kind: "close" })} className="text-danger">Close courts…</button></div>
         </div>
-        <div className="flex items-end justify-between px-4 pb-3 pt-1">
+        <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 px-4 pb-3 pt-1">
           {view === "week" ? (
             <div className="leading-tight">
               <div className="text-2xl font-semibold tracking-tight">Week of {formatInTimeZone(clubLocalToUtc(wkStart, "12:00", club.timezone), club.timezone, "d MMM")}</div>
@@ -702,6 +736,19 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
             ))}
           </div>
         )}
+        {view === "grid" && (
+          // phones only: the grid scrolls with the page, so its own name row would scroll away (S1). This copy sits in
+          // the sticky header; onScroll below keeps it lined up with the columns. Screen readers use the grid's row.
+          <div ref={namesRef} aria-hidden="true" data-testid="court-names" className="overflow-hidden pl-0 pr-2 lg:hidden">
+            <div className="flex min-w-max">
+              {/* covers the names as they scroll left, like the time column below it */}
+              <div className="sticky left-0 z-10 w-[3.75rem] shrink-0 bg-paper" />
+              <div className="grid flex-1 gap-x-1.5 [--col-min:7rem]" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(var(--col-min), 1fr))` }}>
+                {courts.map((c) => courtHead(c, "min-h-9"))}
+              </div>
+            </div>
+          </div>
+        )}
       </header>
 
       {viewError && (
@@ -709,6 +756,13 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
           <span className="flex-1">{savedUnseen ? "Saved. " : ""}Couldn&apos;t load the latest {view === "week" ? "week" : "bookings"}. What you see may be out of date, so adding is off until this works.</span>
           {/* the flag is cleared by a successful read, never by tapping Retry */}
           <button disabled={viewLoading} onClick={() => { setRefresh((n) => n + 1); void reload(); }} className="shrink-0 rounded-lg border border-danger/40 px-3 py-1 disabled:opacity-50">{viewLoading ? "Checking…" : "Retry"}</button>
+        </div>
+      )}
+
+      {notice && (
+        <div role="status" className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-sand bg-sand-soft px-3 py-2 text-sm">
+          <span className="flex-1">{notice}</span>
+          <button onClick={() => setNotice(null)} className="shrink-0 rounded-lg border border-grid bg-white px-3 py-1">OK</button>
         </div>
       )}
 
@@ -741,12 +795,14 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
           onOpen={(b) => openSheet({ kind: "booking", booking: b })}
         />
       ) : view === "grid" ? (
-        <div className="flex-1 overflow-x-auto px-2 pb-24 lg:overflow-visible lg:pb-6">
+        <div className="flex-1 overflow-x-auto pb-24 pl-0 pr-2 lg:overflow-visible lg:pb-6 lg:pl-2" onScroll={(e) => { if (namesRef.current) namesRef.current.scrollLeft = e.currentTarget.scrollLeft; }}>
           <div className="flex min-w-max">
-            {/* time axis */}
-            <div className="relative w-12 shrink-0 lg:sticky lg:left-0 lg:z-20 lg:w-14 lg:bg-paper" style={{ height: times.length * ROW_PX, marginTop: 36 }}>
+            {/* time axis: pinned on the left while the courts scroll sideways (S2); on phones it starts level with the
+                first row, because the court names are in the header. z-[8]: above bookings (≤ z-[6]), below the
+                sticky header (z-10) and the sheets (z-20) */}
+            <div className="sticky left-0 z-[8] w-[3.75rem] shrink-0 bg-paper lg:z-20 lg:mt-9 lg:w-14" style={{ height: times.length * ROW_PX }}>
               {times.map((t, i) => i % labelEvery === 0 && (
-                <div key={t} className="absolute right-2 -translate-y-1/2 text-xs text-muted lg:text-[13px]" style={{ top: i * ROW_PX }}>{t}</div>
+                <div key={t} className="absolute right-1.5 -translate-y-1/2 whitespace-nowrap text-xs text-muted lg:right-2 lg:text-[13px]" style={{ top: i * ROW_PX }}>{t}</div>
               ))}
             </div>
             {/* courts: one Tab stop; arrows move inside (see onGridKey) */}
@@ -754,12 +810,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
             <div ref={gridRef} role="group" aria-label={`Courts, ${dayName} ${dayNum} ${monthName}`} aria-describedby="grid-keys-hint"
                  tabIndex={activeItem || canAdd ? -1 : 0} onKeyDown={onGridKey}
                  className="grid flex-1 gap-x-1.5 outline-none [--col-min:7rem] focus-visible:ring-2 focus-visible:ring-turf lg:[--col-min:9rem]" style={{ gridTemplateColumns: `repeat(${courts.length}, minmax(var(--col-min), 1fr))` }}>
-              {courts.map((c) => (
-                <div key={c.id} className={`h-9 px-1 text-center text-sm lg:sticky lg:top-0 lg:z-10 ${draftOn(c.id, date) ? "rounded-t-lg bg-draft-soft lg:bg-draft-soft" : "lg:bg-paper"}`}>
-                  <div className={`font-medium leading-tight lg:text-[15px] ${draftOn(c.id, date) ? "text-draft" : ""}`}>{c.name}</div>
-                  <div className="text-xs text-muted">{sportNames[c.sport] ?? c.sport}</div>
-                </div>
-              ))}
+              {courts.map((c) => courtHead(c, "h-9 max-lg:sr-only"))}
               {courts.map((c, ci) => (
                 <div key={c.id} className="relative rounded-lg border border-grid bg-white" style={{ height: times.length * ROW_PX }}>
                   {/* free slots; a slot under a booking or block is not a slot (disabled, hidden from keyboard and screen readers) */}

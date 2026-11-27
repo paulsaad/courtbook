@@ -64,6 +64,7 @@ const PAGES: [string, () => Promise<{ default: unknown }>, Record<string, string
   ["a game", () => import("./matches/[id]/page"), { id: "id-1" }],
   ["activity", () => import("./notifications/page"), {}],
   ["profile", () => import("./profile/page"), {}, ["rpc:my_photo_version"]],   // optional: the profile loads without photos
+  ["details before a first booking", () => import("./details/page"), {}],
   ["levels", () => import("./levels/page"), {}],
   ["coach page", () => import("./coach/page"), {}],
   ["staff index", () => import("./staff/page"), {}],
