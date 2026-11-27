@@ -5,7 +5,8 @@ import { normalizePhone } from "@shared/phone";
 import { Text } from "../components/Text";
 import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
-import { SportMark, SPORTS } from "../components/SportMark";
+import { SportMark } from "../components/SportMark";
+import { useSports } from "../lib/sports";
 import { KeyboardAware } from "../components/KeyboardAware";
 import { Empty, ErrorState, Loading } from "../components/StateView";
 import { useSession } from "../lib/session";
@@ -38,6 +39,7 @@ export default function MyDetails() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [sports, setSports] = useState<string[]>([]);
+  const catalogue = useSports();   // active sports, alphabetical (admin-managed catalogue)
   const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
   const [problem, setProblem] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -105,8 +107,10 @@ export default function MyDetails() {
           <View style={styles.field}>
             <Text variant="label">Sports you play (optional)</Text>
             <View style={styles.chips}>
-              {SPORTS.filter((s) => s !== "other").map((s) => (
-                <Chip key={s} tone="sport" label={sportName(s)} selected={sports.includes(s)} onPress={() => toggle(s)} icon={<SportMark sport={s} size={20} />} />
+              {/* the catalogue's active sports, alphabetical (#66 review SF2), plus any the player already has that has since
+                  been deactivated, so it can still be removed (the database keeps it on save, refuses adding it) */}
+              {[...catalogue.map((c) => c.code), ...sports.filter((s) => !catalogue.some((c) => c.code === s))].map((s) => (
+                <Chip key={s} tone="sport" label={catalogue.find((c) => c.code === s)?.name ?? sportName(s)} selected={sports.includes(s)} onPress={() => toggle(s)} icon={<SportMark sport={s} size={20} />} />
               ))}
             </View>
             <Text variant="caption">Set a level for each sport in Profile. Neither is needed to book a court.</Text>

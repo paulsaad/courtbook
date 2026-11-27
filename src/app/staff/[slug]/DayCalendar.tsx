@@ -16,6 +16,8 @@ import { matchBookings, readPrefs, writePrefs } from "./findBooking";
 import { paymentsByBooking } from "@/lib/staffPayments";
 import { isNetworkFailure } from "@/lib/actionError";
 import { DESK_UNCONFIRMED, DESK_UNREACHABLE, deskStateShown, landed, type Reader } from "./landed";
+import { changedElsewhere, describeChange, type Current } from "./changed";
+import { moveBooking } from "./moveBooking";
 
 type Props = { club: Club; courts: Court[]; bookings: Booking[]; blocks: Block[]; date: string; view: StaffView; sport: string | null; court: string | null; loadFailed?: boolean; sportNames: Record<string, string>;
   /** the address named a view or sport (then it is used as is, and remembered on desktop) */
@@ -29,6 +31,14 @@ export type StaffView = "now" | "grid" | "week" | "list";
 type FreeNow = { court_id: string; court_name: string; sport: string; busy: boolean; free_at: string | null };
 /** All courts week (Phase I-2c): only what decides whether a court is taken. No names, no phones. */
 type Taken = { court_id: string; start_at: string; end_at: string; status?: string; hold_expires_at?: string | null };
+/**
+ * F3 (Paul, 26 Nov): the day's cancelled bookings, for the List view only. Original court and time, when it was
+ * cancelled, and the name the desk already sees. No phone (none is needed for a cancelled booking), no price, no
+ * payment. Kept apart from `bookings`, so they can never occupy the grid, the free-court counts, search or Print.
+ */
+export type CancelledRow = { id: string; court_id: string; start_at: string; end_at: string; cancelled_at: string | null; name: string | null };
+const CANCELLED_COLUMNS = "id, court_id, guest_name, start_at, end_at, cancelled_at";
+
 /** A past customer of this club. Name and phone only — never a player account. */
 type Guest = { name: string; phone: string | null; last_at: string };
 
@@ -141,6 +151,9 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
   // older answer landing late would overwrite newer rows and clear the loading flag of a read still
   // in flight — so only the newest request may touch state.
   const dayReq = useRef(0);
+  // F3: the day's cancelled bookings (List view only); null = not read; `failed` = the last read failed
+  const [cancelled, setCancelled] = useState<{ date: string; rows: CancelledRow[]; failed: boolean } | null>(null);
+  const cancelledReq = useRef(0);
 
   // week view shows one court at a time: seven columns is all a phone has room for. Desktop also has
   // "All courts" (Phase I-2c): how many courts of the shown sport are free at each time.
@@ -170,6 +183,14 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     ...shownBlocks.map((k) => ({ kind: "block" as const, k, at: k.start_at, court: k.court_id })),
   ].sort((x, y) => Date.parse(x.at) - Date.parse(y.at) || (courtOrder.get(x.court) ?? 0) - (courtOrder.get(y.court) ?? 0));
 
+  // F3: the List view adds the day's cancelled bookings (shown courts only) in time order; Print and counts do not
+  const shownCancelled = (cancelled?.date === date ? cancelled.rows : []).filter((c) => shownCourtIds.has(c.court_id));
+  const listViewRows = [
+    ...listRows,
+    ...shownCancelled.map((c) => ({ kind: "cancelled" as const, c, at: c.start_at, court: c.court_id })),
+  ].sort((x, y) => Date.parse(x.at) - Date.parse(y.at) || (courtOrder.get(x.court) ?? 0) - (courtOrder.get(y.court) ?? 0)
+    || (x.kind === "cancelled" ? 1 : 0) - (y.kind === "cancelled" ? 1 : 0));
+
   const times = slotTimes(club.open_time, club.close_time, club.slot_minutes);
   const openMin = toMin(club.open_time);
   const ROW_PX = club.slot_minutes <= 30 ? 36 : club.slot_minutes <= 60 ? 56 : 64;
@@ -184,6 +205,31 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     const id = setInterval(tick, 60_000);
     return () => clearInterval(id);
   }, [isToday, club.timezone]);
+
+  // F3: read the day's cancelled bookings for the List view. Names come from club_booking_contacts, which the
+  // calendar already uses; the phone it also returns is dropped here. A failed read keeps the previous rows and says so.
+  const loadCancelled = useCallback(async () => {
+    const seq = ++cancelledReq.current;
+    const supabase = createClient();
+    const { dayStart, dayEnd } = dayBounds(date, club.timezone);
+    const { data, error: e } = await supabase.from("bookings").select(CANCELLED_COLUMNS)
+      .eq("club_id", club.id).eq("status", "cancelled").not("court_id", "is", null).lt("start_at", dayEnd).gt("end_at", dayStart).order("start_at");
+    if (seq !== cancelledReq.current) return;
+    const rows = (data ?? []) as { id: string; court_id: string; guest_name: string | null; start_at: string; end_at: string; cancelled_at: string | null }[];
+    let names = new Map<string, string | null>();
+    let failed = !!e;
+    if (!e && rows.length) {
+      const { data: c, error: ec } = await supabase.rpc("club_booking_contacts", { p_club: club.id, p_bookings: rows.map((r) => r.id) });
+      if (ec) failed = true;
+      else names = new Map((c as { booking_id: string; name: string | null }[] | null ?? []).map((x) => [x.booking_id, x.name] as const));
+    }
+    if (seq !== cancelledReq.current) return;
+    if (failed) { setCancelled((prev) => ({ date, rows: prev?.date === date ? prev.rows : [], failed: true })); return; }
+    setCancelled({ date, failed: false, rows: rows.map((r) => ({
+      id: r.id, court_id: r.court_id, start_at: r.start_at, end_at: r.end_at, cancelled_at: r.cancelled_at, name: r.guest_name ?? names.get(r.id) ?? null,
+    })) });
+  }, [club.id, club.timezone, date]);
+  useEffect(() => { if (view === "list") void loadCancelled(); }, [view, loadCancelled]);   // later reads: reload()
 
   // Refetch only the day's rows from the browser: faster than re-rendering the page.
   // `quiet` (the automatic refresh): the rows on screen stay usable while it runs, because they were
@@ -209,7 +255,8 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     setDayLoading(false);
     if (viewRef.current !== "week") setSavedUnseen(false);
     setLastUpdated(formatInTimeZone(new Date(), club.timezone, "HH:mm"));
-  }, [club.id, club.timezone, date]);
+    if (viewRef.current === "list") void loadCancelled();
+  }, [club.id, club.timezone, date, loadCancelled]);
 
   // Automatic refresh (Phase I-2a): every 60 s while the page is visible, and on returning to it.
   // It re-runs the reads the page already makes and changes nothing else: the open panel, the typed
@@ -319,6 +366,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
     fn: () => PromiseLike<{ error: { message: string; code?: string } | null }>,
     explain: (m: string) => string = friendlyError,
     check?: { find: (db: Reader) => Promise<boolean | null>; shows: string },
+    refused?: (message: string) => Promise<boolean>,
   ) {
     setBusy(true);
     setError(null);
@@ -340,6 +388,7 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         return;
       }
       if (isNetworkFailure(error.message)) setError(found === null ? DESK_UNREACHABLE : DESK_UNCONFIRMED);   // correction B: never "not saved"
+      else if (refused && await refused(error.message)) return;   // the action explained it (F1: the booking changed elsewhere)
       else setError(explainBookingError(error.message, error.code, explain(error.message)));   // reports only the unexpected
       return;
     }
@@ -598,16 +647,32 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
 
             {sheet.kind === "booking" && (
               <BookingSheet
-                key={sheet.booking.id}
+                key={`${sheet.booking.id}|${sheet.booking.court_id}|${sheet.booking.start_at}|${sheet.booking.end_at}`}
                 club={club} courts={allCourts} booking={sheet.booking} times={times} busy={busy}
                 onMove={(courtId, time, slots, price) => {
                   // the day comes from the booking, never from the page: the sheet can be opened
                   // from a week whose URL says another day (covered by src/lib/time.test.ts)
                   const { start, end } = moveTarget(sheet.booking.start_at, club.timezone, time, slots, club.slot_minutes);
                   const id = sheet.booking.id, s0 = start.toISOString(), e0 = end.toISOString();
+                  // F1: what this sheet was opened with. The database moves the booking only if it is still there.
+                  const seen = { court_id: sheet.booking.court_id, start_at: sheet.booking.start_at, end_at: sheet.booking.end_at };
                   // 0091: the price the desk was shown and confirmed; the database refuses if it is no longer right
-                  return run(() => createClient().rpc("move_booking_priced", { p_booking: id, p_court: courtId, p_start: s0, p_end: e0, p_expected_price: price }),
-                    undefined, { find: (db) => landed.moved(db, id, courtId, s0, e0), shows: `this booking on ${anyCourtName(courtId)} at ${hhmm(s0, club.timezone)}` });
+                  return run(() => moveBooking(createClient(), { p_booking: id, p_court: courtId, p_start: s0, p_end: e0, p_expected_price: price },
+                    { p_seen_court: seen.court_id, p_seen_start: seen.start_at, p_seen_end: seen.end_at }),
+                    undefined, { find: (db) => landed.moved(db, id, courtId, s0, e0), shows: `this booking on ${anyCourtName(courtId)} at ${hhmm(s0, club.timezone)}` },
+                    async (message) => {
+                      if (!changedElsewhere(message)) return false;
+                      // read the booking again (with its contact, as the calendar shows it) and say what changed
+                      const supabase = createClient();
+                      const { data, error: e } = await supabase.from("bookings").select(STAFF_BOOKING_COLUMNS).eq("id", id).maybeSingle();
+                      const rows = !e && data ? await withContacts(supabase, club.id, [data as Record<string, unknown>]) : null;
+                      const now = rows?.[0] ?? null;
+                      const { text, stillActive } = describeChange(seen, now as Current | null, anyCourtName, club.timezone);
+                      addDirty.current = false;
+                      if (stillActive && now) { setSheet({ kind: "booking", booking: now }); setError(text); }
+                      else { setSheet(null); setNotice(text); }
+                      return true;
+                    });
                 }}
                 onCancel={(clubCaused) => run(() => createClient().rpc("cancel_booking", { p_booking: sheet.booking.id, p_club_caused: clubCaused }),
                   undefined, { find: (db) => landed.status(db, sheet.booking.id, "cancelled"), shows: "this booking as cancelled" })}
@@ -938,8 +1003,22 @@ export default function DayCalendar({ club, courts: allCourts, bookings: initial
         {/* desktop (Phase I-2c): what the list holds, blocks included */}
         <p data-testid="list-count" className="mx-4 mb-2 hidden text-sm text-muted lg:block">{dayCount(shownBookings.length, shownBlocks.length)}</p>
         <ul className="mx-4 mb-24 divide-y divide-grid rounded-xl border border-grid bg-white">
-          {shownBookings.length === 0 && <li className="p-8 text-center text-muted">No bookings this day. Tap a court slot in Courts view to add one.</li>}
-          {listRows.map((r) => r.kind === "block" ? (
+          {shownBookings.length === 0 && <li className="p-8 text-center text-muted">{shownCancelled.length ? "No active bookings this day." : "No bookings this day."} Tap a court slot in Courts view to add one.</li>}
+          {cancelled?.failed && cancelled.date === date && <li role="status" className="px-4 py-2 text-sm text-muted">Couldn&apos;t load this day&apos;s cancelled bookings, so some may be missing below. The list will try again.</li>}
+          {listViewRows.map((r) => r.kind === "cancelled" ? (
+            <li key={`x-${r.c.id}`} data-testid="cancelled-row"
+              className="flex w-full items-center gap-3 bg-paper px-4 py-3 text-muted">
+              <span className="h-10 w-1 rounded bg-grid" />
+              <div className="w-28 shrink-0">
+                <div className="font-medium">{hhmm(r.c.start_at, club.timezone)}–{hhmm(r.c.end_at, club.timezone)}</div>
+                <div className="text-sm">{courtName(r.c.court_id)}</div>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate">{r.c.name ?? "Player"}</div>
+                <div className="text-sm"><span className="font-semibold uppercase tracking-wide">Cancelled</span>{r.c.cancelled_at ? ` · ${cancelledWhen(r.c.cancelled_at, date, club.timezone)}` : ""}</div>
+              </div>
+            </li>
+          ) : r.kind === "block" ? (
             <li key={r.k.id} className="hidden lg:block">
               <button onClick={() => openSheet({ kind: "block", block: r.k })} className="flex w-full items-center gap-3 px-4 py-3 text-left">
                 <span className="hatch h-10 w-1 rounded bg-slate-soft" />
@@ -1046,6 +1125,12 @@ function bookingType(b: Booking) {
 function plural(n: number, one: string) {
   return `${n} ${one}${n === 1 ? "" : "s"}`;
 }
+/** F3: when it was cancelled, in club time: "cancelled at 14:05" on the shown day, otherwise "cancelled Mon 10 Nov, 14:05". */
+export function cancelledWhen(iso: string, day: string, tz: string) {
+  const at = parseISO(iso);
+  return formatInTimeZone(at, tz, "yyyy-MM-dd") === day ? `cancelled at ${formatInTimeZone(at, tz, "HH:mm")}` : `cancelled ${formatInTimeZone(at, tz, "EEE d MMM, HH:mm")}`;
+}
+
 /** "3 bookings", "3 bookings, 1 block", "No bookings". */
 function dayCount(bookings: number, blocks: number) {
   return `${bookings ? plural(bookings, "booking") : "No bookings"}${blocks ? `, ${plural(blocks, "block")}` : ""}`;

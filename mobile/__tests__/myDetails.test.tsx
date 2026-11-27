@@ -37,6 +37,7 @@ jest.mock("expo-router", () => ({ router: { back: () => mockBack(), push: jest.f
 jest.mock("../lib/session", () => ({ useSession: () => ({ status: "signed-in", session: { user: { id: "me" } } }) }));
 
 import MyDetails from "../app/my-details";
+import { sportsKey } from "../lib/sports";
 
 async function wrap(el: ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { gcTime: Infinity } } });
@@ -133,6 +134,25 @@ describe("before the first court booking", () => {
 });
 
 describe("editing later, from Profile", () => {
+  it("sport chips come from the catalogue, alphabetical; a player's own deactivated sport stays removable (#66 review SF2)", async () => {
+    mockDb.row = { name: "Rana", phone: "+96170123456", sports: ["squash"] };
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity, staleTime: Infinity } } });
+    qc.setQueryData(sportsKey, [{ code: "cricket", name: "Cricket" }, { code: "padel", name: "Padel" }, { code: "table_tennis", name: "Table tennis" }], { updatedAt: Date.now() + 864e5 });
+    await render(
+      <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 360, height: 800 }, insets: { top: 0, left: 0, right: 0, bottom: 0 } }}>
+        <QueryClientProvider client={qc}><MyDetails /></QueryClientProvider>
+      </SafeAreaProvider>,
+    );
+    await screen.findByTestId("details-name");
+    const labels = ["Cricket", "Padel", "Table tennis", "Squash", "Tennis"].filter((l) => screen.queryByText(l));
+    expect(labels).toEqual(["Cricket", "Padel", "Table tennis", "Squash"]);   // added in the dashboard: shown; Tennis not in it: not offered
+    await fireEvent.press(screen.getByText("Squash"));
+    await fireEvent.press(screen.getByText("Cricket"));
+    await fireEvent.press(screen.getByTestId("details-save"));
+    await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+    expect(mockDb.updated).toEqual([{ name: "Rana", phone: "+96170123456", sports: ["cricket"] }]);
+  });
+
   it("shows the saved details and optional sports; saves changes", async () => {
     mockDb.row = { name: "Rana Khoury", phone: "+96170123456", sports: ["padel"] };
     await wrap(<MyDetails />);

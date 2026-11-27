@@ -9,7 +9,7 @@ export type Sport = { code: string; name_en: string; name_ar: string; sort_order
 export async function loadRefData(supabase: SupabaseClient): Promise<{ areas: Governorate[]; sports: Sport[] }> {
   const [{ data: areas }, { data: sports }] = await Promise.all([
     supabase.rpc("areas"),
-    supabase.from("sports").select("*").eq("active", true).order("sort_order"),
+    supabase.from("sports").select("*").eq("active", true).order("name_en"),
   ]);
   return { areas: (areas ?? []) as Governorate[], sports: (sports ?? []) as Sport[] };
 }

@@ -150,14 +150,14 @@ as_user $STAFF_B; cat <<EOF
 \echo '17. staff of club B: insert booking on club A court -> court_not_found ; update club A booking -> UPDATE 0 ; move it -> forbidden'
 insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB_B','$COURT2','Walk-in', $S, $E, 'staff', auth.uid());
 update bookings set status='cancelled' where id='$B';
-select move_booking('$B','$COURT3', $S, $E);
+select (case when move_booking_priced('$B','$COURT3', $S, $E, null, (select court_id from bookings where id = '$B'), (select start_at from bookings where id = '$B'), (select end_at from bookings where id = '$B')) is not null then ''::text end);
 EOF
 as_user $ADMIN; cat <<EOF
 \echo '18. admin moves player1 booking to Padel 3 -> ok ; to 02:00 -> outside_opening_hours ; 4h05 -> bad_duration ; 09:45 -> not_on_grid'
-select move_booking('$B','$COURT3', $S, $E);
-select move_booking('$B','$COURT3', (current_date + 1 + time '02:00') at time zone 'Asia/Beirut', (current_date + 1 + time '03:30') at time zone 'Asia/Beirut');
-select move_booking('$B','$COURT3', $S, $S + interval '4 hour 5 min');
-select move_booking('$B','$COURT3', $S + interval '15 min', $E + interval '15 min');
+select (case when move_booking_priced('$B','$COURT3', $S, $E, null, (select court_id from bookings where id = '$B'), (select start_at from bookings where id = '$B'), (select end_at from bookings where id = '$B')) is not null then ''::text end);
+select (case when move_booking_priced('$B','$COURT3', (current_date + 1 + time '02:00') at time zone 'Asia/Beirut', (current_date + 1 + time '03:30') at time zone 'Asia/Beirut', null, (select court_id from bookings where id = '$B'), (select start_at from bookings where id = '$B'), (select end_at from bookings where id = '$B')) is not null then ''::text end);
+select (case when move_booking_priced('$B','$COURT3', $S, $S + interval '4 hour 5 min', null, (select court_id from bookings where id = '$B'), (select start_at from bookings where id = '$B'), (select end_at from bookings where id = '$B')) is not null then ''::text end);
+select (case when move_booking_priced('$B','$COURT3', $S + interval '15 min', $E + interval '15 min', null, (select court_id from bookings where id = '$B'), (select start_at from bookings where id = '$B'), (select end_at from bookings where id = '$B')) is not null then ''::text end);
 \echo '19. staff walk-in 21:30-23:00 -> ok ; 21:00-00:00 -> outside_opening_hours ; 09:30:30 start -> not_on_grid'
 insert into bookings (club_id, court_id, guest_name, guest_phone, start_at, end_at, source, created_by) values ('$CLUB','$COURT','Walk-in','+961', (current_date + 1 + time '21:30') at time zone 'Asia/Beirut', (current_date + 1 + time '23:00') at time zone 'Asia/Beirut', 'staff', auth.uid());
 insert into bookings (club_id, court_id, guest_name, start_at, end_at, source, created_by) values ('$CLUB','$COURT2','X', (current_date + 1 + time '21:00') at time zone 'Asia/Beirut', (current_date + 2 + time '00:00') at time zone 'Asia/Beirut', 'staff', auth.uid());
@@ -575,7 +575,7 @@ select decide_join('$MB','$P3', true);
 select post_match(null,'tennis',null,null,null,null,2,'x','99999999-9999-4999-8999-999999999999');
 EOF
 as_user $ADMIN; cat <<EOF
-select move_booking('99999999-9999-4999-8999-999999999999','$COURT3', (current_date + 9 + time '12:30') at time zone 'Asia/Beirut', (current_date + 9 + time '14:00') at time zone 'Asia/Beirut');
+select (case when move_booking_priced('99999999-9999-4999-8999-999999999999','$COURT3', (current_date + 9 + time '12:30') at time zone 'Asia/Beirut', (current_date + 9 + time '14:00') at time zone 'Asia/Beirut', null, (select court_id from bookings where id = '99999999-9999-4999-8999-999999999999'), (select start_at from bookings where id = '99999999-9999-4999-8999-999999999999'), (select end_at from bookings where id = '99999999-9999-4999-8999-999999999999')) is not null then ''::text end);
 EOF
 as_user $P1; cat <<EOF
 select start_at = (current_date + 9 + time '12:30') at time zone 'Asia/Beirut' from matches where booking_id='99999999-9999-4999-8999-999999999999';
@@ -1009,7 +1009,7 @@ $PSQL -q -d $DB -c "update clubs set timezone='Asia/Beirut', open_time='08:00', 
 # moving a booking must land on the day it is given, not on whatever day the calendar happens to show
 $PSQL -q -d $DB -c "delete from bookings where club_id='$CLUB' and court_id='$COURT4';" >/dev/null
 MV=$($PSQL -At -q -d $DB -c "insert into bookings (club_id, court_id, guest_name, start_at, end_at, status, source, created_by, price_usd, fee_usd) values ('$CLUB','$COURT4','Mover', (current_date + 16 + time '09:00') at time zone 'Asia/Beirut', (current_date + 16 + time '10:00') at time zone 'Asia/Beirut', 'confirmed','staff','$ADMIN',20,0) returning id" | head -1)
-check $ADMIN "98a a move lands on the day it was given, three days later" "select move_booking('$MV','$COURT4', (current_date + 19 + time '14:00') at time zone 'Asia/Beirut', (current_date + 19 + time '15:00') at time zone 'Asia/Beirut'); select ((start_at at time zone 'Asia/Beirut')::date - current_date)||'/'||to_char(start_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='$MV';" "19/14:00"
+check $ADMIN "98a a move lands on the day it was given, three days later" "select (case when move_booking_priced('$MV','$COURT4', (current_date + 19 + time '14:00') at time zone 'Asia/Beirut', (current_date + 19 + time '15:00') at time zone 'Asia/Beirut', null, (select court_id from bookings where id = '$MV'), (select start_at from bookings where id = '$MV'), (select end_at from bookings where id = '$MV')) is not null then ''::text end); select ((start_at at time zone 'Asia/Beirut')::date - current_date)||'/'||to_char(start_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='$MV';" "19/14:00"
 
 echo "--- AH. how many players a match is looking for (1-30)"
 # its own organiser: by this point P1 runs many live games, and M3-H caps an organiser at 10 (S12)
@@ -1513,16 +1513,16 @@ echo "--- AN. a staff move keeps the club's minimum and maximum booking length (
 at13() { echo "((current_date + 13 + time '$1') at time zone 'Asia/Beirut')"; }
 MB=$({ who_sql $ADMIN; echo "select staff_book('$CLUB','$COURT3', $(at13 09:00), $(at13 10:00), 'Mover', null);"; } | $PSQL -At -d $DB 2>&1 | grep -E '^[0-9a-f-]{36}$' | tail -1)
 check service "AN0 fixture: a 1 h desk booking" "select count(*) from bookings where id='$MB' and status='confirmed';" 1
-fails_with $ADMIN "AN1 moving it to 30 min (club minimum 1 h) is refused" "select move_booking('$MB','$COURT3', $(at13 09:00), $(at13 09:30));" bad_duration
-fails_with $ADMIN "AN2 moving it to 4 h (club maximum 3 h) is refused" "select move_booking('$MB','$COURT3', $(at13 09:00), $(at13 13:00));" bad_duration
+fails_with $ADMIN "AN1 moving it to 30 min (club minimum 1 h) is refused" "select (case when move_booking_priced('$MB','$COURT3', $(at13 09:00), $(at13 09:30), null, (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" bad_duration
+fails_with $ADMIN "AN2 moving it to 4 h (club maximum 3 h) is refused" "select (case when move_booking_priced('$MB','$COURT3', $(at13 09:00), $(at13 13:00), null, (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" bad_duration
 check service "AN3 ...and it is unchanged" "select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'-'||to_char(end_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='$MB';" "09:00-10:00"
 # 0091: a new length changes a walk-in's price, so it is moved with the confirmed new price (move_booking_priced)
-check $ADMIN "AN4 a new length within the limits is accepted (1 h 30)" "select 'ok' from (select move_booking_priced('$MB','$COURT3', $(at13 11:00), $(at13 12:30), quote_price('$COURT3', $(at13 11:00), $(at13 12:30)))) x;" ok
+check $ADMIN "AN4 a new length within the limits is accepted (1 h 30)" "select 'ok' from (select move_booking_priced('$MB','$COURT3', $(at13 11:00), $(at13 12:30), quote_price('$COURT3', $(at13 11:00), $(at13 12:30)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB'))) x;" ok
 $PSQL -q -d $DB -c "update clubs set min_booking_minutes = 120 where id='$CLUB';" >/dev/null
-check $ADMIN "AN5 after the club raises its minimum to 2 h, the booking can still move at its existing length" "select 'ok' from (select move_booking_priced('$MB','$COURT2', $(at13 14:00), $(at13 15:30), quote_price('$COURT2', $(at13 14:00), $(at13 15:30)))) x;" ok
-fails_with $ADMIN "AN6 ...but not to another length below the new minimum" "select move_booking_priced('$MB','$COURT2', $(at13 14:00), $(at13 15:00), quote_price('$COURT2', $(at13 14:00), $(at13 15:00)));" bad_duration
+check $ADMIN "AN5 after the club raises its minimum to 2 h, the booking can still move at its existing length" "select 'ok' from (select move_booking_priced('$MB','$COURT2', $(at13 14:00), $(at13 15:30), quote_price('$COURT2', $(at13 14:00), $(at13 15:30)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB'))) x;" ok
+fails_with $ADMIN "AN6 ...but not to another length below the new minimum" "select move_booking_priced('$MB','$COURT2', $(at13 14:00), $(at13 15:00), quote_price('$COURT2', $(at13 14:00), $(at13 15:00)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB'));" bad_duration
 $PSQL -q -d $DB -c "update clubs set min_booking_minutes = 60 where id='$CLUB';" >/dev/null
-fails_with $ADMIN "AN7 the slot trigger still refuses an off-grid move" "select move_booking_priced('$MB','$COURT2', $(at13 14:10), $(at13 15:40), (select price_usd from bookings where id='$MB'));" not_on_grid
+fails_with $ADMIN "AN7 the slot trigger still refuses an off-grid move" "select move_booking_priced('$MB','$COURT2', $(at13 14:10), $(at13 15:40), (select price_usd from bookings where id='$MB'), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB'));" not_on_grid
 
 echo "--- AL. every migration from 0041 can be applied twice"
 # What this asserts: re-application raises no error. It does NOT assert that a second application

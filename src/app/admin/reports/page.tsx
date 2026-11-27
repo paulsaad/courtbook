@@ -35,5 +35,8 @@ export default async function AdminReports({ searchParams }: { searchParams: Pro
   const stateRes = reports.length ? await supabase.rpc("admin_report_state", { p_reports: reports.map((r) => r.id) }) : null;
   const state = !stateRes ? (missing ? null : {}) : stateRes.error && isMissingFunction(stateRes.error) ? null
     : Object.fromEntries(((loaded(stateRes, "the reports").data ?? []) as ReportState[]).map((x) => [x.report_id, x]));
-  return <><WorkNav area="admin" active="reports" /><ReportsBoard status={status} reports={reports} blocksReceived={blocksReceived} unavailable={missing} failed={!!error && !missing} state={state} /></>;
+  // player photo draft (#67, decision 4): the photo controls are offered only to a listed photo moderator (an admin
+  // alone is not one); the database checks again on every call. Any error, or no photo schema: not offered.
+  const photos = (await supabase.rpc("is_photo_moderator").then((r) => r, () => ({ data: null }))).data === true;
+  return <><WorkNav area="admin" active="reports" /><ReportsBoard status={status} reports={reports} blocksReceived={blocksReceived} unavailable={missing} failed={!!error && !missing} state={state} photos={photos} /></>;
 }
