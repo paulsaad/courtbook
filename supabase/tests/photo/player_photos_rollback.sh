@@ -49,7 +49,7 @@ printf '%s\n' "insert into auth.users (id, phone) values ('a2000000-0000-4000-80
   "set role service_role;" "select set_player_photo('a2000000-0000-4000-8000-000000000001', decode('52494646' || '00000000' || '57454250' || repeat('00', 60), 'hex'), 192, 192);" \
   | $PSQL -q -d $C -v ON_ERROR_STOP=1 >/dev/null || bad "R2 fixture"
 before=$(fp $C); r=$(apply $C $DOWN)
-echo "$r" | grep -q "rollback_blocked: 1 stored photo(s) would be deleted" && ok "R2a a stored photo blocks the rollback, with the reason" || bad "R2a" "$r"
+echo "$r" | grep -q "rollback_blocked: 1 stored photo(s) and 0 evidence copies would be deleted" && ok "R2a a stored photo blocks the rollback, with the reason" || bad "R2a" "$r"
 [ "$before" = "$(fp $C)" ] && [ "$($PSQL -d $C -At -c "select count(*) from player_photos")" = 1 ] && ok "R2b the refused rollback changed nothing (the photo is still there)" || bad "R2b the refused rollback changed something"
 r=$({ echo "set local courtbook.discard_player_photos = 'yes';"; cat $DOWN; } | $PSQL -q -d $C -v ON_ERROR_STOP=1 -1 2>&1 | grep ERROR)
 [ -z "$r" ] && [ "$($PSQL -d $C -At -c "select to_regclass('public.player_photos') is null")" = t ] && ok "R2c confirmed in the transaction, it removes the feature and its photos" || bad "R2c" "$r"
@@ -57,14 +57,33 @@ r=$({ echo "set local courtbook.discard_player_photos = 'yes';"; cat $DOWN; } | 
 # R4 (review of b89b9ff, finding 8): an admin removal is in the append-only log; the rollback keeps the wider action
 # list (so that record stays valid), says so, and the feature applies again afterwards
 apply $C $UP >/dev/null
-printf '%s\n' "insert into moderation_log (action, profile_id, note) values ('remove_photo', 'a2000000-0000-4000-8000-000000000001', 'test');" \
+printf '%s\n' "insert into moderation_log (action, profile_id, note) values ('hide_photo', 'a2000000-0000-4000-8000-000000000001', 'test');" \
   | $PSQL -q -d $C -v ON_ERROR_STOP=1 >/dev/null || bad "R4 fixture"
 r=$($PSQL -q -d $C -v ON_ERROR_STOP=1 -1 -f $DOWN 2>&1)
-echo "$r" | grep -q "keeps its remove_photo entries" && ! echo "$r" | grep -q ERROR \
-  && [ "$($PSQL -d $C -At -c "select pg_get_constraintdef(oid) like '%remove_photo%' from pg_constraint where conname = 'moderation_log_action_check'")" = t ] \
-  && [ "$($PSQL -d $C -At -c "select count(*) from moderation_log where action = 'remove_photo'")" = 1 ] \
-  && ok "R4a with a remove_photo entry in the log: the rollback keeps the entry and the wider action list, and says so" || bad "R4a" "$r"
+echo "$r" | grep -q "keeps its photo moderation entries" && ! echo "$r" | grep -q ERROR \
+  && [ "$($PSQL -d $C -At -c "select pg_get_constraintdef(oid) like '%hide_photo%' from pg_constraint where conname = 'moderation_log_action_check'")" = t ] \
+  && [ "$($PSQL -d $C -At -c "select count(*) from moderation_log where action = 'hide_photo'")" = 1 ] \
+  && ok "R4a with a hide_photo entry in the log: the rollback keeps the entry and the wider action list, and says so" || bad "R4a" "$r"
 r=$(apply $C $UP); [ -z "$r" ] && ok "R4b the feature applies again after that rollback" || bad "R4b" "$r"
+
+# R5 (decision 4): photo evidence of an open report, or one on legal hold, is never discarded by a rollback, even
+# confirmed; once the report is closed and not held, it goes only with the confirmation
+U=a2000000-0000-4000-8000-000000000001; V=a2000000-0000-4000-8000-000000000002
+printf '%s\n' "insert into auth.users (id, phone) values ('$V', '+96171999002') on conflict do nothing;" \
+  "insert into reports (id, reporter_id, target_kind, profile_id, target_key, reason) values ('a2000000-0000-4000-8000-0000000000f1', '$V', 'player', '$U', '$U', 'inappropriate');" \
+  "insert into photo_evidence (report_id, profile_id, image, width, height, version, reason) values ('a2000000-0000-4000-8000-0000000000f1', '$U', decode('52494646' || '00000000' || '57454250' || repeat('00', 60), 'hex'), 192, 192, 1, 'reported');" \
+  | $PSQL -q -d $C -v ON_ERROR_STOP=1 >/dev/null || bad "R5 fixture"
+before=$(fp $C)
+r=$({ echo "set local courtbook.discard_player_photos = 'yes';"; cat $DOWN; } | $PSQL -q -d $C -v ON_ERROR_STOP=1 -1 2>&1 | grep ERROR)
+echo "$r" | grep -q "rollback_blocked: 1 photo evidence copies belong to open reports" && [ "$before" = "$(fp $C)" ] \
+  && ok "R5a evidence on an open report blocks the rollback even when confirmed, and nothing changes" || bad "R5a" "$r"
+$PSQL -q -d $C -c "update reports set legal_hold = true, status = 'dismissed', closed_at = now() where id = 'a2000000-0000-4000-8000-0000000000f1'" >/dev/null
+r=$({ echo "set local courtbook.discard_player_photos = 'yes';"; cat $DOWN; } | $PSQL -q -d $C -v ON_ERROR_STOP=1 -1 2>&1 | grep ERROR)
+echo "$r" | grep -q "rollback_blocked: 1 photo evidence copies belong to open reports or reports on legal hold" && ok "R5b … and so does evidence on a closed report under legal hold" || bad "R5b" "$r"
+$PSQL -q -d $C -c "update reports set legal_hold = false where id = 'a2000000-0000-4000-8000-0000000000f1'" >/dev/null
+r=$(apply $C $DOWN); echo "$r" | grep -q "rollback_blocked: 0 stored photo(s) and 1 evidence copies" && ok "R5c closed and not held: blocked without the confirmation" || bad "R5c" "$r"
+r=$({ echo "set local courtbook.discard_player_photos = 'yes';"; cat $DOWN; } | $PSQL -q -d $C -v ON_ERROR_STOP=1 -1 2>&1 | grep ERROR)
+[ -z "$r" ] && [ "$($PSQL -d $C -At -c "select to_regclass('public.photo_evidence') is null")" = t ] && ok "R5d … and removed with it" || bad "R5d" "$r"
 
 # R3
 r=$(apply $B $DOWN); echo "$r" | grep -q "nothing to roll back" && ok "R3a a second rollback refuses: nothing to roll back" || bad "R3a" "$r"

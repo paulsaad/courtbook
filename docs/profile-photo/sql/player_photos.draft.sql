@@ -154,25 +154,145 @@ revoke all on function claim_photo_upload(uuid) from public, anon, authenticated
 grant execute on function claim_photo_upload(uuid) to service_role;
 
 -- 4c -----------------------------------------------------------------------------------------------------------------
--- Review requirement 2 (26 Nov): an admin removes an inappropriate photo without suspending the account. Admin only,
--- a reason is required, and the action is in the moderation log like the other safe actions (0082). The player can
--- upload again; a repeat is handled by suspension, as today.
+-- Moderation of photos (Paul, 27 Nov, decision 4): an authorized moderator may HIDE an inappropriate photo; the photo
+-- is kept as evidence, under the report's own retention and legal hold; reported-photo evidence is readable only by
+-- specifically authorized moderators, and every reading is logged. Being an admin alone gives no access to photos.
+--   * photo_moderators: who is authorized. Managed in the Supabase dashboard only (no client, no server key); every
+--     change is written to the moderation log by a trigger. A photo moderator must also be an admin (the reports
+--     page is admin-only) whose own account is neither suspended nor closing.
+--   * photo_evidence: a copy of the photo, tied to a report. Taken when a player is reported (so a later change or
+--     removal by the player loses nothing) and when a moderator hides the photo. Nobody reads the table directly.
+--   * Retention follows the report: the copy stays while the report is open or on legal hold, and goes when the
+--     180-day rule clears the report's own text (enforce_report_retention, 0082, unchanged) or the report is deleted.
+--     Account deletion keeps it, like the report's snapshot (0086: "Moderation reports and snapshots stay").
 alter table moderation_log drop constraint if exists moderation_log_action_check;
 alter table moderation_log add constraint moderation_log_action_check
-  check (action in ('resolve', 'reopen', 'suspend', 'unsuspend', 'hide_message', 'legal_hold_on', 'legal_hold_off', 'clear_text', 'remove_photo'));
+  check (action in ('resolve', 'reopen', 'suspend', 'unsuspend', 'hide_message', 'legal_hold_on', 'legal_hold_off', 'clear_text',
+                    'hide_photo', 'view_photo_evidence', 'photo_moderator_on', 'photo_moderator_off'));
 
-create or replace function admin_remove_player_photo(p_profile uuid, p_reason text) returns boolean
+create table if not exists photo_moderators (
+  profile_id uuid primary key references profiles(id) on delete cascade,
+  note       text check (char_length(coalesce(note, '')) <= 300),
+  added_at   timestamptz not null default now()
+);
+alter table photo_moderators enable row level security;   -- no policy
+revoke all on photo_moderators from public, anon, authenticated, service_role;
+
+create or replace function photo_moderators_log() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if not is_admin() then raise exception 'forbidden'; end if;
+  if tg_op in ('INSERT', 'UPDATE') then
+    perform log_moderation('photo_moderator_on', null, new.profile_id, null, coalesce(new.note, 'added'));
+  end if;
+  if tg_op in ('DELETE', 'UPDATE') then
+    perform log_moderation('photo_moderator_off', null, old.profile_id, null, 'removed');
+  end if;
+  return null;
+end $$;
+revoke all on function photo_moderators_log() from public, anon, authenticated;
+drop trigger if exists photo_moderators_log on photo_moderators;
+create trigger photo_moderators_log after insert or update or delete on photo_moderators
+  for each row execute function photo_moderators_log();
+
+create or replace function is_photo_moderator() returns boolean
+language sql stable security definer set search_path = public as $$
+  select auth.uid() is not null and is_admin()
+     and exists (select 1 from photo_moderators where profile_id = auth.uid())
+     and not exists (select 1 from account_suspensions where profile_id = auth.uid())
+     and not deletion_requested(auth.uid());
+$$;
+revoke all on function is_photo_moderator() from public, anon;
+grant execute on function is_photo_moderator() to authenticated;   -- the reports page shows the photo controls by it
+
+create table if not exists photo_evidence (
+  id          uuid primary key default gen_random_uuid(),
+  report_id   uuid not null references reports(id) on delete cascade,
+  profile_id  uuid not null,                       -- whose photo; no foreign key: evidence outlives the account
+  image       bytea not null check (octet_length(image) between 64 and 65536),
+  width       int not null,
+  height      int not null,
+  version     int not null,
+  reason      text not null check (reason in ('reported', 'hidden')),
+  captured_at timestamptz not null default clock_timestamp(),
+  unique (report_id, version)
+);
+alter table photo_evidence enable row level security;     -- no policy
+revoke all on photo_evidence from public, anon, authenticated, service_role;
+
+-- a player report captures the reported player's current photo
+create or replace function photo_evidence_on_report() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.target_kind = 'player' and new.profile_id is not null then
+    insert into photo_evidence (report_id, profile_id, image, width, height, version, reason)
+    select new.id, p.profile_id, p.image, p.width, p.height, p.version, 'reported' from player_photos p where p.profile_id = new.profile_id
+    on conflict (report_id, version) do nothing;
+  end if;
+  return null;
+end $$;
+revoke all on function photo_evidence_on_report() from public, anon, authenticated;
+drop trigger if exists photo_evidence_on_report on reports;
+create trigger photo_evidence_on_report after insert on reports for each row execute function photo_evidence_on_report();
+
+-- the copy goes when the report's own text is cleared by the retention rule (never while open or on legal hold)
+create or replace function photo_evidence_retention() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.snapshot is null and old.snapshot is not null and new.status <> 'open' and not new.legal_hold then
+    delete from photo_evidence where report_id = new.id;
+  end if;
+  return null;
+end $$;
+revoke all on function photo_evidence_retention() from public, anon, authenticated;
+drop trigger if exists photo_evidence_retention on reports;
+create trigger photo_evidence_retention after update of snapshot on reports for each row execute function photo_evidence_retention();
+
+-- hide: the photo leaves every viewer at once (the player may upload a new one); a copy is kept with the report
+create or replace function moderator_hide_player_photo(p_report uuid, p_reason text) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare r reports%rowtype; ph player_photos%rowtype;
+begin
+  if not is_photo_moderator() then raise exception 'forbidden'; end if;
   if coalesce(btrim(p_reason), '') = '' then raise exception 'reason_required'; end if;
-  delete from player_photos where profile_id = p_profile;
-  if not found then return false; end if;                                 -- nothing to remove: nothing logged
-  perform log_moderation('remove_photo', null, p_profile, null, btrim(p_reason));
+  select * into r from reports where id = p_report for update;
+  if not found or r.target_kind not in ('player', 'message', 'game') or r.profile_id is null then raise exception 'not_found'; end if;
+  -- a report past the 180-day rule has had its text cleared; a copy tied to it now would never be cleared
+  if r.status <> 'open' and not r.legal_hold and r.closed_at < now() - interval '180 days' then raise exception 'report_expired'; end if;
+  delete from player_photos where profile_id = r.profile_id returning * into ph;
+  if not found then return false; end if;                                 -- nothing to hide: nothing logged
+  insert into photo_evidence (report_id, profile_id, image, width, height, version, reason)
+  values (r.id, ph.profile_id, ph.image, ph.width, ph.height, ph.version, 'hidden')
+  on conflict (report_id, version) do nothing;                            -- already captured at report time
+  perform log_moderation('hide_photo', r.id, r.profile_id, null, btrim(p_reason));
   return true;
 end $$;
-revoke all on function admin_remove_player_photo(uuid, text) from public, anon;
-grant execute on function admin_remove_player_photo(uuid, text) to authenticated, service_role;   -- is_admin() decides (as 0082's admin_* functions)
+revoke all on function moderator_hide_player_photo(uuid, text) from public, anon;
+grant execute on function moderator_hide_player_photo(uuid, text) to authenticated;   -- is_photo_moderator() decides
+
+-- which photo copies a report holds (no bytes); the reports page lists them for photo moderators only
+create or replace function moderator_photo_evidence_list(p_report uuid)
+returns table (evidence_id uuid, version int, reason text, captured_at timestamptz)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not is_photo_moderator() then raise exception 'forbidden'; end if;
+  return query select e.id, e.version, e.reason, e.captured_at from photo_evidence e where e.report_id = p_report order by e.captured_at;
+end $$;
+revoke all on function moderator_photo_evidence_list(uuid) from public, anon;
+grant execute on function moderator_photo_evidence_list(uuid) to authenticated;
+
+-- one copy's bytes; every reading is logged, whatever the caller does with it
+create or replace function moderator_photo_evidence(p_evidence uuid) returns bytea
+language plpgsql volatile security definer set search_path = public as $$
+declare e photo_evidence%rowtype;
+begin
+  if not is_photo_moderator() then raise exception 'forbidden'; end if;
+  select * into e from photo_evidence where id = p_evidence;
+  if not found then raise exception 'not_found'; end if;
+  perform log_moderation('view_photo_evidence', e.report_id, e.profile_id, null, 'version ' || e.version);
+  return e.image;
+end $$;
+revoke all on function moderator_photo_evidence(uuid) from public, anon;
+grant execute on function moderator_photo_evidence(uuid) to authenticated;
 
 -- 5 ------------------------------------------------------------------------------------------------------------------
 -- 0086's lock-out: a closed account changes nothing, on every table (0086 test E1 requires it of a new table).

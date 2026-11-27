@@ -66,33 +66,53 @@ describe("Reports (admin)", () => {
     expect(calls).toEqual([{ fn: "admin_suspend", args: { p_profile: "p2", p_reason: "threats" } }]);
   });
 
-  it("removes the reported player's photo only with a reason, without suspending (draft #67)", async () => {
+  it("a photo moderator hides the reported player's photo only with a reason, without suspending (#67, decision 4)", async () => {
     answer = () => ({ data: true, error: null });
     render(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} photos />);
-    fireEvent.click(screen.getByText("Remove photo"));
-    const go = screen.getAllByText("Remove photo").find((b) => b.className.includes("bg-action")) as HTMLButtonElement;
+    fireEvent.click(screen.getByText("Hide photo"));
+    const go = screen.getAllByText("Hide photo").find((b) => b.className.includes("bg-action")) as HTMLButtonElement;
     expect(go.disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText(/Why remove Sami's photo/), { target: { value: " nudity " } });
+    fireEvent.change(screen.getByLabelText(/Why hide Sami's photo/), { target: { value: " nudity " } });
     fireEvent.click(go);
     await waitFor(() => expect(refresh).toHaveBeenCalled());
-    expect(calls).toEqual([{ fn: "admin_remove_player_photo", args: { p_profile: "p2", p_reason: "nudity" } }]);
-    expect(screen.getByRole("status").textContent).toBe("Sami's photo was removed.");
+    expect(calls).toEqual([{ fn: "moderator_hide_player_photo", args: { p_report: "r1", p_reason: "nudity" } }]);
+    expect(screen.getByRole("status").textContent).toBe("Sami's photo is hidden. A copy is kept with this report.");
   });
-  it("no photo to remove: says so, nothing refreshed", async () => {
+  it("no photo to hide: says so, nothing refreshed", async () => {
     answer = () => ({ data: false, error: null });
     render(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} photos />);
-    fireEvent.click(screen.getByText("Remove photo"));
-    fireEvent.change(screen.getByLabelText(/Why remove Sami's photo/), { target: { value: "x" } });
-    fireEvent.click(screen.getAllByText("Remove photo").find((b) => b.className.includes("bg-action"))!);
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Sami has no photo to remove."));
+    fireEvent.click(screen.getByText("Hide photo"));
+    fireEvent.change(screen.getByLabelText(/Why hide Sami's photo/), { target: { value: "x" } });
+    fireEvent.click(screen.getAllByText("Hide photo").find((b) => b.className.includes("bg-action"))!);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Sami has no photo to hide."));
     expect(refresh).not.toHaveBeenCalled();
   });
-  it("not offered on a report without a player, nor where the photo schema is missing", () => {
+  it("lists the report's photo copies as links to the no-store evidence route, saying each opening is recorded", async () => {
+    answer = () => ({ data: [{ evidence_id: "e1", version: 1, reason: "reported", captured_at: "2026-11-20T10:00:00Z" }, { evidence_id: "e2", version: 2, reason: "hidden", captured_at: "2026-11-21T10:00:00Z" }], error: null });
+    render(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} photos />);
+    fireEvent.click(screen.getByText("Photo evidence"));
+    await waitFor(() => expect(screen.getByLabelText("Photo evidence")).toBeTruthy());
+    expect(calls).toEqual([{ fn: "moderator_photo_evidence_list", args: { p_report: "r1" } }]);
+    const links = screen.getByLabelText("Photo evidence").querySelectorAll("a");
+    expect([...links].map((l) => l.getAttribute("href"))).toEqual(["/api/admin/photo-evidence/e1", "/api/admin/photo-evidence/e2"]);
+    expect([...links].every((l) => l.getAttribute("rel")?.includes("noreferrer"))).toBe(true);
+    expect(screen.getByText(/recorded in the moderation log/)).toBeTruthy();
+  });
+  it("a refused evidence list (not a photo moderator) shows the error, no list", async () => {
+    answer = () => ({ data: null, error: { message: "forbidden" } });
+    render(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} photos />);
+    fireEvent.click(screen.getByText("Photo evidence"));
+    await waitFor(() => expect(calls.length).toBe(1));
+    expect(screen.queryByLabelText("Photo evidence")).toBeNull();
+  });
+  it("no photo controls on a report without a player, nor for an admin who is not a photo moderator", () => {
     render(<ReportsBoard status="open" reports={[report({ profile_id: null })]} unavailable={false} failed={false} photos />);
-    expect(screen.queryByText("Remove photo")).toBeNull();
+    expect(screen.queryByText("Hide photo")).toBeNull();
+    expect(screen.queryByText("Photo evidence")).toBeNull();
     cleanup();
     render(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} />);
-    expect(screen.queryByText("Remove photo")).toBeNull();
+    expect(screen.queryByText("Hide photo")).toBeNull();
+    expect(screen.queryByText("Photo evidence")).toBeNull();
   });
 
   it("lifts a suspension", async () => {

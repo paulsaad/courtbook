@@ -63,8 +63,8 @@ Also verified:
 the test runner).
 
 ## Tests
-- `PSQL="sudo -u postgres psql" bash supabase/tests/photo/player_photos.sh` — 36 database cases on a scratch DB
-  (visibility, blocks, pending, cancelled games, suspension, admin; the real close and data step; races; legal hold;
+- `PSQL="sudo -u postgres psql" bash supabase/tests/photo/player_photos.sh` — 65 database cases on a scratch DB
+  (visibility, blocks, pending, cancelled games, suspension, photo moderation and evidence; the real close and data step; races; legal hold;
   lock-out; exact rights; byte and size limits). `CONTROL=1` weakens the visibility rule: the 10 privacy cases fail.
 - With the draft: `run.sh` 381/381; `m86/deletion86.sh`, `m86/pipeline_e2e.sh`, `m86/races86.sh` pass.
 - `npx vitest run src/app/api/player-photo` — 36 cases: EXIF/GPS removal (fails if metadata is kept), pixel limit
@@ -73,26 +73,36 @@ the test runner).
 
 ## Moderation and the upload limit (27 Nov, review requirements 2 and 3)
 
-- **Admin removal:** `admin_remove_player_photo(profile, reason)`. Admin only; a reason is required; the photo is deleted
-  without suspending the account; the action is in the append-only moderation log as `remove_photo`. The reports board
-  offers "Remove photo" on a report about a player, only where the photo schema exists, and says when there was no
-  photo to remove.
+- **Moderation (Paul's decision 4, 27 Nov; replaces the earlier admin removal):**
+  - *Who:* a **photo moderator** — an admin listed in `photo_moderators`, whose own account is active. The list is kept
+    in the Supabase dashboard only (no client or server-key access); each addition and removal is written to the
+    moderation log by a trigger. Being an admin alone gives no access to any player photo.
+  - *Hide:* `moderator_hide_player_photo(report, reason)` removes the photo from every viewer at once, without suspending
+    the account, and keeps a copy with the report. Reason required; logged as `hide_photo` (who, report, whose, why).
+    The player can upload a new one; a repeat is handled by suspension.
+  - *Evidence:* `photo_evidence` keeps a copy of the photo **when a player is reported** (so a later change or removal by
+    the player loses nothing) and **when it is hidden**. Nobody reads the table directly. A photo moderator lists the
+    copies of a report (`moderator_photo_evidence_list`, no bytes) and opens one through
+    `/api/admin/photo-evidence/[id]` (`moderator_photo_evidence`); **every opening is logged** (`view_photo_evidence`).
+    The route is `private, no-store`, no ETag, `no-referrer`; any refusal is the same 404.
+  - *Retention and legal hold:* a copy lives as long as its report's text: kept while the report is open or on legal
+    hold, deleted when the 180-day rule clears the report's text (0082's `enforce_report_retention`, unchanged) or the
+    report is deleted. A held report's copy stays even if its text is cleared another way. Account deletion keeps it,
+    as 0086 keeps report snapshots. A hide on a report already past the rule is refused (`report_expired`).
+  - *Rollback:* refuses outright while any copy belongs to an open report or one on legal hold (no override); other
+    copies go only with the same explicit confirmation as photos.
+  - The reports board shows "Hide photo" and "Photo evidence" only to photo moderators (`is_photo_moderator`); the
+    database checks again on every call.
 - **Upload limit:** `claim_photo_upload(actor)`, server only, before the image is decoded: 10 attempts an hour per
   account (counted one at a time under a per-account lock), closed and suspended accounts refused first; 429 with a
   fixed message.
-- **Open decisions for Paul (review of b89b9ff, findings 2 and 3):**
-  1. Removing a photo deletes it and keeps no copy, also when the report is on legal hold. If the photo itself is the
-     evidence, the removal destroys it. Options: refuse removal while a report about the player is on legal hold; keep
-     a hidden copy for the hold; or accept and document it.
-  2. Admins have no view of a reported photo in the app (by design so far): they decide on the report's text alone.
-     Options: an admin-only view of a reported player's photo, or accept and document it.
+- The two open decisions from the review of b89b9ff (legal hold; admin view of a reported photo) were decided by Paul on
+  27 Nov (decision 4) and are implemented as above.
 
 ## Not in this draft
 - The phone app. Display needs no new server work (the app can call `match_photo_versions` / `player_photo` directly
   and render the bytes); upload needs the route to accept the app's bearer token. Proposed as a follow-up.
 - Photos anywhere else (player lists, chat). Only the game's player list and the profile.
-- Moderation/reporting of an offensive photo: the existing report flow covers the player; an admin "remove photo"
-  action is a small follow-up if Paul wants it before launch.
 
 ## Rollback (26 Nov)
 

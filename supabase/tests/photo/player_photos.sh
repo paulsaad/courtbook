@@ -115,12 +115,12 @@ check "P15 exact table rights: nobody but the owner (anon, authenticated and ser
   "^anon=- authenticated=- service_role=-$"
 check "P15b exact function rights (anon none; players read, remove; only the server writes; internals for nobody)" \
   "$(q "select string_agg(f || ':' || (case when has_function_privilege('anon', f, 'EXECUTE') then 'A' else '' end) || (case when has_function_privilege('authenticated', f, 'EXECUTE') then 'U' else '' end), ' ' order by f)
-        from unnest(array['admin_remove_player_photo(uuid,text)','can_see_player_photo(uuid,uuid)','claim_photo_upload(uuid)','match_photo_versions(uuid)','my_photo_version()','player_photo(uuid)','player_photo_on_closure()','remove_player_photo()','set_player_photo(uuid,bytea,integer,integer)']) f;")" \
-  "^admin_remove_player_photo\(uuid,text\):U can_see_player_photo\(uuid,uuid\): claim_photo_upload\(uuid\): match_photo_versions\(uuid\):U my_photo_version\(\):U player_photo\(uuid\):U player_photo_on_closure\(\): remove_player_photo\(\):U set_player_photo\(uuid,bytea,integer,integer\):$"
+        from unnest(array['can_see_player_photo(uuid,uuid)','claim_photo_upload(uuid)','match_photo_versions(uuid)','my_photo_version()','player_photo(uuid)','player_photo_on_closure()','remove_player_photo()','set_player_photo(uuid,bytea,integer,integer)','is_photo_moderator()','moderator_hide_player_photo(uuid,text)','moderator_photo_evidence_list(uuid)','moderator_photo_evidence(uuid)','photo_moderators_log()','photo_evidence_on_report()','photo_evidence_retention()']) f;")" \
+  "^can_see_player_photo\(uuid,uuid\): claim_photo_upload\(uuid\): is_photo_moderator\(\):U match_photo_versions\(uuid\):U moderator_hide_player_photo\(uuid,text\):U moderator_photo_evidence\(uuid\):U moderator_photo_evidence_list\(uuid\):U my_photo_version\(\):U photo_evidence_on_report\(\): photo_evidence_retention\(\): photo_moderators_log\(\): player_photo\(uuid\):U player_photo_on_closure\(\): remove_player_photo\(\):U set_player_photo\(uuid,bytea,integer,integer\):$"
 check "P15c RLS on, no policy; every function SECURITY DEFINER with a fixed search_path" \
   "$(q "select (select relrowsecurity from pg_class where relname = 'player_photos') || ' ' || (select count(*) from pg_policies where tablename = 'player_photos') || ' ' ||
-        (select count(*) from pg_proc where proname in ('can_see_player_photo','player_photo','match_photo_versions','my_photo_version','set_player_photo','remove_player_photo','player_photo_on_closure','claim_photo_upload','admin_remove_player_photo') and prosecdef and proconfig @> array['search_path=public']);")" \
-  "^true 0 9$"
+        (select count(*) from pg_proc where proname in ('can_see_player_photo','player_photo','match_photo_versions','my_photo_version','set_player_photo','remove_player_photo','player_photo_on_closure','claim_photo_upload','moderator_hide_player_photo','moderator_photo_evidence_list','moderator_photo_evidence','is_photo_moderator','photo_moderators_log','photo_evidence_on_report','photo_evidence_retention') and prosecdef and proconfig @> array['search_path=public']);")" \
+  "^true 0 15$"
 check "P15d the server key cannot write or read the table directly" \
   "$(q "$(svc) insert into player_photos (profile_id, image, width, height) values ('$B', $IMG, 192, 192);")" "ERR .*permission denied"
 check "P13d a stored photo at exactly the cap (65536 bytes) is accepted; one byte more is not" \
@@ -161,22 +161,65 @@ claim_race() {
 check "U6 30 concurrent upload claims for one player: exactly 10 accepted and recorded (the per-account lock)" "$(claim_race)" "^10 10 done$"
 check "U5 a closed or suspended account is refused before any decode" \
   "$(q "insert into account_suspensions (profile_id, reason, suspended_by) values ('$B', 'test', '$ADMIN'); $(claim $B)")$(q "$(fresh $B) select close_my_account('web') is not null; reset role; $(claim $B)")" "ERR suspended.*ERR account_closed"
-# review requirement 2 (26 Nov): an admin removes an inappropriate photo, without suspending the account
-check "M1 an admin removes a photo with a reason: gone, logged (who, whose, why), the account not suspended" \
-  "$(q "$(put $B) $(as $ADMIN) select admin_remove_player_photo('$B', 'nudity'); reset role;
-        select (select count(*) from player_photos where profile_id = '$B') || ' ' ||
-               (select admin_id = '$ADMIN' and profile_id = '$B' and note = 'nudity' from moderation_log where action = 'remove_photo') || ' ' ||
-               (select count(*) from account_suspensions where profile_id = '$B');")" "^t 0 true 0$"
-check "M2 a player (even the organizer of a shared game) cannot use it" \
-  "$(q "$(put $B) $(as $A) select admin_remove_player_photo('$B', 'x');")" "ERR forbidden"
-check "M2b anon cannot call it" \
-  "$(q "$(put $B) set local role anon; select admin_remove_player_photo('$B', 'x');")" "ERR .*permission denied"
-check "M3 a reason is required" \
-  "$(q "$(put $B) $(as $ADMIN) select admin_remove_player_photo('$B', '  ');")" "ERR reason_required"
-check "M4 nothing to remove: false, and nothing is logged" \
-  "$(q "$(as $ADMIN) select admin_remove_player_photo('$B', 'x'); reset role; select count(*) from moderation_log where action = 'remove_photo';")" "^f 0$"
-check "M5 the player can upload again afterwards (a repeat is handled by suspension)" \
-  "$(q "$(put $B) $(as $ADMIN) select admin_remove_player_photo('$B', 'nudity'); reset role; $(put $B) $(seen $B $B)")" "t.*1$"
-check "M6 the removal record cannot be edited or deleted (append-only log)" \
-  "$(q "$(put $B) $(as $ADMIN) select admin_remove_player_photo('$B', 'nudity'); reset role; delete from moderation_log where action = 'remove_photo';")" "ERR moderation_log_is_append_only"
+# decision 4 (Paul, 27 Nov): authorized moderators hide; evidence kept with the report, legal hold respected;
+# evidence readable only by listed photo moderators, every read logged; being an admin alone gives nothing.
+REP="current_setting('t.rep')::uuid"
+report_b() { echo "$(as $A) do \$r\$ begin perform report_content('player', '$B', 'inappropriate', 'photo'); end \$r\$; reset role;
+  do \$r\$ begin perform set_config('t.rep', (select id::text from reports where target_kind = 'player' and target_key = '$B'), true); end \$r\$;"; }
+mod() { echo "insert into photo_moderators (profile_id, note) values ('$ADMIN', 'test');"; }
+check "M1 reporting a player keeps a copy of their photo with the report; the photo itself stays (not yet hidden)" \
+  "$(q "$(put $B) $(report_b) select (select count(*) from photo_evidence where report_id = $REP and reason = 'reported') || ' ' || (select count(*) from player_photos where profile_id = '$B');")" "^1 1$"
+check "M1b no photo, no copy" \
+  "$(q "$(report_b) select count(*) from photo_evidence;")" "^0$"
+check "M2 a photo moderator hides it with a reason: gone for everyone, the copy kept, logged (who, report, whose, why), not suspended" \
+  "$(q "$(put $B) $(report_b) $(mod) $(as $ADMIN) select moderator_hide_player_photo($REP, 'nudity'); $(seen $A $B) $(seen $B $B) reset role;
+        select (select count(*) from photo_evidence where report_id = $REP) || ' ' ||
+               (select admin_id = '$ADMIN' and report_id = $REP and profile_id = '$B' and note = 'nudity' from moderation_log where action = 'hide_photo') || ' ' ||
+               (select count(*) from account_suspensions where profile_id = '$B');")" "^t 0 0 1 true 0$"
+check "M2b a photo changed after the report: both versions are kept (as reported, as hidden)" \
+  "$(q "$(put $B) $(report_b) $(put $B) $(mod) $(as $ADMIN) select moderator_hide_player_photo($REP, 'nudity'); reset role;
+        select string_agg(version || reason, ',' order by version) from photo_evidence where report_id = $REP;")" "^t 1reported,2hidden$"
+check "M3 an admin who is not a listed photo moderator: hide, list and read are all refused" \
+  "$(q "$(put $B) $(report_b) $(as $ADMIN) select moderator_hide_player_photo($REP, 'x');")$(q "$(put $B) $(report_b) $(as $ADMIN) select count(*) from moderator_photo_evidence_list($REP);")$(q "$(put $B) $(report_b) $(as $ADMIN) select moderator_photo_evidence(gen_random_uuid());")" \
+  "^ERR forbidden ?ERR forbidden ?ERR forbidden$"
+check "M3b a listed profile that is not an admin, or a listed admin who is suspended, is refused" \
+  "$(q "$(put $B) $(report_b) insert into photo_moderators (profile_id) values ('$A'); $(as $A) select moderator_hide_player_photo($REP, 'x');")$(q "$(put $B) $(report_b) $(mod) insert into account_suspensions (profile_id, reason, suspended_by) values ('$ADMIN', 'test', '$ADMIN'); $(as $ADMIN) select moderator_hide_player_photo($REP, 'x');")" \
+  "^ERR forbidden ?ERR forbidden$"
+check "M3c anon cannot call any of them" \
+  "$(q "set local role anon; select moderator_hide_player_photo(gen_random_uuid(), 'x');")$(q "set local role anon; select moderator_photo_evidence(gen_random_uuid());")$(q "set local role anon; select is_photo_moderator();")" \
+  "^ERR .*permission denied.*ERR .*permission denied.*ERR .*permission denied"
+check "M3d nobody reads or writes the evidence or the moderator list directly: player, admin, server key" \
+  "$(q "$(as $ADMIN) select count(*) from photo_evidence;")$(q "$(svc) select count(*) from photo_evidence;")$(q "$(as $ADMIN) insert into photo_moderators (profile_id) values ('$ADMIN');")$(q "$(svc) insert into photo_moderators (profile_id) values ('$ADMIN');")" \
+  "^ERR permission denied for table photo_evidence ?ERR permission denied for table photo_evidence ?ERR permission denied for table photo_moderators ?ERR permission denied for table photo_moderators$"
+check "M4 a reason is required; nothing to hide answers false and logs nothing" \
+  "$(q "$(put $B) $(report_b) $(mod) $(as $ADMIN) select moderator_hide_player_photo($REP, '  ');")$(q "$(report_b) $(mod) $(as $ADMIN) select moderator_hide_player_photo($REP, 'x'); reset role; select count(*) from moderation_log where action = 'hide_photo';")" \
+  "^ERR reason_required ?f 0$"
+check "M5 a photo moderator lists the copies (no bytes) and reads one: the bytes are the photo's; every read is logged" \
+  "$(q "$(put $B) $(report_b) $(mod) $(as $ADMIN) select count(*) from moderator_photo_evidence_list($REP);
+        select moderator_photo_evidence((select evidence_id from moderator_photo_evidence_list($REP) limit 1)) = $IMG;
+        select moderator_photo_evidence((select evidence_id from moderator_photo_evidence_list($REP) limit 1)) is not null; reset role;
+        select count(*) from moderation_log where action = 'view_photo_evidence' and admin_id = '$ADMIN' and report_id = $REP and profile_id = '$B';")" "^1 t t 2$"
+check "M6 adding and removing a photo moderator (dashboard) is itself logged" \
+  "$(q "$(mod) delete from photo_moderators; select string_agg(action, ',' order by at) from moderation_log where profile_id = '$ADMIN' and action like 'photo_moderator_%';")" "^photo_moderator_on,photo_moderator_off$"
+age_report() { echo "update reports set status = 'dismissed', closed_at = now() - interval '200 days' where id = $REP;"; }
+check "M7 retention: 180 days after the report closed, the copy goes with the report's text" \
+  "$(q "$(put $B) $(report_b) $(age_report) select enforce_report_retention(180) > 0; select count(*) from photo_evidence;")" "^t 0$"
+check "M7b on legal hold the copy stays, also after retention runs" \
+  "$(q "$(put $B) $(report_b) $(age_report) update reports set legal_hold = true where id = $REP; select enforce_report_retention(180); select count(*) from photo_evidence;")" "^[0-9]+ 1$"
+check "M7c an open report keeps its copy whatever its age" \
+  "$(q "$(put $B) $(report_b) update reports set created_at = now() - interval '400 days' where id = $REP; select enforce_report_retention(180); select count(*) from photo_evidence;")" "^[0-9]+ 1$"
+check "M7e a held report's copy stays even if its text is cleared some other way (e.g. by hand in the dashboard)" \
+  "$(q "$(put $B) $(report_b) $(age_report) update reports set legal_hold = true where id = $REP; update reports set snapshot = null where id = $REP; select count(*) from photo_evidence;")" "^1$"
+check "M7d a report already past the rule cannot be given a new copy by hiding" \
+  "$(q "$(put $B) $(report_b) $(age_report) $(mod) $(as $ADMIN) select moderator_hide_player_photo($REP, 'x');")" "ERR report_expired"
+check "M8 account deletion removes the photo but keeps the evidence with the report (as 0086 keeps snapshots)" \
+  "$(q "$(put $B) $(report_b) $(fresh $B) select close_my_account('web') is not null; reset role;
+        $(svc) select delete_account_data('$B') is not null; reset role;
+        select (select count(*) from player_photos where profile_id = '$B') || ' ' || (select count(*) from photo_evidence where profile_id = '$B');")" "^f t t 0 1$"
+check "M9 after a hide the player can upload again, and shared-game players see the new photo" \
+  "$(q "$(put $B) $(report_b) $(mod) $(as $ADMIN) select moderator_hide_player_photo($REP, 'nudity'); reset role; $(put $B) $(seen $A $B)")" "t.*1$"
+check "M10 the hide and read records cannot be edited or deleted (append-only log)" \
+  "$(q "$(put $B) $(report_b) $(mod) $(as $ADMIN) select moderator_hide_player_photo($REP, 'nudity'); reset role; delete from moderation_log where action = 'hide_photo';")" "ERR moderation_log_is_append_only"
+check "M11 is_photo_moderator: true only for a listed, active admin" \
+  "$(q "$(mod) $(as $ADMIN) select is_photo_moderator(); $(as $A) select is_photo_moderator();")$(q "$(as $ADMIN) select is_photo_moderator();")" "^t f ?f$"
 exit $status

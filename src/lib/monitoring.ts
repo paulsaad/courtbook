@@ -71,7 +71,7 @@ export function safeText(text: unknown, exceptionType?: string): string {
 /** Every page and route of the website (src/app). Kept in step with the folders by monitoring.routes.test.ts. */
 export const ROUTES = [
   "/", "/account-closed", "/admin", "/admin/clubs/[slug]", "/admin/deletions", "/admin/monitoring", "/admin/payments", "/admin/reports", "/age",
-  "/api/account/close", "/api/admin/delete-account", "/api/club-media", "/api/internal/deletions/retry", "/api/health", "/api/monitoring/test", "/api/notify/email", "/api/pay/simulate", "/api/payments.csv", "/api/player-photo", "/api/player-photo/[id]",
+  "/api/account/close", "/api/admin/delete-account", "/api/admin/photo-evidence/[id]", "/api/club-media", "/api/internal/deletions/retry", "/api/health", "/api/monitoring/test", "/api/notify/email", "/api/pay/simulate", "/api/payments.csv", "/api/player-photo", "/api/player-photo/[id]",
   "/auth/callback", "/auth/signout", "/bookings", "/bookings/[id]", "/club/[slug]", "/club/[slug]/coaches",
   "/club/[slug]/info", "/club/[slug]/matches", "/coach", "/coaches", "/coaches/[id]", "/courts", "/delete-account", "/details", "/levels", "/login",
   "/matches/[id]", "/me", "/notifications", "/pay/[id]", "/play", "/privacy", "/profile", "/profile/blocked", "/staff", "/staff/[slug]",

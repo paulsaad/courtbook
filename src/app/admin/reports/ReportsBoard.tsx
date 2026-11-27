@@ -16,7 +16,7 @@ export type Report = {
 /** 0082: what the board shows beyond admin_reports (absent before 0082). */
 export type ReportState = { report_id: string; legal_hold: boolean; handled_by_name: string | null; closed_at: string | null; log_entries: number };
 type LogRow = { at: string; admin_name: string | null; action: string; note: string | null };
-const ACTIONS: Record<string, string> = { resolve: "Resolved", reopen: "Reopened", suspend: "Suspended", unsuspend: "Suspension lifted", hide_message: "Message hidden", legal_hold_on: "Legal hold on", legal_hold_off: "Legal hold off", clear_text: "Old text cleared", remove_photo: "Photo removed" };
+const ACTIONS: Record<string, string> = { resolve: "Resolved", reopen: "Reopened", suspend: "Suspended", unsuspend: "Suspension lifted", hide_message: "Message hidden", legal_hold_on: "Legal hold on", legal_hold_off: "Legal hold off", clear_text: "Old text cleared", hide_photo: "Photo hidden", view_photo_evidence: "Photo evidence viewed", photo_moderator_on: "Made a photo moderator", photo_moderator_off: "No longer a photo moderator" };
 type Line = { id: string; created_at: string; sender: string | null; body: string; deleted: boolean; reported: boolean };
 
 const tz = "Asia/Beirut";
@@ -85,6 +85,8 @@ function WithReason({ label, prompt, danger, busy, onSubmit }: { label: string; 
   );
 }
 
+type Evidence = { evidence_id: string; version: number; reason: "reported" | "hidden"; captured_at: string };
+
 function ReportCard({ r, blocks, st, photos = false }: { r: Report; blocks?: number; st: ReportState | null; photos?: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -104,14 +106,20 @@ function ReportCard({ r, blocks, st, photos = false }: { r: Report; blocks?: num
   }
   const refresh = async (fn: string, args: Record<string, unknown>) => { if (await call(fn, args)) router.refresh(); };
   const [photoNote, setPhotoNote] = useState<string | null>(null);
-  // review of b89b9ff (finding 4): say so when there was no photo to remove, instead of nothing
-  async function removePhoto(why: string) {
+  const [evidence, setEvidence] = useState<Evidence[] | null>(null);
+  // decision 4 (27 Nov): a photo moderator hides the photo; a copy stays with this report as evidence
+  async function hidePhoto(why: string) {
     setPhotoNote(null);
-    const out = await call("admin_remove_player_photo", { p_profile: r.profile_id, p_reason: why });
+    const out = await call("moderator_hide_player_photo", { p_report: r.id, p_reason: why });
     if (!out) return;
-    if (out.data === false) { setPhotoNote(`${who} has no photo to remove.`); return; }
-    setPhotoNote(`${who}'s photo was removed.`);
+    if (out.data === false) { setPhotoNote(`${who} has no photo to hide.`); return; }
+    setPhotoNote(`${who}'s photo is hidden. A copy is kept with this report.`);
+    setEvidence(null);
     router.refresh();
+  }
+  async function showEvidence() {
+    const out = await call("moderator_photo_evidence_list", { p_report: r.id });
+    if (out) setEvidence((out.data ?? []) as Evidence[]);
   }
   async function showConversation() {
     const out = await call("admin_report_messages", { p_report: r.id });
@@ -172,13 +180,24 @@ function ReportCard({ r, blocks, st, photos = false }: { r: Report; blocks?: num
           ? <WithReason label="Lift suspension" prompt={`Why lift the suspension of ${who}? (kept in the moderation log)`} busy={busy} onSubmit={(why) => refresh("admin_unsuspend", { p_profile: r.profile_id, p_reason: why })} />
           : <button disabled={busy} onClick={() => refresh("admin_unsuspend", { p_profile: r.profile_id })} className="rounded-xl border border-grid bg-white px-3 py-2">Lift suspension</button>
         )}
-        {/* player photo (draft #67, review requirement 2): remove an inappropriate photo without suspending the account */}
-        {photos && r.profile_id && <WithReason label="Remove photo" danger prompt={`Why remove ${who}'s photo? (kept in the moderation log; they can upload a new one)`} busy={busy}
-          onSubmit={(why) => void removePhoto(why)} />}
+        {/* player photo (draft #67, decision 4): photo moderators only; hide without suspending; evidence kept with the report */}
+        {photos && r.profile_id && <WithReason label="Hide photo" danger prompt={`Why hide ${who}'s photo? (kept in the moderation log; a copy stays with this report; they can upload a new one)`} busy={busy}
+          onSubmit={(why) => void hidePhoto(why)} />}
+        {photos && r.profile_id && !evidence && <button disabled={busy} onClick={showEvidence} className="rounded-xl border border-grid bg-white px-3 py-2">Photo evidence</button>}
         {st && <WithReason label={st.legal_hold ? "Release legal hold" : "Put on legal hold"} prompt={st.legal_hold ? "Why release the hold? (its text can then be cleared on schedule)" : "Why hold this report? (its text will not be cleared)"} busy={busy}
           onSubmit={(why) => refresh("admin_set_legal_hold", { p_report: r.id, p_hold: !st.legal_hold, p_note: why })} />}
         {st && st.log_entries > 0 && !history && <button disabled={busy} onClick={showHistory} className="rounded-xl border border-grid bg-white px-3 py-2">History ({st.log_entries})</button>}
       </div>
+      {evidence && (
+        <div className="mt-2 rounded-lg bg-paper p-2" aria-label="Photo evidence">
+          {evidence.length === 0 ? <p className="text-muted">No photo copy is kept with this report.</p> : <>
+            <p className="text-xs text-muted">Opening a copy is recorded in the moderation log.</p>
+            <ul className="mt-1 flex flex-col gap-1">
+              {evidence.map((e) => <li key={e.evidence_id}><a href={`/api/admin/photo-evidence/${e.evidence_id}`} target="_blank" rel="noopener noreferrer" className="underline">
+                {e.reason === "hidden" ? "As hidden" : "As reported"}, {when(e.captured_at)}</a></li>)}
+            </ul></>}
+        </div>
+      )}
       {history && (
         <ol className="mt-2 flex flex-col gap-1 rounded-lg bg-paper p-2" aria-label="Moderation history">
           {history.length === 0 && <li className="text-muted">Nothing recorded.</li>}

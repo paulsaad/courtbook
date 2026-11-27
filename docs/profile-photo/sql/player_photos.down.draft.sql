@@ -9,21 +9,40 @@
 do $$
 begin
   if to_regclass('public.player_photos') is null then raise exception 'player photo draft is not applied: nothing to roll back'; end if;
-  if exists (select 1 from player_photos) and coalesce(current_setting('courtbook.discard_player_photos', true), '') <> 'yes' then
-    raise exception 'rollback_blocked: % stored photo(s) would be deleted; set local courtbook.discard_player_photos = ''yes'' to confirm',
-      (select count(*) from player_photos);
+  -- evidence for an open report or one on legal hold is never discarded by a rollback, confirmed or not
+  if to_regclass('public.photo_evidence') is not null and exists (select 1 from photo_evidence e join reports r on r.id = e.report_id where r.status = 'open' or r.legal_hold) then
+    raise exception 'rollback_blocked: % photo evidence copies belong to open reports or reports on legal hold; they cannot be discarded',
+      (select count(*) from photo_evidence e join reports r on r.id = e.report_id where r.status = 'open' or r.legal_hold);
+  end if;
+  if (exists (select 1 from player_photos) or (to_regclass('public.photo_evidence') is not null and exists (select 1 from photo_evidence)))
+     and coalesce(current_setting('courtbook.discard_player_photos', true), '') <> 'yes' then
+    raise exception 'rollback_blocked: % stored photo(s) and % evidence copies would be deleted; set local courtbook.discard_player_photos = ''yes'' to confirm',
+      (select count(*) from player_photos), (select count(*) from photo_evidence);
   end if;
 end $$;
 
 drop trigger if exists player_photo_on_closure on account_deletions;
 drop function if exists player_photo_on_closure();
-drop function if exists admin_remove_player_photo(uuid, text);
--- the moderation log is append-only: with no 'remove_photo' row the action list returns to 0082's exactly; with one,
--- the wider list stays (so the record stays valid) and the rollback says so
+drop function if exists moderator_photo_evidence(uuid);
+drop function if exists moderator_photo_evidence_list(uuid);
+drop function if exists moderator_hide_player_photo(uuid, text);
+drop trigger if exists photo_evidence_retention on reports;
+drop function if exists photo_evidence_retention();
+drop trigger if exists photo_evidence_on_report on reports;
+drop function if exists photo_evidence_on_report();
+drop table if exists photo_evidence;
+drop function if exists is_photo_moderator();
+-- removing the list is itself logged (photo_moderator_off), before the trigger goes
+delete from photo_moderators;
+drop trigger if exists photo_moderators_log on photo_moderators;
+drop function if exists photo_moderators_log();
+drop table if exists photo_moderators;
+-- the moderation log is append-only: with no photo entries the action list returns to 0082's exactly; with any, the
+-- wider list stays (so the record stays valid) and the rollback says so
 do $$
 begin
-  if exists (select 1 from moderation_log where action = 'remove_photo') then
-    raise notice 'moderation_log keeps its remove_photo entries; its action list is left including remove_photo';
+  if exists (select 1 from moderation_log where action in ('hide_photo', 'view_photo_evidence', 'photo_moderator_on', 'photo_moderator_off')) then
+    raise notice 'moderation_log keeps its photo moderation entries; its action list is left including them';
   else
     alter table moderation_log drop constraint if exists moderation_log_action_check;
     alter table moderation_log add constraint moderation_log_action_check

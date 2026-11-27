@@ -28,6 +28,7 @@ const { processPhoto } = await import("@/lib/playerPhoto/process");
 const shared = await import("@/lib/playerPhoto/shared");
 const upload = await import("./route");
 const view = await import("./[id]/route");
+const evidence = await import("../admin/photo-evidence/[id]/route");
 
 const ME = "a0000000-0000-4000-8000-00000000000a";
 const OTHER = "b0000000-0000-4000-8000-00000000000b";
@@ -231,5 +232,45 @@ describe("GET /api/player-photo/[id]", () => {
   it("a database error is 500, not a 404 that would hide the fault", async () => {
     userRpc = { player_photo: { error: { message: "boom", code: "XX000" } } };
     expect((await get(OTHER)).status).toBe(500);
+  });
+});
+
+describe("GET /api/admin/photo-evidence/[id] (#67, decision 4)", () => {
+  const EV = "e0000000-0000-4000-8000-00000000000e";
+  const get = (id: string) => evidence.GET(new Request(`${SITE}/api/admin/photo-evidence/${id}`), { params: Promise.resolve({ id }) });
+  const img = async () => shared.toPgBytea((await processPhoto(await jpegWithGps(300, 300)) as { webp: Buffer }).webp);
+
+  it("a photo moderator gets the copy as WebP, never stored by any cache; the database is asked as the caller", async () => {
+    userRpc = { moderator_photo_evidence: { data: await img() } };
+    const res = await get(EV);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/webp");
+    expect(res.headers.get("cache-control")).toBe("private, no-store, max-age=0");
+    expect(res.headers.get("etag")).toBeNull();
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(calls).toEqual([{ client: "user", fn: "moderator_photo_evidence", args: { p_evidence: EV } }]);
+    expect(calls.some((c) => c.client === "service")).toBe(false);
+  });
+  it("not a photo moderator (forbidden), no such copy, or no schema: the same uncached 404", async () => {
+    for (const message of ["forbidden", "not_found", "Could not find the function public.moderator_photo_evidence"]) {
+      userRpc = { moderator_photo_evidence: { error: { message } } };
+      const res = await get(EV);
+      expect(res.status).toBe(404);
+      expect(res.headers.get("cache-control")).toBe("private, no-store, max-age=0");
+    }
+  });
+  it("signed out, or a malformed id: 404 without asking the database", async () => {
+    user = null;
+    expect((await get(EV)).status).toBe(404);
+    user = { id: ME };
+    expect((await get("../etc")).status).toBe(404);
+    expect(calls).toEqual([]);
+  });
+  it("any other failure is an uncached 500", async () => {
+    userRpc = { moderator_photo_evidence: { error: { message: "boom", code: "XX000" } } };
+    const res = await get(EV);
+    expect(res.status).toBe(500);
+    expect(res.headers.get("cache-control")).toBe("private, no-store, max-age=0");
   });
 });
