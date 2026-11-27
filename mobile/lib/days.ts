@@ -20,6 +20,11 @@ export function shortDate(key: string): string {
   return `${WD[d.getUTCDay()]} ${d.getUTCDate()} ${MONTH[d.getUTCMonth()].slice(0, 3)}`;
 }
 
+/** A readable name from a sport code ("table_tennis" → "Table tennis"). The catalogue's own name (lib/sports.ts) wins
+ *  where it is loaded; this is the fallback for a code the app has not seen yet (sports are admin-managed). */
 export function sportName(code: string): string {
-  return code === "other" ? "Other" : code[0].toUpperCase() + code.slice(1);
+  if (!code) return "Other";
+  if (code === "other") return "Other";
+  const words = code.replace(/_/g, " ");
+  return words[0].toUpperCase() + words.slice(1);
 }
