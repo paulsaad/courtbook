@@ -63,7 +63,7 @@ const PAGES: [string, () => Promise<{ default: unknown }>, Record<string, string
   ["club games", () => import("./club/[slug]/matches/page"), { slug: "batroun" }],
   ["a game", () => import("./matches/[id]/page"), { id: "id-1" }],
   ["activity", () => import("./notifications/page"), {}],
-  ["profile", () => import("./profile/page"), {}],
+  ["profile", () => import("./profile/page"), {}, ["rpc:my_photo_version"]],   // optional: the profile loads without photos
   ["details before a first booking", () => import("./details/page"), {}],
   ["levels", () => import("./levels/page"), {}],
   ["coach page", () => import("./coach/page"), {}],
@@ -73,7 +73,7 @@ const PAGES: [string, () => Promise<{ default: unknown }>, Record<string, string
   ["admin", () => import("./admin/page"), {}],
   ["admin payments", () => import("./admin/payments/page"), {}],
   ["admin club", () => import("./admin/clubs/[slug]/page"), { slug: "batroun" }],
-  ["admin reports", () => import("./admin/reports/page"), {}, ["rpc:admin_reports"]],
+  ["admin reports", () => import("./admin/reports/page"), {}, ["rpc:admin_reports", "rpc:is_photo_moderator"]],   // the photo check is optional: no photo schema or not a photo moderator = no photo controls
   ["club booking page", () => import("./club/[slug]/page"), { slug: "batroun" }, ["from:occupancy"]],
   ["courts", () => import("./courts/page"), {}, ["rpc:club_day_slots"]],
   ["staff calendar", () => import("./staff/[slug]/page"), { slug: "batroun" }, ["from:bookings", "from:blocks"]],
