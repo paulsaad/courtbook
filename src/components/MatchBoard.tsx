@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import LevelRange from "./LevelRange";
 import PlayersNeeded from "./PlayersNeeded";
 import { fitLabel, rangeLabel } from "@/lib/levels";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
 import { clubLocalToUtc, hhmm, todayIn } from "@/lib/time";
-import { friendlyError } from "@/lib/types";
+import { actionError, isNetworkFailure } from "@/lib/actionError";
+import { forgetRequest, tokenForRequest, type RequestTokens } from "@/lib/requestToken";
+import { codeLabel } from "@/lib/labels";
 
 export type MatchRow = {
   match_id: string; club_id: string; club_name: string; club_slug: string; sport: string; start_at: string; end_at: string | null;
@@ -30,7 +32,7 @@ export function MatchCard({ m, tz }: { m: MatchRow; tz: string }) {
         <span className="font-medium">{formatInTimeZone(new Date(m.start_at), tz, "EEE d MMM · HH:mm")}{m.end_at ? `–${hhmm(m.end_at, tz)}` : ""}</span>
         <span className={`rounded-full px-2 py-0.5 text-xs ${m.status === "open" ? "bg-turf-soft text-turf" : "bg-slate-soft text-muted"}`}>{m.status === "open" ? `${spots} spot${spots === 1 ? "" : "s"} left` : m.status === "cancelled" ? "Cancelled" : m.closed_reason === "full" ? "Full" : m.closed_reason === "no_court" ? "Court cancelled" : "Private"}</span>
       </div>
-      <div className="mt-1 text-sm text-muted">{m.sport} · {rangeLabel(m.level_min, m.level_max, m.level_legacy)}{m.court_name ? ` · ${m.court_name} booked` : ""} · by {m.organizer_name ?? "player"}{m.i_organize ? " (you)" : m.my_status === "accepted" ? " · you're in" : m.my_status === "pending" ? " · requested" : ""}{m.i_organize && m.pending > 0 ? ` · ${m.pending} waiting` : ""}</div>
+      <div className="mt-1 text-sm text-muted">{codeLabel(m.sport)} · {rangeLabel(m.level_min, m.level_max, m.level_legacy)}{m.court_name ? ` · ${m.court_name} booked` : ""} · by {m.organizer_name ?? "player"}{m.i_organize ? " (you)" : m.my_status === "accepted" ? " · you're in" : m.my_status === "pending" ? " · requested" : ""}{m.i_organize && m.pending > 0 ? ` · ${m.pending} waiting` : ""}</div>
       {!m.i_organize && m.level_min != null && (() => { const f = fitLabel(m.my_level, m.level_min, m.level_max); return <div className={`mt-1 text-xs ${f.tone === "ok" ? "text-turf" : f.tone === "warn" ? "text-sand" : "text-muted"}`}>{f.text}</div>; })()}
       {m.note && <p className="mt-2 text-sm">{m.note}</p>}
     </Link>
@@ -45,17 +47,23 @@ export default function MatchBoard({ club, rows, myBookings, sports }: { club: C
   const today = todayIn(club.timezone);
   const [f, setF] = useState({ sport: sports[0]?.code ?? "padel", range: [null, null] as [number | null, number | null], date: today, time: "18:00", needed: 3, note: "", bookingId: "", joinMode: "open" });
 
+  // one key per post (0073): a retry after a lost answer returns the game already posted instead of a
+  // second copy. Kept after a network failure only for the SAME request (a changed form gets a new key, or it
+  // would be answered with the old game); dropped after a refusal (nothing was posted then).
+  const tokens = useRef<RequestTokens>(new Map());
   async function post(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setBusy(true); setError(null);
     const start = f.bookingId ? null : clubLocalToUtc(f.date, f.time, club.timezone).toISOString();
     const end = f.bookingId || !start ? null : new Date(new Date(start).getTime() + 90 * 60000).toISOString();
-    const { data, error } = await createClient().rpc("post_match", {
+    const request = {
       p_club: club.id, p_sport: f.sport, p_start: start, p_end: end, p_level_min: f.range[0], p_level_max: f.range[1],
       p_players_needed: f.needed, p_note: f.note, p_booking: f.bookingId || null, p_join_mode: f.joinMode,
-    });
+    };
+    const { data, error } = await createClient().rpc("post_match", { ...request, p_token: tokenForRequest(tokens.current, request) });
     setBusy(false);
-    if (error) { setError(friendlyError(error.message)); return; }
+    if (error) { if (!isNetworkFailure(error.message)) forgetRequest(tokens.current, request); setError(actionError(error.message)); return; }
     router.push(`/matches/${data as string}`);
   }
 
@@ -68,7 +76,7 @@ export default function MatchBoard({ club, rows, myBookings, sports }: { club: C
 
       {open && (
         <form onSubmit={post} className="flex flex-col gap-3 rounded-2xl border border-grid bg-white p-4">
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+          {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
           <div className="flex flex-wrap gap-2">{sports.map((sp) => <button type="button" key={sp.code} onClick={() => setF({ ...f, sport: sp.code })} className={chip(f.sport === sp.code)}>{sp.name_en}</button>)}</div>
           {myBookings.length > 0 && (
             <label className="flex flex-col gap-1 text-sm">Link one of your bookings (optional)
@@ -80,8 +88,8 @@ export default function MatchBoard({ club, rows, myBookings, sports }: { club: C
           )}
           {!f.bookingId && (
             <div className="flex gap-2">
-              <input className={`${input} flex-1`} type="date" min={today} required value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
-              <input className={input} type="time" step={1800} required value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} />
+              <input className={`${input} flex-1`} type="date" aria-label="Date" min={today} required value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
+              <input className={input} type="time" aria-label="Start time" step={1800} required value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} />
             </div>
           )}
           <div className="text-sm">Who is it for<div className="mt-1"><LevelRange value={f.range} onChange={(r) => setF({ ...f, range: r })} /></div></div>

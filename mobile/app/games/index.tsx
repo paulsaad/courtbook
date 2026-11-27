@@ -5,7 +5,8 @@ import { Text } from "../../components/Text";
 import { Chip } from "../../components/Chip";
 import { Icon } from "../../components/Icon";
 import { Segmented } from "../../components/Segmented";
-import { SportMark, SPORTS } from "../../components/SportMark";
+import { SportMark } from "../../components/SportMark";
+import { useSports } from "../../lib/sports";
 import { Empty, ErrorState, Loading } from "../../components/StateView";
 import { SignInPrompt } from "../../components/SignInPrompt";
 import { GameCard } from "../../components/game/GameCard";
@@ -14,7 +15,6 @@ import { useSession } from "../../lib/session";
 import { useAreas, useMyLevels } from "../../lib/games";
 import { useFindGames } from "../../lib/gameScreens";
 import { activeFilterCount, capNote, DEFAULT_FILTERS, myLevelNote, type GameFilters, type When } from "../../lib/gameFilters";
-import { sportName } from "../../lib/days";
 import { useOnline } from "../../lib/online";
 import { GAME_WRITES_AVAILABLE } from "../../lib/gameActions";
 import { GameBanner } from "../../components/game/GameBanner";
@@ -26,7 +26,6 @@ const WHEN: { key: When; label: string }[] = [
   { key: "week", label: "This week" },
   { key: "any", label: "Any time" },
 ];
-const BOARD_SPORTS = SPORTS.filter((s) => s !== "other");
 
 /** "18:42" in the phone's clock, for "Updated 18:42". */
 function clock(ms: number): string {
@@ -44,6 +43,7 @@ export default function FindAGame() {
   const signedIn = session.status === "signed-in";
   const online = useOnline();
   const [filters, setFilters] = useState<GameFilters>(DEFAULT_FILTERS);
+  const boardSports = useSports();   // active sports, alphabetical (admin-managed catalogue)
   const [areaOpen, setAreaOpen] = useState(false);
   const board = useFindGames(filters, { signedIn });
   const levels = useMyLevels({ signedIn });
@@ -62,8 +62,8 @@ export default function FindAGame() {
       {suspended ? <View style={styles.pad}><GameBanner tone="warn" title={SUSPENDED_TITLE} text={SUSPENDED_TEXT} testID="account-suspended" /></View> : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sports} accessibilityLabel="Sport">
         <Chip label="All sports" tone="sport" selected={!filters.sport} onPress={() => set({ sport: null })} />
-        {BOARD_SPORTS.map((s) => (
-          <Chip key={s} label={sportName(s)} tone="sport" selected={filters.sport === s} icon={<SportMark sport={s} size={16} />}
+        {boardSports.map(({ code: s, name }) => (
+          <Chip key={s} label={name} tone="sport" selected={filters.sport === s} icon={<SportMark sport={s} size={16} />}
                 onPress={() => set({ sport: filters.sport === s ? null : s })} />
         ))}
       </ScrollView>

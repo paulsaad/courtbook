@@ -7,6 +7,7 @@ import ClubHeader from "../ClubHeader";
 import { FACILITIES } from "@/components/facilities";
 import { feeSummary } from "@/lib/fees";
 import { cancellationLine } from "./cancellation";
+import { codeLabel } from "@/lib/labels";
 
 const fmtDur = (m: number) => (m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`);
 
@@ -90,7 +91,7 @@ export default async function ClubInfo({ params }: { params: Promise<{ slug: str
         </section>
         <section className="rounded-2xl border border-grid bg-white px-4 py-2">
           <h2 className="pt-2 font-medium">Courts</h2>
-          {(courts ?? []).map((c) => <div key={c.name} className={row}><span>{c.name}</span><span className="text-muted">{c.sport}{c.surface ? ` · ${c.surface}` : ""}</span></div>)}
+          {(courts ?? []).map((c) => <div key={c.name} className={row}><span>{c.name}</span><span className="text-muted">{codeLabel(c.sport)}{c.surface ? ` · ${c.surface}` : ""}</span></div>)}
         </section>
         <section className="rounded-2xl border border-grid bg-white px-4 py-2">
           <h2 className="pt-2 font-medium">Prices per hour</h2>

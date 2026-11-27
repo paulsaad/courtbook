@@ -1,23 +1,50 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/client";
-import { COMMUNITY_RULES, COMMUNITY_RULES_TITLE, friendlyError } from "@/lib/types";
+import { COMMUNITY_RULES, COMMUNITY_RULES_TITLE } from "@/lib/types";
+import { actionError } from "@/lib/actionError";
+import { BLOCK_EXPLAINED, BLOCKED_PATH, blockPlayer, reportMessage } from "@/lib/gameSafety";
+import SafetyConfirm from "@/components/SafetyConfirm";
+import ReportSheet from "./ReportSheet";
 
 type Msg = { id: string; profile_id: string; name: string | null; body: string; created_at: string; deleted?: boolean; /** M3-S: the reader blocked the sender (text withheld) */ blocked?: boolean };
 
 // what the thread looks like right now, so we only re-render when it really changed
+/** Report and block are offered only on another player's message that is still shown. */
+const canReport = (m: Msg, meId: string) => m.profile_id !== meId && !m.deleted && !m.blocked;
+
+/** A duplicate-key refusal that could not be matched to this exact message: not sent as far as we know. */
+export const NOT_CONFIRMED = "Your message wasn't sent. Try again.";
+/** H15: the send was refused by row-level security: no longer the organiser or an accepted player (as the app). */
+export const NOT_IN_GAME = "You're no longer in this game.";
+const notMember = (e: { code?: string; message?: string }) => e.code === "42501" || /row-level security/i.test(e.message ?? "");
+
 const signature = (rows: Msg[]) => rows.map((r) => `${r.id}:${r.deleted ? 1 : 0}${r.blocked ? 1 : 0}`).join(",");
 
 export default function MatchChat({ matchId, meId, tz, initial, finished, hidden }: { matchId: string; meId: string; tz: string; initial: Msg[]; finished: boolean; hidden: boolean }) {
+  const router = useRouter();
   const [gone, setGone] = useState(hidden);
   const [msgs, setMsgs] = useState<Msg[]>(initial);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rules, setRules] = useState(false);   // M3-S: shown when the server asks for the rules first
+  // H13: one id per message, made here and kept for its retries (as the app, mobile/lib/chat.ts). If the
+  // first try reached the database and only the answer was lost, the retry hits the primary key: sent once.
+  const outgoing = useRef<{ body: string; id: string } | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  // report and block (M3-S, as the app's long-press menu): only on other players' visible messages
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [reporting, setReporting] = useState<Msg | null>(null);
+  const [blocking, setBlocking] = useState<Msg | null>(null);
+  const [blockedName, setBlockedName] = useState<string | null>(null);
+  // a message's options only while it can still be reported: not after it is deleted, withheld or gone
+  // a new copy of the thread (poll or reload) closes a menu whose message can no longer be reported
+  const closeStaleMenu = (rows: Msg[]) => setMenuFor((open) => (open && rows.some((m) => m.id === open && canReport(m, meId)) ? open : null));
 
   // poll the whole thread every 5 s, not just what is newer: a message deleted further up
   // would never come back through an incremental read (boring and reliable; realtime can replace it later)
@@ -28,42 +55,89 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
       if (!alive || error || !data) return;
       const rows = data as Msg[];
       setMsgs((cur) => (signature(cur) === signature(rows) ? cur : rows));
+      setMenuFor((open) => (open && rows.some((m) => m.id === open && canReport(m, meId)) ? open : null));
     }, 5000);
     return () => { alive = false; clearInterval(id); };
-  }, [matchId]);
+  }, [matchId, meId]);
   useEffect(() => { bottom.current?.scrollIntoView({ block: "nearest" }); }, [msgs.length]);
 
+  // the whole thread again, now: after a block the server withholds that player's messages
+  async function reload() {
+    const { data, error } = await createClient().rpc("match_messages_list", { p_match: matchId, p_after: null });
+    if (!error && data) { setMsgs(data as Msg[]); closeStaleMenu(data as Msg[]); }
+  }
+  async function block(m: Msg): Promise<string | null> {
+    const p = await blockPlayer((fn, args) => createClient().rpc(fn, args), m.profile_id);
+    if (p) return p;
+    setBlockedName(m.name ?? "this player");
+    await reload();
+    return null;
+  }
+
   async function removeMessage(id: string) {
+    const before = msgs.find((m) => m.id === id);
+    setError(null);
     setMsgs((cur) => cur.map((m) => (m.id === id ? { ...m, body: "", deleted: true } : m)));
     const { error } = await createClient().rpc("delete_match_message", { p_id: id });
-    if (error) setMsgs(initial);
+    // H16: it used to reset the whole thread to the page's first copy (newer messages vanished) and said nothing.
+    // Now only this message comes back, and the reason is shown (as the Activity fix, #83).
+    if (error) {
+      if (before) setMsgs((cur) => cur.map((m) => (m.id === id ? before : m)));
+      setError(actionError(error.message));
+    }
   }
   async function removeConversation() {
     const { error } = await createClient().rpc("hide_match", { p_match: matchId, p_hidden: true });
     if (!error) { setGone(true); setMsgs([]); }
   }
 
+  /** Does the thread hold exactly this message (id, sender, text)? null when the thread can't be read. */
+  async function findSent(id: string, body: string): Promise<{ sent: boolean; otherMessage: boolean; rows: Msg[] } | null> {
+    const { data, error } = await createClient().rpc("match_messages_list", { p_match: matchId, p_after: null });
+    if (error || !data) return null;
+    const rows = data as Msg[];
+    const m = rows.find((r) => r.id === id);
+    const sent = !!m && m.profile_id === meId && m.body === body;   // a deleted message has empty text: never a match
+    return { sent, otherMessage: !!m && !sent, rows };
+  }
   async function send(e?: React.FormEvent) {
     e?.preventDefault();
     const body = text.trim();
     if (!body) return;
+    const retry = outgoing.current?.body === body;
+    if (!retry) outgoing.current = { body, id: crypto.randomUUID() };
+    const id = outgoing.current!.id;
     setBusy(true); setError(null);
     const supabase = createClient();
-    const { data, error } = await supabase.from("match_messages").insert({ match_id: matchId, profile_id: meId, body }).select("id, profile_id, body, created_at").single();
-    setBusy(false);
+    const { data, error } = await supabase.from("match_messages").insert({ id, match_id: matchId, profile_id: meId, body }).select("id, profile_id, body, created_at").single();
     if (error) {
       // the text stays in the box; the rules are asked for once, then the same message is sent
-      if (error.message?.includes("rules_not_accepted")) setRules(true);
-      else setError(friendlyError(error.message));
-      return;
-    }
-    if (data) { setMsgs((cur) => [...cur, { ...data, name: "You" }]); setText(""); fetch("/api/notify/email", { method: "POST" }).catch(() => {}); }
+      if (error.message?.includes("rules_not_accepted")) { setBusy(false); setRules(true); return; }
+      const duplicate = error.code === "23505";
+      // A duplicate key, or a retry refused for another reason (e.g. slow_down after a lost answer), counts as
+      // sent only if the thread holds exactly this message: this id, from me, with this text. Anything else is
+      // not proof (another unique rule, an id that names someone else's message): the text stays, try again.
+      const found = duplicate || retry ? await findSent(id, body) : null;
+      if (found?.sent) { setMsgs(found.rows); closeStaleMenu(found.rows); }
+      else {
+        if (found?.otherMessage) outgoing.current = null;   // this id is taken by a different message: a new id next time
+        setBusy(false);
+        // H15: left the game (or was removed) elsewhere: say so and show the game as it now is, not "Refresh"
+        if (notMember(error)) { setError(NOT_IN_GAME); router.refresh(); return; }
+        setError(duplicate ? NOT_CONFIRMED : actionError(error.message));   // no connection: says so (H3)
+        return;
+      }
+    } else if (data) setMsgs((cur) => (cur.some((m) => m.id === data.id) ? cur : [...cur, { ...data, name: "You" }]));
+    else await reload();
+    setBusy(false);
+    outgoing.current = null; setText("");
+    fetch("/api/notify/email", { method: "POST" }).catch(() => {});
   }
   async function acceptRules() {
     setBusy(true); setError(null);
     const { error } = await createClient().rpc("accept_community_rules");
     setBusy(false);
-    if (error) { setError(friendlyError(error.message)); return; }
+    if (error) { setError(actionError(error.message)); return; }
     setRules(false);
     await send();
   }
@@ -84,10 +158,22 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
         {msgs.length === 0 && <p className="text-muted">No messages yet. Agree on balls, who brings what, where to meet.</p>}
         {msgs.map((x) => (
           <div key={x.id} className={`group max-w-[85%] rounded-2xl px-3 py-2 ${x.deleted ? "self-start border border-dashed border-grid bg-white text-muted" : x.profile_id === meId ? "self-end bg-turf text-white" : "self-start bg-paper"}`}>
-            {x.profile_id !== meId && !x.deleted && !x.blocked && <div className="text-xs font-medium opacity-70">{x.name ?? "Player"}</div>}
-            {x.deleted ? <div className="text-xs italic">Message deleted</div> : x.blocked ? <div className="text-xs italic text-muted">Message from a player you blocked</div> : <div>{x.body}</div>}
-            {!x.deleted && x.profile_id === meId && <button onClick={() => removeMessage(x.id)} className="mt-0.5 text-[10px] text-white/80 underline">Delete</button>}
-            <div className={`mt-0.5 text-[10px] ${x.profile_id === meId ? "text-white/70" : "text-muted"}`}>{formatInTimeZone(new Date(x.created_at), tz, "EEE HH:mm")}</div>
+            {x.profile_id !== meId && !x.deleted && !x.blocked && (
+              <div className="flex items-start justify-between gap-2">
+                <div className="text-xs font-medium opacity-70">{x.name ?? "Player"}</div>
+                <button type="button" onClick={() => setMenuFor(menuFor === x.id ? null : x.id)} aria-expanded={menuFor === x.id}
+                  aria-label={`Options for ${x.name ?? "this player"}'s message`} className="-my-2 -mr-2 flex h-9 w-10 shrink-0 items-center justify-center rounded-full text-base leading-none text-muted">⋯</button>
+              </div>
+            )}
+            {x.deleted ? <div className="text-xs italic">Message deleted</div> : x.blocked ? <div className="text-xs italic text-muted"><span>Message from a player you blocked</span> · <Link href={BLOCKED_PATH} className="not-italic underline">Blocked players</Link></div> : <div>{x.body}</div>}
+            {menuFor === x.id && canReport(x, meId) && (
+              <div className="mt-1 flex flex-col items-start gap-1 border-t border-grid pt-1" role="group" aria-label="Message options">
+                <button type="button" onClick={() => { setMenuFor(null); setReporting(x); }} className="min-h-9 text-sm font-medium text-ink">Report message</button>
+                <button type="button" onClick={() => { setMenuFor(null); setBlocking(x); }} className="min-h-9 text-sm font-medium text-danger">Block {x.name ?? "this player"}</button>
+              </div>
+            )}
+            {!x.deleted && x.profile_id === meId && <button onClick={() => removeMessage(x.id)} className="mt-0.5 text-[10px] text-white underline">Delete</button>}
+            <div className={`mt-0.5 text-[10px] ${x.profile_id === meId ? "text-white" : "text-muted"}`}>{formatInTimeZone(new Date(x.created_at), tz, "EEE HH:mm")}</div>
           </div>
         ))}
         <div ref={bottom} />
@@ -102,11 +188,25 @@ export default function MatchChat({ matchId, meId, tz, initial, finished, hidden
           </div>
         </div>
       )}
-      {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+      {blockedName && (
+        <p role="status" className="mt-3 rounded-lg bg-paper px-3 py-2 text-sm">
+          You blocked {blockedName}. You won&apos;t see their messages. <Link href={BLOCKED_PATH} className="text-action underline">Blocked players</Link>
+        </p>
+      )}
+      {error && <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
       <form onSubmit={send} className="mt-3 flex gap-2">
-        <input className="flex-1 rounded-xl border border-grid px-3 py-2.5 text-base outline-none focus:border-action" placeholder="Message" maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
+        <input aria-label="Message" className="min-w-0 flex-1 rounded-xl border border-grid px-3 py-2.5 text-base outline-none focus:border-action" placeholder="Message" maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
         <button disabled={busy || !text.trim()} className="rounded-xl bg-action px-4 font-medium text-white disabled:opacity-50">Send</button>
       </form>
+      {reporting && (
+        <ReportSheet name={reporting.name} onClose={() => setReporting(null)}
+          onSend={(reason, note) => reportMessage((fn, args) => createClient().rpc(fn, args), reporting.id, reason, note)}
+          onBlock={() => { setBlocking(reporting); setReporting(null); }} />
+      )}
+      {blocking && (
+        <SafetyConfirm title={`Block ${blocking.name ?? "this player"}?`} text={BLOCK_EXPLAINED} action="Block" destructive linkBlocked
+          onConfirm={() => block(blocking)} onClose={() => setBlocking(null)} />
+      )}
     </section>
   );
 }

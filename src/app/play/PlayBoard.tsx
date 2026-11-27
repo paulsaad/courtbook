@@ -9,6 +9,7 @@ import { EMPTY, readPrefs, writePrefs, type Prefs } from "@/lib/prefs";
 import AreaPicker from "@/components/AreaPicker";
 import type { OpenMatch } from "@/components/Discover";
 import { fitLabel, rangeLabel } from "@/lib/levels";
+import { playWindowEnd } from "@/lib/playWindow";
 
 const TZ = "Asia/Beirut";
 const chip = (on: boolean) => `min-h-11 shrink-0 rounded-full border px-4 text-sm ${on ? "border-ink bg-ink text-white" : "border-grid bg-white"}`;
@@ -33,8 +34,7 @@ export default function PlayBoard({ areas, sports, initial, clubs }: { areas: Go
     (async () => {
       setBusy(true);
       const now = new Date();
-      const to = when === "today" ? new Date(now.getTime() + 24 * 3600e3) : when === "week" ? new Date(now.getTime() + 7 * 24 * 3600e3) : null;
-      const { data, error } = await createClient().rpc("open_matches", { p_sport: prefs.sport, p_fit: fit, p_to: to?.toISOString() ?? null, p_governorate: prefs.gov, p_district: prefs.district, p_limit: 50 });
+      const { data, error } = await createClient().rpc("open_matches", { p_sport: prefs.sport, p_fit: fit, p_to: playWindowEnd(when, now, TZ), p_governorate: prefs.gov, p_district: prefs.district, p_limit: 50 });
       if (!alive) return;
       if (error) { setFailed(true); setBusy(false); return; }
       setFailed(false); setRows((data ?? []) as OpenMatch[]); setBusy(false);
@@ -50,13 +50,13 @@ export default function PlayBoard({ areas, sports, initial, clubs }: { areas: Go
         <AreaPicker areas={areas} value={{ gov: prefs.gov, district: prefs.district }} onChange={(a) => update({ ...prefs, gov: a.gov, district: a.district })} />
       </header>
       <div className="-mx-5 flex gap-2 overflow-x-auto px-5">
-        <button onClick={() => update({ ...prefs, sport: null })} className={chip(!prefs.sport)}>All sports</button>
-        {sports.filter((s) => s.code !== "other").map((s) => <button key={s.code} onClick={() => update({ ...prefs, sport: prefs.sport === s.code ? null : s.code })} className={chip(prefs.sport === s.code)}>{s.name_en}</button>)}
+        <button onClick={() => update({ ...prefs, sport: null })} aria-pressed={!prefs.sport} className={chip(!prefs.sport)}>All sports</button>
+        {sports.filter((s) => s.code !== "other").map((s) => <button key={s.code} onClick={() => update({ ...prefs, sport: prefs.sport === s.code ? null : s.code })} aria-pressed={prefs.sport === s.code} className={chip(prefs.sport === s.code)}>{s.name_en}</button>)}
       </div>
       <div className="-mx-5 flex gap-2 overflow-x-auto px-5">
-        {(["today", "week", "any"] as const).map((w) => <button key={w} onClick={() => setWhen(w)} className={chip(when === w)}>{w === "today" ? "Today" : w === "week" ? "This week" : "Any day"}</button>)}
-        <span className="w-px shrink-0 bg-grid" />
-        <button onClick={() => setFit(fit ? null : "mine")} className={chip(!!fit)}>My level</button>
+        {(["today", "week", "any"] as const).map((w) => <button key={w} onClick={() => setWhen(w)} aria-pressed={when === w} className={chip(when === w)}>{w === "today" ? "Today" : w === "week" ? "This week" : "Any day"}</button>)}
+        <span className="w-px shrink-0 bg-grid" aria-hidden="true" />
+        <button onClick={() => setFit(fit ? null : "mine")} aria-pressed={!!fit} className={chip(!!fit)}>My level</button>
       </div>
 
       <section className={`flex flex-col gap-3 ${busy ? "opacity-60" : ""}`}>

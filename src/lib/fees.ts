@@ -34,3 +34,41 @@ export function feeSummary(mode: PaymentMode | string | null, serviceFeeUsd: num
   // taught this function about: overstating a cost is safer than promising free and then charging.
   return { fee: amount, payment: fee > 0 ? "Paid online when you reserve." : null };
 }
+
+export type PanelText = { priceLine: string; total: string; button: string; footnote: string };
+
+/**
+ * The words of the website's booking panels (club page and Courts page), from the club's payment mode.
+ *
+ * At an `at_desk` club `book_at_desk()` confirms at once, writes `fee_usd = 0` and creates no payment,
+ * so the panel must not mention a booking fee, a total with a fee, paying, or a hold. Any other mode
+ * reserves a held slot that is then paid in the app, with the club's service fee on top. The wording
+ * matches the Courts page (BookSheet), which already said this.
+ */
+export function bookingPanelText(i: {
+  mode: PaymentMode | string | null; courtUsd: number | null; serviceFeeUsd: number | string;
+  holdMinutes: number; cutoffHours: number; signedIn: boolean; busy: boolean;
+}): PanelText {
+  const money = (v: number) => `$${v.toFixed(2)}`;
+  const court = i.courtUsd === null ? "…" : money(i.courtUsd);
+  if (i.mode === "at_desk") {
+    return {
+      priceLine: "Pay at the club",
+      total: court,
+      button: i.busy ? "Reserving…" : !i.signedIn ? "Sign in to reserve" : "Reserve — you pay at the club",
+      footnote: `Confirmed straight away · nothing is paid through the app · free cancellation until ${i.cutoffHours} h before`,
+    };
+  }
+  const fee = Number(i.serviceFeeUsd);
+  const total = i.courtUsd === null ? null : i.courtUsd + fee;
+  return {
+    priceLine: `Court ${court} + booking fee ${money(fee)}`,
+    total: total === null ? "…" : money(total),
+    button: i.busy ? "Reserving…" : !i.signedIn ? "Sign in to reserve" : `Reserve and pay${total !== null ? ` ${money(total)}` : ""}`,
+    // A simulated (demo) club collects nothing; say so before the player taps, as the pay page already does.
+    footnote: `${i.mode === "simulated" ? `${DEMO_NOTE} · ` : ""}Slot held ${i.holdMinutes} minutes while you pay · free cancellation until ${i.cutoffHours} h before`,
+  };
+}
+
+/** Shown wherever a simulated (demo) payment could be read as a real charge. Payment behaviour is unchanged. */
+export const DEMO_NOTE = "Demo club: no real money is charged";

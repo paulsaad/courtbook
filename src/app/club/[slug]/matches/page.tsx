@@ -20,7 +20,7 @@ export default async function ClubMatches({ params }: { params: Promise<{ slug: 
     supabase.from("bookings").select("id, start_at, end_at, courts!bookings_court_id_fkey(name)").eq("player_id", user.id).eq("club_id", club.id).eq("status", "confirmed").gt("start_at", new Date().toISOString()).order("start_at"),
     loadClubHead(supabase, club),
     supabase.rpc("club_sports", { p_club: club.id }),
-    supabase.from("sports").select("code, name_en").order("sort_order"),
+    supabase.from("sports").select("code, name_en").eq("active", true).order("name_en"),   // a new game: active sports only (#66 review SF3)
   ]), "this club's games");
   const sportsHere = ((sportRows ?? []) as { code: string; name_en: string }[]).filter((s) => ((clubSports ?? []) as string[]).includes(s.code));
   return (

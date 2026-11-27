@@ -30,11 +30,13 @@ body { font-family: var(--font-sans); font-variant-numeric: tabular-nums; -webki
 .card { background: var(--color-card); border: 1px solid #eceeeb; border-radius: var(--radius-card); box-shadow: 0 1px 2px rgba(18, 22, 20, 0.04); }
 .chip { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 999px; font-size: 14px; font-weight: 600; background: var(--color-card); color: var(--color-ink); border: 1px solid var(--color-grid); white-space: nowrap; flex-shrink: 0; }
 .chip-on { background: var(--color-ink); color: #fff; border-color: var(--color-ink); }
+/* a chip whose label may wrap at large text instead of overflowing (H8) */
+.chip-wrap { white-space: normal; flex-shrink: 1; max-width: 100%; text-align: center; padding-block: 8px; }
 .btn { display: block; width: 100%; text-align: center; border-radius: 16px; padding: 15px 16px; font-size: 16px; font-weight: 700; }
 .btn-primary { background: var(--color-turf); color: #fff; }
 .btn-primary:disabled { opacity: .5; }
 .btn-secondary { background: var(--color-card); color: var(--color-ink); border: 1px solid var(--color-grid); }
-.eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .5px; color: #8a918e; text-transform: uppercase; }
+.eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .5px; color: var(--color-muted); text-transform: uppercase; }   /* #8a918e was 3.2:1 on white (WCAG AA needs 4.5) */
 h1, h2, h3 { letter-spacing: -0.02em; }
 
 .hatch {
