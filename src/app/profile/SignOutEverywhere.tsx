@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -12,22 +13,34 @@ import { signOutAllDevices } from "@/lib/signOutAll";
  * does not do (already-issued access tokens keep working until they expire, up to an hour by default) is in
  * src/lib/signOutText.ts and said in the confirmation. The Auth server must confirm the revocation before this browser
  * is cleared (src/lib/signOutAll.ts); otherwise this browser stays signed in and the page says the others may be too.
+ * If this browser's session had already ended, it is cleared too and the page says so, with a way to sign in again
+ * (follow-up 27 Nov: it used to stay looking signed in).
  */
 export default function SignOutEverywhere() {
   const router = useRouter();
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [ended, setEnded] = useState(false);
 
   async function confirm() {
     setBusy(true); setProblem(null);
     // the server confirms the revocation before this browser is cleared (src/lib/signOutAll.ts, re-review R103-1)
     const r = await signOutAllDevices(createClient().auth);
     setBusy(false);
-    if (!r.ok) { setProblem(r.reason === "this_device_ended" ? SIGN_OUT_ALL.thisDeviceEnded : SIGN_OUT_ALL.failed); return; }
+    if (!r.ok && r.reason === "this_device_ended") { setEnded(true); return; }   // this browser is now signed out
+    if (!r.ok) { setProblem(SIGN_OUT_ALL.failed); return; }
     router.replace("/"); router.refresh();
   }
 
+  if (ended) {
+    return (
+      <section role="alert" className="card flex flex-col gap-3 p-4">
+        <p className="text-sm">{SIGN_OUT_ALL.thisDeviceEnded}</p>
+        <Link href="/login?next=/profile" className="rounded-xl bg-cedar px-4 py-3 text-center text-sm font-semibold text-white">Sign in again</Link>
+      </section>
+    );
+  }
   if (!asking) {
     return (
       <div className="text-center">

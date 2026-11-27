@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import * as Updates from "expo-updates";
@@ -77,6 +77,10 @@ export default function Profile() {
   }
   // F2 review S3: every device (Supabase global sign-out), after a confirmation; see shared/signOutText.ts
   const [allProblem, setAllProblem] = useState<string | null>(null);
+  // the "already ended" message is for the signed-out screen; signing in again clears it
+  useEffect(() => {
+    if (session.status === "signed-in") setAllProblem((p) => (p === SIGN_OUT_ALL.thisDeviceEnded ? null : p));
+  }, [session.status]);
   function signOutEverywhere() {
     setAllProblem(null);
     Alert.alert(SIGN_OUT_ALL.title, SIGN_OUT_ALL.body, [
@@ -85,7 +89,8 @@ export default function Profile() {
         setBusy(true);
         const r = await signOutAllDevices(supabase.auth);
         setBusy(false);
-        // this phone stays signed in; the others may be too (the server did not confirm)
+        // failed: this phone stays signed in; the others may be too (the server did not confirm)
+        // this_device_ended: this phone is now signed out too (follow-up 27 Nov), and the message stays on screen
         if (!r.ok) setAllProblem(r.reason === "this_device_ended" ? SIGN_OUT_ALL.thisDeviceEnded : SIGN_OUT_ALL.failed);
       } },
     ]);
@@ -96,7 +101,10 @@ export default function Profile() {
       {session.status === "loading" ? (
         <Loading label="Checking sign-in" />
       ) : session.status === "signed-out" ? (
-        <SignInPrompt title="Your profile" body="Sign in to set your levels, see your activity and manage your account." />
+        <>
+          {allProblem ? <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.problem} accessibilityRole="alert" testID="profile-signout-all-problem">{allProblem}</Text> : null}
+          <SignInPrompt title="Your profile" body="Sign in to set your levels, see your activity and manage your account." />
+        </>
       ) : (
         <View style={styles.card}>
           <View style={styles.who}>

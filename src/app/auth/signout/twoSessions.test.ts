@@ -80,11 +80,29 @@ describe("F2: account closure still ends every session", () => {
       method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/json" }, body: JSON.stringify({ confirm: true }),
     })));
     expect(await res.json()).toEqual({ closed: true });
-    expect(logoutScopes()).toEqual(["global"]);
+    expect(logoutScopes()).toEqual(["global", "local"]);   // confirmed revocation, then this browser's cookies (27 Nov)
     expect(auth.alive()).toHaveLength(0);
     expect(await signedIn(desk)).toEqual({ user: false, refreshed: false });
     expect(await signedIn(phone)).toEqual({ user: false, refreshed: false });
   });
+  // follow-up 27 Nov (issue 3): auth.signOut({ scope: "global" }) took these answers as success and nothing said so
+  for (const status of [401, 403, 404]) {
+    it(`Auth refuses the revocation (${status}): reported, this browser signed out, the desk NOT claimed signed out`, async () => {
+      const { report } = await import("@/lib/report");
+      (report as ReturnType<typeof vi.fn>).mockClear();
+      const desk = await signIn(), phone = await signIn();
+      auth.logoutAnswer = { status, code: "forced" };
+      const res = await as(phone, () => closeRoute(new Request("http://localhost:3000/api/account/close", {
+        method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/json" }, body: JSON.stringify({ confirm: true }),
+      })));
+      auth.logoutAnswer = null;
+      expect(await res.json()).toEqual({ closed: true });
+      expect(report).toHaveBeenCalledWith("deletionStepFailed", "account", { code: "global_signout" });
+      expect([...phone.keys()].filter((k) => k.includes("auth-token"))).toEqual([]);
+      expect(auth.alive().length).toBeGreaterThan(0);        // the ban (processDeletion step B) is what ends it then
+      expect(await signedIn(desk)).toEqual({ user: true, refreshed: true });
+    });
+  }
 });
 
 describe("F2: when Supabase Auth cannot be reached (what 'local' changes, and what it does not)", () => {

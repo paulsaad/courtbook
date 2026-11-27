@@ -53,8 +53,8 @@ it("Sign out on the phone: the phone is signed out, the desk browser keeps its s
 it("closing the account on the phone signs the desk browser out as well (global)", async () => {
   const phone = await device(), desk = await device();
   const rpc = async () => ({ data: null, error: null });   // close_my_account committed (tested in the database suites)
-  expect(await closeMyAccount(rpc, (o) => phone.signOut(o))).toEqual({ ok: true });
-  expect(scopes()).toEqual(["global"]);
+  expect(await closeMyAccount(rpc, phone)).toEqual({ ok: true });
+  expect(scopes()).toEqual(["global", "local"]);   // confirmed revocation, then this phone (follow-up 27 Nov)
   expect(auth.alive()).toHaveLength(0);
   expect((await desk.refreshSession()).error).toBeTruthy();
   expect(await signedIn(phone)).toEqual({ session: false, refreshed: false });
@@ -122,5 +122,27 @@ it("Sign out of all devices when this phone's own session already ended on the s
   const phone = await device(), desk = await device();
   auth.sessions[0].revoked = true;
   expect(await signOutAllDevices(phone)).toEqual({ ok: false, reason: "this_device_ended" });
+  expect((await desk.refreshSession()).error).toBeNull();
+  // follow-up 27 Nov (issue 1): this phone is cleared, so the app shows it signed out instead of still signed in
+  expect((await phone.getSession()).data.session).toBeNull();
+});
+it("Sign out of all devices with an expired access token whose renewal is refused: this_device_ended (not the generic failure); this phone signed out", async () => {
+  const phone = await device(), desk = await device();
+  auth.sessions[0].revoked = true;
+  jest.useFakeTimers({ doNotFake: ["setTimeout", "setInterval", "setImmediate", "nextTick", "queueMicrotask", "clearTimeout", "clearInterval"], now: Date.now() + 2 * 3600_000 });
+  try {
+    expect(await signOutAllDevices(phone)).toEqual({ ok: false, reason: "this_device_ended" });
+    expect(scopes()).not.toContain("global");
+  } finally { jest.useRealTimers(); }
+  expect((await phone.getSession()).data.session).toBeNull();
+  expect((await desk.refreshSession()).error).toBeNull();
+});
+it("closing the account when Auth refuses the revocation (401): still closed; this phone signed out; the desk is not claimed revoked", async () => {
+  const phone = await device(), desk = await device();
+  auth.logoutAnswer = { status: 401, code: "no_authorization" };
+  expect(await closeMyAccount(async () => ({ data: null, error: null }), phone)).toEqual({ ok: true });
+  expect((await phone.getSession()).data.session).toBeNull();
+  auth.logoutAnswer = null;
+  expect(auth.alive()).toHaveLength(2);    // the server-side ban (retry route) ends it; the database refuses its writes
   expect((await desk.refreshSession()).error).toBeNull();
 });

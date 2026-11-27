@@ -25,9 +25,10 @@ jest.mock("../lib/supabase", () => ({
   },
 }));
 const mockPush = jest.fn();
-jest.mock("expo-router", () => ({ router: { push: (...a: unknown[]) => mockPush(...a) } }));
+jest.mock("expo-router", () => ({ router: { push: (...a: unknown[]) => mockPush(...a) }, usePathname: () => "/profile" }));
 jest.mock("expo-updates", () => ({ channel: "production" }));
-jest.mock("../lib/session", () => ({ useSession: () => ({ status: "signed-in", session: { user: { id: "me", email: "rana@example.test" } } }) }));
+let mockSignedIn = true;   // follow-up 27 Nov: a test signs this phone out part way through
+jest.mock("../lib/session", () => ({ useSession: () => (mockSignedIn ? { status: "signed-in", session: { user: { id: "me", email: "rana@example.test" } } } : { status: "signed-out" }) }));
 jest.mock("../lib/buildInfo", () => ({ currentBuild: () => [] }));
 jest.mock("../lib/appIdentity", () => ({ installedVariant: "live" }));
 jest.mock("../lib/activity", () => ({ useActivity: () => ({ data: [] }), unreadCount: () => 0, badgeText: () => null }));
@@ -39,13 +40,17 @@ jest.mock("../components/DeleteAccount", () => { const { Text } = jest.requireAc
 
 import Profile from "../app/(tabs)/profile";
 
-async function show(children: ReactNode = <Profile />) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { gcTime: Infinity } } });
-  return render(
+function tree(qc: QueryClient, children: ReactNode) {
+  return (
     <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 360, height: 800 }, insets: { top: 0, left: 0, right: 0, bottom: 0 } }}>
       <QueryClientProvider client={qc}>{children}</QueryClientProvider>
-    </SafeAreaProvider>,
+    </SafeAreaProvider>
   );
+}
+async function show(children: ReactNode = <Profile />) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { gcTime: Infinity } } });
+  const view = await render(tree(qc, children));
+  return Object.assign(view, { again: () => view.rerender(tree(qc, <Profile />)) });
 }
 beforeEach(() => {
   mockDb.row = { name: "Rana Khoury", phone: "+96170123456", sports: ["padel", "tennis"] }; mockDb.levels = [{ sport: "padel", level: 5 }]; mockDb.rpcError = null;
@@ -163,6 +168,23 @@ describe("Profile: Sign out of all devices (F2 review S3, Paul 26 Nov; re-review
     await fireEvent.press(await screen.findByTestId("profile-signout-all"));
     await buttons()[1].onPress!();
     expect(await screen.findByText(SIGN_OUT_ALL.thisDeviceEnded)).toBeTruthy();
-    expect(supabase.auth.signOut).not.toHaveBeenCalled();
+    // follow-up 27 Nov (issue 1): this phone is cleared, so it no longer looks signed in
+    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: "local" });
+  });
+
+  it("follow-up 27 Nov: once this phone is signed out the message stays on the signed-out screen; signing in again clears it", async () => {
+    supabase.auth.admin.signOut.mockResolvedValue({ error: { name: "AuthSessionMissingError", status: 404 } });
+    supabase.auth.signOut.mockImplementation(async () => { mockSignedIn = false; return { error: null }; });
+    try {
+      const view = await show();
+      await fireEvent.press(await screen.findByTestId("profile-signout-all"));
+      await buttons()[1].onPress!();
+      expect((await screen.findByTestId("profile-signout-all-problem")).props.children).toBe(SIGN_OUT_ALL.thisDeviceEnded);
+      expect(screen.queryByTestId("profile-signout-all")).toBeNull();          // the signed-in card is gone
+      mockSignedIn = true;
+      await view.again();
+      await waitFor(() => expect(screen.queryByText(SIGN_OUT_ALL.thisDeviceEnded)).toBeNull());
+      expect(screen.getByTestId("profile-signout-all")).toBeTruthy();
+    } finally { mockSignedIn = true; }
   });
 });
