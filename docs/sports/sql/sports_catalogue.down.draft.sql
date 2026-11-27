@@ -36,6 +36,7 @@ delete from sports where code <> all(array['padel','tennis','other','football','
 drop index if exists sports_name_en_unique;
 alter table sports drop constraint if exists sports_names_present;
 alter table sports drop column if exists aliases;
+alter table sports alter column sort_order drop default;
 alter table sports alter column name_ar set not null;
 
 -- 2. capture every function whose signature uses the domain (definition and grants), and drop it

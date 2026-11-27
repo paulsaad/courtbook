@@ -91,6 +91,9 @@ alter table sports add constraint sports_names_present check (btrim(name_en) <> 
 -- sports' values are left as they are; it simply stops being required. Nothing reads it for sports.
 alter table sports alter column name_ar drop not null;
 create unique index if not exists sports_name_en_unique on sports (lower(name_en));
+-- Sports are listed by name (F16); sort_order no longer orders anything. A default lets an admin add a sport in the
+-- Supabase table editor with only a code and a name.
+alter table sports alter column sort_order set default 1000;
 
 insert into sports (code, name_en, name_ar, sort_order, active, aliases)
 values ('table_tennis', 'Table tennis', null, 80, true, '{"ping pong","ping-pong","pingpong"}')
@@ -115,6 +118,7 @@ begin
 end $$;
 drop trigger if exists sports_guard on sports;
 create trigger sports_guard before update or delete on sports for each row execute function sports_guard();
+revoke execute on function sports_guard() from public, anon, authenticated;  -- fires as a trigger only
 
 -- a NEW use of a sport must name an active catalogue entry; existing uses are never re-checked (history is kept)
 create or replace function sport_choice_guard() returns trigger language plpgsql security definer set search_path = public as $$
@@ -152,6 +156,7 @@ create trigger sport_choice_guard before insert or update of sport  on matches  
 -- 'unknown_sport' instead of the raw foreign-key error.
 drop trigger if exists sport_choice_guard on player_levels;
 create trigger sport_choice_guard before insert or update of sport on player_levels for each row execute function sport_choice_guard();
+revoke execute on function sport_choice_guard() from public, anon, authenticated;  -- fires as a trigger only
 
 -- ------------------------------------------------------------------ 5. alphabetical, and only the club's own sports
 create or replace function club_sports(p_club uuid) returns sport[]

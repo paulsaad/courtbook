@@ -13,6 +13,14 @@ trap '$PSQL -q -d postgres -c "drop database if exists $DB" >/dev/null' EXIT
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql >/dev/null || exit 2
 for f in $(ls supabase/migrations/*.sql | sort) docs/sports/sql/sports_catalogue.draft.sql; do
   [[ "$f" == docs/* && -n "${CONTROL:-}" ]] && continue
+  # C16: every function's privileges, security mode and search_path, and table RLS, as they were before the draft
+  [[ "$f" == docs/* ]] && $PSQL -q -d $DB -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+create schema t_snap;
+create table t_snap.fns as select p.oid::regprocedure::text as sig, coalesce((select array_agg(x::text order by x::text) from unnest(p.proacl) x)::text, 'default') as acl, p.prosecdef, coalesce(p.proconfig::text, '') as cfg
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public';
+create table t_snap.rls as select c.relname, c.relrowsecurity, coalesce(c.relacl::text, '') as acl from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r';
+create table t_snap.pol as select tablename, policyname, cmd, roles::text, coalesce(qual, '') as qual, coalesce(with_check, '') as wc from pg_policies where schemaname = 'public';
+SQL
   $PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || { echo "BUILD FAILED: $f"; exit 2; }
 done
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/seed.sql >/dev/null || exit 2
@@ -105,4 +113,47 @@ check "C14 a game for a sport not yet activated is refused, whatever the client"
         insert into matches (club_id, sport, organizer_id, start_at, end_at, players_needed) values ($CLUB_B, 'cricket', '$P1', now() + interval '1 day', now() + interval '1 day 1 hour', 2);")" "ERR sport_inactive"
 check "C14b a game for an unknown code is refused as unknown_sport" \
   "$(q "insert into matches (club_id, sport, organizer_id, start_at, end_at, players_needed) values ($CLUB_B, 'curling', '$P1', now() + interval '1 day', now() + interval '1 day 1 hour', 2);")" "ERR unknown_sport"
+# the Supabase dashboard (table editor, SQL editor) runs as postgres, with no signed-in user
+check "C15 dashboard: add a sport with only a code and a name; rename it, edit aliases, deactivate, reactivate" \
+  "$(q "insert into sports (code, name_en) values ('cricket', 'Cricket');
+        update sports set name_en = 'Cricket (nets)', aliases = '{bat and ball}' where code = 'cricket';
+        update sports set active = false where code = 'cricket';
+        update sports set active = true where code = 'cricket';
+        select code || '|' || name_en || '|' || array_to_string(aliases, ',') || '|' || active from sports where code = 'cricket';")" "^cricket\|Cricket \(nets\)\|bat and ball\|true$"
+check "C15b dashboard: a sport added there is choosable by players at once; deactivated there, it is not" \
+  "$(q "insert into sports (code, name_en) values ('cricket', 'Cricket');
+        $(as $P1) select string_agg(code, ',' order by name_en) from sports where active and code in ('cricket', 'squash');
+        reset role; update sports set active = false where code = 'cricket';
+        $(as $P1) select coalesce(string_agg(code, ','), '-') from sports where active and code = 'cricket';
+        update profiles set sports = '{cricket}' where id = '$P1';")" "^cricket,squash
+-
+ERR sport_inactive$"
+check "C15c dashboard: the code stays permanent and an in-use sport cannot be deleted" \
+  "$(q "update sports set code = 'ping_pong' where code = 'table_tennis';")
+$(q "delete from sports where code = 'padel';")" "^ERR sport_code_permanent
+ERR sport_in_use$"
+check "C15d dashboard: a duplicate display name is refused" \
+  "$(q "insert into sports (code, name_en) values ('pingpong', 'table TENNIS');")" "ERR .*sports_name_en_unique"
+check "C16 every function that existed before keeps its grants, security mode and search_path" \
+  "$(q "select coalesce(string_agg(b.sig || ' ' || b.acl || '->' || coalesce(a.acl, 'GONE'), '; '), 'same') from t_snap.fns b
+          left join (select p.oid::regprocedure::text as sig, coalesce((select array_agg(x::text order by x::text) from unnest(p.proacl) x)::text, 'default') as acl, p.prosecdef, coalesce(p.proconfig::text, '') as cfg
+                     from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public') a using (sig)
+          where a.sig is null or a.acl <> b.acl or a.prosecdef <> b.prosecdef or a.cfg <> b.cfg;")" "^same$"
+check "C16b the new functions: guards are not callable by any client role; club_sports keeps its grants (C16)" \
+  "$(q "select string_agg(r || ':' || f || '=' || has_function_privilege(r, f, 'execute'), ' ' order by r, f)
+          from unnest(array['anon','authenticated','service_role']) r, unnest(array['sports_guard()','sport_choice_guard()','club_sports(uuid)']) f;")" "^anon:club_sports\(uuid\)=true anon:sport_choice_guard\(\)=false anon:sports_guard\(\)=false authenticated:club_sports\(uuid\)=true authenticated:sport_choice_guard\(\)=false authenticated:sports_guard\(\)=false service_role:club_sports\(uuid\)=true"
+check "C16c every security-definer function in public pins its search_path" \
+  "$(q "select coalesce(string_agg(p.oid::regprocedure::text, ', '), 'all pinned') from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public' and p.prosecdef and not coalesce(array_to_string(p.proconfig, ',') like '%search_path=%', false)
+            and p.oid::regprocedure::text not in (select sig from t_snap.fns where prosecdef);")" "^all pinned$"
+check "C16d table RLS flags and table grants are unchanged; sports policies are exactly read-all and admin-write" \
+  "$(q "select coalesce(string_agg(b.relname, ','), 'same') from t_snap.rls b join pg_class c on c.relname = b.relname and c.relnamespace = 'public'::regnamespace
+          where c.relrowsecurity <> b.relrowsecurity or coalesce(c.relacl::text, '') <> b.acl;
+        select string_agg(policyname || '/' || cmd || '/' || roles::text, ' ' order by policyname) from pg_policies where schemaname = 'public' and tablename = 'sports';
+        select count(*) from (select tablename, policyname, cmd, roles::text, coalesce(qual, '') q, coalesce(with_check, '') w from pg_policies
+                              where schemaname = 'public' and tablename <> 'sports' except select * from t_snap.pol) x;")" "^same
+sports: admin/ALL/\{authenticated\} sports: read/SELECT/\{public\}
+0$"
+check "C16e a player cannot call the guards directly" \
+  "$(q "$(as $P1) select sports_guard();")" "ERR (permission denied|trigger functions can only be called as triggers)"
 exit $status
