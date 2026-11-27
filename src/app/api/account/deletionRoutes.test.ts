@@ -63,10 +63,12 @@ function happyService() {
   };
 }
 beforeEach(() => {
-  calls = []; user = { id: ME }; userRpc = {}; signOut = vi.fn(async () => ({ error: null })); logout = vi.fn(async () => ({ error: null })); reported.length = 0;
+  calls = []; user = { id: ME }; userRpc = {}; signOut = vi.fn(async () => ({ error: null })); reported.length = 0;
   happyService();
   delete process.env.CRON_SECRET;
 });
+// a separate hook (not the line above) so the staging website's version of this file merges without a conflict here
+beforeEach(() => { logout = vi.fn(async () => ({ error: null })); });
 const services = () => calls.filter((c) => c.client === "service").map((c) => c.fn);
 
 describe("POST /api/account/close", () => {
