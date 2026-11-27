@@ -1544,7 +1544,13 @@ else claim "106a re-applying 0041 onwards raises no error$(printf "$RERUN_FAILS"
 # functions without its clauses) must end with 0100's catalogue in place, not a silently older schema
 check service "106e and 0100's catalogue is back in place afterwards (search by sport and alias, alphabetical club_sports, the domain)" "select (position('unnest(s.aliases)' in pg_get_functiondef('club_discovery(sport,text,text,text)'::regprocedure)) > 0 and position('unnest(s2.aliases)' in pg_get_functiondef('club_day_slots(date,sport,text,text,text)'::regprocedure)) > 0 and position('order by x.name_en' in pg_get_functiondef('club_sports(uuid)'::regprocedure)) > 0 and (select typtype from pg_type where typname = 'sport' and typnamespace = 'public'::regnamespace) = 'd')::text;" true
 # 0099 converges too: re-applying 0091 restores the old movers, and 0099 re-applied after it refuses them again
+# (compat.sh adds a TEST-ONLY adapter after 0099 that makes the old calls work again on purpose: then only the
+# 8-argument move is required)
+if ls supabase/migrations | grep -q 'legacy_adapter_TEST_ONLY'; then
+check service "106f and 0099's 8-argument staff move is back in place afterwards (test-only legacy adapter present)" "select (to_regprocedure('move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric,uuid,timestamptz,timestamptz)') is not null)::text;" true
+else
 check service "106f and 0099's staff moves are back in place afterwards (8-argument move; the 5- and 4-argument calls refuse move_needs_reload)" "select (to_regprocedure('move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric,uuid,timestamptz,timestamptz)') is not null and position('move_needs_reload' in pg_get_functiondef('move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric)'::regprocedure)) > 0 and position('move_needs_reload' in pg_get_functiondef('move_booking(uuid,uuid,timestamptz,timestamptz)'::regprocedure)) > 0)::text;" true
+fi
 check service "106b and the uploader is still not public afterwards"  "select has_column_privilege('anon','club_media','created_by','SELECT');" "f"
 check service "106d and still exactly one hold_slot after 0051/0052 re-created the old one" "select count(*)||'/'||max(pronargs) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='hold_slot';" "1/5"
 check service "106c and publication is still server-only afterwards"  "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('set_club_image','add_club_gallery','reorder_club_gallery','set_gallery_caption','remove_club_media','record_media_orphan') and has_function_privilege('authenticated', p.oid, 'EXECUTE');" 0

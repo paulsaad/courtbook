@@ -29,6 +29,15 @@ fp() { { $PSQL -d $1 -X -At -f supabase/tests/schema_fingerprint.sql; $PSQL -d $
 echo "== 0. release set"
 bash supabase/tests/candidate/release_set.sh | sed 's/^/  /'; [ ${PIPESTATUS[0]} = 0 ] && line "0 release set" PASS || line "0 release set" FAIL
 
+echo "== A0. read-only preflights before, postchecks after (supabase/live)"
+chk() { local out; out=$($PSQL -d $1 -X -At -F'|' -c "set default_transaction_read_only = on" -f "$2" 2>&1); [ -n "$(echo "$out" | grep '|')" ] && ! echo "$out" | grep -qE '\|STOP$|ERROR' && echo PASS || { echo FAIL; echo "$out" | grep -E 'STOP|ERROR' >&2; }; }
+build courtbook_cand_pre99 '$NF < "0099"' && line "A0a F1 preflight on 0001–0093" "$(chk courtbook_cand_pre99 supabase/live/staff_moves_preflight.sql)"
+build courtbook_cand_pre100 '$NF < "0100"' && line "A0b 0100 preflight on 0001–0093 + 0099" "$(chk courtbook_cand_pre100 supabase/live/sports_0100_preflight.sql)"
+build courtbook_cand_full '1' && line "A0c 0100 postcheck on the full schema" "$(chk courtbook_cand_full supabase/live/sports_0100_postcheck.sql)"
+line "A0d F1 postcheck refuses before 0099 (control)" "$(chk courtbook_cand_pre99 supabase/live/staff_moves_postcheck.sql 2>/dev/null | grep -q FAIL && echo PASS || echo FAIL)"
+line "A0e 0100 postcheck refuses before 0100 (control)" "$(chk courtbook_cand_pre100 supabase/live/sports_0100_postcheck.sql 2>/dev/null | grep -q FAIL && echo PASS || echo FAIL)"
+$PSQL -q -d postgres -c "drop database if exists courtbook_cand_pre99" -c "drop database if exists courtbook_cand_pre100" -c "drop database if exists courtbook_cand_full" >/dev/null 2>&1
+
 echo "== A. F1 on the full schema"
 T=courtbook_cand_f1
 if build $T '1' && (cd supabase/tests/staff_moves && $PSQL -d $T -X -q -At -v ON_ERROR_STOP=1 -f fixtures.sql >/dev/null 2>&1); then
@@ -44,7 +53,7 @@ $PSQL -q -d postgres -c "drop database if exists $T" >/dev/null 2>&1
 
 echo "== B. existing suites on the full schema"
 bash supabase/tests/run.sh > /tmp/cand050s_run.log 2>&1
-grep -q "SUITE OK" /tmp/cand050s_run.log && line "B0 run.sh ($(grep -E 'checks:' /tmp/cand050s_run.log | tail -1); $(grep -c '106e' /tmp/cand050s_run.log) run-once check)" PASS || { line "B0 run.sh" FAIL; grep -E "FAIL" /tmp/cand050s_run.log | head; }
+grep -q "SUITE OK" /tmp/cand050s_run.log && line "B0 run.sh ($(grep -E 'checks:' /tmp/cand050s_run.log | tail -1); $(grep -cE "ok +106[ef]" /tmp/cand050s_run.log)/2 convergence checks)" PASS || { line "B0 run.sh" FAIL; grep -E "FAIL" /tmp/cand050s_run.log | head; }
 for s in races/booking_races.sh races/court_deactivation_race.sh races/closed_account_booking.sh staff_ops/staff_ops.sh \
          m83/cancel.sh m3/safety.sh m3/hardening.sh m3/hardening_races.sh m10/moderation.sh m80/age.sh \
          m86/deletion86.sh m86/races86.sh m86/pipeline_e2e.sh m86/old_app_answers.sh m86/ported_deletion_races.sh \
