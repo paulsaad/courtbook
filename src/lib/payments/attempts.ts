@@ -53,7 +53,8 @@ export async function verifyAndRecord(admin: Rpc, provider: PaymentProvider, att
   if (status.state === "unknown") {
     const made = opts.createdAt ? new Date(opts.createdAt).getTime() : NaN;
     const old = Number.isFinite(made) && (opts.now ?? new Date()).getTime() - made > UNKNOWN_GRACE_MINUTES * 60_000;
-    status = { state: old ? "expired" : "pending" } as const;
+    // 0098 (M1): CourtBook's own inference, recorded as such (end_reason unknown_timeout), never as the provider's expiry
+    status = { state: old ? "unknown_timeout" : "pending" } as const;
   }
   const args = status.state === "succeeded"
     ? { p_attempt: attemptId, p_result: "succeeded", p_provider_ref: status.evidence.providerRef, p_amount: status.evidence.amount, p_currency: status.evidence.currency }

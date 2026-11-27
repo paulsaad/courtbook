@@ -297,6 +297,23 @@ describe("POST /api/native/pay/status", () => {
     expect((await (await ask()).json()).state).toBe("cancelled");
   });
 
+  // 0098 (M1, Paul 26 Nov): "no fee was taken" only when every attempt is known to have taken nothing
+  it("noFeeTaken: true with no attempts, or only provider-refused/-expired/abandoned ones; false after CourtBook's own timeout or with a refund owed", async () => {
+    const ended = (end_reason: string, status = "expired") => ({ id: ATT, status, outcome: null, attempt_no: 1, provider: "whish", end_reason });
+    paymentRow = pay({}, { status: "expired", hold_expires_at: past() });
+    attemptRows = [];
+    expect((await (await ask()).json()).noFeeTaken).toBe(true);
+    for (const [row, want] of [[ended("provider_failed", "failed"), true], [ended("provider_expired"), true], [ended("abandoned", "failed"), true],
+      [ended("unknown_timeout"), false], [{ ...ended("provider_expired"), end_reason: null }, false]] as const) {
+      attemptRows = [row];
+      const b = await (await ask()).json();
+      expect([b.state, b.noFeeTaken]).toEqual(["hold_expired", want]);
+    }
+    attemptRows = [ended("provider_expired")]; refundCount = 1;
+    expect((await (await ask()).json()).noFeeTaken).toBe(false);
+    refundCount = 0; attemptRows = [];
+  });
+
   describe("fails closed when a financial read fails (review of PR #37)", () => {
     const UNAVAILABLE = { error: "payment_status_unavailable", final: false };
     const noClaims = (b: Record<string, unknown>) => {

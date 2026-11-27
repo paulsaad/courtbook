@@ -205,14 +205,16 @@ select pg_temp.keep('rel_ok', pg_temp.res(pg_temp.aid('rel_a'), 'succeeded', 'W-
 insert into t select 'A18 a success after the player released the hold: recorded and owed back, no booking',
   pg_temp.got('rel_ok') = 'late' and b.status = 'expired' and p.status = 'refund_due' and pg_temp.charges(p.id) = 'refund_due:not_confirmed', pg_temp.got('rel') || ' then ' || pg_temp.got('rel_ok')
 from bookings b join payments p on p.booking_id = b.id where b.id = pg_temp.bk('a_taker');
--- an attempt we marked expired (no answer) turns out to have succeeded while the hold is still live: it confirms
+-- an attempt we marked expired (no answer) turns out to have succeeded while the hold is still live.
+-- 0098 (M1, Paul 26 Nov): a closed attempt is never revived: the charge is owed back; the live hold is left alone
 select pg_temp.keep('ex_h', pg_temp.hold(6, 2, 3, '10:00', '11:00'));
 select pg_temp.keep('ex_a', pg_temp.att(6, pg_temp.py('ex_h'), 30));
 select pg_temp.keep('ex_exp', pg_temp.res(pg_temp.aid('ex_a'), 'expired'));
 select pg_temp.keep('ex_ok', pg_temp.res(pg_temp.aid('ex_a'), 'succeeded', 'W-exp-1', 1.00, 'USD'));
-insert into t select 'A19 money taken on an attempt we had given up on is still recorded (here the hold was live: confirmed)',
-  pg_temp.got('ex_exp') = 'expired' and pg_temp.got('ex_ok') = 'confirmed' and b.status = 'confirmed', pg_temp.got('ex_exp') || ' then ' || pg_temp.got('ex_ok')
-from bookings b where b.id = pg_temp.bk('ex_h');
+insert into t select 'A19 money taken on an attempt we had given up on is still recorded and owed back (0098: never revives); the live hold stays pending',
+  pg_temp.got('ex_exp') = 'expired' and pg_temp.got('ex_ok') = 'late' and b.status = 'pending' and p.status = 'pending'
+  and pg_temp.charges(p.id) = 'refund_due:not_confirmed', pg_temp.got('ex_exp') || ' then ' || pg_temp.got('ex_ok') || ' ' || b.status || '/' || p.status
+from bookings b join payments p on p.booking_id = b.id where b.id = pg_temp.bk('ex_h');
 select pg_temp.keep('ab_h', pg_temp.hold(7, 3, 3, '10:00', '11:00'));
 select pg_temp.keep('ab_a', pg_temp.att(7, pg_temp.py('ab_h'), 40));
 select pg_temp.keep('ab_x', pg_temp.s(format('select abandon_payment_attempt(%L, ''gateway refused'')', pg_temp.aid('ab_a'))));
@@ -265,8 +267,9 @@ select pg_temp.keep('y_unmatched_vs_attempt', pg_temp.s($$select reconcile_provi
 select pg_temp.keep('y_un_first', pg_temp.s($$select reconcile_provider_charge('simulated', 'not-ours-777', 'R-UN-S', 1.00, 'USD')$$));
 select pg_temp.keep('y_attempt_vs_unmatched', pg_temp.s(format('select reconcile_provider_charge(''simulated'', %L, ''R-UN-S'', 1.00, ''USD'')', pg_temp.aid('rc_a'))));
 select pg_temp.keep('y_cur', pg_temp.s($$select reconcile_provider_charge('whish', 'not-ours-123', 'R-UN-1', 1.00, 'EUR')$$));
-insert into t values ('R7 the same provider reference under another attempt, under no attempt, or in another currency is a conflict, never already_recorded',
-  pg_temp.got('y_other_attempt') = 'ERR charge_evidence_conflict' and pg_temp.got('y_unmatched_vs_attempt') = 'ERR charge_evidence_conflict'
+-- 0098 (case 6 decision): the same reference with NO attempt of ours, same amount and currency, is the same money
+insert into t values ('R7 the same provider reference under another attempt or in another currency is a conflict; under no attempt (same amount, currency) it is already_recorded (0098)',
+  pg_temp.got('y_other_attempt') = 'ERR charge_evidence_conflict' and pg_temp.got('y_unmatched_vs_attempt') = 'already_recorded'
   and pg_temp.got('y_cur') = 'ERR charge_evidence_conflict'
   and pg_temp.got('y_un_first') = 'unmatched' and pg_temp.got('y_attempt_vs_unmatched') = 'ERR charge_evidence_conflict'
   and (select count(*) from fee_charges where provider_ref in ('R-1', 'R-UN-1', 'R-UN-S')) = 3

@@ -1,7 +1,6 @@
 import {
   FEE_TERMS, PAYMENT_SERVER, afterReserve, feeCancelNote, feeLine, keepKeyAfterStart, keepKeyAfterStatus, payView, paymentConfig,
-  readStart, readStatus, reservableInApp, safePaymentPage, startProblem, type PaymentStatus,
-} from "../lib/feePayment";
+  readStart, readStatus, reservableInApp, safePaymentPage, startProblem, HOLD_ENDED_UNCERTAIN, releaseOutcome, type PaymentStatus } from "../lib/feePayment";
 import { PayController, paymentStorageKey, type PayDeps } from "../lib/payController";
 import { HELD_LABEL, reserveButton } from "../lib/reserveButton";
 // Node's own modules (Jest runs in Node; the app's type settings have no Node types).
@@ -10,7 +9,7 @@ declare const __dirname: string;
 const nodeRequire = require;
 
 const status = (over: Partial<PaymentStatus> = {}): PaymentStatus => ({
-  state: "awaiting_payment", bookingStatus: "pending", paymentStatus: "pending", holdExpiresAt: null, attempt: null, attemptsLeft: 3, refundsDue: 0, ...over,
+  state: "awaiting_payment", bookingStatus: "pending", paymentStatus: "pending", holdExpiresAt: null, attempt: null, attemptsLeft: 3, refundsDue: 0, noFeeTaken: false, ...over,
 });
 
 describe("G: the feature is off unless a build turns it on, and each app talks only to its own server", () => {
@@ -361,7 +360,10 @@ describe("B1: what the payment screen says", () => {
   });
   it("confirmed → booking; expired, refund due: explained, nothing to press but the booking", () => {
     expect(payView(status({ state: "confirmed" }), o)).toMatchObject({ title: "Court booked", primary: "view-booking" });
-    expect(payView(status({ state: "hold_expired" }), o).message).toMatch(/No fee was taken/);
+    // 0098 (M1): "No fee was taken" only when the server says every attempt took nothing
+    expect(payView(status({ state: "hold_expired", noFeeTaken: true }), o).message).toMatch(/No fee was taken/);
+    expect(payView(status({ state: "hold_expired", noFeeTaken: false }), o).message).toBe(HOLD_ENDED_UNCERTAIN);
+    expect(payView(status({ state: "hold_expired", noFeeTaken: false }), o).message).not.toMatch(/No fee was taken/);
     expect(payView(status({ state: "refund_due" }), o).message).toMatch(/refunded/);
     expect(payView(null, o).title).toMatch(/Checking/);
   });
@@ -421,5 +423,27 @@ describe("B2/G: the app carries no server or provider credential and no payment-
   it("app.json / app.config: no new permission for payments", () => {
     const cfg = fs.readFileSync(path.join(root, "app.config.ts"), "utf8");
     expect(cfg).not.toMatch(/web-browser|payment/i);
+  });
+});
+
+describe("0098 (M12 review M1/M2)", () => {
+  it("the server's noFeeTaken is read strictly: anything but true is not 'no fee was taken'", () => {
+    const base = { state: "hold_expired", bookingStatus: "expired", paymentStatus: "expired", holdExpiresAt: null, attempt: null, attemptsLeft: 2, refundsDue: 0 };
+    for (const [v, want] of [[true, true], [false, false], ["true", false], [undefined, false], [1, false]] as const) {
+      const r = readStatus(200, { ...base, noFeeTaken: v });
+      expect(r.kind === "status" && r.status.noFeeTaken).toBe(want);
+    }
+  });
+  it("the booking screen's fee line never says 'No fee was taken' unless told so", () => {
+    expect(feeLine("expired", 1).note).toBe("If you were charged, the fee will be refunded");
+    expect(feeLine("failed", 1).note).not.toMatch(/No fee/);
+    expect(feeLine("expired", 1, true).note).toBe("No fee was taken");
+  });
+  it("release_hold's answer: already_confirmed is never treated as released; an old server's empty answer is", () => {
+    expect(releaseOutcome("already_confirmed")).toBe("already_confirmed");
+    expect(releaseOutcome("already_closed")).toBe("already_closed");
+    expect(releaseOutcome("released")).toBe("released");
+    expect(releaseOutcome(null)).toBe("released");
+    expect(releaseOutcome("")).toBe("released");
   });
 });

@@ -88,7 +88,9 @@ export default function PayPanel(p: Props) {
 
   async function giveUp() {
     setBusy(true);
-    await createClient().rpc("release_hold", { p_booking: p.bookingId });
+    const { data } = await createClient().rpc("release_hold", { p_booking: p.bookingId });
+    // 0098 (M2): the payment confirmed the booking first: the court is booked, never answered as released
+    if (data === "already_confirmed") { router.replace(`/bookings/${p.bookingId}?new=1`); return; }
     router.replace(`/club/${p.clubSlug}`);
   }
 

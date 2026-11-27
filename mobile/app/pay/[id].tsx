@@ -20,7 +20,7 @@ import { durationLabel } from "../../lib/courts";
 import { supabase } from "../../lib/supabase";
 import { recoverFromAuthFailure } from "../../lib/authRecovery";
 import { FEE_PAYMENTS_ON, payController } from "../../lib/payments";
-import { FEE_TERMS, TEST_MODE_NOTE, payView, startProblem, type PaymentStatus } from "../../lib/feePayment";
+import { FEE_TERMS, RELEASE_TOO_LATE, TEST_MODE_NOTE, payView, releaseOutcome, startProblem, type PaymentStatus } from "../../lib/feePayment";
 import { color, font, radius, space } from "../../lib/theme";
 
 /**
@@ -162,14 +162,24 @@ export default function Pay() {
 
   function onAbandon() {
     if (!view.canAbandon || busy) return;
-    Alert.alert("Release this court?", "Your hold ends now and the court is free for others. Nothing has been charged.", [
+    // 0098 (M1): "nothing has been charged" only when every earlier attempt is known to have taken nothing
+    Alert.alert("Release this court?", `Your hold ends now and the court is free for others. ${status?.noFeeTaken ? "Nothing has been charged." : "If you were charged, the fee will be refunded."}`, [
       { text: "Keep it", style: "cancel" },
       {
         text: "Release", style: "destructive", onPress: async () => {
           setBusy("abandon");
-          const { error } = await supabase.rpc("release_hold", { p_booking: b!.id });
+          const { data, error } = await supabase.rpc("release_hold", { p_booking: b!.id });
           setBusy(null);
           if (error) { setProblem("The hold couldn't be released. Check your connection and try again."); return; }
+          // 0098 (M2): the payment may have confirmed the booking first; then the court is booked, never "released"
+          if (releaseOutcome(data) === "already_confirmed") {
+            if (userId) await ctl.forget(userId, paymentId!);
+            void queryClient.invalidateQueries({ queryKey: ["my-agenda"] });
+            void queryClient.invalidateQueries({ queryKey: ["active-hold"] });
+            Alert.alert(RELEASE_TOO_LATE.title, RELEASE_TOO_LATE.body);
+            router.replace(`/booking/${b!.id}`);
+            return;
+          }
           if (userId) await ctl.forget(userId, paymentId!);
           void queryClient.invalidateQueries({ queryKey: ["my-agenda"] });
           void queryClient.invalidateQueries({ queryKey: ["day-slots"] });
