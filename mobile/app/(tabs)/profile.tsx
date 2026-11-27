@@ -1,8 +1,10 @@
-import { useState, useSyncExternalStore } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import * as Updates from "expo-updates";
 import { supabase } from "../../lib/supabase";
+import { signOutAllDevices, signOutThisDevice } from "../../lib/signOut";
+import { SIGN_OUT_ALL } from "@shared/signOutText";
 import { useSession } from "../../lib/session";
 import { currentBuild } from "../../lib/buildInfo";
 import { initials, useProfileName } from "../../lib/profile";
@@ -69,8 +71,29 @@ export default function Profile() {
   async function signOut() {
     setBusy(true);
     // The session provider empties the cache on every sign-out, however it happens.
-    await supabase.auth.signOut();
+    // F2: this phone only (lib/signOut.ts); account closure still signs out everywhere (lib/accountClosing.ts)
+    await signOutThisDevice(supabase.auth);
     setBusy(false);
+  }
+  // F2 review S3: every device (Supabase global sign-out), after a confirmation; see shared/signOutText.ts
+  const [allProblem, setAllProblem] = useState<string | null>(null);
+  // the "already ended" message is for the signed-out screen; signing in again clears it
+  useEffect(() => {
+    if (session.status === "signed-in") setAllProblem((p) => (p === SIGN_OUT_ALL.thisDeviceEnded ? null : p));
+  }, [session.status]);
+  function signOutEverywhere() {
+    setAllProblem(null);
+    Alert.alert(SIGN_OUT_ALL.title, SIGN_OUT_ALL.body, [
+      { text: SIGN_OUT_ALL.cancel, style: "cancel" },
+      { text: SIGN_OUT_ALL.confirm, style: "destructive", onPress: async () => {
+        setBusy(true);
+        const r = await signOutAllDevices(supabase.auth);
+        setBusy(false);
+        // failed: this phone stays signed in; the others may be too (the server did not confirm)
+        // this_device_ended: this phone is now signed out too (follow-up 27 Nov), and the message stays on screen
+        if (!r.ok) setAllProblem(r.reason === "this_device_ended" ? SIGN_OUT_ALL.thisDeviceEnded : SIGN_OUT_ALL.failed);
+      } },
+    ]);
   }
 
   return (
@@ -78,7 +101,10 @@ export default function Profile() {
       {session.status === "loading" ? (
         <Loading label="Checking sign-in" />
       ) : session.status === "signed-out" ? (
-        <SignInPrompt title="Your profile" body="Sign in to set your levels, see your activity and manage your account." />
+        <>
+          {allProblem ? <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.problem} accessibilityRole="alert" testID="profile-signout-all-problem">{allProblem}</Text> : null}
+          <SignInPrompt title="Your profile" body="Sign in to set your levels, see your activity and manage your account." />
+        </>
       ) : (
         <View style={styles.card}>
           <View style={styles.who}>
@@ -101,6 +127,8 @@ export default function Profile() {
           </View>
           <Button label={missing.length ? "Add your details" : "Edit your details"} variant="quiet" onPress={() => router.push("/my-details")} testID="profile-edit-details" />
           <Button label="Sign out" variant="secondary" busy={busy} onPress={signOut} />
+          <Button label={SIGN_OUT_ALL.button} variant="quiet" disabled={busy} onPress={signOutEverywhere} testID="profile-signout-all" />
+          {allProblem ? <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.problem} accessibilityRole="alert">{allProblem}</Text> : null}
         </View>
       )}
       {userId ? (
@@ -225,6 +253,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", justifyContent: "space-between", gap: space.md },
   detailRows: { gap: 2 },
   missing: { ...text.body, color: color.warnInk },
+  problem: { ...text.caption, color: color.danger },
   levelChips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
   previewLink: { minHeight: 48, justifyContent: "center", alignItems: "center" },
   activity: { flexDirection: "row", alignItems: "center", gap: space.md, minHeight: TOUCH + 8 },

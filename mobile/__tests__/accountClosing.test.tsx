@@ -2,7 +2,7 @@
  * M2 (0086): one-step account closing in the app. The logic (lib/accountClosing.ts), the screen
  * (components/DeleteAccount.tsx), the wording kept identical to the website's, and the contract with the migration.
  */
-jest.mock("../lib/supabase", () => ({ supabase: { rpc: jest.fn(), auth: { signOut: jest.fn() } } }));
+jest.mock("../lib/supabase", () => ({ supabase: { rpc: jest.fn(), auth: { signOut: jest.fn(), getSession: jest.fn(), admin: { signOut: jest.fn() } } } }));
 
 declare const require: (m: string) => any; // eslint-disable-line @typescript-eslint/no-explicit-any
 declare const __dirname: string;
@@ -44,66 +44,93 @@ describe("wording and contract", () => {
   });
 });
 
+/** this phone's auth: a session, the confirmed revocation (admin.signOut(jwt, "global")), and the local sign-out */
+function phoneAuth(logoutError: { name?: string; code?: string; status?: number } | null = null) {
+  return {
+    getSession: jest.fn(async () => ({ data: { session: { access_token: "this-phone" } }, error: null })),
+    admin: { signOut: jest.fn(async () => ({ error: logoutError })) },
+    signOut: jest.fn(async () => ({ error: null })),
+  };
+}
+
 describe("closeMyAccount", () => {
-  it("closes as the person (p_via app), then signs out everywhere", async () => {
+  it("closes as the person (p_via app), then ends every session (confirmed by Auth), then this phone", async () => {
     const rpc = jest.fn(async () => ok({ status: "closing" }));
-    const signOut = jest.fn(async () => ({ error: null }));
-    await expect(closeMyAccount(rpc, signOut)).resolves.toEqual({ ok: true });
+    const auth = phoneAuth();
+    await expect(closeMyAccount(rpc, auth)).resolves.toEqual({ ok: true });
     expect(rpc).toHaveBeenCalledWith("close_my_account", { p_via: "app" });
-    expect(signOut).toHaveBeenCalledWith({ scope: "global" });
-    expect(rpc.mock.invocationCallOrder[0]).toBeLessThan(signOut.mock.invocationCallOrder[0]);
+    expect(auth.admin.signOut).toHaveBeenCalledWith("this-phone", "global");
+    expect(auth.signOut.mock.calls).toEqual([[{ scope: "local" }]]);
+    expect(rpc.mock.invocationCallOrder[0]).toBeLessThan(auth.admin.signOut.mock.invocationCallOrder[0]);
   });
-  it("a global sign-out that fails falls back to signing out this device", async () => {
-    const signOut = jest.fn().mockResolvedValueOnce({ error: { message: "x" } }).mockResolvedValue({ error: null });
-    await closeMyAccount(async () => ok(), signOut);
-    expect(signOut.mock.calls).toEqual([[{ scope: "global" }], [{ scope: "local" }]]);
+  // follow-up 27 Nov: the old call, signOut({ scope: "global" }), reported success on 401/403/404 without revoking
+  for (const e of [{ name: "AuthApiError", status: 401 }, { name: "AuthApiError", status: 403 }, { name: "AuthApiError", status: 500 }, { name: "AuthRetryableFetchError", status: 0 }]) {
+    it(`revocation not confirmed (${e.name} ${e.status}): still closed, and this phone is signed out anyway`, async () => {
+      const auth = phoneAuth(e);
+      await expect(closeMyAccount(async () => ok(), auth)).resolves.toEqual({ ok: true });
+      expect(auth.signOut.mock.calls).toEqual([[{ scope: "local" }]]);
+    });
+  }
+  it("this phone's session already ended on the server: still closed; this phone signed out", async () => {
+    const auth = phoneAuth({ name: "AuthSessionMissingError", status: 404 });
+    await expect(closeMyAccount(async () => ok(), auth)).resolves.toEqual({ ok: true });
+    expect(auth.signOut.mock.calls).toEqual([[{ scope: "local" }]]);
+  });
+  it("never the old unconfirmed global call", async () => {
+    const auth = phoneAuth();
+    await closeMyAccount(async () => ok(), auth);
+    expect(auth.signOut).not.toHaveBeenCalledWith({ scope: "global" });
+    expect(auth.signOut.mock.calls.flat()).toEqual([{ scope: "local" }]);
   });
   it("staff and admin are refused with the reason; not signed out", async () => {
-    const signOut = jest.fn();
-    await expect(closeMyAccount(async () => err("staff_role"), signOut)).resolves.toEqual({ ok: false, message: expect.stringMatching(/staff at a club/) });
-    await expect(closeMyAccount(async () => err("admin_role"), signOut)).resolves.toEqual({ ok: false, message: expect.stringMatching(/Admin accounts/) });
-    expect(signOut).not.toHaveBeenCalled();
+    const auth = phoneAuth();
+    await expect(closeMyAccount(async () => err("staff_role"), auth)).resolves.toEqual({ ok: false, message: expect.stringMatching(/staff at a club/) });
+    await expect(closeMyAccount(async () => err("admin_role"), auth)).resolves.toEqual({ ok: false, message: expect.stringMatching(/Admin accounts/) });
+    expect(auth.signOut).not.toHaveBeenCalled();
+    expect(auth.admin.signOut).not.toHaveBeenCalled();
   });
   it("an error after the close committed: the account is closed, so it still signs out", async () => {
     const rpc = jest.fn(async (fn: string) => (fn === "close_my_account" ? err("Network request failed") : ok({ status: "closing", closed: true })));
-    const signOut = jest.fn(async () => ({ error: null }));
-    await expect(closeMyAccount(rpc, signOut)).resolves.toEqual({ ok: true });
-    expect(signOut).toHaveBeenCalled();
+    const auth = phoneAuth();
+    await expect(closeMyAccount(rpc, auth)).resolves.toEqual({ ok: true });
+    expect(auth.admin.signOut).toHaveBeenCalledWith("this-phone", "global");
+    expect(auth.signOut).toHaveBeenCalledWith({ scope: "local" });
   });
   it("an error with nothing closed: 'nothing was changed', still signed in", async () => {
     const rpc = jest.fn(async (fn: string) => (fn === "close_my_account" ? err("Network request failed") : ok(null)));
-    const signOut = jest.fn();
-    await expect(closeMyAccount(rpc, signOut)).resolves.toEqual({ ok: false, message: CLOSE_FAILED });
-    expect(signOut).not.toHaveBeenCalled();
+    const auth = phoneAuth();
+    await expect(closeMyAccount(rpc, auth)).resolves.toEqual({ ok: false, message: CLOSE_FAILED });
+    expect(auth.signOut).not.toHaveBeenCalled();
+    expect(auth.admin.signOut).not.toHaveBeenCalled();
   });
   it("a thrown network error is handled the same way", async () => {
     const rpc = jest.fn(async () => { throw new TypeError("Network request failed"); });
-    await expect(closeMyAccount(rpc, jest.fn())).resolves.toEqual({ ok: false, message: CLOSE_FAILED });
+    await expect(closeMyAccount(rpc, phoneAuth())).resolves.toEqual({ ok: false, message: CLOSE_FAILED });
   });
 });
 
 describe("review 23 Nov", () => {
   it("signed in too long ago: asks for a code; nothing closed, not signed out", async () => {
-    const signOut = jest.fn();
-    await expect(closeMyAccount(async () => err("reauth_required"), signOut)).resolves.toEqual({ ok: false, reauth: true });
-    expect(signOut).not.toHaveBeenCalled();
+    const auth = phoneAuth();
+    await expect(closeMyAccount(async () => err("reauth_required"), auth)).resolves.toEqual({ ok: false, reauth: true });
+    expect(auth.signOut).not.toHaveBeenCalled();
   });
   it("automatic processing not running: says to try later or use the website; nothing closed", async () => {
-    await expect(closeMyAccount(async () => err("processing_unavailable"), jest.fn())).resolves.toEqual({ ok: false, message: PROCESSING_PAUSED });
+    await expect(closeMyAccount(async () => err("processing_unavailable"), phoneAuth())).resolves.toEqual({ ok: false, message: PROCESSING_PAUSED });
   });
   it("the code goes to the account's own address and never creates an account; then the same close", async () => {
     const otp = { getUser: async () => ({ data: { user: { email: "p@example.com" } } }), signInWithOtp: jest.fn(async () => ({ error: null })), verifyOtp: jest.fn(async () => ({ error: null })) };
     await expect(sendReauthCode(otp)).resolves.toEqual({ email: "p@example.com" });
     expect(otp.signInWithOtp).toHaveBeenCalledWith({ email: "p@example.com", options: { shouldCreateUser: false } });
     const rpc = jest.fn(async () => ({ data: { status: "closing" }, error: null }));
-    await expect(verifyAndClose(otp, rpc, jest.fn(async () => ({ error: null })), "p@example.com", "12 34 56")).resolves.toEqual({ ok: true });
+    await expect(verifyAndClose(otp, rpc, phoneAuth(), "p@example.com", "12 34 56")).resolves.toEqual({ ok: true });
     expect(otp.verifyOtp).toHaveBeenCalledWith({ email: "p@example.com", token: "123456", type: "email" });
     expect(rpc).toHaveBeenCalledWith("close_my_account", { p_via: "app" });
   });
   it("a wrong code closes nothing", async () => {
     const otp = { getUser: async () => ({ data: { user: { email: "p@example.com" } } }), signInWithOtp: jest.fn(), verifyOtp: jest.fn(async () => ({ error: { message: "invalid" } })) };
     const rpc = jest.fn();
-    await expect(verifyAndClose(otp, rpc, jest.fn(), "p@example.com", "000000")).resolves.toEqual({ ok: false, message: expect.stringMatching(/code didn't work/) });
+    await expect(verifyAndClose(otp, rpc, phoneAuth(), "p@example.com", "000000")).resolves.toEqual({ ok: false, message: expect.stringMatching(/code didn't work/) });
     expect(rpc).not.toHaveBeenCalled();
   });
   it("the app's texts for these are the website's", () => {
@@ -131,10 +158,14 @@ describe("signOutIfClosed (cold start, sign-in)", () => {
 describe("the Delete account card", () => {
   const rpc = supabase.rpc as jest.Mock;
   const signOut = supabase.auth.signOut as jest.Mock;
+  const getSession = supabase.auth.getSession as jest.Mock;
+  const logout = supabase.auth.admin.signOut as jest.Mock;
   let alert: jest.SpyInstance;
   beforeEach(() => {
-    rpc.mockReset(); signOut.mockReset();
+    rpc.mockReset(); signOut.mockReset(); getSession.mockReset(); logout.mockReset();
     signOut.mockResolvedValue({ error: null });
+    getSession.mockResolvedValue({ data: { session: { access_token: "this-phone" } }, error: null });
+    logout.mockResolvedValue({ error: null });
     rpc.mockImplementation(async (fn: string) => (fn === "my_account_deletion" ? ok(null) : ok({ status: "closing" })));
     alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
   });
@@ -156,7 +187,8 @@ describe("the Delete account card", () => {
     void alert.mock.calls[0][2][1].onPress();
     await waitFor(() => expect(alert).toHaveBeenLastCalledWith(CLOSED_TITLE, CLOSED_TEXT));
     expect(rpc).toHaveBeenCalledWith("close_my_account", { p_via: "app" });
-    expect(signOut).toHaveBeenCalledWith({ scope: "global" });
+    expect(logout).toHaveBeenCalledWith("this-phone", "global");
+    expect(signOut).toHaveBeenCalledWith({ scope: "local" });
   });
   it("a refusal is shown on the card", async () => {
     rpc.mockImplementation(async (fn: string) => (fn === "my_account_deletion" ? ok(null) : err("staff_role")));

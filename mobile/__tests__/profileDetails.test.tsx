@@ -21,13 +21,14 @@ jest.mock("../lib/supabase", () => ({
   supabase: {
     rpc: (...a: unknown[]) => mockRpc(...(a as [string])),
     from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { ...mockDb.row }, error: null }) }) }) }),
-    auth: { signOut: jest.fn() },
+    auth: { signOut: jest.fn(), getSession: jest.fn(async () => ({ data: { session: { access_token: "tok" } }, error: null })), admin: { signOut: jest.fn() } },
   },
 }));
 const mockPush = jest.fn();
-jest.mock("expo-router", () => ({ router: { push: (...a: unknown[]) => mockPush(...a) } }));
+jest.mock("expo-router", () => ({ router: { push: (...a: unknown[]) => mockPush(...a) }, usePathname: () => "/profile" }));
 jest.mock("expo-updates", () => ({ channel: "production" }));
-jest.mock("../lib/session", () => ({ useSession: () => ({ status: "signed-in", session: { user: { id: "me", email: "rana@example.test" } } }) }));
+let mockSignedIn = true;   // follow-up 27 Nov: a test signs this phone out part way through
+jest.mock("../lib/session", () => ({ useSession: () => (mockSignedIn ? { status: "signed-in", session: { user: { id: "me", email: "rana@example.test" } } } : { status: "signed-out" }) }));
 jest.mock("../lib/buildInfo", () => ({ currentBuild: () => [] }));
 jest.mock("../lib/appIdentity", () => ({ installedVariant: "live" }));
 jest.mock("../lib/activity", () => ({ useActivity: () => ({ data: [] }), unreadCount: () => 0, badgeText: () => null }));
@@ -39,13 +40,17 @@ jest.mock("../components/DeleteAccount", () => { const { Text } = jest.requireAc
 
 import Profile from "../app/(tabs)/profile";
 
-async function show(children: ReactNode = <Profile />) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { gcTime: Infinity } } });
-  return render(
+function tree(qc: QueryClient, children: ReactNode) {
+  return (
     <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 360, height: 800 }, insets: { top: 0, left: 0, right: 0, bottom: 0 } }}>
       <QueryClientProvider client={qc}>{children}</QueryClientProvider>
-    </SafeAreaProvider>,
+    </SafeAreaProvider>
   );
+}
+async function show(children: ReactNode = <Profile />) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { gcTime: Infinity } } });
+  const view = await render(tree(qc, children));
+  return Object.assign(view, { again: () => view.rerender(tree(qc, <Profile />)) });
 }
 beforeEach(() => {
   mockDb.row = { name: "Rana Khoury", phone: "+96170123456", sports: ["padel", "tennis"] }; mockDb.levels = [{ sport: "padel", level: 5 }]; mockDb.rpcError = null;
@@ -105,5 +110,81 @@ describe("Profile: sports and levels (optional)", () => {
     expect(await screen.findByText(/Optional — it helps you find games/)).toBeTruthy();
     await fireEvent.press(screen.getByText("Add sports"));
     expect(mockPush).toHaveBeenCalledWith("/my-details");
+  });
+});
+
+describe("Profile: Sign out (F2, Paul 26 Nov)", () => {
+  it("ends this phone's session only: scope local, never the default (global)", async () => {
+    const { supabase } = jest.requireMock("../lib/supabase") as { supabase: { auth: { signOut: jest.Mock } } };
+    supabase.auth.signOut.mockClear();
+    await show();
+    await fireEvent.press(await screen.findByText("Sign out"));
+    await waitFor(() => expect(supabase.auth.signOut).toHaveBeenCalledTimes(1));
+    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: "local" });
+  });
+});
+
+describe("Profile: Sign out of all devices (F2 review S3, Paul 26 Nov; re-review R103-1)", () => {
+  const { supabase } = jest.requireMock("../lib/supabase") as { supabase: { auth: { signOut: jest.Mock; admin: { signOut: jest.Mock } } } };
+  const { Alert } = jest.requireActual("react-native") as typeof import("react-native");
+  type Btn = { text: string; style?: string; onPress?: () => Promise<void> | void };
+  let alert: jest.SpyInstance;
+  beforeEach(() => { supabase.auth.signOut.mockReset(); supabase.auth.admin.signOut.mockReset(); alert = jest.spyOn(Alert, "alert").mockImplementation(() => {}); });
+  afterEach(() => alert.mockRestore());
+  const buttons = () => alert.mock.calls.at(-1)![2] as Btn[];
+  const { SIGN_OUT_ALL } = jest.requireActual("../shared/signOutText") as typeof import("../shared/signOutText");
+
+  it("asks first, with the shared wording; Cancel signs nothing out", async () => {
+    await show();
+    await fireEvent.press(await screen.findByTestId("profile-signout-all"));
+    expect(alert.mock.calls.at(-1)!.slice(0, 2)).toEqual([SIGN_OUT_ALL.title, SIGN_OUT_ALL.body]);
+    expect(buttons().map((b) => b.text)).toEqual([SIGN_OUT_ALL.cancel, SIGN_OUT_ALL.confirm]);
+    expect(supabase.auth.admin.signOut).not.toHaveBeenCalled();
+    expect(supabase.auth.signOut).not.toHaveBeenCalled();
+  });
+
+  it("confirmed: the server's global revocation (once), and only then this phone cleared (local)", async () => {
+    supabase.auth.admin.signOut.mockResolvedValue({ error: null });
+    await show();
+    await fireEvent.press(await screen.findByTestId("profile-signout-all"));
+    await buttons()[1].onPress!();
+    expect(supabase.auth.admin.signOut).toHaveBeenCalledTimes(1);
+    expect(supabase.auth.admin.signOut).toHaveBeenCalledWith("tok", "global");
+    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: "local" });
+  });
+
+  it("refused or offline: says the others may still be signed in; this phone is not signed out", async () => {
+    supabase.auth.admin.signOut.mockResolvedValue({ error: { name: "AuthApiError", status: 404, code: "not_found" } });
+    await show();
+    await fireEvent.press(await screen.findByTestId("profile-signout-all"));
+    await buttons()[1].onPress!();
+    expect(await screen.findByText(SIGN_OUT_ALL.failed)).toBeTruthy();
+    expect(supabase.auth.signOut).not.toHaveBeenCalled();
+  });
+
+  it("this phone's own sign-in already ended on the server: says so", async () => {
+    supabase.auth.admin.signOut.mockResolvedValue({ error: { name: "AuthSessionMissingError", status: 400 } });
+    await show();
+    await fireEvent.press(await screen.findByTestId("profile-signout-all"));
+    await buttons()[1].onPress!();
+    expect(await screen.findByText(SIGN_OUT_ALL.thisDeviceEnded)).toBeTruthy();
+    // follow-up 27 Nov (issue 1): this phone is cleared, so it no longer looks signed in
+    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: "local" });
+  });
+
+  it("follow-up 27 Nov: once this phone is signed out the message stays on the signed-out screen; signing in again clears it", async () => {
+    supabase.auth.admin.signOut.mockResolvedValue({ error: { name: "AuthSessionMissingError", status: 404 } });
+    supabase.auth.signOut.mockImplementation(async () => { mockSignedIn = false; return { error: null }; });
+    try {
+      const view = await show();
+      await fireEvent.press(await screen.findByTestId("profile-signout-all"));
+      await buttons()[1].onPress!();
+      expect((await screen.findByTestId("profile-signout-all-problem")).props.children).toBe(SIGN_OUT_ALL.thisDeviceEnded);
+      expect(screen.queryByTestId("profile-signout-all")).toBeNull();          // the signed-in card is gone
+      mockSignedIn = true;
+      await view.again();
+      await waitFor(() => expect(screen.queryByText(SIGN_OUT_ALL.thisDeviceEnded)).toBeNull());
+      expect(screen.getByTestId("profile-signout-all")).toBeTruthy();
+    } finally { mockSignedIn = true; }
   });
 });

@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import LevelSheet from "@/components/LevelSheet";
 import { levelLabel } from "@/lib/levels";
 import DeleteAccount from "./DeleteAccount";
+import SignOutEverywhere from "./SignOutEverywhere";
 import PlayingAreasSection from "./PlayingAreasSection";
 import type { Governorate } from "@/lib/geo";
 import { LegalLinks } from "@/components/legal";
@@ -115,6 +116,7 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage, 
       )}
       {!manage.isCoach && <Link href="/coach" className="text-center text-sm text-muted">Are you a coach? <span className="font-semibold text-turf">Set up your coach profile</span></Link>}
       <form action="/auth/signout" method="post" className="text-center"><button className="py-2 text-[15px] font-semibold text-cedar">Sign out</button></form>
+      <SignOutEverywhere />
       <DeleteAccount />
       <LegalLinks className="justify-center" />
     </main>
