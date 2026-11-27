@@ -17,9 +17,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; cancel = cancellation and refund checks in SQL (temporary courts and accounts, removed after); web_accept = launch-1 website flows in a browser against this branch's website built for staging (throwaway accounts, club and court, removed after; needs confirm_ref); api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else); m3_0067_preflight / m3_0067_postcheck and m3_0072_preflight / m3_0072_postcheck, m3_0073_*, m3_0074_* and m3_0075_* = read-only checks before / after applying 0067 0072, 0073 or 0074 (supabase/live/00xx_*.sql); blocks_0076_* / blocks_0077_* = read-only checks before / after 0076 or 0077 (calendar blocks); blocks_functional = the block rules tried as a demo-club desk account, in one transaction that is rolled back; m7_0078_* = read-only checks before / after 0078 (hide demo clubs); m7_demo_hidden_on / _off = staging only: set the hide_demo_clubs switch on or off (nothing else); launch1_preflight / launch1_postcheck = read-only checks before / after applying 0078–0084 together (supabase/live/launch1_*.sql); m85_preflight / m85_postcheck = read-only checks before / after applying 0085 (unpublished clubs unreadable); auth_checks = real Supabase Auth behaviour account closing relies on (sign-in time in the token, global sign-out, ban, delete, same email again; throwaway auth-*@courtbook.test users made with the admin API, no email sent, removed after; no migration; needs confirm_ref); m86_worker_check = read only: the deletion retry worker's last run and open deletion records by status (counts only; the R1 release gate); m86_old_app = after 0086 only: the released app's deletion calls (request, cancel, status) as a throwaway account in ONE transaction that is rolled back, compared with the answers the released screen is tested against; rc_preflight / rc_postcheck = read-only checks before / after applying the release candidate's 0086–0092 (supabase/live/rc_0086_0091_*.sql); rc87_preflight = read only: the preflight for 0087–0092 once 0086 is applied (supabase/live/rc_0087_0092_preflight.sql; apply runs it itself before 0087); pilot_0093_preflight / pilot_0093_postcheck = read-only checks before / after applying 0093 (supabase/live/pilot_0093_*.sql; apply runs the preflight itself and the postcheck after); pilot_0093_functional = after 0093: closed and open accounts against book_at_desk and the older-app request, in ONE transaction that is rolled back; pilot_0093_rollback = staging only, needs confirm_ref: undo 0093 (supabase/rollback/0093_down.sql) and forget it in staging_meta.applied, in one transaction; refuses and changes nothing if anything after 0093 is applied; coords_audit = read only: active clubs whose map point can't be trusted (supabase/tests/favourites/club_coordinates_audit.sql); test_conflicts = read only: what occupies the demo courts the smoke/API tests used to book (no player details)"
+        description: "check = connect and report; apply = apply migrations not yet applied (+ demo seed); smoke = booking checks in SQL; cancel = cancellation and refund checks in SQL (temporary courts and accounts, removed after); web_accept = launch-1 website flows in a browser against this branch's website built for staging (throwaway accounts, club and court, removed after; needs confirm_ref); api = checks through Supabase's API and the web payment route (throwaway players, cleaned up); tester = Paul's staging-app sign-in (paul.tester@courtbook.test, password from the STAGING_TESTER_PASSWORD secret) and demo club at the desk; demo_at_desk = only the demo club's payment mode back to at the desk (nothing else); m3_0067_preflight / m3_0067_postcheck and m3_0072_preflight / m3_0072_postcheck, m3_0073_*, m3_0074_* and m3_0075_* = read-only checks before / after applying 0067 0072, 0073 or 0074 (supabase/live/00xx_*.sql); blocks_0076_* / blocks_0077_* = read-only checks before / after 0076 or 0077 (calendar blocks); blocks_functional = the block rules tried as a demo-club desk account, in one transaction that is rolled back; m7_0078_* = read-only checks before / after 0078 (hide demo clubs); m7_demo_hidden_on / _off = staging only: set the hide_demo_clubs switch on or off (nothing else); launch1_preflight / launch1_postcheck = read-only checks before / after applying 0078–0084 together (supabase/live/launch1_*.sql); m85_preflight / m85_postcheck = read-only checks before / after applying 0085 (unpublished clubs unreadable); auth_checks = real Supabase Auth behaviour account closing relies on (sign-in time in the token, global sign-out, ban, delete, same email again; throwaway auth-*@courtbook.test users made with the admin API, no email sent, removed after; no migration; needs confirm_ref); m86_worker_check = read only: the deletion retry worker's last run and open deletion records by status (counts only; the R1 release gate); m86_old_app = after 0086 only: the released app's deletion calls (request, cancel, status) as a throwaway account in ONE transaction that is rolled back, compared with the answers the released screen is tested against; rc_preflight / rc_postcheck = read-only checks before / after applying the release candidate's 0086–0092 (supabase/live/rc_0086_0091_*.sql); rc87_preflight = read only: the preflight for 0087–0092 once 0086 is applied (supabase/live/rc_0087_0092_preflight.sql; apply runs it itself before 0087); pilot_0093_preflight / pilot_0093_postcheck = read-only checks before / after applying 0093 (supabase/live/pilot_0093_*.sql; apply runs the preflight itself and the postcheck after); pilot_0093_functional = after 0093: closed and open accounts against book_at_desk and the older-app request, in ONE transaction that is rolled back; pilot_0093_rollback = staging only, needs confirm_ref: undo 0093 (supabase/rollback/0093_down.sql) and forget it in staging_meta.applied, in one transaction; refuses and changes nothing if anything after 0093 is applied; f1_0099_* / sports_0100_* / photos_0101_* = read-only checks before / after 0099 (staff moves compare what the desk saw), 0100 (sports catalogue) or 0101 (player photos), each failing on any STOP, error or empty result; apply runs the matching preflight before and postcheck after each of these, and applies them only one at a time, in order (0099, then 0100, then 0101); undo_0099_0101 = staging only, needs confirm_ref and migrations = the ONE number to undo (0101, 0100 or 0099, newest first): runs supabase/rollback/<n>_down.sql and forgets it, in one transaction; refuses and changes nothing if a later migration is applied; it never confirms discarding stored photos (0101_down refuses while photos exist); coords_audit = read only: active clubs whose map point can't be trusted (supabase/tests/favourites/club_coordinates_audit.sql); test_conflicts = read only: what occupies the demo courts the smoke/API tests used to book (no player details)"
         type: choice
-        options: [check, apply, smoke, cancel, api, web_accept, reset_demo, tester, demo_at_desk, m3_0067_preflight, m3_0067_postcheck, m3_0072_preflight, m3_0072_postcheck, m3_0073_preflight, m3_0073_postcheck, m3_0074_preflight, m3_0074_postcheck, m3_0075_preflight, m3_0075_postcheck, blocks_0076_preflight, blocks_0076_postcheck, blocks_0077_preflight, blocks_0077_postcheck, blocks_functional, m7_0078_preflight, m7_0078_postcheck, m7_demo_hidden_on, m7_demo_hidden_off, launch1_preflight, launch1_postcheck, m85_preflight, m85_postcheck, auth_checks, m86_worker_check, m86_old_app, rc_preflight, rc_postcheck, rc87_preflight, pilot_0093_preflight, pilot_0093_postcheck, pilot_0093_functional, pilot_0093_rollback, coords_audit, test_conflicts, m3_accounts, m3_test_games, m3_test_games_shared, m3_test_games_cleanup, m3_moderator_check, m3_moderator_grant]
+        options: [check, apply, smoke, cancel, api, web_accept, reset_demo, tester, demo_at_desk, m3_0067_preflight, m3_0067_postcheck, m3_0072_preflight, m3_0072_postcheck, m3_0073_preflight, m3_0073_postcheck, m3_0074_preflight, m3_0074_postcheck, m3_0075_preflight, m3_0075_postcheck, blocks_0076_preflight, blocks_0076_postcheck, blocks_0077_preflight, blocks_0077_postcheck, blocks_functional, m7_0078_preflight, m7_0078_postcheck, m7_demo_hidden_on, m7_demo_hidden_off, launch1_preflight, launch1_postcheck, m85_preflight, m85_postcheck, auth_checks, m86_worker_check, m86_old_app, rc_preflight, rc_postcheck, rc87_preflight, pilot_0093_preflight, pilot_0093_postcheck, pilot_0093_functional, pilot_0093_rollback, f1_0099_preflight, f1_0099_postcheck, sports_0100_preflight, sports_0100_postcheck, photos_0101_preflight, photos_0101_postcheck, undo_0099_0101, coords_audit, test_conflicts, m3_accounts, m3_test_games, m3_test_games_shared, m3_test_games_cleanup, m3_moderator_check, m3_moderator_grant]
         default: check
       migrations:
         description: "apply only: the exact migration numbers to apply, e.g. '0068 0069 0070 0071' — nothing else is applied; 'check' lists what is pending"
@@ -157,6 +157,28 @@ jobs:
             bash .github/scripts/run-check.sh "$DB" supabase/live/pilot_0093_preflight.sql part1 \
               || { echo "::error::0093 preflight failed: nothing was applied."; exit 1; }
           fi
+          # Payment infrastructure (M12, 0094–0098) is never applied from this workflow: refuse if any such file is on this
+          # branch, named, or already recorded, before anything else happens.
+          if ls supabase/migrations | grep -qE '^009[4-8]_'; then echo "::error::a payment migration (0094–0098) is on this branch: nothing was applied."; exit 1; fi
+          if echo "$MIGRATIONS" | tr ', ' '\n\n' | grep -qE '^009[4-8]$'; then echo "::error::0094–0098 (payments) are never applied here: nothing was applied."; exit 1; fi
+          if grep -qE '^009[4-8]_' /tmp/applied.txt; then echo "::error::a payment migration is recorded as applied on this database: stop and report. Nothing was applied."; exit 1; fi
+          # 0099 (staff moves compare what the desk saw), 0100 (sports catalogue), 0101 (player photos): one per run, in
+          # this order, each only after the previous one; its preflight must pass first (nothing is applied otherwise) and
+          # its postcheck runs right after it is committed.
+          pre050=; post050=; mig050=
+          if echo "$plan" | grep -qE '^0(099|100|101)_'; then
+            [ "$(echo "$plan" | wc -l)" = 1 ] || { echo "::error::apply 0099, 0100 and 0101 one at a time, each on its own (migrations: one number)."; exit 1; }
+            mig050=$(echo "$plan" | cut -c1-4)
+            case $mig050 in
+              0099) need='^0093_'; pre050=supabase/live/staff_moves_preflight.sql;  post050=supabase/live/staff_moves_postcheck.sql ;;
+              0100) need='^0099_'; pre050=supabase/live/sports_0100_preflight.sql;  post050=supabase/live/sports_0100_postcheck.sql ;;
+              0101) need='^0100_'; pre050=supabase/live/photos_0101_preflight.sql;  post050=supabase/live/photos_0101_postcheck.sql ;;
+            esac
+            grep -qE "$need" /tmp/applied.txt || { echo "::error::$mig050 needs the previous step applied first (order: 0093, 0099, 0100, 0101). Nothing was applied."; exit 1; }
+            echo "$mig050: running the preflight before applying"
+            bash .github/scripts/run-check.sh "$DB" "$pre050" status \
+              || { echo "::error::$mig050 preflight failed: nothing was applied."; exit 1; }
+          fi
           n=0
           for name in $plan; do
             f=supabase/migrations/$name
@@ -189,6 +211,11 @@ jobs:
             echo "0093: applied and recorded (committed); running the postcheck"
             bash .github/scripts/run-check.sh "$DB" supabase/live/pilot_0093_postcheck.sql all \
               || { echo "::error::0093 IS APPLIED (committed and recorded in staging_meta.applied) but its postcheck failed. Stop: report the state shown above. Do not roll back without separate approval."; exit 1; }
+          fi
+          if [ -n "$post050" ]; then
+            echo "$mig050: applied and recorded (committed); running the postcheck"
+            bash .github/scripts/run-check.sh "$DB" "$post050" status \
+              || { echo "::error::$mig050 IS APPLIED (committed and recorded in staging_meta.applied) but its postcheck failed. Stop: report the state shown above. Undoing it (undo_0099_0101, supabase/rollback/${mig050}_down.sql) needs separate approval."; exit 1; }
           fi
 
       - name: API credentials are staging's (api)
@@ -409,6 +436,38 @@ jobs:
       - name: Release candidate 0087–0092 preflight after 0086, read only (rc87_preflight)
         if: inputs.action == 'rc87_preflight'
         run: bash .github/scripts/run-check.sh "$DB" supabase/live/rc_0087_0092_preflight.sql part1
+      - name: 0099 / 0100 / 0101 preflight or postcheck, read only
+        if: startsWith(inputs.action, 'f1_0099_') || startsWith(inputs.action, 'sports_0100_') || startsWith(inputs.action, 'photos_0101_')
+        run: |
+          case "${{ inputs.action }}" in
+            f1_0099_preflight)      f=supabase/live/staff_moves_preflight.sql ;;
+            f1_0099_postcheck)      f=supabase/live/staff_moves_postcheck.sql ;;
+            sports_0100_preflight)  f=supabase/live/sports_0100_preflight.sql ;;
+            sports_0100_postcheck)  f=supabase/live/sports_0100_postcheck.sql ;;
+            photos_0101_preflight)  f=supabase/live/photos_0101_preflight.sql ;;
+            photos_0101_postcheck)  f=supabase/live/photos_0101_postcheck.sql ;;
+            *) echo "::error::unknown action"; exit 1 ;;
+          esac
+          bash .github/scripts/run-check.sh "$DB" "$f" status
+      - name: Undo ONE of 0101, 0100, 0099 (newest first), one transaction (undo_0099_0101)
+        if: inputs.action == 'undo_0099_0101'
+        env:
+          CONFIRM: ${{ inputs.confirm_ref }}
+          MIGRATIONS: ${{ inputs.migrations }}
+        run: |
+          if [ "$CONFIRM" != "$REF" ]; then echo "::error::confirm_ref '$CONFIRM' does not match the target ref '$REF'."; exit 1; fi
+          num=$(echo "$MIGRATIONS" | tr -d ' ,')
+          case "$num" in 0099|0100|0101) ;; *) echo "::error::migrations must be exactly one of 0101, 0100, 0099."; exit 1 ;; esac
+          name=$(psql "$DB" -At -c "select name from staging_meta.applied where name like '${num}\_%'")
+          [ -n "$name" ] || { echo "::error::$num is not recorded as applied here: nothing to undo."; exit 1; }
+          later=$(psql "$DB" -At -c "select string_agg(name, ' ' order by name) from staging_meta.applied where name > '$name'")
+          [ -z "$later" ] || { echo "::error::migrations after $num are applied ($later): undo them first, newest first. Nothing was changed."; exit 1; }
+          [ -f "supabase/rollback/${num}_down.sql" ] || { echo "::error::no supabase/rollback/${num}_down.sql on this branch."; exit 1; }
+          # the rollback's own refusals (e.g. 0101 while photos exist, 0100 while a new sport is in use) roll everything back
+          { cat "supabase/rollback/${num}_down.sql"; echo; echo "delete from staging_meta.applied where name = '$name';"; } \
+            | psql "$DB" -X -v ON_ERROR_STOP=1 -1 -q \
+            || { echo "::error::$num rollback refused or failed: one transaction, so nothing changed."; exit 1; }
+          echo "$num undone; staging_meta.applied: $(psql "$DB" -At -c "select count(*) from staging_meta.applied") files, highest $(psql "$DB" -At -c "select max(name) from staging_meta.applied")"
       - name: 0093 (pilot) preflight, read only (pilot_0093_preflight)
         if: inputs.action == 'pilot_0093_preflight'
         run: bash .github/scripts/run-check.sh "$DB" supabase/live/pilot_0093_preflight.sql part1
