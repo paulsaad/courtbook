@@ -28,6 +28,9 @@ step 6c (the legal drafts) stays a separate, staging-only step after E.
 
 **The three website builds do not change** the retry route, `vercel.json` or `src/lib/deletion/monitor.ts` compared
 with `59a2f11` (checked: an empty diff for those paths). So the trial's schedule and heartbeat code are untouched.
+*(Clarified 27 Nov, during step E: WE also changes `src/lib/deletion/copy.ts` and its test. That is the **wording** of the
+account-deletion confirmation, which now names favourite clubs and saved playing areas. It is not the worker, its
+schedule or its monitoring. The three paths above remain byte-identical in WB, WD and WE.)*
 
 **All database actions** go through GitHub → Actions → **Staging database** → *Run workflow*:
 
