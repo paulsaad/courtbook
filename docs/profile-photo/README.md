@@ -65,7 +65,7 @@ the test runner).
 ## Tests
 - `PSQL="sudo -u postgres psql" bash supabase/tests/photo/player_photos.sh` — 77 database cases on a scratch DB
   (visibility, blocks, pending, cancelled games, suspension, photo moderation and evidence; the real close and data step; races; legal hold;
-  lock-out; exact rights; byte and size limits). `CONTROL=1` weakens the visibility rule: the 10 privacy cases fail.
+  lock-out; exact rights; byte and size limits). `CONTROL=1` weakens the visibility rule: the 12 privacy cases fail.
 - With the draft: `run.sh` 381/381; `m86/deletion86.sh`, `m86/pipeline_e2e.sh`, `m86/races86.sh` pass.
 - `npx vitest run src/app/api/player-photo` — 36 cases: EXIF/GPS removal (fails if metadata is kept), pixel limit
   (fails if removed), sizes, WebP header, routes (which client runs which call, cross-site refusal,
@@ -100,7 +100,9 @@ the test runner).
     the database is asked, so a foreign link creates no log entry.
   - *Open decision for Paul (review S6):* the server key cannot read evidence, but whoever holds it could create a
     sign-in for a moderator through the Auth admin API, and the reading would be logged under that moderator. Option:
-    require a second factor (Supabase MFA, `aal2`) for photo moderators; otherwise document it as accepted.
+    require a second factor (Supabase MFA, `aal2`) for photo moderators; otherwise document it as accepted. The server
+    key is held only in the website's server environment (Vercel) and by Paul in the Supabase dashboard; a sign-in
+    created that way appears in Supabase Auth's audit log, which is where a misuse would be detected.
   - The reports board shows "Hide photo" and "Photo evidence" only to photo moderators (`is_photo_moderator`); the
     database checks again on every call.
 - **Upload limit:** `claim_photo_upload(actor)`, server only, before the image is decoded: 10 attempts an hour per

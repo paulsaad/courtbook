@@ -240,6 +240,10 @@ check "M13b reopened, hidden, closed again: the copy goes 180 days after the new
         update reports set closed_at = now() - interval '181 days' where id = $REP; select count(*) from photo_evidence where report_id = $REP;")" "^t [12] 0$"
 check "M13c an open report keeps its copy even with an old closing date left on it (status decides)" \
   "$(q "$(put $B) $(report_b) update reports set closed_at = now() - interval '400 days' where id = $REP; select count(*) from photo_evidence;")" "^1$"
+check "M13d a copy past the rule is not served even if no change to reports has purged it yet (purge on read)" \
+  "$(q "$(put $B) $(report_b) $(mod) do \$r\$ begin perform set_config('t.ev', (select id::text from photo_evidence limit 1), true); end \$r\$;
+        set local session_replication_role = replica; update reports set status = 'dismissed', closed_at = now() - interval '200 days' where id = $REP; set local session_replication_role = origin;
+        select count(*) from photo_evidence; $(as $ADMIN) select moderator_photo_evidence(current_setting('t.ev')::uuid);")" "^1 ERR not_found$"
 check "M14 a report on legal hold that holds a copy cannot be deleted; released, it can" \
   "$(q "$(put $B) $(report_b) update reports set legal_hold = true where id = $REP; delete from reports where id = $REP;")$(q "$(put $B) $(report_b) delete from reports where id = $REP; select count(*) from photo_evidence;")" "^ERR report_on_legal_hold ?0$"
 check "M15 a closing moderator is refused (S5)" \

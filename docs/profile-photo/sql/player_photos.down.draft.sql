@@ -29,7 +29,7 @@ drop function if exists player_photo_on_closure();
 drop function if exists moderator_photo_evidence(uuid);
 drop function if exists moderator_photo_evidence_list(uuid);
 drop function if exists moderator_hide_player_photo(uuid, text);
-drop trigger if exists photo_evidence_retention on reports;
+drop trigger if exists reports_photo_evidence_retention on reports;
 drop function if exists photo_evidence_retention();
 drop function if exists photo_evidence_purge();
 drop trigger if exists photo_evidence_hold_guard on reports;
@@ -65,5 +65,5 @@ drop function if exists my_photo_version();
 drop function if exists match_photo_versions(uuid);
 drop function if exists player_photo(uuid);
 drop function if exists can_see_player_photo(uuid, uuid);
-drop table if exists player_photos;
-drop sequence if exists player_photo_version_seq;   -- its closed-account lock-out trigger goes with it
+drop table if exists player_photos;   -- its closed-account lock-out trigger goes with it
+drop sequence if exists player_photo_version_seq;
