@@ -66,6 +66,21 @@ describe("Reports (admin)", () => {
     expect(calls).toEqual([{ fn: "admin_suspend", args: { p_profile: "p2", p_reason: "threats" } }]);
   });
 
+  it("removes the reported player's photo only with a reason, without suspending (draft #67)", async () => {
+    render(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} />);
+    fireEvent.click(screen.getByText("Remove photo"));
+    const go = screen.getAllByText("Remove photo").find((b) => b.className.includes("bg-action")) as HTMLButtonElement;
+    expect(go.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(/Why remove Sami's photo/), { target: { value: " nudity " } });
+    fireEvent.click(go);
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(calls).toEqual([{ fn: "admin_remove_player_photo", args: { p_profile: "p2", p_reason: "nudity" } }]);
+  });
+  it("not offered on a report without a player", () => {
+    render(<ReportsBoard status="open" reports={[report({ profile_id: null })]} unavailable={false} failed={false} />);
+    expect(screen.queryByText("Remove photo")).toBeNull();
+  });
+
   it("lifts a suspension", async () => {
     render(<ReportsBoard status="open" reports={[report({ reported_suspended: true })]} unavailable={false} failed={false} />);
     expect(screen.queryByText("Suspend account")).toBeNull();

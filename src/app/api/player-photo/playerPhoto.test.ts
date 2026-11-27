@@ -130,8 +130,9 @@ describe("POST /api/player-photo", () => {
     const res = await upload.POST(form(new Blob([new Uint8Array(input)], { type: "image/jpeg" })));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ version: 3 });
-    expect(calls.map((c) => `${c.client}:${c.fn}`)).toEqual(["service:set_player_photo"]);
-    const args = calls[0].args as { p_actor: string; p_image: string; p_width: number };
+    expect(calls.map((c) => `${c.client}:${c.fn}`)).toEqual(["service:claim_photo_upload", "service:set_player_photo"]);
+    expect(calls[0].args).toEqual({ p_actor: ME });
+    const args = calls[1].args as { p_actor: string; p_image: string; p_width: number };
     expect(args.p_actor).toBe(ME);
     expect(args.p_width).toBe(256);
     const stored = shared.fromPgBytea(args.p_image)!;
@@ -151,10 +152,10 @@ describe("POST /api/player-photo", () => {
     expect((await upload.POST(form(new Blob(["x"])))).status).toBe(401);
     expect(calls).toEqual([]);
   });
-  it("a non-image is 415 and nothing is written", async () => {
+  it("a non-image is 415 and nothing is written (the attempt still counts toward the limit)", async () => {
     const res = await upload.POST(form(new Blob(["not an image"], { type: "image/jpeg" })));
     expect(res.status).toBe(415);
-    expect(calls).toEqual([]);
+    expect(calls.map((c) => `${c.client}:${c.fn}`)).toEqual(["service:claim_photo_upload"]);
   });
   it("an upload over the cap is 413 and nothing is decoded or written", async () => {
     const res = await upload.POST(form(new Blob([new Uint8Array(shared.PHOTO.maxInput + 1)], { type: "image/jpeg" })));
@@ -163,6 +164,14 @@ describe("POST /api/player-photo", () => {
   });
   it("no file is 400", async () => {
     expect((await upload.POST(form(null))).status).toBe(400);
+  });
+  // review requirement 3: the limit is the server's; refused before any decode
+  it.each([["too_many_uploads", 429], ["account_closed", 403], ["suspended", 403], ["something else", 500]])("upload limit check refuses %s → %i, before anything is written", async (msg, status) => {
+    serviceRpc = { claim_photo_upload: { error: { message: msg, code: "P0001" } }, set_player_photo: { data: 3 } };
+    const res = await upload.POST(form(new Blob([new Uint8Array(await jpegWithGps(300, 300))])));
+    expect(res.status).toBe(status);
+    expect(calls.map((c) => `${c.client}:${c.fn}`)).toEqual(["service:claim_photo_upload"]);
+    if (msg === "too_many_uploads") expect((await res.json()).error).toMatch(/many times in the last hour/);
   });
   it.each([["account_closed", 403], ["suspended", 403], ["something else", 500]])("database refusal %s → %i", async (msg, status) => {
     serviceRpc = { set_player_photo: { error: { message: msg, code: "P0001" } } };

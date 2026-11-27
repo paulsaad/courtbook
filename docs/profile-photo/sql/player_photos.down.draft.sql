@@ -17,6 +17,21 @@ end $$;
 
 drop trigger if exists player_photo_on_closure on account_deletions;
 drop function if exists player_photo_on_closure();
+drop function if exists admin_remove_player_photo(uuid, text);
+-- the moderation log is append-only: with no 'remove_photo' row the action list returns to 0082's exactly; with one,
+-- the wider list stays (so the record stays valid) and the rollback says so
+do $$
+begin
+  if exists (select 1 from moderation_log where action = 'remove_photo') then
+    raise notice 'moderation_log keeps its remove_photo entries; its action list is left including remove_photo';
+  else
+    alter table moderation_log drop constraint if exists moderation_log_action_check;
+    alter table moderation_log add constraint moderation_log_action_check
+      check (action in ('resolve', 'reopen', 'suspend', 'unsuspend', 'hide_message', 'legal_hold_on', 'legal_hold_off', 'clear_text'));
+  end if;
+end $$;
+drop function if exists claim_photo_upload(uuid);
+drop table if exists player_photo_uploads;
 drop function if exists remove_player_photo();
 drop function if exists set_player_photo(uuid, bytea, int, int);
 drop function if exists my_photo_version();

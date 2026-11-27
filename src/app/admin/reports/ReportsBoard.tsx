@@ -16,7 +16,7 @@ export type Report = {
 /** 0082: what the board shows beyond admin_reports (absent before 0082). */
 export type ReportState = { report_id: string; legal_hold: boolean; handled_by_name: string | null; closed_at: string | null; log_entries: number };
 type LogRow = { at: string; admin_name: string | null; action: string; note: string | null };
-const ACTIONS: Record<string, string> = { resolve: "Resolved", reopen: "Reopened", suspend: "Suspended", unsuspend: "Suspension lifted", hide_message: "Message hidden", legal_hold_on: "Legal hold on", legal_hold_off: "Legal hold off", clear_text: "Old text cleared" };
+const ACTIONS: Record<string, string> = { resolve: "Resolved", reopen: "Reopened", suspend: "Suspended", unsuspend: "Suspension lifted", hide_message: "Message hidden", legal_hold_on: "Legal hold on", legal_hold_off: "Legal hold off", clear_text: "Old text cleared", remove_photo: "Photo removed" };
 type Line = { id: string; created_at: string; sender: string | null; body: string; deleted: boolean; reported: boolean };
 
 const tz = "Asia/Beirut";
@@ -161,6 +161,9 @@ function ReportCard({ r, blocks, st }: { r: Report; blocks?: number; st: ReportS
           ? <WithReason label="Lift suspension" prompt={`Why lift the suspension of ${who}? (kept in the moderation log)`} busy={busy} onSubmit={(why) => refresh("admin_unsuspend", { p_profile: r.profile_id, p_reason: why })} />
           : <button disabled={busy} onClick={() => refresh("admin_unsuspend", { p_profile: r.profile_id })} className="rounded-xl border border-grid bg-white px-3 py-2">Lift suspension</button>
         )}
+        {/* player photo (draft #67, review requirement 2): remove an inappropriate photo without suspending the account */}
+        {r.profile_id && <WithReason label="Remove photo" danger prompt={`Why remove ${who}'s photo? (kept in the moderation log; they can upload a new one)`} busy={busy}
+          onSubmit={(why) => refresh("admin_remove_player_photo", { p_profile: r.profile_id, p_reason: why })} />}
         {st && <WithReason label={st.legal_hold ? "Release legal hold" : "Put on legal hold"} prompt={st.legal_hold ? "Why release the hold? (its text can then be cleared on schedule)" : "Why hold this report? (its text will not be cleared)"} busy={busy}
           onSubmit={(why) => refresh("admin_set_legal_hold", { p_report: r.id, p_hold: !st.legal_hold, p_note: why })} />}
         {st && st.log_entries > 0 && !history && <button disabled={busy} onClick={showHistory} className="rounded-xl border border-grid bg-white px-3 py-2">History ({st.log_entries})</button>}

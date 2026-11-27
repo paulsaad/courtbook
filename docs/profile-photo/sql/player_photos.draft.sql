@@ -122,6 +122,58 @@ end $$;
 revoke all on function remove_player_photo() from public, anon;
 grant execute on function remove_player_photo() to authenticated;
 
+-- 4b -----------------------------------------------------------------------------------------------------------------
+-- Review requirement 3 (26 Nov): a SERVER-side upload limit, checked before the image is decoded. The route calls
+-- claim_photo_upload(actor) first; it records the attempt and refuses ('too_many_uploads') once the account has made
+-- PHOTO_UPLOADS_PER_HOUR attempts in the last hour. Attempts count, not successes: a stream of undecodable files is
+-- the costly case. Server-only, like set_player_photo. Rows older than a day are pruned on each claim.
+create table if not exists player_photo_uploads (
+  profile_id uuid not null references profiles(id) on delete cascade,
+  at         timestamptz not null default clock_timestamp()
+);
+create index if not exists player_photo_uploads_idx on player_photo_uploads (profile_id, at);
+alter table player_photo_uploads enable row level security;   -- no policy: only claim_photo_upload writes it
+revoke all on player_photo_uploads from public, anon, authenticated, service_role;
+
+create or replace function claim_photo_upload(p_actor uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  if auth.uid() is not null then raise exception 'forbidden'; end if;   -- only the server (service role, no user)
+  if p_actor is null or not exists (select 1 from profiles where id = p_actor) then raise exception 'not_found'; end if;
+  -- the same refusals as set_player_photo, before any decode
+  if deletion_requested(p_actor) then raise exception 'account_closed'; end if;
+  if exists (select 1 from account_suspensions where profile_id = p_actor) then raise exception 'suspended'; end if;
+  perform pg_advisory_xact_lock(hashtext('photo_upload:' || p_actor::text));   -- concurrent uploads count one by one
+  delete from player_photo_uploads where profile_id = p_actor and at < clock_timestamp() - interval '1 day';
+  select count(*) into n from player_photo_uploads where profile_id = p_actor and at > clock_timestamp() - interval '1 hour';
+  if n >= 10 then raise exception 'too_many_uploads'; end if;            -- PHOTO_UPLOADS_PER_HOUR (10)
+  insert into player_photo_uploads (profile_id) values (p_actor);
+end $$;
+revoke all on function claim_photo_upload(uuid) from public, anon, authenticated;
+grant execute on function claim_photo_upload(uuid) to service_role;
+
+-- 4c -----------------------------------------------------------------------------------------------------------------
+-- Review requirement 2 (26 Nov): an admin removes an inappropriate photo without suspending the account. Admin only,
+-- a reason is required, and the action is in the moderation log like the other safe actions (0082). The player can
+-- upload again; a repeat is handled by suspension, as today.
+alter table moderation_log drop constraint if exists moderation_log_action_check;
+alter table moderation_log add constraint moderation_log_action_check
+  check (action in ('resolve', 'reopen', 'suspend', 'unsuspend', 'hide_message', 'legal_hold_on', 'legal_hold_off', 'clear_text', 'remove_photo'));
+
+create or replace function admin_remove_player_photo(p_profile uuid, p_reason text) returns boolean
+language plpgsql security definer set search_path = public as $$
+begin
+  if not is_admin() then raise exception 'forbidden'; end if;
+  if coalesce(btrim(p_reason), '') = '' then raise exception 'reason_required'; end if;
+  delete from player_photos where profile_id = p_profile;
+  if not found then return false; end if;                                 -- nothing to remove: nothing logged
+  perform log_moderation('remove_photo', null, p_profile, null, btrim(p_reason));
+  return true;
+end $$;
+revoke all on function admin_remove_player_photo(uuid, text) from public, anon;
+grant execute on function admin_remove_player_photo(uuid, text) to authenticated;   -- is_admin() decides
+
 -- 5 ------------------------------------------------------------------------------------------------------------------
 -- 0086's lock-out: a closed account changes nothing, on every table (0086 test E1 requires it of a new table).
 do $$
@@ -129,6 +181,9 @@ begin
   if exists (select 1 from pg_proc where proname = 'refuse_writes_by_closed_account') then
     execute 'drop trigger if exists closed_account_lockout on player_photos';
     execute 'create trigger closed_account_lockout before insert or update or delete on player_photos '
+         || 'for each statement execute function refuse_writes_by_closed_account()';
+    execute 'drop trigger if exists closed_account_lockout on player_photo_uploads';
+    execute 'create trigger closed_account_lockout before insert or update or delete on player_photo_uploads '
          || 'for each statement execute function refuse_writes_by_closed_account()';
   end if;
 end $$;
@@ -144,6 +199,7 @@ language plpgsql security definer set search_path = public as $$
 begin
   if new.status in ('data_removed', 'done') and (tg_op = 'INSERT' or old.status is distinct from new.status) then
     delete from player_photos where profile_id = new.subject_id;
+    delete from player_photo_uploads where profile_id = new.subject_id;
   end if;
   return null;
 end $$;

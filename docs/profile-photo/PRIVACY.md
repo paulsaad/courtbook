@@ -16,7 +16,8 @@ The photo feature must not reach players before the privacy policy (M1/PR-4) and
 | Removal by the player | "Remove" deletes it from the database immediately |
 | Account deletion | Hidden from everyone the moment the account closes; deleted at the account's data step; kept hidden (not deleted) while a legal hold applies |
 | Backups | A deleted photo remains in database backups until they expire under the hosting plan's backup retention **(Q: state the period — confirm it with M5's backup set-up)** |
-| Offensive photos | Players can report a player; an admin "remove photo" action is a follow-up (not in this PR) **(Q: needed before release?)** |
+| Upload limit | At most 10 upload attempts an hour per account, counted on the server before the image is read; the attempt log holds only the account id and time; entries older than a day are removed at the next upload, and all are deleted with the account |
+| Offensive photos | Players can report a player. An admin can remove a photo without suspending the account (`admin_remove_player_photo`, reason required, recorded in the moderation log; review requirement 2, 27 Nov). The player can upload again |
 
 ## Store forms (to confirm against the final build)
 

@@ -15,6 +15,8 @@ import { PHOTO, sameOrigin, toPgBytea } from "@/lib/playerPhoto/shared";
 const REFUSALS: Record<string, { status: number; error: string }> = {
   account_closed: { status: 403, error: "This account is closed." },
   suspended: { status: 403, error: "Your account is suspended, so you cannot change your photo." },
+  // review requirement 3: the server-side limit (claim_photo_upload: 10 attempts an hour per account)
+  too_many_uploads: { status: 429, error: "You've changed your photo many times in the last hour. Please try again later." },
 };
 
 export async function POST(request: Request) {
@@ -27,6 +29,16 @@ export async function POST(request: Request) {
   const file = form?.get("file");
   if (!(file instanceof File)) return NextResponse.json({ error: "Choose a photo to upload." }, { status: 400 });
   if (file.size > PHOTO.maxInput) return NextResponse.json({ error: "That photo is too large. Please pick a smaller one." }, { status: 413 });
+
+  // review requirement 3 (26 Nov): every attempt is counted on the server BEFORE the image is decoded, so a stream of
+  // uploads (decodable or not) is refused after the limit without costing a decode
+  const claim = await createAdminClient().rpc("claim_photo_upload", { p_actor: user.id });
+  if (claim.error) {
+    const known = REFUSALS[claim.error.message ?? ""];
+    if (known) return NextResponse.json({ error: known.error }, { status: known.status });
+    console.error(`player-photo: could not check the upload limit (${claim.error.code}: ${claim.error.message})`);
+    return NextResponse.json({ error: "Your photo could not be saved because of a problem on our side. Please try again." }, { status: 500 });
+  }
 
   const p = await processPhoto(Buffer.from(await file.arrayBuffer()));
   if (!p.ok) {

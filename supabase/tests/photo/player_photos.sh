@@ -115,16 +115,55 @@ check "P15 exact table rights: nobody but the owner (anon, authenticated and ser
   "^anon=- authenticated=- service_role=-$"
 check "P15b exact function rights (anon none; players read, remove; only the server writes; internals for nobody)" \
   "$(q "select string_agg(f || ':' || (case when has_function_privilege('anon', f, 'EXECUTE') then 'A' else '' end) || (case when has_function_privilege('authenticated', f, 'EXECUTE') then 'U' else '' end), ' ' order by f)
-        from unnest(array['can_see_player_photo(uuid,uuid)','match_photo_versions(uuid)','my_photo_version()','player_photo(uuid)','player_photo_on_closure()','remove_player_photo()','set_player_photo(uuid,bytea,integer,integer)']) f;")" \
-  "^can_see_player_photo\(uuid,uuid\): match_photo_versions\(uuid\):U my_photo_version\(\):U player_photo\(uuid\):U player_photo_on_closure\(\): remove_player_photo\(\):U set_player_photo\(uuid,bytea,integer,integer\):$"
+        from unnest(array['admin_remove_player_photo(uuid,text)','can_see_player_photo(uuid,uuid)','claim_photo_upload(uuid)','match_photo_versions(uuid)','my_photo_version()','player_photo(uuid)','player_photo_on_closure()','remove_player_photo()','set_player_photo(uuid,bytea,integer,integer)']) f;")" \
+  "^admin_remove_player_photo\(uuid,text\):U can_see_player_photo\(uuid,uuid\): claim_photo_upload\(uuid\): match_photo_versions\(uuid\):U my_photo_version\(\):U player_photo\(uuid\):U player_photo_on_closure\(\): remove_player_photo\(\):U set_player_photo\(uuid,bytea,integer,integer\):$"
 check "P15c RLS on, no policy; every function SECURITY DEFINER with a fixed search_path" \
   "$(q "select (select relrowsecurity from pg_class where relname = 'player_photos') || ' ' || (select count(*) from pg_policies where tablename = 'player_photos') || ' ' ||
-        (select count(*) from pg_proc where proname in ('can_see_player_photo','player_photo','match_photo_versions','my_photo_version','set_player_photo','remove_player_photo','player_photo_on_closure') and prosecdef and proconfig @> array['search_path=public']);")" \
-  "^true 0 7$"
+        (select count(*) from pg_proc where proname in ('can_see_player_photo','player_photo','match_photo_versions','my_photo_version','set_player_photo','remove_player_photo','player_photo_on_closure','claim_photo_upload','admin_remove_player_photo') and prosecdef and proconfig @> array['search_path=public']);")" \
+  "^true 0 9$"
 check "P15d the server key cannot write or read the table directly" \
   "$(q "$(svc) insert into player_photos (profile_id, image, width, height) values ('$B', $IMG, 192, 192);")" "ERR .*permission denied"
 check "P13d a stored photo at exactly the cap (65536 bytes) is accepted; one byte more is not" \
   "$(q "$(svc) select set_player_photo('$B', decode('52494646' || '00000000' || '57454250' || repeat('00', 65524), 'hex'), 192, 192); select set_player_photo('$B', decode('52494646' || '00000000' || '57454250' || repeat('00', 65525), 'hex'), 192, 192);")" "^1 ERR .*check constraint"
 check "P13e dimensions outside 32–256 are refused" \
   "$(q "$(svc) select set_player_photo('$B', $IMG, 512, 512);")" "ERR .*check constraint"
+# review requirement 3 (26 Nov): the server-side upload limit (claim_photo_upload runs before any decode)
+claim() { echo "$(svc) do \$c\$ begin perform claim_photo_upload('$1'); end \$c\$; reset role;"; }
+check "U1 the server may claim 10 uploads an hour for a player; the 11th is refused (too_many_uploads)" \
+  "$(q "$(for i in 1 2 3 4 5 6 7 8 9 10; do claim $B; done) select count(*) from player_photo_uploads where profile_id = '$B'; $(claim $B)")" "^10 ERR too_many_uploads$"
+check "U1b the limit is per player: another player is not affected" \
+  "$(q "$(for i in 1 2 3 4 5 6 7 8 9 10; do claim $B; done) $(claim $A) select count(*) from player_photo_uploads where profile_id = '$A';")" "^1$"
+check "U2 attempts older than an hour no longer count" \
+  "$(q "insert into player_photo_uploads (profile_id, at) select '$B', now() - interval '61 minutes' from generate_series(1, 10); $(claim $B) select count(*) from player_photo_uploads where profile_id = '$B' and at > now() - interval '1 hour';")" "^1$"
+check "U2b attempts older than a day are pruned on the next claim" \
+  "$(q "insert into player_photo_uploads (profile_id, at) select '$B', now() - interval '25 hours' from generate_series(1, 5); $(claim $B) select count(*) from player_photo_uploads where profile_id = '$B';")" "^1$"
+check "U3 a signed-in player cannot claim (only the server), nor use the table" \
+  "$(q "$(as $B) select claim_photo_upload('$B');")$(q "$(as $B) select count(*) from player_photo_uploads;")" "ERR .*permission denied.*ERR .*permission denied"
+check "U3b exact table rights on the upload log: none for anon, authenticated, service_role" \
+  "$(q "select string_agg(r || '=' || coalesce((select string_agg(p, '+' order by p) from unnest(array['SELECT','INSERT','UPDATE','DELETE']) p where has_table_privilege(r, 'player_photo_uploads', p)), '-'), ' ' order by r) from unnest(array['anon','authenticated','service_role']) r;")" \
+  "^anon=- authenticated=- service_role=-$"
+check "U4 a closed account's attempts are deleted at the data step; the table has 0086's lock-out" \
+  "$(q "$(claim $B) $(fresh $B) select close_my_account('web') is not null; reset role;
+        $(svc) select delete_account_data('$B') is not null; reset role;
+        select (select count(*) from player_photo_uploads where profile_id = '$B') || ' ' || exists (select 1 from pg_trigger where tgname = 'closed_account_lockout' and tgrelid = 'player_photo_uploads'::regclass);")" "^f t t 0 true$"
+check "U5 a closed or suspended account is refused before any decode" \
+  "$(q "insert into account_suspensions (profile_id, reason, suspended_by) values ('$B', 'test', '$ADMIN'); $(claim $B)")$(q "$(fresh $B) select close_my_account('web') is not null; reset role; $(claim $B)")" "ERR suspended.*ERR account_closed"
+# review requirement 2 (26 Nov): an admin removes an inappropriate photo, without suspending the account
+check "M1 an admin removes a photo with a reason: gone, logged (who, whose, why), the account not suspended" \
+  "$(q "$(put $B) $(as $ADMIN) select admin_remove_player_photo('$B', 'nudity'); reset role;
+        select (select count(*) from player_photos where profile_id = '$B') || ' ' ||
+               (select admin_id = '$ADMIN' and profile_id = '$B' and note = 'nudity' from moderation_log where action = 'remove_photo') || ' ' ||
+               (select count(*) from account_suspensions where profile_id = '$B');")" "^t 0 true 0$"
+check "M2 a player (even the organizer of a shared game) cannot use it" \
+  "$(q "$(put $B) $(as $A) select admin_remove_player_photo('$B', 'x');")" "ERR forbidden"
+check "M2b anon cannot call it" \
+  "$(q "$(put $B) set local role anon; select admin_remove_player_photo('$B', 'x');")" "ERR .*permission denied"
+check "M3 a reason is required" \
+  "$(q "$(put $B) $(as $ADMIN) select admin_remove_player_photo('$B', '  ');")" "ERR reason_required"
+check "M4 nothing to remove: false, and nothing is logged" \
+  "$(q "$(as $ADMIN) select admin_remove_player_photo('$B', 'x'); reset role; select count(*) from moderation_log where action = 'remove_photo';")" "^f 0$"
+check "M5 the player can upload again afterwards (a repeat is handled by suspension)" \
+  "$(q "$(put $B) $(as $ADMIN) select admin_remove_player_photo('$B', 'nudity'); reset role; $(put $B) $(seen $B $B)")" "t.*1$"
+check "M6 the removal record cannot be edited or deleted (append-only log)" \
+  "$(q "$(put $B) $(as $ADMIN) select admin_remove_player_photo('$B', 'nudity'); reset role; delete from moderation_log where action = 'remove_photo';")" "ERR moderation_log_is_append_only"
 exit $status
