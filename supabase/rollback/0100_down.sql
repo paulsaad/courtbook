@@ -12,7 +12,7 @@ do $$
 declare known text[] := array['padel','tennis','other','football','basketball','volleyball','squash','badminton']; bad text;
 begin
   if not exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' and t.typname = 'sport' and t.typtype = 'd') then
-    raise exception 'sports catalogue draft is not applied: nothing to roll back';
+    raise exception 'sports catalogue (0100) is not applied: nothing to roll back';
   end if;
   select string_agg(distinct x, ',') into bad from (
     select sport::text x from courts union all select sport::text from matches union all select sport::text from player_levels
@@ -80,7 +80,7 @@ alter table coaches       alter column sports set default '{}'::sport[];
 -- 4. re-create the functions from their captured text, with the same grants. club_discovery without the inserted
 --    clause; club_sports at its 0093 definition.
 do $$
-declare f record; g record; d text;
+declare f record; g record; d text; prev_bodies text;
   inserted text := ' or exists (select 1 from courts k join sports s on s.code = k.sport where k.club_id = c.id and k.active and s.active'
     || ' and (s.name_en ilike ''%'' || q.text || ''%'''
     || ' or exists (select 1 from unnest(s.aliases) a where a ilike ''%'' || q.text || ''%'')))';
@@ -88,16 +88,17 @@ declare f record; g record; d text;
     || ' and (s2.name_en ilike ''%'' || q || ''%'''
     || ' or exists (select 1 from unnest(s2.aliases) a where a ilike ''%'' || q || ''%'')))';
 begin
-  perform set_config('check_function_bodies', 'off', true);   -- as the up draft (B1): the order cannot matter
+  prev_bodies := current_setting('check_function_bodies');
+  perform set_config('check_function_bodies', 'off', true);   -- as 0100 (B1): the order cannot matter
   for f in select * from _sport_fns order by sig loop
     -- the enum's defaults come back as written before 0100 (pg_get_functiondef shows the domain-era cast otherwise)
     d := replace(f.def, '(NULL::text)::sport', 'NULL::sport');
     if f.sig like 'club_day_slots(%' then
-      if position(inserted_slots in d) = 0 then raise exception 'club_day_slots changed since the catalogue draft: restore it by hand'; end if;
+      if position(inserted_slots in d) = 0 then raise exception 'club_day_slots changed since 0100: restore it by hand'; end if;
       d := replace(d, inserted_slots, '');
     end if;
     if f.sig like 'club_discovery(%' then
-      if position(inserted in d) = 0 then raise exception 'club_discovery changed since the catalogue draft: restore it by hand'; end if;
+      if position(inserted in d) = 0 then raise exception 'club_discovery changed since 0100: restore it by hand'; end if;
       d := replace(d, inserted, '');
     elsif f.sig like 'club_sports(%' then
       d := $orig$
@@ -121,5 +122,5 @@ $orig$;
     end loop;
     if f.proacl is null then execute format('grant execute on function %s to public', f.sig); end if;
   end loop;
-  perform set_config('check_function_bodies', 'on', true);
+  perform set_config('check_function_bodies', prev_bodies, true);
 end $$;

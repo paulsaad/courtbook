@@ -4,7 +4,7 @@
 --
 -- Today a sport is a Postgres ENUM (0001, 0028, 0040): adding one needs a migration (ALTER TYPE … ADD VALUE). The
 -- `sports` table already holds names, order and an active flag, and admins may already write it (0028 RLS), but a new
--- row is useless until the enum has the value. This draft makes the table the catalogue:
+-- row is useless until the enum has the value. This migration makes the table the catalogue:
 --
 --   1. `sport` becomes a DOMAIN over text (a stable lower-case code: ^[a-z][a-z0-9_]{1,30}$). Existing codes are
 --      unchanged, so every stored value, API payload and app build keeps working. Every column keeps its name.
@@ -34,7 +34,7 @@
 -- pg_dump restores), so their order cannot matter (review of 412156a, B1); a fixed order besides. Skipped entirely once
 -- `sport` is the domain.
 do $conv$
-declare f record; g record;
+declare f record; g record; prev_bodies text := current_setting('check_function_bodies');
 begin
   if not exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace
                  where n.nspname = 'public' and t.typname = 'sport' and t.typtype = 'e') then
@@ -77,7 +77,7 @@ begin
     -- a function with no ACL (null) had the default: EXECUTE for public
     if f.proacl is null then execute format('grant execute on function %s to public', f.sig); end if;
   end loop;
-  perform set_config('check_function_bodies', 'on', true);
+  perform set_config('check_function_bodies', prev_bodies, true);   -- the caller's setting back (re-review nit 1)
 
   execute 'drop type sport_enum_retired';
 end $conv$;

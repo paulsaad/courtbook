@@ -4,7 +4,7 @@
 > (number provisionally approved by Paul). The `sql/…draft.sql` paths below are the historical draft names.
 
 
-**Status: draft, not numbered, not applied anywhere.** Apply locally with
+**Status: migration 0100 in the 0.5.0 candidate (not applied anywhere yet).** Apply locally with
 `EXTRA_MIGRATIONS=supabase/migrations/0100_sports_catalogue.sql`.
 
 ## Why the database had to change

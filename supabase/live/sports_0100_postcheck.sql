@@ -28,12 +28,12 @@ select 'P5 the guard functions: security definer, search_path=public, not callab
   from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('sports_guard', 'sport_choice_guard')
 union all
 select 'P6 searches match a sport''s name and aliases (club_discovery, club_day_slots); club_sports is alphabetical',
-  (position('unnest(s.aliases)' in pg_get_functiondef('public.club_discovery(sport,text,text,text)'::regprocedure)) > 0)::text || '/'
-    || (position('unnest(s2.aliases)' in pg_get_functiondef('public.club_day_slots(date,sport,text,text,text)'::regprocedure)) > 0)::text || '/'
-    || (position('order by x.name_en' in pg_get_functiondef('public.club_sports(uuid)'::regprocedure)) > 0)::text,
-  case when position('unnest(s.aliases)' in pg_get_functiondef('public.club_discovery(sport,text,text,text)'::regprocedure)) > 0
-        and position('unnest(s2.aliases)' in pg_get_functiondef('public.club_day_slots(date,sport,text,text,text)'::regprocedure)) > 0
-        and position('order by x.name_en' in pg_get_functiondef('public.club_sports(uuid)'::regprocedure)) > 0 then 'OK' else 'STOP' end
+  (position('unnest(s.aliases)' in coalesce(pg_get_functiondef(to_regprocedure('public.club_discovery(sport,text,text,text)')), '')) > 0)::text || '/'
+    || (position('unnest(s2.aliases)' in coalesce(pg_get_functiondef(to_regprocedure('public.club_day_slots(date,sport,text,text,text)')), '')) > 0)::text || '/'
+    || (position('order by x.name_en' in coalesce(pg_get_functiondef(to_regprocedure('public.club_sports(uuid)')), '')) > 0)::text,
+  case when position('unnest(s.aliases)' in coalesce(pg_get_functiondef(to_regprocedure('public.club_discovery(sport,text,text,text)')), '')) > 0
+        and position('unnest(s2.aliases)' in coalesce(pg_get_functiondef(to_regprocedure('public.club_day_slots(date,sport,text,text,text)')), '')) > 0
+        and position('order by x.name_en' in coalesce(pg_get_functiondef(to_regprocedure('public.club_sports(uuid)')), '')) > 0 then 'OK' else 'STOP' end
 union all
 select 'P7 browsing still works signed out: club_discovery, club_day_slots and next_free_slot are callable by anon',
   count(*)::text, case when count(*) = 3 and bool_and(has_function_privilege('anon', p.oid, 'execute')) then 'OK' else 'STOP' end

@@ -11,6 +11,11 @@ select 'S2 every sport code fits the new code format ^[a-z][a-z0-9_]{1,30}$',
   coalesce(string_agg(code::text, ','), 'all fit'), case when count(*) = 0 then 'OK' else 'STOP' end
   from sports where code::text !~ '^[a-z][a-z0-9_]{1,30}$'
 union all
+select 'S2b every value the sport type allows fits that format (any of them may be stored in a profile or coach list)',
+  coalesce(string_agg(e.enumlabel, ','), 'all fit'), case when count(*) = 0 then 'OK' else 'STOP' end
+  from pg_enum e join pg_type t on t.oid = e.enumtypid
+  where t.typname = 'sport' and t.typnamespace = 'public'::regnamespace and e.enumlabel !~ '^[a-z][a-z0-9_]{1,30}$'
+union all
 select 'S3 every sport used by a court, game or level is in the sports table (the new foreign keys)',
   count(*)::text, case when count(*) = 0 then 'OK' else 'STOP' end
   from (select sport::text from courts union all select sport::text from matches union all select sport::text from player_levels) u
@@ -38,6 +43,10 @@ select 'S8 club_discovery and club_day_slots have the search text 0100 extends (
   case when position('t.name_ar like ''%'' || q.text || ''%'')' in pg_get_functiondef(to_regprocedure('public.club_discovery(sport,text,text,text)'))) > 0
         and position('tw.name_ar like ''%'' || q || ''%'')' in pg_get_functiondef(to_regprocedure('public.club_day_slots(date,sport,text,text,text)'))) > 0
        then 'OK' else 'STOP' end
+union all
+select 'S10 information: profile/coach sport codes not in the catalogue (kept on save; shown without a name)',
+  ((select count(*) from profiles p, unnest(p.sports) c where c is not null and not exists (select 1 from sports s where s.code = c))
+   + (select count(*) from coaches k, unnest(k.sports) c where c is not null and not exists (select 1 from sports s where s.code = c)))::text, 'OK'
 union all
 select 'S9 information: sports, active, in use by courts', (select count(*) from sports)::text || ' / ' || (select count(*) from sports where active)::text
   || ' / ' || (select count(distinct sport) from courts)::text, 'OK';
