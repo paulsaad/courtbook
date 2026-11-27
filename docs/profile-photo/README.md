@@ -71,6 +71,22 @@ the test runner).
   (fails if removed), sizes, WebP header, routes (which client runs which call, cross-site refusal,
   401/404/413/415/500, ETag/304). Website suite 739 passed; tsc clean; `next build` OK.
 
+## Moderation and the upload limit (27 Nov, review requirements 2 and 3)
+
+- **Admin removal:** `admin_remove_player_photo(profile, reason)`. Admin only; a reason is required; the photo is deleted
+  without suspending the account; the action is in the append-only moderation log as `remove_photo`. The reports board
+  offers "Remove photo" on a report about a player, only where the photo schema exists, and says when there was no
+  photo to remove.
+- **Upload limit:** `claim_photo_upload(actor)`, server only, before the image is decoded: 10 attempts an hour per
+  account (counted one at a time under a per-account lock), closed and suspended accounts refused first; 429 with a
+  fixed message.
+- **Open decisions for Paul (review of b89b9ff, findings 2 and 3):**
+  1. Removing a photo deletes it and keeps no copy, also when the report is on legal hold. If the photo itself is the
+     evidence, the removal destroys it. Options: refuse removal while a report about the player is on legal hold; keep
+     a hidden copy for the hold; or accept and document it.
+  2. Admins have no view of a reported photo in the app (by design so far): they decide on the report's text alone.
+     Options: an admin-only view of a reported player's photo, or accept and document it.
+
 ## Not in this draft
 - The phone app. Display needs no new server work (the app can call `match_photo_versions` / `player_photo` directly
   and render the bytes); upload needs the route to accept the app's bearer token. Proposed as a follow-up.

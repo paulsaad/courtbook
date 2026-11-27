@@ -73,7 +73,7 @@ const PAGES: [string, () => Promise<{ default: unknown }>, Record<string, string
   ["admin", () => import("./admin/page"), {}],
   ["admin payments", () => import("./admin/payments/page"), {}],
   ["admin club", () => import("./admin/clubs/[slug]/page"), { slug: "batroun" }],
-  ["admin reports", () => import("./admin/reports/page"), {}, ["rpc:admin_reports"]],
+  ["admin reports", () => import("./admin/reports/page"), {}, ["rpc:admin_reports", "rpc:my_photo_version"]],   // the photo check is optional: no photo schema = no "Remove photo"
   ["club booking page", () => import("./club/[slug]/page"), { slug: "batroun" }, ["from:occupancy"]],
   ["courts", () => import("./courts/page"), {}, ["rpc:club_day_slots"]],
   ["staff calendar", () => import("./staff/[slug]/page"), { slug: "batroun" }, ["from:bookings", "from:blocks"]],

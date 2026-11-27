@@ -35,5 +35,7 @@ export default async function AdminReports({ searchParams }: { searchParams: Pro
   const stateRes = reports.length ? await supabase.rpc("admin_report_state", { p_reports: reports.map((r) => r.id) }) : null;
   const state = !stateRes ? (missing ? null : {}) : stateRes.error && isMissingFunction(stateRes.error) ? null
     : Object.fromEntries(((loaded(stateRes, "the reports").data ?? []) as ReportState[]).map((x) => [x.report_id, x]));
-  return <><WorkNav area="admin" active="reports" /><ReportsBoard status={status} reports={reports} blocksReceived={blocksReceived} unavailable={missing} failed={!!error && !missing} state={state} /></>;
+  // player photo draft (#67): the removal is offered only where the photo schema exists (any error: not offered)
+  const photos = !(await supabase.rpc("my_photo_version").then((r) => r, () => ({ error: true }))).error;
+  return <><WorkNav area="admin" active="reports" /><ReportsBoard status={status} reports={reports} blocksReceived={blocksReceived} unavailable={missing} failed={!!error && !missing} state={state} photos={photos} /></>;
 }

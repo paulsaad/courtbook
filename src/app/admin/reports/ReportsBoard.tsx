@@ -25,7 +25,7 @@ const REASONS: Record<string, string> = { spam: "Spam", abuse: "Abuse or harassm
 const KINDS: Record<string, string> = { message: "Message", player: "Player", game: "Game", feedback: "Help & Feedback" };
 const TABS = [["open", "Open"], ["actioned", "Handled"], ["dismissed", "Dismissed"]] as const;
 
-export default function ReportsBoard({ status, reports, unavailable, failed, blocksReceived = {}, state = null }: { status: string; reports: Report[]; unavailable: boolean; failed: boolean; blocksReceived?: Record<string, number>; state?: Record<string, ReportState> | null }) {
+export default function ReportsBoard({ status, reports, unavailable, failed, blocksReceived = {}, state = null, photos = false }: { status: string; reports: Report[]; unavailable: boolean; failed: boolean; blocksReceived?: Record<string, number>; state?: Record<string, ReportState> | null; photos?: boolean }) {
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-5 p-5 pb-16">
       <Link href="/admin" className="text-sm text-muted">‹ Admin</Link>
@@ -45,7 +45,7 @@ export default function ReportsBoard({ status, reports, unavailable, failed, blo
         (list as Report[]).length > 0 && (
           <section key={title as string} className="flex flex-col gap-3" aria-label={title as string}>
             <h2 className="text-sm font-medium text-muted">{title as string} · {(list as Report[]).length}</h2>
-            {(list as Report[]).map((r) => <ReportCard key={r.id} r={r} blocks={r.profile_id ? blocksReceived[r.profile_id] : undefined} st={state ? state[r.id] ?? null : null} />)}
+            {(list as Report[]).map((r) => <ReportCard key={r.id} r={r} blocks={r.profile_id ? blocksReceived[r.profile_id] : undefined} st={state ? state[r.id] ?? null : null} photos={photos} />)}
           </section>
         ))}
     </main>
@@ -85,7 +85,7 @@ function WithReason({ label, prompt, danger, busy, onSubmit }: { label: string; 
   );
 }
 
-function ReportCard({ r, blocks, st }: { r: Report; blocks?: number; st: ReportState | null }) {
+function ReportCard({ r, blocks, st, photos = false }: { r: Report; blocks?: number; st: ReportState | null; photos?: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +103,16 @@ function ReportCard({ r, blocks, st }: { r: Report; blocks?: number; st: ReportS
     return { data };
   }
   const refresh = async (fn: string, args: Record<string, unknown>) => { if (await call(fn, args)) router.refresh(); };
+  const [photoNote, setPhotoNote] = useState<string | null>(null);
+  // review of b89b9ff (finding 4): say so when there was no photo to remove, instead of nothing
+  async function removePhoto(why: string) {
+    setPhotoNote(null);
+    const out = await call("admin_remove_player_photo", { p_profile: r.profile_id, p_reason: why });
+    if (!out) return;
+    if (out.data === false) { setPhotoNote(`${who} has no photo to remove.`); return; }
+    setPhotoNote(`${who}'s photo was removed.`);
+    router.refresh();
+  }
   async function showConversation() {
     const out = await call("admin_report_messages", { p_report: r.id });
     if (out) setLines((out.data ?? []) as Line[]);
@@ -149,6 +159,7 @@ function ReportCard({ r, blocks, st }: { r: Report; blocks?: number; st: ReportS
         </ol>
       )}
       {error && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-danger">{error}</p>}
+      {photoNote && <p role="status" className="mt-2 rounded-lg bg-paper px-3 py-2 text-muted">{photoNote}</p>}
 
       <div className="mt-3 flex flex-wrap gap-2">
         {r.message_id && !r.message_deleted && open && (
@@ -162,8 +173,8 @@ function ReportCard({ r, blocks, st }: { r: Report; blocks?: number; st: ReportS
           : <button disabled={busy} onClick={() => refresh("admin_unsuspend", { p_profile: r.profile_id })} className="rounded-xl border border-grid bg-white px-3 py-2">Lift suspension</button>
         )}
         {/* player photo (draft #67, review requirement 2): remove an inappropriate photo without suspending the account */}
-        {r.profile_id && <WithReason label="Remove photo" danger prompt={`Why remove ${who}'s photo? (kept in the moderation log; they can upload a new one)`} busy={busy}
-          onSubmit={(why) => refresh("admin_remove_player_photo", { p_profile: r.profile_id, p_reason: why })} />}
+        {photos && r.profile_id && <WithReason label="Remove photo" danger prompt={`Why remove ${who}'s photo? (kept in the moderation log; they can upload a new one)`} busy={busy}
+          onSubmit={(why) => void removePhoto(why)} />}
         {st && <WithReason label={st.legal_hold ? "Release legal hold" : "Put on legal hold"} prompt={st.legal_hold ? "Why release the hold? (its text can then be cleared on schedule)" : "Why hold this report? (its text will not be cleared)"} busy={busy}
           onSubmit={(why) => refresh("admin_set_legal_hold", { p_report: r.id, p_hold: !st.legal_hold, p_note: why })} />}
         {st && st.log_entries > 0 && !history && <button disabled={busy} onClick={showHistory} className="rounded-xl border border-grid bg-white px-3 py-2">History ({st.log_entries})</button>}

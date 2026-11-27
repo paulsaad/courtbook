@@ -172,7 +172,7 @@ begin
   return true;
 end $$;
 revoke all on function admin_remove_player_photo(uuid, text) from public, anon;
-grant execute on function admin_remove_player_photo(uuid, text) to authenticated;   -- is_admin() decides
+grant execute on function admin_remove_player_photo(uuid, text) to authenticated, service_role;   -- is_admin() decides (as 0082's admin_* functions)
 
 -- 5 ------------------------------------------------------------------------------------------------------------------
 -- 0086's lock-out: a closed account changes nothing, on every table (0086 test E1 requires it of a new table).

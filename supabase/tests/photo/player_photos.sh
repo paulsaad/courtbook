@@ -146,6 +146,19 @@ check "U4 a closed account's attempts are deleted at the data step; the table ha
   "$(q "$(claim $B) $(fresh $B) select close_my_account('web') is not null; reset role;
         $(svc) select delete_account_data('$B') is not null; reset role;
         select (select count(*) from player_photo_uploads where profile_id = '$B') || ' ' || exists (select 1 from pg_trigger where tgname = 'closed_account_lockout' and tgrelid = 'player_photo_uploads'::regclass);")" "^f t t 0 true$"
+# review of b89b9ff (finding 1): concurrent claims are counted one by one (the per-account lock): 30 at once, 10 accepted
+claim_race() {
+  local pids=() ok=0
+  for i in $(seq 1 30); do
+    { printf '%s\n' "begin;" "set local role service_role;" "set local request.jwt.claim.sub = '';" "select claim_photo_upload('$B');" "select pg_sleep(0.2);" "commit;" \
+        | $PSQL -d $DB -X -q -At -v ON_ERROR_STOP=1 >/dev/null 2>&1 && echo ok; } > /tmp/photo_claim_$i.out &
+    pids+=($!)
+  done
+  wait "${pids[@]}"
+  ok=$(cat /tmp/photo_claim_*.out | grep -c '^ok$'); rm -f /tmp/photo_claim_*.out
+  echo "$ok $($PSQL -d $DB -X -At -c "select count(*) from player_photo_uploads where profile_id = '$B'") $($PSQL -d $DB -X -At -c "delete from player_photo_uploads where profile_id = '$B'" >/dev/null; echo done)"
+}
+check "U6 30 concurrent upload claims for one player: exactly 10 accepted and recorded (the per-account lock)" "$(claim_race)" "^10 10 done$"
 check "U5 a closed or suspended account is refused before any decode" \
   "$(q "insert into account_suspensions (profile_id, reason, suspended_by) values ('$B', 'test', '$ADMIN'); $(claim $B)")$(q "$(fresh $B) select close_my_account('web') is not null; reset role; $(claim $B)")" "ERR suspended.*ERR account_closed"
 # review requirement 2 (26 Nov): an admin removes an inappropriate photo, without suspending the account

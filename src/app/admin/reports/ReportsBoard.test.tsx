@@ -67,7 +67,8 @@ describe("Reports (admin)", () => {
   });
 
   it("removes the reported player's photo only with a reason, without suspending (draft #67)", async () => {
-    render(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} />);
+    answer = () => ({ data: true, error: null });
+    render(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} photos />);
     fireEvent.click(screen.getByText("Remove photo"));
     const go = screen.getAllByText("Remove photo").find((b) => b.className.includes("bg-action")) as HTMLButtonElement;
     expect(go.disabled).toBe(true);
@@ -75,9 +76,22 @@ describe("Reports (admin)", () => {
     fireEvent.click(go);
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(calls).toEqual([{ fn: "admin_remove_player_photo", args: { p_profile: "p2", p_reason: "nudity" } }]);
+    expect(screen.getByRole("status").textContent).toBe("Sami's photo was removed.");
   });
-  it("not offered on a report without a player", () => {
-    render(<ReportsBoard status="open" reports={[report({ profile_id: null })]} unavailable={false} failed={false} />);
+  it("no photo to remove: says so, nothing refreshed", async () => {
+    answer = () => ({ data: false, error: null });
+    render(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} photos />);
+    fireEvent.click(screen.getByText("Remove photo"));
+    fireEvent.change(screen.getByLabelText(/Why remove Sami's photo/), { target: { value: "x" } });
+    fireEvent.click(screen.getAllByText("Remove photo").find((b) => b.className.includes("bg-action"))!);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Sami has no photo to remove."));
+    expect(refresh).not.toHaveBeenCalled();
+  });
+  it("not offered on a report without a player, nor where the photo schema is missing", () => {
+    render(<ReportsBoard status="open" reports={[report({ profile_id: null })]} unavailable={false} failed={false} photos />);
+    expect(screen.queryByText("Remove photo")).toBeNull();
+    cleanup();
+    render(<ReportsBoard status="open" reports={[report()]} unavailable={false} failed={false} />);
     expect(screen.queryByText("Remove photo")).toBeNull();
   });
 

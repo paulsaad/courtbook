@@ -54,6 +54,18 @@ echo "$r" | grep -q "rollback_blocked: 1 stored photo(s) would be deleted" && ok
 r=$({ echo "set local courtbook.discard_player_photos = 'yes';"; cat $DOWN; } | $PSQL -q -d $C -v ON_ERROR_STOP=1 -1 2>&1 | grep ERROR)
 [ -z "$r" ] && [ "$($PSQL -d $C -At -c "select to_regclass('public.player_photos') is null")" = t ] && ok "R2c confirmed in the transaction, it removes the feature and its photos" || bad "R2c" "$r"
 
+# R4 (review of b89b9ff, finding 8): an admin removal is in the append-only log; the rollback keeps the wider action
+# list (so that record stays valid), says so, and the feature applies again afterwards
+apply $C $UP >/dev/null
+printf '%s\n' "insert into moderation_log (action, profile_id, note) values ('remove_photo', 'a2000000-0000-4000-8000-000000000001', 'test');" \
+  | $PSQL -q -d $C -v ON_ERROR_STOP=1 >/dev/null || bad "R4 fixture"
+r=$($PSQL -q -d $C -v ON_ERROR_STOP=1 -1 -f $DOWN 2>&1)
+echo "$r" | grep -q "keeps its remove_photo entries" && ! echo "$r" | grep -q ERROR \
+  && [ "$($PSQL -d $C -At -c "select pg_get_constraintdef(oid) like '%remove_photo%' from pg_constraint where conname = 'moderation_log_action_check'")" = t ] \
+  && [ "$($PSQL -d $C -At -c "select count(*) from moderation_log where action = 'remove_photo'")" = 1 ] \
+  && ok "R4a with a remove_photo entry in the log: the rollback keeps the entry and the wider action list, and says so" || bad "R4a" "$r"
+r=$(apply $C $UP); [ -z "$r" ] && ok "R4b the feature applies again after that rollback" || bad "R4b" "$r"
+
 # R3
 r=$(apply $B $DOWN); echo "$r" | grep -q "nothing to roll back" && ok "R3a a second rollback refuses: nothing to roll back" || bad "R3a" "$r"
 r=$(apply $B $UP); [ -z "$r" ] && [ "$($PSQL -d $B -At -c "select to_regclass('public.player_photos') is not null")" = t ] && ok "R3b the photo feature applies again after a rollback" || bad "R3b" "$r"

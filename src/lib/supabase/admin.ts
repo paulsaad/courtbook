@@ -2,8 +2,9 @@ import "server-only";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 /** Service-role client. Server only. Bypasses RLS: use for confirm_payment / fail_payment, for writing to the
- *  club-media bucket (no client write policy), and for account-deletion processing (M2, 0086: src/lib/deletion,
- *  only after the route has established who may ask — the person themselves, an admin, or the CRON_SECRET caller).
+ *  club-media bucket (no client write policy), for account-deletion processing (M2, 0086: src/lib/deletion,
+ *  only after the route has established who may ask — the person themselves, an admin, or the CRON_SECRET caller),
+ *  and, in the player-photo draft, for claim_photo_upload / set_player_photo after the route has the signed-in user.
  *  Nothing else. `timeoutMs` aborts each request after that long (deletion processing uses it). */
 export function createAdminClient(opts: { timeoutMs?: number } = {}) {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
