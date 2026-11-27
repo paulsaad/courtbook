@@ -177,6 +177,8 @@ export const ERRORS: Record<string, string> = {
   cannot_reopen: "A cancelled game can't be reopened.",
   match_not_finished: "You can do this once the game has finished.",
   changed_elsewhere: "The photos were changed elsewhere. Refresh and try again.",
+  // F1: a staff move from a sheet opened before another screen moved or changed the booking (the database refused it)
+  booking_changed_elsewhere: "This booking was changed on another screen, so your move was not saved.",
   bad_players_needed: "Choose between 1 and 30 players.",
   bad_range: "The end must be after the start.",
   // 0077: the database's own sentence for an outdated page, shown as written
