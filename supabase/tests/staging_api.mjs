@@ -260,12 +260,40 @@ try {
   record("M3", "move to 4 h (above the 3 h maximum): bad_duration", errOf(m)?.includes("bad_duration"), errOf(m) ?? "moved!");
   record("M4", "...booking unchanged", span() === "09:00-10:00", span());
   // 14:00 onwards is free on test court 3 whether or not section P ran (P replaces a player's 12:00 hold).
+  // Since 0091 a desk move that changes a walk-in's price must be confirmed at the price the database computes:
+  // quote_move shows it, move_booking_priced(..., expected price) performs it. The older 4-argument move_booking
+  // still works when the price stays the same, and must refuse when it would change.
+  const price = () => Number(sql(`select price_usd from bookings where id='${MB}'`));
+  const priced = (u, court, s0, e0, p) =>
+    u.client.rpc("move_booking_priced", { p_booking: MB, p_court: court, p_start: at(s0), p_end: at(e0), p_expected_price: p });
+  const p0 = price();
   m = await move(U1, COURT3, "14:00", "15:30");
-  record("M5", "move to 1 h 30 at another time: accepted", !m.error && span() === "14:00-15:30", errOf(m) ?? span());
+  record("M5a", "the older move call cannot change a walk-in's price (1 h → 1 h 30) without confirmation: price_confirmation_needed",
+    errOf(m)?.includes("price_confirmation_needed"), errOf(m) ?? "moved!");
+  record("M5b", "...nothing moved, price unchanged", span() === "09:00-10:00" && price() === p0, `${span()} $${price()}`);
+  const qm = await U1.client.rpc("quote_move", { p_booking: MB, p_court: COURT3, p_start: at("14:00"), p_end: at("15:30") });
+  const qNew = Number(qm.data?.new), qCur = Number(qm.data?.current);
+  const dbPrice = Number(sql(`select quote_price('${COURT3}', '${at("14:00")}', '${at("15:30")}')`));
+  record("M5c", "quote_move shows the desk the current and the new price (the club's price for 1 h 30)",
+    !qm.error && qCur === p0 && qNew === dbPrice && qNew !== p0 && qm.data?.kind === "reprice", errOf(qm) ?? JSON.stringify(qm.data));
+  m = await priced(U1, COURT3, "14:00", "15:30", qNew + 1);
+  record("M5d", "confirming a price that is not the database's: price_changed, nothing moved",
+    errOf(m)?.includes("price_changed") && span() === "09:00-10:00" && price() === p0, errOf(m) ?? `moved! ${span()}`);
+  m = await priced(U1, COURT3, "14:00", "15:30", qNew);
+  record("M5", "move to 1 h 30 at another time, confirmed at the quoted price: accepted, booking repriced",
+    !m.error && Number(m.data?.price) === qNew && span() === "14:00-15:30" && price() === qNew, errOf(m) ?? `${span()} $${price()}`);
+  // M6: the slot grid (bookings_slot_validation) still refuses an off-grid move. The price is confirmed first, so the
+  // grid check itself is what is reached and must refuse.
+  const q6 = await U1.client.rpc("quote_move", { p_booking: MB, p_court: COURT3, p_start: at("14:10"), p_end: at("15:40") });
+  m = await priced(U1, COURT3, "14:10", "15:40", Number(q6.data?.new));
+  record("M6", "off the grid (14:10–15:40), price confirmed: not_on_grid (slot trigger), nothing moved",
+    !q6.error && errOf(m)?.includes("not_on_grid") && span() === "14:00-15:30" && price() === qNew, `${errOf(q6) ?? ""}${errOf(m) ?? "moved!"} ${span()}`);
   m = await move(U1, COURT3, "14:10", "15:40");
-  record("M6", "off the grid: not_on_grid (slot trigger)", errOf(m)?.includes("not_on_grid"), errOf(m) ?? "moved!");
+  record("M6b", "...and through the older call (same length and price there): also not_on_grid", errOf(m)?.includes("not_on_grid") && span() === "14:00-15:30", errOf(m) ?? "moved!");
   m = await move(U2, COURT3, "16:00", "17:00");
   record("M7", "a player who is not staff: forbidden", errOf(m)?.includes("forbidden"), errOf(m) ?? "moved!");
+  m = await priced(U2, COURT3, "16:00", "17:00", qNew);
+  record("M7b", "...nor through the confirmed-price call", errOf(m)?.includes("forbidden") && span() === "14:00-15:30", errOf(m) ?? "moved!");
   sql(`delete from club_staff where profile_id='${U1.id}'`);
 
 } catch (e) {
