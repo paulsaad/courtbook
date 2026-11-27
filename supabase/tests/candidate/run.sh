@@ -38,7 +38,11 @@ build courtbook_cand_full '1' && line "A0c 0100 postcheck on the full schema" "$
 o=$(bash supabase/tests/sports/preflight_0100.sh 2>&1); rc=$?; [ $rc = 0 ] && echo "$o" | grep -q "RESULT: PASS" && line "A0f 0100 preflight STOPs on each kind of bad data ($(echo "$o" | grep -c '^ok') cases)" PASS || { line "A0f 0100 preflight bad-data cases (rc=$rc)" FAIL; echo "$o" | grep FAIL; }
 line "A0d F1 postcheck refuses before 0099 (control)" "$(chk courtbook_cand_pre99 supabase/live/staff_moves_postcheck.sql 2>/dev/null | grep -q FAIL && echo PASS || echo FAIL)"
 line "A0e 0100 postcheck refuses before 0100 (control)" "$(chk courtbook_cand_pre100 supabase/live/sports_0100_postcheck.sql 2>/dev/null | grep -q FAIL && echo PASS || echo FAIL)"
-$PSQL -q -d postgres -c "drop database if exists courtbook_cand_pre99" -c "drop database if exists courtbook_cand_pre100" -c "drop database if exists courtbook_cand_full" >/dev/null 2>&1
+build courtbook_cand_pre101 '$NF < "0101"' && line "A0g 0101 preflight on 0001–0093 + 0099 + 0100" "$(chk courtbook_cand_pre101 supabase/live/photos_0101_preflight.sql)" || line "A0g (build failed)" FAIL
+line "A0h 0101 postcheck on the full schema" "$(chk courtbook_cand_full supabase/live/photos_0101_postcheck.sql)"
+line "A0i 0101 postcheck refuses before 0101 (control)" "$(chk courtbook_cand_pre101 supabase/live/photos_0101_postcheck.sql 2>/dev/null | grep -q FAIL && echo PASS || echo FAIL)"
+line "A0j 0101 preflight refuses once 0101 is applied (control)" "$(chk courtbook_cand_full supabase/live/photos_0101_preflight.sql 2>/dev/null | grep -q FAIL && echo PASS || echo FAIL)"
+$PSQL -q -d postgres -c "drop database if exists courtbook_cand_pre99" -c "drop database if exists courtbook_cand_pre100" -c "drop database if exists courtbook_cand_pre101" -c "drop database if exists courtbook_cand_full" >/dev/null 2>&1
 
 echo "== A. F1 on the full schema"
 T=courtbook_cand_f1
