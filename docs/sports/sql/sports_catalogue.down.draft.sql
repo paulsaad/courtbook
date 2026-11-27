@@ -110,7 +110,7 @@ $function$
 $orig$;
     end if;
     execute d;
-    execute format('revoke all on function %s from public', f.sig);
+    execute format('revoke all on function %s from public, anon, authenticated, service_role', f.sig);
     for g in select (aclexplode(f.proacl)).* loop
       if g.privilege_type = 'EXECUTE' then
         execute format('grant execute on function %s to %s', f.sig,

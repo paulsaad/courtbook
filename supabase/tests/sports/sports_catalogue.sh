@@ -206,6 +206,17 @@ race_delete() {
   $PSQL -q -d $DB -c "update profiles set sports = '{padel}' where id = '$P1'" -c "delete from sports where code = 'cricket'" >/dev/null 2>&1
 }
 check "C19 a delete racing a profile that adds the sport waits and is refused (sport_in_use); the sport stays" "$(race_delete)" "^ERR sport_in_use 1$"
+# the other order (confirming review of f728c6b): the delete starts first and is still open when a profile adds the sport
+race_delete_first() {
+  $PSQL -q -d $DB -c "insert into sports (code, name_en) values ('cricket', 'Cricket') on conflict do nothing" >/dev/null
+  { printf '%s\n' "begin;" "delete from sports where code = 'cricket';" "select pg_sleep(2);" "commit;" | $PSQL -d $DB -X -q -At >/dev/null 2>&1; } &
+  local a=$!; sleep 0.7
+  local out; out=$(printf '%s\n' "\\set VERBOSITY terse" "update profiles set sports = '{cricket}' where id = '$P1';" | $PSQL -d $DB -X -q -At 2>&1 | sed 's/^.*ERROR:  /ERR /')
+  wait $a
+  echo "$out $($PSQL -d $DB -At -c "select count(*) from profiles where id = '$P1' and 'cricket' = any(sports)")"
+  $PSQL -q -d $DB -c "update profiles set sports = '{padel}' where id = '$P1'" >/dev/null 2>&1
+}
+check "C19b a profile adding a sport while its delete is in progress waits, then is refused (unknown_sport); nothing dangles" "$(race_delete_first)" "^ERR unknown_sport 0$"
 check "C20 display names are stored trimmed, and unique ignoring case" \
   "$(q "insert into sports (code, name_en) values ('zumba', ' Zumba');")$(q "insert into sports (code, name_en) values ('tt2', 'TABLE TENNIS');")" "^ERR .*sports_names_trimmed.*ERR .*sports_name_en_unique.*$"
 exit $status
