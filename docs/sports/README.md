@@ -1,7 +1,7 @@
 # Sports catalogue (F14 table tennis, F15 admin-managed sports, F16 alphabetical) — DRAFT
 
 **Status: draft, not numbered, not applied anywhere.** Apply locally with
-`EXTRA_MIGRATIONS=docs/sports/sql/sports_catalogue.draft.sql`.
+`EXTRA_MIGRATIONS=supabase/migrations/0100_sports_catalogue.sql`.
 
 ## Why the database had to change
 

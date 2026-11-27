@@ -11,14 +11,13 @@ W="$(cd .. && pwd)/.f1compat-$$"
 git worktree add -q --detach "$W" HEAD || exit 2
 trap 'git worktree remove --force "$W" >/dev/null 2>&1' EXIT
 [ -d node_modules ] && ln -s "$(pwd)/node_modules" "$W/node_modules"
-last=$(ls supabase/migrations | sort | tail -1); [ "$last" = "0093_closed_account_booking_lock_order.sql" ] || { echo "unexpected last migration: $last"; exit 2; }
-cp docs/staff-moves/sql/move_checks_what_desk_saw.draft.sql "$W/supabase/migrations/0094_f1_draft_TEMPORARY.sql"
-cp supabase/tests/staff_moves/legacy_adapter.sql "$W/supabase/migrations/0095_f1_legacy_adapter_TEST_ONLY.sql"
+[ -f supabase/migrations/0099_staff_moves_check_what_desk_saw.sql ] || { echo "F1 is expected as migration 0099"; exit 2; }
+cp supabase/tests/staff_moves/legacy_adapter.sql "$W/supabase/migrations/0099z_f1_legacy_adapter_TEST_ONLY.sql"   # sorts right after 0099
 cd "$W"
 status=PASS
 step() { local name=$1; shift; out=$("$@" 2>&1); r=$?; line=$(echo "$out" | grep -E "checks: [0-9]+, failures|RESULT|SUITE|race checks|passed|failed|PASS|FAIL" | tail -2 | tr '\n' ' ');
   if [ $r -eq 0 ]; then echo "  ok    $name  ($line)"; else echo "  FAIL  $name  ($line)"; echo "$out" | grep -E "^ *(FAIL|not ok)" | head -10; status=FAIL; fi; }
-step "run.sh (builds courtbook_test 0001-0095)" bash supabase/tests/run.sh
+step "run.sh (builds courtbook_test 0001-0093, 0099, test adapter, 0100)" bash supabase/tests/run.sh
 step "staff_ops" bash supabase/tests/staff_ops/staff_ops.sh
 step "fixes/run_fixes" bash supabase/tests/fixes/run_fixes.sh
 step "fixes/d3_time" bash supabase/tests/fixes/d3_time.sh

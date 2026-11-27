@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sports catalogue draft (docs/sports/sql/sports_catalogue.draft.sql) on its own scratch database: every migration,
+# Sports catalogue draft (supabase/migrations/0100_sports_catalogue.sql) on its own scratch database: every migration,
 # the seed, then the draft, then run.sh's people and second club. LOCAL ONLY.
 #   PSQL="sudo -u postgres psql" bash supabase/tests/sports/sports_catalogue.sh
 # (Not on courtbook_test: run.sh re-applies every migration from 0041 at its end, which re-creates the older
@@ -11,10 +11,10 @@ DB=courtbook_sports
 $PSQL -q -d postgres -c "drop database if exists $DB" -c "create database $DB" >/dev/null || exit 2
 trap '$PSQL -q -d postgres -c "drop database if exists $DB" >/dev/null' EXIT
 $PSQL -q -d $DB -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql >/dev/null || exit 2
-for f in $(ls supabase/migrations/*.sql | sort) docs/sports/sql/sports_catalogue.draft.sql; do
-  [[ "$f" == docs/* && -n "${CONTROL:-}" ]] && continue
+for f in $(ls supabase/migrations/*.sql | sort | awk -F/ '$NF < "0100"') supabase/migrations/0100_sports_catalogue.sql; do
+  [[ "$f" == */0100_* && -n "${CONTROL:-}" ]] && continue
   # C16: every function's privileges, security mode and search_path, and table RLS, as they were before the draft
-  [[ "$f" == docs/* ]] && $PSQL -q -d $DB -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+  [[ "$f" == */0100_* ]] && $PSQL -q -d $DB -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
 create schema t_snap;
 create table t_snap.fns as select p.oid::regprocedure::text as sig, coalesce((select array_agg(x::text order by x::text) from unnest(p.proacl) x)::text, 'default') as acl, p.prosecdef, coalesce(p.proconfig::text, '') as cfg
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public';
@@ -187,8 +187,8 @@ reorder() {
   local db=courtbook_sports_order_$1
   $PSQL -q -d postgres -c "drop database if exists $db" -c "create database $db" >/dev/null || return 2
   $PSQL -q -d $db -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql >/dev/null || return 2
-  for f in $(ls supabase/migrations/*.sql | sort); do $PSQL -q -d $db -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || return 2; done
-  sed "s/from _sport_fns order by sig loop/from _sport_fns order by sig $1 loop/" docs/sports/sql/sports_catalogue.draft.sql > /tmp/sc_order_$1.sql
+  for f in $(ls supabase/migrations/*.sql | sort | awk -F/ '$NF < "0100"'); do $PSQL -q -d $db -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || return 2; done
+  sed "s/from _sport_fns order by sig loop/from _sport_fns order by sig $1 loop/" supabase/migrations/0100_sports_catalogue.sql > /tmp/sc_order_$1.sql
   grep -q "order by sig $1 loop" /tmp/sc_order_$1.sql || { echo "sed failed"; return 2; }
   $PSQL -q -d $db -v ON_ERROR_STOP=1 -1 -f /tmp/sc_order_$1.sql 2>&1 | grep -E "ERROR" | sed 's/^.*ERROR:  /ERR /'
   $PSQL -q -d $db -At -c "select typtype from pg_type where typname = 'sport' and typnamespace = 'public'::regnamespace"

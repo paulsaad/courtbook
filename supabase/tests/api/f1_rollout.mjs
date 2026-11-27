@@ -41,6 +41,15 @@ const seenOn = (c) => ({ p_seen_court: c, p_seen_start: T10, p_seen_end: T11 });
 const args = (id, to) => ({ p_booking: id, p_court: to, p_start: T10, p_end: T11, p_expected_price: 20 });
 const has8 = async () => (await one("select to_regprocedure('move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric,uuid,timestamptz,timestamptz)') is not null")) === true;
 
+// ------------------------------------------------------------------ 0. numbered F1 (0099): courtbook_test has it, so roll it
+// back first (supabase/rollback/0099_down.sql) and make PostgREST forget it: step 1 is the database before F1
+if (await has8()) {
+  await db.query(readFileSync("supabase/rollback/0099_down.sql", "utf8"));
+  await db.query("notify pgrst, 'reload schema'");
+  let gone = false;
+  for (let i = 0; i < 40 && !gone; i++) { await sleep(250); gone = (await asUser(MAYA).rpc("move_booking_priced", { p_booking: "00000000-0000-4000-8000-000000000000", p_court: "00000000-0000-4000-8000-000000000000", p_start: T10, p_end: T11, p_expected_price: 0, p_seen_court: null, p_seen_start: T10, p_seen_end: T11 })).error?.code === "PGRST202"; }
+  rep("0.0 0099 rolled back with supabase/rollback/0099_down.sql; PostgREST no longer sees the 8-argument function", gone && !(await has8()));
+}
 // ------------------------------------------------------------------ 1. before the change
 rep("1.0 the database is 0001–0093, without F1", !(await has8()));
 let id = await walkIn(A);
@@ -51,7 +60,7 @@ let r = await moveBooking(cm, args(id, B), seenOn(A));
 rep("1b moveBooking falls back to 0091's call, which moves as today (2 calls)", !r.error && nm.calls === 2 && (await where(id)) === B, { err: r.error, calls: nm.calls });
 
 // ------------------------------------------------------------------ 2. the change applied, schema cache stale
-await db.query(readFileSync("docs/staff-moves/sql/move_checks_what_desk_saw.draft.sql", "utf8"));
+await db.query(readFileSync("supabase/migrations/0099_staff_moves_check_what_desk_saw.sql", "utf8"));
 rep("2.0 F1 applied in the database (PostgREST's schema cache not reloaded)", await has8());
 id = await walkIn(C);                                 // on C; Dina moves it to A; Maya's sheet still says C
 await db.query("update bookings set court_id = $1 where id = $2", [A, id]);   // (Dina's move, done directly)

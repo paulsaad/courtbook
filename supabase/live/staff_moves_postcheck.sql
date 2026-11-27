@@ -1,4 +1,4 @@
--- F1: READ-ONLY postcheck, run after docs/staff-moves/sql/move_checks_what_desk_saw.draft.sql. Every line must end in OK.
+-- F1: READ-ONLY postcheck, run after supabase/migrations/0099_staff_moves_check_what_desk_saw.sql. Every line must end in OK.
 -- Changes nothing (selects only).   psql "$DB" -X -At -F'|' -f supabase/live/staff_moves_postcheck.sql
 with f as (select to_regprocedure('public.move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric,uuid,timestamptz,timestamptz)') as oid)
 select 'P1 the 8-argument move_booking_priced is the draft''s (compares what the desk saw)', coalesce(md5(p.prosrc), 'missing'),

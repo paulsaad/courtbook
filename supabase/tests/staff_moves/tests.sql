@@ -1,4 +1,4 @@
--- F1 after move_checks_what_desk_saw.draft.sql: a staff move applies only if the booking is still where the desk saw it.
+-- F1 after 0099_staff_moves_check_what_desk_saw.sql: a staff move applies only if the booking is still where the desk saw it.
 -- Deterministic checks (the race harness is race.mjs). Rolled back. Fictional people.
 \set ON_ERROR_STOP 1
 begin;

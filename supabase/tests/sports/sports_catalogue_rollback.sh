@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rollback of the sports-catalogue draft (docs/sports/sql/sports_catalogue.down.draft.sql). LOCAL ONLY, scratch DBs.
+# Rollback of the sports-catalogue draft (supabase/rollback/0100_down.sql). LOCAL ONLY, scratch DBs.
 #   PSQL="sudo -u postgres psql" bash supabase/tests/sports/sports_catalogue_rollback.sh
 # R1  up then down = a plain build, exactly: the schema fingerprint plus types, enum labels, domains, indexes, views,
 #     column types and defaults, and the seeded data.
@@ -8,12 +8,12 @@
 set -u
 cd "$(dirname "$0")/../../.."
 PSQL=${PSQL:-psql}
-UP=docs/sports/sql/sports_catalogue.draft.sql; DOWN=docs/sports/sql/sports_catalogue.down.draft.sql
+UP=supabase/migrations/0100_sports_catalogue.sql; DOWN=supabase/rollback/0100_down.sql
 A=courtbook_sp_plain; B=courtbook_sp_roundtrip; C=courtbook_sp_blocked
 build() {
   $PSQL -q -d postgres -c "drop database if exists $1" -c "create database $1" >/dev/null || exit 2
   $PSQL -q -d $1 -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql >/dev/null || exit 2
-  for f in $(ls supabase/migrations/*.sql | sort); do $PSQL -q -d $1 -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || { echo "BUILD FAILED: $f"; exit 2; }; done
+  for f in $(ls supabase/migrations/*.sql | sort | awk -F/ '$NF < "0100"'); do $PSQL -q -d $1 -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || { echo "BUILD FAILED: $f"; exit 2; }; done
   $PSQL -q -d $1 -v ON_ERROR_STOP=1 -f supabase/seed.sql >/dev/null || exit 2
 }
 apply() { $PSQL -q -d $1 -v ON_ERROR_STOP=1 -1 -f "$2" 2>&1 | grep -E "ERROR" | sed 's/^.*ERROR:  //'; }

@@ -18,15 +18,15 @@ cd "$(dirname "$0")/../../.."
 PSQL=${PSQL:-psql}
 PG_MODULE=${PG_MODULE:-/tmp/pgdeps/node_modules}
 export PGOPTIONS='-c client_min_messages=warning'
-DRAFT=docs/staff-moves/sql/move_checks_what_desk_saw.draft.sql
-DOWN=docs/staff-moves/sql/move_checks_what_desk_saw.down.draft.sql
+DRAFT=supabase/migrations/0099_staff_moves_check_what_desk_saw.sql   # numbered (0.5.0 candidate); the base below is 0001..0098
+DOWN=supabase/rollback/0099_down.sql
 T=courtbook_staffmoves
 trap '$PSQL -q -d postgres -c "drop database if exists courtbook_staffmoves" >/dev/null 2>&1' EXIT
 q() { $PSQL -d $T -X -q -At "$@" 2>&1; }
 build() {
   $PSQL -q -d postgres -c "drop database if exists $T" -c "create database $T" >/dev/null || exit 2
   $PSQL -q -d $T -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql >/dev/null 2>&1 || exit 2
-  for f in $(ls supabase/migrations/*.sql | sort); do $PSQL -q -d $T -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || { echo "cannot build: $f"; exit 2; }; done
+  for f in $(ls supabase/migrations/*.sql | sort | awk -F/ '$NF < "0099"'); do $PSQL -q -d $T -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || { echo "cannot build: $f"; exit 2; }; done
   $PSQL -q -d $T -f supabase/seed.sql >/dev/null 2>&1 || true
   (cd supabase/tests/staff_moves && $PSQL -d $T -X -q -At -v ON_ERROR_STOP=1 -f fixtures.sql >/dev/null 2>&1) || { echo "fixtures failed"; exit 2; }
 }

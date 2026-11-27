@@ -1532,6 +1532,17 @@ RERUN_FAILS=""
 for f in $(ls supabase/migrations/*.sql | sort); do
   n=$(basename "$f")
   case "$n" in 00[0-3]*|0040_*) continue;; esac
+  # 0100 (sports catalogue) converts the sport type and is deliberately run-once: a second application must REFUSE
+  # with its own message and change nothing (checked just below), instead of succeeding
+  case "$n" in 0100_*)
+    before=$($PSQL -d $DB -X -At -f supabase/tests/schema_fingerprint.sql 2>&1 | md5sum)
+    err=$($PSQL -d $DB -v ON_ERROR_STOP=1 -1 -f "$f" 2>&1 >/dev/null | grep -m1 ERROR)
+    after=$($PSQL -d $DB -X -At -f supabase/tests/schema_fingerprint.sql 2>&1 | md5sum)
+    echo "$err" | grep -q "sports catalogue (0100) already applied" && [ "$before" = "$after" ] \
+      && claim "106e 0100 is run-once: a second application refuses with its own message and changes nothing" 0 \
+      || claim "106e 0100 is run-once: a second application refuses with its own message and changes nothing (got: $err)" 1
+    continue;;
+  esac
   err=$($PSQL -d $DB -v ON_ERROR_STOP=1 -1 -f "$f" 2>&1 >/dev/null | grep -m1 ERROR)
   [ -n "$err" ] && RERUN_FAILS="$RERUN_FAILS\n    $n → $err"
 done

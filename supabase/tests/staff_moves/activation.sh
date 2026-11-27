@@ -9,13 +9,12 @@
 set -u
 cd "$(dirname "$0")/../../.."
 export PSQL=${PSQL:-psql} PG_MODULE=${PG_MODULE:-/tmp/pgdeps/node_modules}
-last=$(ls supabase/migrations | sort | tail -1)
-[ "$last" = "0093_closed_account_booking_lock_order.sql" ] || { echo "unexpected last migration: $last (give F1 its number and update this script)"; exit 2; }
+[ -f supabase/migrations/0099_staff_moves_check_what_desk_saw.sql ] || { echo "F1 is expected as migration 0099"; exit 2; }
+ls supabase/migrations | grep -qE '^009[4-8]_' && { echo "REFUSED: payment migrations 0094-0098 must not be in this branch"; exit 2; }
 W="$(cd .. && pwd)/.f1activation-$$"
 git worktree add -q --detach "$W" HEAD || exit 2
 trap 'git worktree remove --force "$W" >/dev/null 2>&1' EXIT
 [ -d node_modules ] && ln -s "$(pwd)/node_modules" "$W/node_modules"
-cp docs/staff-moves/sql/move_checks_what_desk_saw.draft.sql "$W/supabase/migrations/0094_f1_draft_TEMPORARY.sql"
 cd "$W"
 status=PASS
 line() { echo "$1" | grep -E "checks: [0-9]+, failures|RESULT|SUITE|race checks|summary|passed|failed|PASS|FAIL" | tail -2 | tr '\n' ' '; }
@@ -25,7 +24,7 @@ must_fail() { local name=$1; shift; out=$("$@" 2>&1); r=$?
   if [ $r -ne 0 ]; then echo "  ok    $name fails, as it must  ($(line "$out"))"; else echo "  FAIL  $name passed, but it should have shown the defect"; status=FAIL; fi; }
 
 echo "== converted suites on 0001–0093 + F1 (no adapter)"
-step "run.sh (builds courtbook_test 0001–0094 temporary)" bash supabase/tests/run.sh
+step "run.sh (builds courtbook_test 0001–0093 + 0099 + 0100)" bash supabase/tests/run.sh
 step "staff_ops" bash supabase/tests/staff_ops/staff_ops.sh
 must_fail "staff_ops CONTROL (pre-0091 mover behind the desk's call)" env CONTROL=1 bash supabase/tests/staff_ops/staff_ops.sh
 step "fixes/run_fixes" bash supabase/tests/fixes/run_fixes.sh
@@ -61,7 +60,7 @@ step "rc_0086_0091_postcheck (staging check, read only, on a local copy)" rc_pos
 $PSQL -q -d postgres -c "drop database if exists courtbook_f1stage" >/dev/null
 
 echo "== the same suites on 0001–0093 WITHOUT F1: they must fail (so they ship with the migration, never before)"
-rm "supabase/migrations/0094_f1_draft_TEMPORARY.sql"
+rm supabase/migrations/0099_staff_moves_check_what_desk_saw.sql   # in the throwaway worktree only
 bash supabase/tests/run.sh >/dev/null 2>&1   # courtbook_test 0001–0093
 must_fail "staff_ops without F1" bash supabase/tests/staff_ops/staff_ops.sh
 echo "existing suites converted for F1: $status"

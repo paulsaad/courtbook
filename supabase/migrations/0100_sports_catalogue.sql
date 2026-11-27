@@ -29,7 +29,7 @@
 do $$
 begin
   if exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' and t.typname = 'sport' and t.typtype = 'd') then
-    raise exception 'sports catalogue draft already applied';
+    raise exception 'sports catalogue (0100) already applied';
   end if;
 end $$;
 

@@ -1,4 +1,4 @@
--- F1 (staff moves check what the desk saw): READ-ONLY preflight, run before docs/staff-moves/sql/move_checks_what_desk_saw.draft.sql.
+-- F1 (staff moves check what the desk saw): READ-ONLY preflight, run before supabase/migrations/0099_staff_moves_check_what_desk_saw.sql.
 -- Every line must end in OK. Any STOP: do not apply; report it. Changes nothing (selects only).
 --   psql "$DB" -X -At -F'|' -f supabase/live/staff_moves_preflight.sql
 select 'F1 move_booking_priced (5 arguments) is exactly 0091''s', md5(prosrc), case when md5(prosrc) = 'b44d992c944deb64e6eab6052d3da223' then 'OK' else 'STOP' end
