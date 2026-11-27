@@ -9,6 +9,9 @@
 do $$
 begin
   if to_regclass('public.player_photos') is null then raise exception 'player photo draft is not applied: nothing to roll back'; end if;
+  -- review of 02e7d06 (S2): no report, photo or copy may be added between this check and the drops below
+  lock table reports, player_photos in share row exclusive mode;
+  if to_regclass('public.photo_evidence') is not null then execute 'lock table photo_evidence in share row exclusive mode'; end if;
   -- evidence for an open report or one on legal hold is never discarded by a rollback, confirmed or not
   if to_regclass('public.photo_evidence') is not null and exists (select 1 from photo_evidence e join reports r on r.id = e.report_id where r.status = 'open' or r.legal_hold) then
     raise exception 'rollback_blocked: % photo evidence copies belong to open reports or reports on legal hold; they cannot be discarded',
@@ -28,12 +31,17 @@ drop function if exists moderator_photo_evidence_list(uuid);
 drop function if exists moderator_hide_player_photo(uuid, text);
 drop trigger if exists photo_evidence_retention on reports;
 drop function if exists photo_evidence_retention();
+drop function if exists photo_evidence_purge();
+drop trigger if exists photo_evidence_hold_guard on reports;
+drop function if exists photo_evidence_hold_guard();
 drop trigger if exists photo_evidence_on_report on reports;
 drop function if exists photo_evidence_on_report();
 drop table if exists photo_evidence;
 drop function if exists is_photo_moderator();
 -- removing the list is itself logged (photo_moderator_off), before the trigger goes
 delete from photo_moderators;
+drop trigger if exists photo_moderators_truncate_log on photo_moderators;
+drop function if exists photo_moderators_truncate_log();
 drop trigger if exists photo_moderators_log on photo_moderators;
 drop function if exists photo_moderators_log();
 drop table if exists photo_moderators;
@@ -57,4 +65,5 @@ drop function if exists my_photo_version();
 drop function if exists match_photo_versions(uuid);
 drop function if exists player_photo(uuid);
 drop function if exists can_see_player_photo(uuid, uuid);
-drop table if exists player_photos;   -- its closed-account lock-out trigger goes with it
+drop table if exists player_photos;
+drop sequence if exists player_photo_version_seq;   -- its closed-account lock-out trigger goes with it

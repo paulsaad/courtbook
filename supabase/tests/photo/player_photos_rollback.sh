@@ -88,4 +88,15 @@ r=$({ echo "set local courtbook.discard_player_photos = 'yes';"; cat $DOWN; } | 
 # R3
 r=$(apply $B $DOWN); echo "$r" | grep -q "nothing to roll back" && ok "R3a a second rollback refuses: nothing to roll back" || bad "R3a" "$r"
 r=$(apply $B $UP); [ -z "$r" ] && [ "$($PSQL -d $B -At -c "select to_regclass('public.player_photos') is not null")" = t ] && ok "R3b the photo feature applies again after a rollback" || bad "R3b" "$r"
+# R6 (review of 02e7d06, S2): while a rollback runs, no new report (whose photo copy the drops would lose) can be filed
+# a pause right after the guard's check (the first "end $$;"), where a report filed would otherwise slip in before the drops
+awk 'BEGIN{d=0} {print} /^end \$\$;$/ && !d {print "select pg_sleep(2);"; d=1}' $DOWN > /tmp/ph_down_paused.sql
+grep -q "pg_sleep(2)" /tmp/ph_down_paused.sql || bad "R6 fixture"
+{ { echo "begin;"; cat /tmp/ph_down_paused.sql; echo "rollback;"; } | $PSQL -q -d $B -v ON_ERROR_STOP=1 >/dev/null 2>&1; } &
+rb=$!; sleep 0.8
+r=$(printf '%s\n' "set lock_timeout = '500ms';" "insert into reports (reporter_id, target_kind, target_key, reason) values (gen_random_uuid(), 'player', gen_random_uuid(), 'spam');" | $PSQL -q -d $B 2>&1)
+wait $rb
+echo "$r" | grep -q "lock timeout" && ok "R6 a report filed during the rollback waits for it (tables locked before the check)" || bad "R6" "$r"
+r=$($PSQL -d $A -At -c "select count(*) from pg_class where relname = 'player_photo_version_seq'")
+[ "$r" = 0 ] && [ "$($PSQL -d $B -At -c "select count(*) from pg_class where relname = 'player_photo_version_seq'")" = 1 ] && ok "R6b the version sequence exists with the feature and only then" || bad "R6b"
 exit $status

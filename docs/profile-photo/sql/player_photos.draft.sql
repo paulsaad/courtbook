@@ -91,6 +91,13 @@ revoke all on function my_photo_version() from public, anon;
 grant execute on function my_photo_version() to authenticated;
 
 -- 4 ------------------------------------------------------------------------------------------------------------------
+-- Review of 02e7d06 (B1): versions come from one sequence, so a version is never reused, also after a removal or a
+-- hide deletes the row. Viewers' caches (URL ?v= and ETag) can then never show an earlier photo, and every evidence
+-- copy has its own version.
+create sequence if not exists player_photo_version_seq as integer;
+revoke all on sequence player_photo_version_seq from public, anon, authenticated, service_role;
+alter table player_photos alter column version set default nextval('player_photo_version_seq');
+
 -- Server-only writer: the route has already decoded, re-encoded and measured the image. Returns the new version.
 create or replace function set_player_photo(p_actor uuid, p_image bytea, p_width int, p_height int) returns int
 language plpgsql security definer set search_path = public as $$
@@ -104,7 +111,7 @@ begin
   values (p_actor, p_image, p_width, p_height)
   on conflict (profile_id) do update
     set image = excluded.image, width = excluded.width, height = excluded.height,
-        version = pp.version + 1, updated_at = now()
+        version = nextval('player_photo_version_seq'), updated_at = now()
   returning pp.version into v;
   return v;
 end $$;
@@ -193,6 +200,20 @@ revoke all on function photo_moderators_log() from public, anon, authenticated;
 drop trigger if exists photo_moderators_log on photo_moderators;
 create trigger photo_moderators_log after insert or update or delete on photo_moderators
   for each row execute function photo_moderators_log();
+-- review of 02e7d06 (S4): emptying the list in one statement is logged too, one entry per moderator removed
+create or replace function photo_moderators_truncate_log() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare m record;
+begin
+  for m in select profile_id from photo_moderators loop
+    perform log_moderation('photo_moderator_off', null, m.profile_id, null, 'removed (truncate)');
+  end loop;
+  return null;
+end $$;
+revoke all on function photo_moderators_truncate_log() from public, anon, authenticated;
+drop trigger if exists photo_moderators_truncate_log on photo_moderators;
+create trigger photo_moderators_truncate_log before truncate on photo_moderators
+  for each statement execute function photo_moderators_truncate_log();
 
 create or replace function is_photo_moderator() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -234,18 +255,42 @@ revoke all on function photo_evidence_on_report() from public, anon, authenticat
 drop trigger if exists photo_evidence_on_report on reports;
 create trigger photo_evidence_on_report after insert on reports for each row execute function photo_evidence_on_report();
 
--- the copy goes when the report's own text is cleared by the retention rule (never while open or on legal hold)
+-- Retention (review of 02e7d06, S1): the copy goes 180 days after its report was closed, unless the report is open
+-- again or on legal hold. The same time rule as the report's text (0082), but applied to the copy directly, so a report
+-- whose text was empty from the start, or one reopened and closed again, is covered. Runs after every change to
+-- reports (each new report, each moderator action) and before any copy is listed, read or added.
+create or replace function photo_evidence_purge() returns int
+language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  delete from photo_evidence e using reports r
+   where r.id = e.report_id and r.status <> 'open' and not r.legal_hold
+     and r.closed_at is not null and r.closed_at < now() - interval '180 days';
+  get diagnostics n = row_count;
+  return n;
+end $$;
+revoke all on function photo_evidence_purge() from public, anon, authenticated;
+
 create or replace function photo_evidence_retention() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if new.snapshot is null and old.snapshot is not null and new.status <> 'open' and not new.legal_hold then
-    delete from photo_evidence where report_id = new.id;
-  end if;
+  perform photo_evidence_purge();
   return null;
 end $$;
 revoke all on function photo_evidence_retention() from public, anon, authenticated;
 drop trigger if exists photo_evidence_retention on reports;
-create trigger photo_evidence_retention after update of snapshot on reports for each row execute function photo_evidence_retention();
+create trigger photo_evidence_retention after insert or update on reports for each statement execute function photo_evidence_retention();
+
+-- a report on legal hold that holds photo copies cannot be deleted (review nit: the copies would go with it)
+create or replace function photo_evidence_hold_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if old.legal_hold and exists (select 1 from photo_evidence where report_id = old.id) then raise exception 'report_on_legal_hold'; end if;
+  return old;
+end $$;
+revoke all on function photo_evidence_hold_guard() from public, anon, authenticated;
+drop trigger if exists photo_evidence_hold_guard on reports;
+create trigger photo_evidence_hold_guard before delete on reports for each row execute function photo_evidence_hold_guard();
 
 -- hide: the photo leaves every viewer at once (the player may upload a new one); a copy is kept with the report
 create or replace function moderator_hide_player_photo(p_report uuid, p_reason text) returns boolean
@@ -256,6 +301,7 @@ begin
   if coalesce(btrim(p_reason), '') = '' then raise exception 'reason_required'; end if;
   select * into r from reports where id = p_report for update;
   if not found or r.target_kind not in ('player', 'message', 'game') or r.profile_id is null then raise exception 'not_found'; end if;
+  if r.profile_id = auth.uid() then raise exception 'forbidden'; end if;   -- never one's own (review nit)
   -- a report past the 180-day rule has had its text cleared; a copy tied to it now would never be cleared
   if r.status <> 'open' and not r.legal_hold and r.closed_at < now() - interval '180 days' then raise exception 'report_expired'; end if;
   delete from player_photos where profile_id = r.profile_id returning * into ph;
@@ -272,9 +318,11 @@ grant execute on function moderator_hide_player_photo(uuid, text) to authenticat
 -- which photo copies a report holds (no bytes); the reports page lists them for photo moderators only
 create or replace function moderator_photo_evidence_list(p_report uuid)
 returns table (evidence_id uuid, version int, reason text, captured_at timestamptz)
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public as $$
 begin
   if not is_photo_moderator() then raise exception 'forbidden'; end if;
+  if exists (select 1 from reports where id = p_report and profile_id = auth.uid()) then raise exception 'forbidden'; end if;
+  perform photo_evidence_purge();
   return query select e.id, e.version, e.reason, e.captured_at from photo_evidence e where e.report_id = p_report order by e.captured_at;
 end $$;
 revoke all on function moderator_photo_evidence_list(uuid) from public, anon;
@@ -286,8 +334,9 @@ language plpgsql volatile security definer set search_path = public as $$
 declare e photo_evidence%rowtype;
 begin
   if not is_photo_moderator() then raise exception 'forbidden'; end if;
+  perform photo_evidence_purge();
   select * into e from photo_evidence where id = p_evidence;
-  if not found then raise exception 'not_found'; end if;
+  if not found or e.profile_id = auth.uid() then raise exception 'not_found'; end if;
   perform log_moderation('view_photo_evidence', e.report_id, e.profile_id, null, 'version ' || e.version);
   return e.image;
 end $$;
@@ -304,6 +353,13 @@ begin
          || 'for each statement execute function refuse_writes_by_closed_account()';
     execute 'drop trigger if exists closed_account_lockout on player_photo_uploads';
     execute 'create trigger closed_account_lockout before insert or update or delete on player_photo_uploads '
+         || 'for each statement execute function refuse_writes_by_closed_account()';
+    -- review of 02e7d06 (S3): the two moderation tables too
+    execute 'drop trigger if exists closed_account_lockout on photo_evidence';
+    execute 'create trigger closed_account_lockout before insert or update or delete on photo_evidence '
+         || 'for each statement execute function refuse_writes_by_closed_account()';
+    execute 'drop trigger if exists closed_account_lockout on photo_moderators';
+    execute 'create trigger closed_account_lockout before insert or update or delete on photo_moderators '
          || 'for each statement execute function refuse_writes_by_closed_account()';
   end if;
 end $$;

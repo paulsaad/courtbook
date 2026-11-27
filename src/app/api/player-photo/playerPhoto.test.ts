@@ -267,6 +267,16 @@ describe("GET /api/admin/photo-evidence/[id] (#67, decision 4)", () => {
     expect((await get("../etc")).status).toBe(404);
     expect(calls).toEqual([]);
   });
+  it("a cross-site or same-site request is refused before the database is asked (no log entry from a foreign link)", async () => {
+    for (const site of ["cross-site", "same-site"]) {
+      const res = await evidence.GET(new Request(`${SITE}/api/admin/photo-evidence/${EV}`, { headers: { "sec-fetch-site": site } }), { params: Promise.resolve({ id: EV }) });
+      expect(res.status).toBe(404);
+    }
+    expect(calls).toEqual([]);
+    userRpc = { moderator_photo_evidence: { data: await img() } };
+    const ok = await evidence.GET(new Request(`${SITE}/api/admin/photo-evidence/${EV}`, { headers: { "sec-fetch-site": "same-origin" } }), { params: Promise.resolve({ id: EV }) });
+    expect(ok.status).toBe(200);
+  });
   it("any other failure is an uncached 500", async () => {
     userRpc = { moderator_photo_evidence: { error: { message: "boom", code: "XX000" } } };
     const res = await get(EV);

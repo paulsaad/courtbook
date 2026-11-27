@@ -63,7 +63,7 @@ Also verified:
 the test runner).
 
 ## Tests
-- `PSQL="sudo -u postgres psql" bash supabase/tests/photo/player_photos.sh` — 65 database cases on a scratch DB
+- `PSQL="sudo -u postgres psql" bash supabase/tests/photo/player_photos.sh` — 77 database cases on a scratch DB
   (visibility, blocks, pending, cancelled games, suspension, photo moderation and evidence; the real close and data step; races; legal hold;
   lock-out; exact rights; byte and size limits). `CONTROL=1` weakens the visibility rule: the 10 privacy cases fail.
 - With the draft: `run.sh` 381/381; `m86/deletion86.sh`, `m86/pipeline_e2e.sh`, `m86/races86.sh` pass.
@@ -91,6 +91,16 @@ the test runner).
     as 0086 keeps report snapshots. A hide on a report already past the rule is refused (`report_expired`).
   - *Rollback:* refuses outright while any copy belongs to an open report or one on legal hold (no override); other
     copies go only with the same explicit confirmation as photos.
+  - *Review of 02e7d06 (27 Nov), fixed:* versions come from one sequence and are never reused (a removed or hidden
+    photo can no longer come back from a viewer's cache, and every copy keeps its own version); retention is the time
+    rule on the copy itself (180 days after the report closed, unless open again or held), so reports with no text and
+    reopened reports are covered; a held report holding copies cannot be deleted; the rollback locks the tables before
+    its check; the moderation tables have 0086's lock-out; emptying the moderator list (TRUNCATE) is logged; a
+    moderator never acts on or reads a report about themselves; the evidence route refuses cross-site requests before
+    the database is asked, so a foreign link creates no log entry.
+  - *Open decision for Paul (review S6):* the server key cannot read evidence, but whoever holds it could create a
+    sign-in for a moderator through the Auth admin API, and the reading would be logged under that moderator. Option:
+    require a second factor (Supabase MFA, `aal2`) for photo moderators; otherwise document it as accepted.
   - The reports board shows "Hide photo" and "Photo evidence" only to photo moderators (`is_photo_moderator`); the
     database checks again on every call.
 - **Upload limit:** `claim_photo_upload(actor)`, server only, before the image is decoded: 10 attempts an hour per

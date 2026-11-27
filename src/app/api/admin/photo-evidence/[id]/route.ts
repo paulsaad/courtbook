@@ -12,9 +12,13 @@ import { UUID, fromPgBytea } from "@/lib/playerPhoto/shared";
 const NO_STORE = { "Cache-Control": "private, no-store, max-age=0", Pragma: "no-cache" };
 const NONE = () => new Response(null, { status: 404, headers: NO_STORE });
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!UUID.test(id)) return NONE();
+  // each reading is logged, so a link on another site must not create a log entry: only our own pages, or the address
+  // typed or pasted (browsers send same-origin / none); older browsers send no header and are let through
+  const site = request.headers.get("sec-fetch-site");
+  if (site && site !== "same-origin" && site !== "none") return NONE();
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NONE();
