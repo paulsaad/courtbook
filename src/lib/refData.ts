@@ -10,7 +10,7 @@ import { allLoaded, loaded } from "./load";
 export async function loadRefDataChecked(supabase: SupabaseClient): Promise<{ areas: Governorate[]; sports: Sport[] }> {
   const [{ data: areas }, { data: sports }] = allLoaded(await Promise.all([
     supabase.rpc("areas"),
-    supabase.from("sports").select("*").eq("active", true).order("sort_order"),
+    supabase.from("sports").select("*").eq("active", true).order("name_en"),
   ]), "the areas and sports");
   return { areas: (areas ?? []) as Governorate[], sports: (sports ?? []) as Sport[] };
 }

@@ -161,6 +161,9 @@ export const ERRORS: Record<string, string> = {
   not_found: "Payment not found — the hold may have expired. Go back and pick the slot again.",
   below_accepted: "You already have more accepted players than that.",
   bad_level: "Level must be between 1 and 10.",
+  // sports catalogue (review 66-4): a sport an admin has switched off, or a code the catalogue does not know
+  sport_inactive: "That sport isn't available any more. Choose another sport.",
+  unknown_sport: "That sport isn't available. Choose a sport from the list.",
   bad_level_range: "Choose a level range from 1 to 10 with min ≤ max, or All levels welcome.",
   user_not_found: "No account with that email. They need to sign in once first.",
   clubs_booking_minutes_check: "Min/max must be multiples of the grid step, and max ≥ min.",

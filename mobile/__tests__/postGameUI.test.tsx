@@ -22,6 +22,7 @@ import PostGame from "../app/games/post";
 import EditGame from "../app/games/edit";
 import { bookingDays } from "../lib/days";
 import { gameKeys } from "../lib/games";
+import { sportsKey } from "../lib/sports";
 import type { GameDetail } from "../lib/gameTypes";
 
 const metrics = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 0, left: 0, right: 0, bottom: 0 } };
@@ -211,5 +212,16 @@ describe("Edit game", () => {
     await fireEvent.press(screen.getByTestId("edit-save"));
     expect(await screen.findByText("You already have more players accepted than that.")).toBeTruthy();
     expect(mockBack).not.toHaveBeenCalled();
+  });
+});
+
+describe("Post a game: sports offered (#66 review SF3)", () => {
+  it("offers only the clubs' sports that are active in the catalogue", async () => {
+    fakePost(jest.fn());
+    const qc = client();
+    qc.setQueryData(sportsKey, [{ code: "padel", name: "Padel" }], { updatedAt: Date.now() + 864e5 });   // tennis deactivated
+    await show(<PostGame />, qc);
+    expect(await screen.findByTestId("sport-padel")).toBeTruthy();
+    expect(screen.queryByTestId("sport-tennis")).toBeNull();
   });
 });
