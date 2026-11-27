@@ -95,6 +95,10 @@ grant execute on function my_photo_version() to authenticated;
 -- hide deletes the row. Viewers' caches (URL ?v= and ETag) can then never show an earlier photo, and every evidence
 -- copy has its own version.
 create sequence if not exists player_photo_version_seq as integer;
+-- start above any version a viewer could have cached before a rollback and re-apply (confirming review nit): from the
+-- current Unix time, which only grows (an integer until 2038, by which time the column can be widened)
+select setval('player_photo_version_seq', greatest(extract(epoch from clock_timestamp())::int,
+  coalesce((select last_value from player_photo_version_seq), 1)));
 revoke all on sequence player_photo_version_seq from public, anon, authenticated, service_role;
 alter table player_photos alter column version set default nextval('player_photo_version_seq');
 
@@ -258,7 +262,8 @@ create trigger photo_evidence_on_report after insert on reports for each row exe
 -- Retention (review of 02e7d06, S1): the copy goes 180 days after its report was closed, unless the report is open
 -- again or on legal hold. The same time rule as the report's text (0082), but applied to the copy directly, so a report
 -- whose text was empty from the start, or one reopened and closed again, is covered. Runs after every change to
--- reports (each new report, each moderator action) and before any copy is listed, read or added.
+-- reports (each new report, each moderator action) and before any copy is listed or read. Hiding does not purge; it
+-- refuses a report already past the rule (report_expired).
 create or replace function photo_evidence_purge() returns int
 language plpgsql security definer set search_path = public as $$
 declare n int;
@@ -278,8 +283,11 @@ begin
   return null;
 end $$;
 revoke all on function photo_evidence_retention() from public, anon, authenticated;
+-- named to fire after 0082's reports_enforce_retention (same timing, alphabetical order), so a new report locks report
+-- rows before photo copies, as an admin's retention run does: no lock-order deadlock between the two (review nit)
 drop trigger if exists photo_evidence_retention on reports;
-create trigger photo_evidence_retention after insert or update on reports for each statement execute function photo_evidence_retention();
+drop trigger if exists reports_photo_evidence_retention on reports;
+create trigger reports_photo_evidence_retention after insert or update on reports for each statement execute function photo_evidence_retention();
 
 -- a report on legal hold that holds photo copies cannot be deleted (review nit: the copies would go with it)
 create or replace function photo_evidence_hold_guard() returns trigger
