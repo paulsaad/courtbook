@@ -1,7 +1,8 @@
 /**
  * Normalise a phone number to E.164 digits for wa.me links. Lebanese local numbers
  * ("03 123 456", "70 123 456", "01 234 567") become +961…; international input
- * ("+961 3 123 456", "0049 7633 50623") is kept as given. Returns null when invalid.
+ * ("+961 3 123 456", "0049 7633 50623") is kept as given, except a Lebanese trunk 0 after +961, which is dropped.
+ * Returns null when invalid.
  */
 export function normalizePhone(raw: string): string | null {
   const s = raw.trim().replace(/[\s().-]/g, "");
@@ -15,6 +16,9 @@ export function normalizePhone(raw: string): string | null {
   else if (/^[378]\d{7}$/.test(s)) digits = "961" + s;               // mobile without the leading 0: 70 123 456, 81 …, 3x …
   else if (/^3\d{6}$/.test(s)) digits = "961" + s;                   // 3 123 456 (03 without the 0)
   else return null;
+  // H12: a Lebanese trunk 0 kept after the country code ("+961 03 123 456", "00961 70 …", "961 01 …") is not part of
+  // the number: drop it. Only for +961 — in some countries (Italy) a leading 0 after the code is part of the number.
+  if (/^9610\d{7,8}$/.test(digits)) digits = "961" + digits.slice(4);
   if (!/^\d{8,15}$/.test(digits)) return null;
   return "+" + digits;
 }

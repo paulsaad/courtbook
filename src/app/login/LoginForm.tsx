@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { sendCodeError, verifyCodeError } from "@/lib/authText";
 import { useRouter, useSearchParams } from "next/navigation";
+import { safeNextPath } from "@/lib/safeNext";
 import { createClient } from "@/lib/supabase/client";
 import { Cedar } from "@/components/Brand";
 import { reportAuthError } from "@/lib/report";
@@ -17,13 +18,17 @@ export default function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const next = params.get("next") ?? "/";
-  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  const safeNext = safeNextPath(next);
   const [email, setEmail] = useState("");
   const [state, setState] = useState<"idle" | "sending" | "sent">("idle");
   const [error, setError] = useState<string | null>(() => { const e = params.get("error"); return e ? ERRORS[e] ?? "Sign-in failed. Please request a new link." : null; });
   const [cooldown, setCooldown] = useState(0);
   const [code, setCode] = useState("");
   const [verifying, setVerifying] = useState(false);
+  // H6: on the code step, focus goes to the code field (it was left on the page body, so keyboard and
+  // screen-reader users had to find it)
+  const codeField = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (state === "sent") codeField.current?.focus(); }, [state]);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -66,7 +71,7 @@ export default function LoginForm() {
   return (
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-5 p-6">
       <div className="flex items-center gap-2"><Cedar size={26} /><h1 className="text-2xl font-extrabold tracking-tight">Sign in to CourtBook</h1></div>
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
       {state !== "sent" && (
         <>
           <button type="button" onClick={google} disabled={gBusy} className="flex w-full items-center justify-center gap-3 rounded-2xl border border-grid bg-white px-4 py-3.5 text-base font-semibold disabled:opacity-50">
@@ -84,7 +89,7 @@ export default function LoginForm() {
             <p className="mt-1 text-muted">Type the code from the email here.</p>
           </div>
           <form onSubmit={verify} className="flex gap-2">
-            <input className={`${input} flex-1 tracking-widest`} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6,10}" placeholder="12345678" value={code} onChange={(e) => setCode(e.target.value)} />
+            <input ref={codeField} aria-label="Sign-in code" className={`${input} flex-1 tracking-widest`} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6,10}" placeholder="12345678" value={code} onChange={(e) => setCode(e.target.value)} />
             <button disabled={verifying || !/^[0-9]{6,10}$/.test(code.trim())} className={primary}>{verifying ? "…" : "Continue"}</button>
           </form>
           <div className="flex items-center justify-between text-sm">
@@ -94,7 +99,7 @@ export default function LoginForm() {
         </div>
       ) : (
         <form onSubmit={send} className="flex flex-col gap-3">
-          <input type="email" required autoComplete="email" inputMode="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} className={input} />
+          <input type="email" aria-label="Email" required autoComplete="email" inputMode="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} className={input} />
           <button type="submit" disabled={state === "sending"} className={primary}>{state === "sending" ? "Sending…" : "Send sign-in email"}</button>
           <p className="text-center text-xs text-muted">No password. We email you a code. Once per phone — you stay signed in.</p>
         </form>

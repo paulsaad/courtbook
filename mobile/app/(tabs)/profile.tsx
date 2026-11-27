@@ -6,6 +6,12 @@ import { supabase } from "../../lib/supabase";
 import { useSession } from "../../lib/session";
 import { currentBuild } from "../../lib/buildInfo";
 import { initials, useProfileName } from "../../lib/profile";
+import { missingForBooking, useMyProfile } from "../../lib/myProfile";
+import { useMyLevels } from "../../lib/games";
+import { levelLabel } from "@shared/levels";
+import { sportName } from "../../lib/days";
+import { LevelSheet } from "../../components/LevelSheet";
+import { Chip } from "../../components/Chip";
 import { installedVariant as appVariant } from "../../lib/appIdentity";
 import { Button } from "../../components/Button";
 import { Loading } from "../../components/StateView";
@@ -54,6 +60,11 @@ export default function Profile() {
   const email = session.status === "signed-in" ? session.session.user.email ?? null : null;
   const shownName = name.data?.trim() || null;
   const safety = useSafety(session.status === "signed-in");
+  const userId = session.status === "signed-in" ? session.session.user.id : null;
+  const details = useMyProfile(userId);
+  const levels = useMyLevels({ signedIn: !!userId });
+  const [levelFor, setLevelFor] = useState<string | null>(null);
+  const missing = details.data ? missingForBooking(details.data) : [];
 
   async function signOut() {
     setBusy(true);
@@ -79,9 +90,38 @@ export default function Profile() {
               <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.label} selectable numberOfLines={1}>{email ?? "your account"}</Text>
             </View>
           </View>
+          <View style={styles.detailRows} testID="profile-details">
+            <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.label}>Contact phone</Text>
+            <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={details.data?.phone ? styles.value : styles.missing} selectable>
+              {details.isError && !details.data ? "Couldn't load" : details.data ? details.data.phone ?? "Not added yet — needed to book a court" : "…"}
+            </Text>
+            {missing.includes("name") && details.data ? (
+              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.missing}>Add your name — clubs see it on your bookings.</Text>
+            ) : null}
+          </View>
+          <Button label={missing.length ? "Add your details" : "Edit your details"} variant="quiet" onPress={() => router.push("/my-details")} testID="profile-edit-details" />
           <Button label="Sign out" variant="secondary" busy={busy} onPress={signOut} />
         </View>
       )}
+      {userId ? (
+        <>
+          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.section}>Sports and levels</Text>
+          <View style={styles.card} testID="profile-levels">
+            {details.data && details.data.sports.length > 0 ? (
+              <View style={styles.levelChips}>
+                {details.data.sports.map((sp) => (
+                  <Chip key={sp} label={`${sportName(sp)} · ${levels.data?.[sp] != null ? levelLabel(levels.data[sp]) : "Set your level"}`}
+                        onPress={() => setLevelFor(sp)} testID={`level-chip-${sp}`} />
+                ))}
+              </View>
+            ) : (
+              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.label}>Add the sports you play, then a level for each. Optional — it helps you find games that suit you.</Text>
+            )}
+            <Button label={details.data?.sports.length ? "Change sports" : "Add sports"} variant="quiet" onPress={() => router.push("/my-details")} testID="profile-sports" />
+          </View>
+          <LevelSheet sport={levelFor} sportName={levelFor ? sportName(levelFor) : ""} current={levelFor ? levels.data?.[levelFor] ?? null : null} onClose={() => setLevelFor(null)} />
+        </>
+      ) : null}
       {session.status === "signed-in" ? <ActivityLink /> : null}
       {session.status === "signed-in" ? (
         <Pressable accessibilityRole="button" accessibilityLabel="Where I play" onPress={() => router.push("/areas")}
@@ -183,6 +223,9 @@ const styles = StyleSheet.create({
   label: { ...text.caption, color: color.muted },
   value: { ...text.body, color: color.ink },
   row: { flexDirection: "row", justifyContent: "space-between", gap: space.md },
+  detailRows: { gap: 2 },
+  missing: { ...text.body, color: color.warnInk },
+  levelChips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
   previewLink: { minHeight: 48, justifyContent: "center", alignItems: "center" },
   activity: { flexDirection: "row", alignItems: "center", gap: space.md, minHeight: TOUCH + 8 },
   activityText: { ...text.label, flex: 1, color: color.ink, fontSize: 16 },

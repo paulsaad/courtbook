@@ -14,6 +14,7 @@ import { areaFromPrefs, prefsFromArea, usePlaying } from "@/lib/playing";
 import { clubPoint, coarsen, distanceLabel, sortByDistance, type LatLng, type PlayingArea } from "@/lib/places";
 import { IconSearch } from "@/components/Icons";
 import BookSheet, { type SheetClub } from "./BookSheet";
+import { placeLine } from "@/app/club/[slug]/ClubHeader";
 
 export type DaySlot = {
   club_id: string; club_name: string; slug: string; town: string | null; district: string | null; price_from: number | null; sports: string[];
@@ -230,7 +231,7 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
           const on = d === date;
           return (
             <button key={d} data-on={on} onClick={() => setDate(d)} className="flex w-[50px] shrink-0 flex-col items-center gap-1.5 text-xs font-semibold">
-              <span className="text-[#8a918e]">{d === today ? "Today" : formatInTimeZone(dayOf(d), TZ, "EEEEE")}</span>
+              <span className="text-muted">{d === today ? "Today" : formatInTimeZone(dayOf(d), TZ, "EEEEE")}</span>
               <span className={`flex h-10 w-10 items-center justify-center rounded-full text-[17px] font-bold ${on ? "bg-cedar text-white" : ""}`}>{formatInTimeZone(dayOf(d), TZ, "d")}</span>
             </button>
           );
@@ -246,7 +247,7 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
       </div>
       <form onSubmit={(e) => { e.preventDefault(); setQuery(typed.trim()); }} className="mx-5 mt-2 flex items-center gap-2 rounded-full border border-grid bg-white px-4 py-2 text-sm">
         <IconSearch size={18} className="text-muted" />
-        <input value={typed} onChange={(e) => setTyped(e.target.value)} enterKeyHint="search" placeholder="Club or town" className="flex-1 bg-transparent text-base outline-none" />
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} enterKeyHint="search" placeholder="Club or town" className="min-w-0 flex-1 bg-transparent text-base outline-none" />
         {typed && <button type="button" onClick={() => { setTyped(""); setQuery(""); }} aria-label="Clear" className="px-1 text-muted">✕</button>}
       </form>
       {query && <div className="px-5 pt-2 text-[13px] text-muted">Showing clubs matching “{query}”</div>}
@@ -279,7 +280,7 @@ export default function CourtsDay({ areas, sports, today, date: initialDate, que
                   {c.is_demo && (
                     <span className="mt-0.5 inline-block rounded-full bg-sand-soft px-2 py-0.5 text-[11px] font-semibold text-sand">Fictional demo club</span>
                   )}
-                  <div className="text-sm text-muted">{c.km != null && <span aria-label={distanceLabel(c.km).a11y}>{distanceLabel(c.km).text} · </span>}{[c.town, c.district].filter(Boolean).join(" · ") || "Lebanon"}{c.price_from != null ? ` · from $${Number(c.price_from).toFixed(0)}/h` : ""}{!prefs.sport && c.sports.length > 1 ? ` · ${c.sports.map(sportName).join(", ")}` : ""}</div>
+                  <div className="text-sm text-muted">{c.km != null && <span aria-label={distanceLabel(c.km).a11y}>{distanceLabel(c.km).text} · </span>}{placeLine(c.town, c.district)}{c.price_from != null ? ` · from $${Number(c.price_from).toFixed(0)}/h` : ""}{!prefs.sport && c.sports.length > 1 ? ` · ${c.sports.map(sportName).join(", ")}` : ""}</div>
                 </div>
                 <span className="text-muted">›</span>
               </Link>

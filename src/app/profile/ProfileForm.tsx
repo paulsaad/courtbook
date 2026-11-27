@@ -10,6 +10,7 @@ import DeleteAccount from "./DeleteAccount";
 import PlayingAreasSection from "./PlayingAreasSection";
 import type { Governorate } from "@/lib/geo";
 import { LegalLinks } from "@/components/legal";
+import { PHONE_HELP, PHONE_PRIVACY, checkDetails, detailsPatch, saveProblem } from "@/lib/playerDetails";
 
 type Initial = { name: string; phone: string; level: string; sports: string[]; email_notifications: boolean };
 const LEVELS = [["beginner", "Beginner"], ["intermediate", "Intermediate"], ["advanced", "Advanced"]] as const;
@@ -30,13 +31,18 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage, 
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    setBusy(true); setError(null);
+    setError(null);
+    // the same checks as the booking details step and the app: a phone is optional here, but a typed one must be a
+    // full number, and it is saved in international form so a club can dial it
+    const bad = checkDetails({ name: f.name, phone: f.phone }, ["name", "phone"], false);
+    if (bad.name || bad.phone) { setError(bad.name ?? bad.phone ?? null); return; }
+    setBusy(true);
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     const { error } = await supabase.from("profiles")
-      .update({ name: f.name.trim(), phone: f.phone.trim() || null, sports: f.sports, email_notifications: f.email_notifications })
+      .update({ ...detailsPatch({ name: f.name, phone: f.phone }, ["name", "phone"]), sports: f.sports, email_notifications: f.email_notifications })
       .eq("id", user!.id);
-    if (error) { setBusy(false); setError(error.message); return; }
+    if (error) { setBusy(false); setError(saveProblem(error)); return; }
     setBusy(false);
     if (firstTime) {
       const todo = f.sports.filter((sp) => levels[sp] == null);
@@ -74,7 +80,8 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage, 
         <span className="flex h-28 w-28 items-center justify-center rounded-full border-4 border-white bg-turf text-[40px] font-extrabold text-white shadow-[0_0_0_1px_#e6e8e5]" aria-hidden="true">{initials}</span>
         <div className="text-2xl font-extrabold tracking-tight">{initial.name}</div>
         <div className="text-sm text-muted">{manage.email}{initial.phone ? ` · ${initial.phone}` : ""}</div>
-        <button onClick={() => setEditing(true)} className="chip mt-1">Edit name, phone, sports</button>
+        {/* H8: the chip's text may wrap at large text (it pushed the page 25 px sideways at 200 %) */}
+        <button onClick={() => setEditing(true)} className="chip chip-wrap mt-1">Edit name, phone, sports</button>
       </div>
       <section className="flex flex-col gap-2.5">
         <h2 className="text-xl font-bold">Your sports</h2>
@@ -94,6 +101,8 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage, 
         <div className="eyebrow px-4 pb-1.5 pt-3.5">Account</div>
         {row("Activity", "/notifications")}
         {row("Your bookings and matches", "/me")}
+        {/* the page comes with #74 (BLOCKED_PATH there); the app has the same list on its Profile */}
+        {row("Blocked players", "/profile/blocked")}
       </section>
       {!firstTime && areas.length > 0 && <PlayingAreasSection govs={areas} />}
       {(manage.staffHref || manage.isAdmin || manage.isCoach) && (
@@ -115,14 +124,16 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage, 
     <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5 pt-12">
       <div>
         <h1 className="text-2xl font-extrabold tracking-tight">{firstTime ? "Welcome. Who are you?" : "Edit profile"}</h1>
-        <p className="mt-1 text-sm text-muted">Clubs see your name on bookings. Your phone is only shown to club staff.</p>
+        <p className="mt-1 text-sm text-muted">Clubs see your name on your bookings.</p>
       </div>
       <form onSubmit={save} className="flex flex-col gap-4">
         <label className="flex flex-col gap-1 text-sm">Name
           <input className={input} required autoComplete="name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
         </label>
-        <label className="flex flex-col gap-1 text-sm">Phone (WhatsApp)
-          <input className={input} inputMode="tel" autoComplete="tel" placeholder="03 123 456" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
+        <label className="flex flex-col gap-1 text-sm">Contact phone (needed to book a court)
+          <input className={input} inputMode="tel" autoComplete="tel" placeholder="03 123 456 or +46 70 123 45 67" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
+          <span className="text-xs text-muted">{PHONE_HELP}</span>
+          <span className="text-xs text-muted">{PHONE_PRIVACY}</span>
         </label>
         <fieldset className="flex flex-col gap-2 text-sm">
           <legend className="mb-1">Sports</legend>

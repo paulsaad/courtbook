@@ -9,6 +9,13 @@ export type ClubHead = {
   is_demo?: boolean | null;
 };
 
+/** "Town · District", without saying the same name twice ("Batroun · Batroun": C1). */
+export function placeLine(town: string | null, district: string | null) {
+  const parts = [town, district].filter((x): x is string => !!x);
+  const uniq = parts.filter((x, i) => parts.findIndex((y) => y.trim().toLowerCase() === x.trim().toLowerCase()) === i);
+  return uniq.join(" · ") || "Lebanon";
+}
+
 const TABS = [["", "Book"], ["/matches", "Matches"], ["/coaches", "Coaches"], ["/info", "Info"]] as const;
 
 export default function ClubHeader({ club, tab, signedIn = false }: { club: ClubHead; tab: "" | "/matches" | "/coaches" | "/info"; signedIn?: boolean }) {
@@ -29,12 +36,13 @@ export default function ClubHeader({ club, tab, signedIn = false }: { club: Club
         </p>
       )}
       <p className="text-sm text-muted">
-        {[club.town, club.district].filter(Boolean).join(" · ") || "Lebanon"} · {club.open_time.slice(0, 5)}–{club.close_time.slice(0, 5)}{price && <> · {price}</>}
+        {placeLine(club.town, club.district)} · {club.open_time.slice(0, 5)}–{club.close_time.slice(0, 5)}{price && <> · {price}</>}
         {directions && <> · <a className="text-action underline" href={directions} target="_blank" rel="noreferrer">Directions</a></>}
       </p>
-      <nav className="mt-3 flex rounded-full border border-grid bg-white p-0.5 text-sm">
+      {/* H8: at large text (Android 200 %) the four tabs pushed the page 47 px sideways; they now wrap onto a second row */}
+      <nav className="mt-3 flex flex-wrap rounded-3xl border border-grid bg-white p-0.5 text-sm">
         {TABS.map(([t, label]) => (
-          <Link key={t} href={`/club/${club.slug}${t}`} className={`flex-1 rounded-full py-1.5 text-center ${tab === t ? "bg-ink text-white" : ""}`}>{label}</Link>
+          <Link key={t} href={`/club/${club.slug}${t}`} className={`min-w-0 flex-1 basis-auto rounded-full px-2 py-1.5 text-center ${tab === t ? "bg-ink text-white" : ""}`}>{label}</Link>
         ))}
       </nav>
     </header>

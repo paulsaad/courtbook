@@ -10,9 +10,9 @@ export default async function CourtsPage({ searchParams }: { searchParams: Promi
   const sp = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (user) {   // signed in: confirm the profile and 18+ before reserving (browsing signed out stays open)
+  if (user) {   // signed in: the 18+ step; no name is asked to browse (Reserve asks for the name and contact phone)
     const q = new URLSearchParams(Object.entries(sp).filter(([, v]) => typeof v === "string") as [string, string][]);
-    const gate = await playerGatePath(supabase, user.id, `/courts${q.size ? `?${q}` : ""}`, "the courts");
+    const gate = await playerGatePath(supabase, user.id, `/courts${q.size ? `?${q}` : ""}`, "the courts", { requireName: false });
     if (gate) redirect(gate);
   }
   const today = todayIn("Asia/Beirut");

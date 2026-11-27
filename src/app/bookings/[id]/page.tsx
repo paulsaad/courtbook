@@ -4,8 +4,10 @@ import { notFound, redirect } from "next/navigation";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
 import { allLoaded, loaded } from "@/lib/load";
+import { isMalformedId } from "@/lib/ids";
 import { hhmm, nowMs } from "@/lib/time";
 import CancelButton from "./CancelButton";
+import { clubPhoneFrom } from "@/lib/clubContactPhone";
 import OpenToPlayers, { type BookingMatch } from "./OpenToPlayers";
 
 export default async function BookingPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ new?: string }> }) {
@@ -15,12 +17,15 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: b } = loaded(await supabase
+  const read = await supabase
     .from("bookings")
-    .select("id, status, start_at, end_at, price_usd, fee_usd, cancelled_at, clubs(name, slug, timezone, cancel_cutoff_hours, location_url, payment_mode, lat, lng), courts!bookings_court_id_fkey(name, sport)")
+    .select("id, club_id, status, start_at, end_at, price_usd, fee_usd, cancelled_at, clubs(name, slug, timezone, cancel_cutoff_hours, location_url, payment_mode, lat, lng), courts!bookings_court_id_fkey(name, sport)")
     .eq("id", id)
     .eq("player_id", user.id)
-    .single(), "this booking");
+    .single();
+  // a malformed id (a link cut short when shared, a typo) names no booking: Not found, not a failed read (as #78)
+  if (isMalformedId(read.error)) notFound();
+  const { data: b } = loaded(read, "this booking");
   if (!b) notFound();
   if (b.status === "pending") redirect(`/pay/${id}`);
 
@@ -42,6 +47,11 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
   const freeCancel = b.status === "confirmed" && cutoffAt.getTime() > nowMs();
   const upcoming = b.status === "confirmed" && new Date(b.end_at).getTime() > nowMs();
 
+  // PR-9b: when the cancellation notice asks the player to tell the club, a way to: the club's own public contact
+  // phone (clubs.contact_phone; never a staff member's number). Read only then; no number or a failed read → Info link.
+  const tellClub = upcoming && atDesk && !freeCancel;
+  const clubPhone = tellClub ? clubPhoneFrom(await supabase.from("clubs").select("contact_phone").eq("id", b.club_id).maybeSingle()) : null;
+
   const waText = encodeURIComponent(`Court booked ✅ ${club.name}, ${court.name}\n${day}, ${time}\n${directions ?? ""}`.trim());
 
   return (
@@ -58,7 +68,8 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
       <div className="rounded-2xl border border-grid bg-white p-4 text-sm">
         <div className="flex justify-between py-1"><span>Court</span><span>${Number(b.price_usd ?? 0).toFixed(2)}</span></div>
         {atDesk ? (
-          <div className="mt-2 flex justify-between border-t border-grid pt-3 font-semibold"><span>Pay at the club</span><span>${Number(b.price_usd ?? 0).toFixed(2)}</span></div>
+          // H9: only a confirmed booking is paid at the club; a cancelled one (or a no-show) has nothing to settle here
+          b.status === "confirmed" && <div className="mt-2 flex justify-between border-t border-grid pt-3 font-semibold"><span>Pay at the club</span><span>${Number(b.price_usd ?? 0).toFixed(2)}</span></div>
         ) : (
           <>
             <div className="flex justify-between py-1"><span>Booking fee</span><span>${Number(b.fee_usd ?? 0).toFixed(2)}</span></div>
@@ -67,16 +78,17 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
             {pay?.status === "refunded" && <p className="mt-2 text-muted">Refunded.</p>}
           </>
         )}
-        {atDesk && <p className="mt-2 text-xs text-muted">Nothing is paid through CourtBook. Settle with {club.name} when you arrive.</p>}
+        {atDesk && <p className="mt-2 text-xs text-muted">{b.status === "confirmed" ? `Nothing is paid through CourtBook. Settle with ${club.name} when you arrive.` : "Nothing was paid through CourtBook."}</p>}
       </div>
 
       {upcoming && <OpenToPlayers bookingId={b.id} sport={court.sport} sportName={sportLabel.get(court.sport) ?? court.sport} match={match} />}
 
       {upcoming && (
         <>
-          <a href={`https://wa.me/?text=${waText}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#25D366] py-3.5 text-center font-medium text-white">Share on WhatsApp</a>
+          <a href={`https://wa.me/?text=${waText}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#25D366] py-3.5 text-center font-semibold text-ink">Share on WhatsApp</a>
           {directions && <a href={directions} target="_blank" rel="noreferrer" className="rounded-xl border border-grid bg-white py-3.5 text-center">Directions</a>}
-          <CancelButton bookingId={b.id} freeCancel={freeCancel} cutoffHours={club.cancel_cutoff_hours} cutoffLabel={`${formatInTimeZone(cutoffAt, tz, "EEE d MMM HH:mm")}`} nothingPaid={atDesk} />
+          <CancelButton bookingId={b.id} freeCancel={freeCancel} cutoffHours={club.cancel_cutoff_hours} cutoffLabel={`${formatInTimeZone(cutoffAt, tz, "EEE d MMM HH:mm")}`} nothingPaid={atDesk}
+            clubPhone={clubPhone} clubInfoHref={`/club/${club.slug}/info`} />
         </>
       )}
     </main>
