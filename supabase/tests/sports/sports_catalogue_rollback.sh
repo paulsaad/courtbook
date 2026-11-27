@@ -30,6 +30,7 @@ union all select 'coltype ' || table_name || '.' || column_name || ' ' || udt_na
 union all select 'data sports ' || md5(string_agg(format('%s|%s|%s|%s|%s', code, name_en, name_ar, sort_order, active), ';' order by code)) from sports
 union all select 'data courts ' || md5(string_agg(k.name || '@' || c.slug || ':' || k.sport::text || ':' || k.active, ';' order by c.slug, k.name)) from courts k join clubs c on c.id = k.club_id
 union all select 'data profiles ' || md5(coalesce(string_agg(id || ':' || sports::text, ';' order by id), '')) from profiles
+union all select 'fnbody ' || p.oid::regprocedure::text || ' ' || md5(pg_get_functiondef(p.oid)) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prokind = 'f'
 union all select 'data player_levels ' || md5(coalesce(string_agg(profile_id || ':' || sport::text || ':' || level, ';' order by profile_id, sport::text), '')) from player_levels
 order by 1;"
 fp() { { $PSQL -d $1 -X -At -v ON_ERROR_STOP=1 -f supabase/tests/schema_fingerprint.sql; $PSQL -d $1 -X -At -v ON_ERROR_STOP=1 -c "$EXTRA"; } 2>&1 | sort; }

@@ -89,7 +89,8 @@ declare f record; g record; d text;
 begin
   perform set_config('check_function_bodies', 'off', true);   -- as the up draft (B1): the order cannot matter
   for f in select * from _sport_fns order by sig loop
-    d := f.def;
+    -- the enum's defaults come back as written before 0100 (pg_get_functiondef shows the domain-era cast otherwise)
+    d := replace(f.def, '(NULL::text)::sport', 'NULL::sport');
     if f.sig like 'club_day_slots(%' then
       if position(inserted_slots in d) = 0 then raise exception 'club_day_slots changed since the catalogue draft: restore it by hand'; end if;
       d := replace(d, inserted_slots, '');
