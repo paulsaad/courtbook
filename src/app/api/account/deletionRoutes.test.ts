@@ -35,7 +35,8 @@ vi.mock("@/lib/supabase/admin", () => ({
     } },
   }),
 }));
-vi.mock("@/lib/report", () => ({ report: async (k: string, a: string, d: unknown) => { reported.push([k, a, d]); } }));
+let reportThrows = false;   // a monitoring outage: report() rejects
+vi.mock("@/lib/report", () => ({ report: async (k: string, a: string, d: unknown) => { reported.push([k, a, d]); if (reportThrows && k === "deletionStepFailed" && (d as { code?: string })?.code === "global_signout") throw new Error("sentry down"); } }));
 
 const close = await import("./close/route");
 const retry = await import("../internal/deletions/retry/route");
@@ -171,6 +172,16 @@ describe("POST /api/account/close", () => {
       expect(services()).toContain("auth.ban");
     });
   }
+  it("the report of an unconfirmed revocation itself failing never skips the ban (review nit of db8ac32)", async () => {
+    logout = vi.fn(async () => ({ error: { name: "AuthApiError", status: 401 } }));
+    reportThrows = true;
+    try {
+      const res = await close.POST(post("/api/account/close", { confirm: true }));
+      expect(await res.json()).toEqual({ closed: true });
+      expect(services()).toContain("auth.ban");
+      expect(services()).toContain("finish_account_deletion");
+    } finally { reportThrows = false; }
+  });
   it("revocation unreachable (offline): reported; this browser signed out; the ban still runs", async () => {
     logout = vi.fn(async () => ({ error: { name: "AuthRetryableFetchError", status: 0 } }));
     await close.POST(post("/api/account/close", { confirm: true }));
