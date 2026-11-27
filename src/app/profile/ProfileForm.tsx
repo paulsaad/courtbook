@@ -9,6 +9,7 @@ import { levelLabel } from "@/lib/levels";
 import DeleteAccount from "./DeleteAccount";
 import SignOutEverywhere from "./SignOutEverywhere";
 import PlayingAreasSection from "./PlayingAreasSection";
+import ProfilePhoto from "./ProfilePhoto";
 import type { Governorate } from "@/lib/geo";
 import { LegalLinks } from "@/components/legal";
 import { PHONE_HELP, PHONE_PRIVACY, checkDetails, detailsPatch, saveProblem } from "@/lib/playerDetails";
@@ -18,7 +19,7 @@ const LEVELS = [["beginner", "Beginner"], ["intermediate", "Intermediate"], ["ad
 
 type Manage = { staffHref: string | null; isAdmin: boolean; isCoach: boolean; email: string };
 
-export default function ProfileForm({ initial, next, firstTime, sports, manage, levels: initialLevels, areas = [] }: { initial: Initial; next: string; firstTime: boolean; sports: { code: string; name_en: string }[]; manage: Manage; levels: Record<string, number>; areas?: Governorate[] }) {
+export default function ProfileForm({ initial, next, firstTime, sports, manage, levels: initialLevels, areas = [], photo }: { initial: Initial; next: string; firstTime: boolean; sports: { code: string; name_en: string }[]; manage: Manage; levels: Record<string, number>; areas?: Governorate[]; photo?: { userId: string; version: number | null } }) {
   const router = useRouter();
   const [f, setF] = useState(initial);
   const [busy, setBusy] = useState(false);
@@ -78,7 +79,9 @@ export default function ProfileForm({ initial, next, firstTime, sports, manage, 
   if (!editing) return (
     <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5 pt-12">
       <div className="flex flex-col items-center gap-2">
+        {photo ? <ProfilePhoto userId={photo.userId} initials={initials} version={photo.version} /> : (
         <span className="flex h-28 w-28 items-center justify-center rounded-full border-4 border-white bg-turf text-[40px] font-extrabold text-white shadow-[0_0_0_1px_#e6e8e5]" aria-hidden="true">{initials}</span>
+        )}
         <div className="text-2xl font-extrabold tracking-tight">{initial.name}</div>
         <div className="text-sm text-muted">{manage.email}{initial.phone ? ` · ${initial.phone}` : ""}</div>
         {/* H8: the chip's text may wrap at large text (it pushed the page 25 px sideways at 200 %) */}

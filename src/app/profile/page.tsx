@@ -18,6 +18,9 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
     supabase.rpc("my_levels"),
   ]), "your profile");
   const ref = await loadRefData(supabase);
+  // Optional, and outside allLoaded on purpose: until the photo schema is applied this call fails, and the profile
+  // must still load exactly as before (initials, no photo controls).
+  const { data: photoVersion, error: photoError } = await supabase.rpc("my_photo_version");
   const levels = Object.fromEntries(((lv ?? []) as { sport: string; level: number }[]).map((r) => [r.sport, r.level]));
   const isAdmin = p?.roles?.includes("admin") ?? false;
   const safeNext = safeNextPath(next);
@@ -29,6 +32,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
       sports={sports ?? []}
       levels={levels}
       areas={ref.areas}
+      photo={photoError ? undefined : { userId: user.id, version: (photoVersion as number | null) ?? null }}
       manage={{ staffHref: isAdmin || (staffCount ?? 0) > 0 ? "/staff" : null, isAdmin, isCoach: (coachCount ?? 0) > 0, email: user.email ?? user.phone ?? "" }}
     />
   );
