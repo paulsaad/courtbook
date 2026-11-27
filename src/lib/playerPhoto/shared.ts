@@ -1,6 +1,6 @@
 /**
  * Player photo helpers that are safe on the client and the server (no sharp, no Supabase).
- * DRAFT — the database side is docs/profile-photo/sql/player_photos.draft.sql and is not applied anywhere yet.
+ * The database side is supabase/migrations/0101_player_photos.sql (0.5.0 candidate; not applied anywhere yet).
  */
 
 export const PHOTO = {

@@ -1,5 +1,10 @@
--- DRAFT — optional player profile photo. Not a numbered migration: nothing here runs on staging or production until
--- Paul approves it and it is given the next free number. Applies on top of the release-candidate schema (0001–0093).
+-- 0101 — optional player profile photo (#67; number provisionally approved by Paul, 27 Nov). Applies after 0099 and 0100
+-- on the 0.5.0 schema; independent of both. Rollback: supabase/rollback/0101_down.sql (one transaction).
+-- Corrections from the #108 integration review (27 Nov), applied here:
+--   I-2  photo access through a game ends 30 days after the game ended (can_see_player_photo);
+--   I-3  releasing a legal hold on a report that holds photo copies: photo moderators only, logged, and the copies stay
+--        30 more days after the release (photo_evidence_purge, photo_hold_release_guard);
+--   I-4  a message or game report for 'inappropriate' or 'abuse' copies the named player's photo too.
 --
 -- Design (docs/profile-photo/README.md has the reasoning):
 --   * The photo is a small WebP (≤ 256 × 256, ≤ 64 KB) stored in the database, one row per player. No storage bucket,
@@ -7,8 +12,9 @@
 --   * Only the server writes a photo (set_player_photo refuses any signed-in caller): the web route decodes and
 --     re-encodes every upload, which strips EXIF/GPS and bounds the size. A player may remove their own photo directly.
 --   * Who may see it is decided here, per request, by player_photo() running as the viewer: the player themself, or a
---     player who shares a non-cancelled game with them where both are the organizer or accepted — and neither has
---     blocked the other, and the subject's account is neither closing nor suspended.
+--     player who shares a non-cancelled game with them where both are the organizer or accepted, until 30 days after
+--     that game ended (I-2) — and neither has blocked the other, and the subject's account is neither closing nor
+--     suspended.
 --   * Closing an account hides the photo at once (can_see_player_photo checks deletion_requested); the account's data
 --     step deletes it (trigger on account_deletions → 'data_removed'), with the server key, like the rest of their data.
 --   * The table gets 0086's closed-account lock-out, as every table must (0086 test E1).
@@ -46,6 +52,9 @@ language sql stable security definer set search_path = public as $$
           select 1
           from matches m
           where m.status <> 'cancelled'
+            -- I-2 (Paul's #67 decision 7): visible until exactly 30 days after the game ended. A game without an end
+            -- time counts as ending at its start. Upcoming and ongoing games are inside the window by definition.
+            and coalesce(m.end_at, m.start_at) > now() - interval '30 days'
             and (m.organizer_id = p_viewer
                  or exists (select 1 from match_players a where a.match_id = m.id and a.profile_id = p_viewer and a.status = 'accepted'))
             and (m.organizer_id = p_subject
@@ -244,11 +253,18 @@ create table if not exists photo_evidence (
 alter table photo_evidence enable row level security;     -- no policy
 revoke all on photo_evidence from public, anon, authenticated, service_role;
 
--- a player report captures the reported player's current photo
+-- A report captures the named player's current photo when the report can concern that photo (I-4):
+--   * a player report, whatever the reason: the reported profile, photo included, is the subject;
+--   * a message or game report for 'inappropriate' or 'abuse': the photo is shown beside the message and in the game,
+--     so it may be what is reported. The named player is the message's sender, or the game's organizer.
+-- Other reasons ('spam', 'danger', 'other') and feedback copy nothing: no unrelated photo is retained. A photo
+-- moderator who hides the photo later still captures it then (moderator_hide_player_photo).
 create or replace function photo_evidence_on_report() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if new.target_kind = 'player' and new.profile_id is not null then
+  if new.profile_id is not null
+     and (new.target_kind = 'player'
+          or (new.target_kind in ('message', 'game') and new.reason in ('inappropriate', 'abuse'))) then
     insert into photo_evidence (report_id, profile_id, image, width, height, version, reason)
     select new.id, p.profile_id, p.image, p.width, p.height, p.version, 'reported' from player_photos p where p.profile_id = new.profile_id
     on conflict (report_id, version) do nothing;
@@ -260,7 +276,7 @@ drop trigger if exists photo_evidence_on_report on reports;
 create trigger photo_evidence_on_report after insert on reports for each row execute function photo_evidence_on_report();
 
 -- Retention (review of 02e7d06, S1): the copy goes 180 days after its report was closed, unless the report is open
--- again or on legal hold. The same time rule as the report's text (0082), but applied to the copy directly, so a report
+-- again or on legal hold, or its legal hold was released less than 30 days ago (I-3). The same time rule as the report's text (0082), but applied to the copy directly, so a report
 -- whose text was empty from the start, or one reopened and closed again, is covered. Runs after every change to
 -- reports (each new report, each moderator action) and before any copy is listed or read. Hiding does not purge; it
 -- refuses a report already past the rule (report_expired).
@@ -270,7 +286,8 @@ declare n int;
 begin
   delete from photo_evidence e using reports r
    where r.id = e.report_id and r.status <> 'open' and not r.legal_hold
-     and r.closed_at is not null and r.closed_at < now() - interval '180 days';
+     and r.closed_at is not null and r.closed_at < now() - interval '180 days'
+     and (r.legal_hold_released_at is null or r.legal_hold_released_at < now() - interval '30 days');
   get diagnostics n = row_count;
   return n;
 end $$;
@@ -289,16 +306,50 @@ drop trigger if exists photo_evidence_retention on reports;
 drop trigger if exists reports_photo_evidence_retention on reports;
 create trigger reports_photo_evidence_retention after insert or update on reports for each statement execute function photo_evidence_retention();
 
--- a report on legal hold that holds photo copies cannot be deleted (review nit: the copies would go with it)
+-- a report on legal hold that holds photo copies cannot be deleted (review nit: the copies would go with it); nor can
+-- one whose hold was released less than 30 days ago (I-3)
 create or replace function photo_evidence_hold_guard() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if old.legal_hold and exists (select 1 from photo_evidence where report_id = old.id) then raise exception 'report_on_legal_hold'; end if;
+  if (old.legal_hold or old.legal_hold_released_at > now() - interval '30 days')
+     and exists (select 1 from photo_evidence where report_id = old.id) then raise exception 'report_on_legal_hold'; end if;
   return old;
 end $$;
 revoke all on function photo_evidence_hold_guard() from public, anon, authenticated;
 drop trigger if exists photo_evidence_hold_guard on reports;
 create trigger photo_evidence_hold_guard before delete on reports for each row execute function photo_evidence_hold_guard();
+
+-- I-3 (Paul, 27 Nov): releasing a legal hold on a report that holds photo copies.
+--   * Only a photo moderator may do it, through the reports page (admin_set_legal_hold, 0082, unchanged, which logs
+--     'legal_hold_off' with its reason). Being an admin is not enough; the server key never may (it is the credential
+--     most exposed to code); the database owner (Supabase SQL editor) may, and that is logged here.
+--   * The release does not delete anything: the time is recorded (reports.legal_hold_released_at) and the copies stay
+--     30 more days (photo_evidence_purge), in which a mistaken release can be reversed by putting the hold back.
+--   * Reports without photo copies are unchanged: any admin releases them, as in 0082.
+-- Who is calling is read from the session's role (set by the API for each request; unchanged inside security-definer
+-- functions): 'authenticated' (a signed-in admin, only through admin_set_legal_hold, as RLS gives no direct update),
+-- 'service_role' or 'anon' (the API keys), anything else (a direct database session: the owner).
+alter table reports add column if not exists legal_hold_released_at timestamptz;
+
+create or replace function photo_hold_release_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare caller text := coalesce(nullif(current_setting('role', true), ''), 'none');
+begin
+  if not (old.legal_hold and not new.legal_hold) then return new; end if;
+  if exists (select 1 from photo_evidence where report_id = old.id) then
+    if caller in ('service_role', 'anon') then raise exception 'photo_moderator_required'; end if;
+    if caller = 'authenticated' and not is_photo_moderator() then raise exception 'photo_moderator_required'; end if;
+    if caller <> 'authenticated' then   -- the owner's direct release (admin_set_legal_hold logs the app's own)
+      perform log_moderation('legal_hold_off', old.id, old.profile_id, old.message_id, 'released in the database (photo evidence kept 30 days)');
+    end if;
+  end if;
+  new.legal_hold_released_at := now();
+  return new;
+end $$;
+revoke all on function photo_hold_release_guard() from public, anon, authenticated;
+drop trigger if exists photo_hold_release_guard on reports;
+create trigger photo_hold_release_guard before update of legal_hold on reports
+  for each row execute function photo_hold_release_guard();
 
 -- hide: the photo leaves every viewer at once (the player may upload a new one); a copy is kept with the report
 create or replace function moderator_hide_player_photo(p_report uuid, p_reason text) returns boolean
@@ -311,7 +362,10 @@ begin
   if not found or r.target_kind not in ('player', 'message', 'game') or r.profile_id is null then raise exception 'not_found'; end if;
   if r.profile_id = auth.uid() then raise exception 'forbidden'; end if;   -- never one's own (review nit)
   -- a report past the 180-day rule has had its text cleared; a copy tied to it now would never be cleared
-  if r.status <> 'open' and not r.legal_hold and r.closed_at < now() - interval '180 days' then raise exception 'report_expired'; end if;
+  if r.status <> 'open' and not r.legal_hold and r.closed_at < now() - interval '180 days'
+     and (r.legal_hold_released_at is null or r.legal_hold_released_at < now() - interval '30 days') then
+    raise exception 'report_expired';
+  end if;
   delete from player_photos where profile_id = r.profile_id returning * into ph;
   if not found then return false; end if;                                 -- nothing to hide: nothing logged
   insert into photo_evidence (report_id, profile_id, image, width, height, version, reason)

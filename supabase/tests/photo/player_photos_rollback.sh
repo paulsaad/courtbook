@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rollback of the player-photo draft (docs/profile-photo/sql/player_photos.down.draft.sql). LOCAL ONLY, scratch DBs.
+# Rollback of 0101 (supabase/rollback/0101_down.sql), on builds of 0001–0100. LOCAL ONLY, scratch DBs.
 #   PSQL="sudo -u postgres psql" bash supabase/tests/photo/player_photos_rollback.sh
 # R1  up then down = a plain build, exactly (schema fingerprint plus types, indexes, views, column types and defaults, data).
 # R2  a stored photo blocks the rollback unless confirmed in the transaction; the refusal changes nothing; confirmed,
@@ -8,12 +8,12 @@
 set -u
 cd "$(dirname "$0")/../../.."
 PSQL=${PSQL:-psql}
-UP=docs/profile-photo/sql/player_photos.draft.sql; DOWN=docs/profile-photo/sql/player_photos.down.draft.sql
+UP=supabase/migrations/0101_player_photos.sql; DOWN=supabase/rollback/0101_down.sql
 A=courtbook_ph_plain; B=courtbook_ph_roundtrip; C=courtbook_ph_blocked
 build() {
   $PSQL -q -d postgres -c "drop database if exists $1" -c "create database $1" >/dev/null || exit 2
   $PSQL -q -d $1 -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql >/dev/null || exit 2
-  for f in $(ls supabase/migrations/*.sql | sort); do $PSQL -q -d $1 -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || { echo "BUILD FAILED: $f"; exit 2; }; done
+  for f in $(ls supabase/migrations/*.sql | sort | awk -F/ '$NF < "0101"'); do $PSQL -q -d $1 -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || { echo "BUILD FAILED: $f"; exit 2; }; done
   $PSQL -q -d $1 -v ON_ERROR_STOP=1 -f supabase/seed.sql >/dev/null || exit 2
 }
 apply() { $PSQL -q -d $1 -v ON_ERROR_STOP=1 -1 -f "$2" 2>&1 | grep -E "ERROR" | sed 's/^.*ERROR:  //'; }
@@ -41,7 +41,7 @@ ok "R0 the fingerprint reads $(echo "$fpa" | wc -l) items, including $(echo "$fp
 r=$(apply $B $UP); [ -z "$r" ] || bad "R1 up applies" "$r"
 r=$(apply $B $DOWN); [ -z "$r" ] && ok "R1a down applies after up" || bad "R1a down applies after up" "$r"
 d=$(diff <(fp $A) <(fp $B))
-[ -z "$d" ] && ok "R1b up then down = a plain 0001–$(ls supabase/migrations | tail -1 | cut -c1-4) build: $(fp $A | wc -l) schema and data items identical" || bad "R1b up then down differs from a plain build" "$d"
+[ -z "$d" ] && ok "R1b up then down = a plain 0001–$(ls supabase/migrations | awk '$0 < "0101"' | tail -1 | cut -c1-4) build: $(fp $A | wc -l) schema and data items identical" || bad "R1b up then down differs from a plain build" "$d"
 
 # R2
 apply $C $UP >/dev/null
@@ -79,8 +79,12 @@ echo "$r" | grep -q "rollback_blocked: 1 photo evidence copies belong to open re
   && ok "R5a evidence on an open report blocks the rollback even when confirmed, and nothing changes" || bad "R5a" "$r"
 $PSQL -q -d $C -c "update reports set legal_hold = true, status = 'dismissed', closed_at = now() where id = 'a2000000-0000-4000-8000-0000000000f1'" >/dev/null
 r=$({ echo "set local courtbook.discard_player_photos = 'yes';"; cat $DOWN; } | $PSQL -q -d $C -v ON_ERROR_STOP=1 -1 2>&1 | grep ERROR)
-echo "$r" | grep -q "rollback_blocked: 1 photo evidence copies belong to open reports or reports on legal hold" && ok "R5b … and so does evidence on a closed report under legal hold" || bad "R5b" "$r"
+echo "$r" | grep -q "rollback_blocked: 1 photo evidence copies belong to open reports, reports on legal hold" && ok "R5b … and so does evidence on a closed report under legal hold" || bad "R5b" "$r"
 $PSQL -q -d $C -c "update reports set legal_hold = false where id = 'a2000000-0000-4000-8000-0000000000f1'" >/dev/null
+# I-3: released less than 30 days ago, the copy is still protected, confirmed or not
+r=$({ echo "set local courtbook.discard_player_photos = 'yes';"; cat $DOWN; } | $PSQL -q -d $C -v ON_ERROR_STOP=1 -1 2>&1 | grep ERROR)
+echo "$r" | grep -q "rollback_blocked: 1 photo evidence copies belong to .*recently released" && ok "R5b2 … and evidence released from legal hold less than 30 days ago (I-3)" || bad "R5b2" "$r"
+$PSQL -q -d $C -c "update reports set legal_hold_released_at = now() - interval '31 days' where id = 'a2000000-0000-4000-8000-0000000000f1'" >/dev/null
 r=$(apply $C $DOWN); echo "$r" | grep -q "rollback_blocked: 0 stored photo(s) and 1 evidence copies" && ok "R5c closed and not held: blocked without the confirmation" || bad "R5c" "$r"
 r=$({ echo "set local courtbook.discard_player_photos = 'yes';"; cat $DOWN; } | $PSQL -q -d $C -v ON_ERROR_STOP=1 -1 2>&1 | grep ERROR)
 [ -z "$r" ] && [ "$($PSQL -d $C -At -c "select to_regclass('public.photo_evidence') is null")" = t ] && ok "R5d … and removed with it" || bad "R5d" "$r"

@@ -83,24 +83,32 @@ check "C8d a sport listed only on a coach cannot be deleted" \
 check "C8c an unused sport can be deleted by an admin" \
   "$(q "insert into sports (code, name_en, sort_order) values ('cricket', 'Cricket', 95); $(as $ADMIN) delete from sports where code = 'cricket'; select count(*) from sports where code = 'cricket';")" "^0$"
 check "C9 club_sports lists the club's own sports alphabetically by name" \
-  "$(q "insert into courts (club_id, name, sport) values ($CLUB_B, 'Bad 1', 'badminton'), ($CLUB_B, 'TT 1', 'table_tennis'), ($CLUB_B, 'Ten 1', 'tennis');
+  "$(q "update sports set active = true where code = 'table_tennis'; insert into courts (club_id, name, sport) values ($CLUB_B, 'Bad 1', 'badminton'), ($CLUB_B, 'TT 1', 'table_tennis'), ($CLUB_B, 'Ten 1', 'tennis');
         $(as $P1) select array_to_string(club_sports($CLUB_B), ',');")" "^badminton,padel,table_tennis,tennis$"
 check "C9b club_sports orders by display name, not by code" \
   "$(q "insert into sports (code, name_en) values ('aaa_zumba', 'Zumba'); insert into courts (club_id, name, sport) values ($CLUB_B, 'Z 1', 'aaa_zumba');
         $(as $P1) select array_to_string(club_sports($CLUB_B), ',');")" "^padel,aaa_zumba$"
 check "C10 discovery: 'ping pong' finds a club with a table tennis court" \
-  "$(q "insert into courts (club_id, name, sport) values ($BATROUN, 'TT 1', 'table_tennis');
+  "$(q "update sports set active = true where code = 'table_tennis'; insert into courts (club_id, name, sport) values ($BATROUN, 'TT 1', 'table_tennis');
         $(as $P1) select string_agg(slug, ',') from club_discovery(null, null, null, 'ping pong');")" "batroun"
 check "C10b and without one the same search finds nothing" \
   "$(q "$(as $P1) select count(*) from club_discovery(null, null, null, 'ping pong');")" "^0$"
 check "C10c a deactivated sport's name and aliases no longer find clubs (discovery and the Courts search)" \
-  "$(q "insert into courts (club_id, name, sport) values ($BATROUN, 'TT 1', 'table_tennis'); update sports set active = false where code = 'table_tennis';
+  "$(q "update sports set active = true where code = 'table_tennis'; insert into courts (club_id, name, sport) values ($BATROUN, 'TT 1', 'table_tennis'); update sports set active = false where code = 'table_tennis';
         $(as $P1) select (select count(*) from club_discovery(null, null, null, 'ping pong')) || ' ' || (select count(*) from club_day_slots(current_date + 1, null, null, null, 'ping pong'));")" "^0 0$"
 check "C10d the Courts search (club_day_slots) finds a club by sport name or alias, like discovery" \
-  "$(q "insert into courts (club_id, name, sport) values ($BATROUN, 'TT 1', 'table_tennis');
+  "$(q "update sports set active = true where code = 'table_tennis'; insert into courts (club_id, name, sport) values ($BATROUN, 'TT 1', 'table_tennis');
         $(as $P1) select (select count(distinct club_id) from club_day_slots(current_date + 1, null, null, null, 'ping pong')) || ' ' || (select count(distinct club_id) from club_day_slots(current_date + 1, null, null, null, 'Table Tennis'));")" "^1 1$"
-check "C11 table tennis is an active catalogue sport, English name only (no Arabic name)" \
-  "$(q "select name_en || '|' || (name_ar is null) || '|' || active from sports where code = 'table_tennis';")" "^Table tennis\|true\|true$"
+check "C11 table tennis is in the catalogue, English name only (no Arabic name), and INACTIVE until an admin activates it (I-1)" \
+  "$(q "select name_en || '|' || (name_ar is null) || '|' || active from sports where code = 'table_tennis';")" "^Table tennis\|true\|false$"
+check "C11b while inactive, nothing new can use it: a court, a game, a player level, a coach (sport_inactive)" \
+  "$(q "insert into courts (club_id, name, sport) values ($BATROUN, 'TT 1', 'table_tennis');")$(q "insert into matches (club_id, sport, organizer_id, start_at, players_needed) select $BATROUN, 'table_tennis', '$P1', now() + interval '1 day', 1;")$(q "insert into player_levels (profile_id, sport, level) values ('$P1', 'table_tennis', 3);")$(q "insert into coaches (profile_id, sports) values ('$P1', '{table_tennis}') on conflict (profile_id) do update set sports = '{table_tennis}';")" "^ERR sport_inactive ?ERR sport_inactive ?ERR sport_inactive ?ERR sport_inactive$"
+check "C11c while inactive it is not offered: not among the active sports a client lists, and 'ping pong' finds nothing" \
+  "$(q "$(as $P1) select (select count(*) from sports where active and code = 'table_tennis') || ' ' || (select count(*) from club_discovery(null, null, null, 'ping pong'));")" "^0 0$"
+check "C11d an admin activates it: then a court can use it" \
+  "$(q "$(as $ADMIN) update sports set active = true where code = 'table_tennis'; reset role; insert into courts (club_id, name, sport) values ($BATROUN, 'TT 1', 'table_tennis'); select count(*) from courts where sport = 'table_tennis';")" "^1$"
+check "C11e re-applying 0100 after the activation keeps it active (the migration never overrides the admin's choice)" \
+  "$(q "update sports set active = true where code = 'table_tennis'; $(cat supabase/migrations/0100_sports_catalogue.sql) select active from sports where code = 'table_tennis';")" "t$"
 check "C12 the old enum is gone; every sport column is the domain" \
   "$(q "select (select count(*) from pg_type where typname = 'sport_enum_retired') || '|' ||
           count(*) filter (where not (t.typtype = 'd' or (t.typelem <> 0 and (select e.typtype from pg_type e where e.oid = t.typelem) = 'd'))) || '|' || count(*)
@@ -236,9 +244,9 @@ restore() {
   $PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0100_sports_catalogue.sql 2>&1 | grep ERROR
   $PSQL -d $DB -X -At -c "select (position('unnest(s.aliases)' in pg_get_functiondef('club_discovery(sport,text,text,text)'::regprocedure)) > 0
                                   and position('unnest(s2.aliases)' in pg_get_functiondef('club_day_slots(date,sport,text,text,text)'::regprocedure)) > 0)"
-  $PSQL -q -d $DB -c "insert into courts (club_id, name, sport) select id, 'TT conv', 'table_tennis' from clubs where slug = 'batroun'" >/dev/null
+  $PSQL -q -d $DB -c "update sports set active = true where code = 'table_tennis'" -c "insert into courts (club_id, name, sport) select id, 'TT conv', 'table_tennis' from clubs where slug = 'batroun'" >/dev/null
   $PSQL -d $DB -X -At -c "select count(*) from club_discovery(null, null, null, 'ping pong')"
-  $PSQL -q -d $DB -c "delete from courts where name = 'TT conv'" >/dev/null
+  $PSQL -q -d $DB -c "delete from courts where name = 'TT conv'" -c "update sports set active = false where code = 'table_tennis'" >/dev/null
 }
 check "C21b re-applying 0078 drops the search clauses; re-applying 0100 restores them and 'ping pong' finds the club again" "$(restore | tr '\n' ' ')" "^f t 1 ?$"
 exit $status

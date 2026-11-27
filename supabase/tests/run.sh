@@ -1543,6 +1543,9 @@ else claim "106a re-applying 0041 onwards raises no error$(printf "$RERUN_FAILS"
 # 0100 converges (independent review of the 0.5.0 candidate, S1): re-applying 0041 onwards (0078 re-creates the search
 # functions without its clauses) must end with 0100's catalogue in place, not a silently older schema
 check service "106e and 0100's catalogue is back in place afterwards (search by sport and alias, alphabetical club_sports, the domain)" "select (position('unnest(s.aliases)' in pg_get_functiondef('club_discovery(sport,text,text,text)'::regprocedure)) > 0 and position('unnest(s2.aliases)' in pg_get_functiondef('club_day_slots(date,sport,text,text,text)'::regprocedure)) > 0 and position('order by x.name_en' in pg_get_functiondef('club_sports(uuid)'::regprocedure)) > 0 and (select typtype from pg_type where typname = 'sport' and typnamespace = 'public'::regnamespace) = 'd')::text;" true
+# 0101 converges too: after the loop re-applied 0082 (moderation-log action list) and then 0101, the photo actions,
+# the I-2 rule and the I-3 release guard are all in place, and exactly one release guard trigger exists
+check service "106g and 0101's photo moderation is back in place afterwards (action list, 30-day rule, release guard)" "select (pg_get_constraintdef((select oid from pg_constraint where conname = 'moderation_log_action_check')) like '%view_photo_evidence%' and position('30 days' in pg_get_functiondef('can_see_player_photo(uuid,uuid)'::regprocedure)) > 0 and (select count(*) from pg_trigger where tgname = 'photo_hold_release_guard') = 1 and (select active from sports where code = 'table_tennis') = false)::text;" true
 # 0099 converges too: re-applying 0091 restores the old movers, and 0099 re-applied after it refuses them again
 # (compat.sh adds a TEST-ONLY adapter after 0099 that makes the old calls work again on purpose: then only the
 # 8-argument move is required)

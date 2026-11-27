@@ -17,8 +17,11 @@
 --      deactivated sport keeps working (deactivate the court to stop bookings).
 --   5. Only an admin writes the catalogue (existing RLS: "sports: admin"). Players and club staff cannot: staff choose
 --      among active sports for their courts, they do not invent global ones.
---   6. Table tennis is added (code table_tennis), with "ping pong" as an alias. Discovery's free-text search also
---      matches a sport's name and aliases ("ping pong" finds clubs with table tennis courts).
+--   6. Table tennis is added (code table_tennis), with "ping pong" as an alias, INACTIVE (I-1, #108 review; Paul's #66
+--      decision): no court, game, level or coach can use it until an admin activates it as its own approved step
+--      (update sports set active = true where code = 'table_tennis'). Re-applying this migration never changes that
+--      choice (on conflict do nothing). Discovery's free-text search also matches a sport's name and aliases ("ping
+--      pong" finds clubs with table tennis courts, once there are any).
 --   7. club_sports lists a club's sports alphabetically by display name; the app and website order every sport list by
 --      display name (client change in the same draft).
 --
@@ -97,7 +100,7 @@ create unique index if not exists sports_name_en_unique on sports (lower(name_en
 alter table sports alter column sort_order set default 1000;
 
 insert into sports (code, name_en, name_ar, sort_order, active, aliases)
-values ('table_tennis', 'Table tennis', null, 80, true, '{"ping pong","ping-pong","pingpong"}')
+values ('table_tennis', 'Table tennis', null, 80, false, '{"ping pong","ping-pong","pingpong"}')   -- I-1: starts inactive
 on conflict (code) do nothing;
 
 -- every single-valued use references the catalogue

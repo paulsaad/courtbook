@@ -42,11 +42,11 @@ ok "R0 the fingerprint reads $(echo "$fpa" | wc -l) items, including $(echo "$fp
 r=$(apply $B $UP); [ -z "$r" ] || bad "R1 up applies" "$r"
 r=$(apply $B $DOWN); [ -z "$r" ] && ok "R1a down applies after up" || bad "R1a down applies after up" "$r"
 d=$(diff <(fp $A) <(fp $B)); n=$(fp $A | wc -l)
-[ -z "$d" ] && ok "R1b up then down = a plain 0001–$(ls supabase/migrations | tail -1 | cut -c1-4) build: $n schema and data items identical" || bad "R1b up then down differs from a plain build" "$d"
+[ -z "$d" ] && ok "R1b up then down = a plain 0001–$(ls supabase/migrations | awk '$0 < "0100"' | tail -1 | cut -c1-4) build: $n schema and data items identical" || bad "R1b up then down differs from a plain build" "$d"
 
 # R2
 apply $C $UP >/dev/null
-$PSQL -q -d $C -c "insert into courts (club_id, name, sport, sort) select id, 'TT 1', 'table_tennis', 99 from clubs where slug = 'batroun'" >/dev/null
+$PSQL -q -d $C -c "update sports set active = true where code = 'table_tennis'" -c "insert into courts (club_id, name, sport, sort) select id, 'TT 1', 'table_tennis', 99 from clubs where slug = 'batroun'" >/dev/null
 before=$(fp $C); r=$(apply $C $DOWN)
 echo "$r" | grep -q "rollback_blocked: sport(s) table_tennis in use" && ok "R2a a table tennis court blocks the rollback, with the reason" || bad "R2a" "$r"
 [ "$before" = "$(fp $C)" ] && ok "R2b the refused rollback changed nothing" || bad "R2b the refused rollback changed something"

@@ -1,5 +1,6 @@
--- DRAFT rollback of player_photos.draft.sql (not numbered, applied nowhere). Returns the schema to exactly what it was
--- (supabase/tests/photo/player_photos_rollback.sh: schema fingerprint identical to a plain build).
+-- Rollback of 0101_player_photos.sql. Run as ONE transaction (psql -1, or the SQL editor's single run). Returns the
+-- schema to exactly what it was before 0101 (supabase/tests/photo/player_photos_rollback.sh: schema fingerprint
+-- identical to a plain build).
 --
 -- Removing the feature removes the stored photos with it. So it REFUSES, changing nothing, while any photo exists,
 -- unless the person running it confirms in the same transaction:
@@ -12,10 +13,13 @@ begin
   -- review of 02e7d06 (S2): no report, photo or copy may be added between this check and the drops below
   lock table reports, player_photos in share row exclusive mode;
   if to_regclass('public.photo_evidence') is not null then execute 'lock table photo_evidence in share row exclusive mode'; end if;
-  -- evidence for an open report or one on legal hold is never discarded by a rollback, confirmed or not
-  if to_regclass('public.photo_evidence') is not null and exists (select 1 from photo_evidence e join reports r on r.id = e.report_id where r.status = 'open' or r.legal_hold) then
-    raise exception 'rollback_blocked: % photo evidence copies belong to open reports or reports on legal hold; they cannot be discarded',
-      (select count(*) from photo_evidence e join reports r on r.id = e.report_id where r.status = 'open' or r.legal_hold);
+  -- evidence for an open report, one on legal hold, or one released from hold less than 30 days ago (I-3) is never
+  -- discarded by a rollback, confirmed or not
+  if to_regclass('public.photo_evidence') is not null and exists (select 1 from photo_evidence e join reports r on r.id = e.report_id
+       where r.status = 'open' or r.legal_hold or r.legal_hold_released_at > now() - interval '30 days') then
+    raise exception 'rollback_blocked: % photo evidence copies belong to open reports, reports on legal hold or recently released from it; they cannot be discarded',
+      (select count(*) from photo_evidence e join reports r on r.id = e.report_id
+        where r.status = 'open' or r.legal_hold or r.legal_hold_released_at > now() - interval '30 days');
   end if;
   if (exists (select 1 from player_photos) or (to_regclass('public.photo_evidence') is not null and exists (select 1 from photo_evidence)))
      and coalesce(current_setting('courtbook.discard_player_photos', true), '') <> 'yes' then
@@ -32,11 +36,14 @@ drop function if exists moderator_hide_player_photo(uuid, text);
 drop trigger if exists reports_photo_evidence_retention on reports;
 drop function if exists photo_evidence_retention();
 drop function if exists photo_evidence_purge();
+drop trigger if exists photo_hold_release_guard on reports;
+drop function if exists photo_hold_release_guard();
 drop trigger if exists photo_evidence_hold_guard on reports;
 drop function if exists photo_evidence_hold_guard();
 drop trigger if exists photo_evidence_on_report on reports;
 drop function if exists photo_evidence_on_report();
 drop table if exists photo_evidence;
+alter table reports drop column if exists legal_hold_released_at;
 drop function if exists is_photo_moderator();
 -- removing the list is itself logged (photo_moderator_off), before the trigger goes
 delete from photo_moderators;

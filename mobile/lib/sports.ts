@@ -10,8 +10,10 @@ import { sportName } from "./days";
  */
 export type CatalogueSport = { code: string; name: string };
 
+// Only sports active everywhere. Table tennis is left out (I-7, #108 review): it starts inactive (0100) and appears from
+// the catalogue once an admin activates it, so an app that cannot read the catalogue never offers it early.
 export const KNOWN_SPORTS: CatalogueSport[] = sortByName(
-  ["padel", "tennis", "football", "basketball", "volleyball", "squash", "badminton", "table_tennis"].map((code) => ({ code, name: sportName(code) })),
+  ["padel", "tennis", "football", "basketball", "volleyball", "squash", "badminton"].map((code) => ({ code, name: sportName(code) })),
 );
 
 export function sortByName(list: CatalogueSport[]): CatalogueSport[] {

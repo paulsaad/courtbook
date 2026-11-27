@@ -1,7 +1,11 @@
-# Optional player profile photo — DRAFT (not applied, not deployed)
+# Optional player profile photo — 0101 in the 0.5.0 candidate (not applied, not deployed)
 
-Status: isolated draft for review. The SQL is unnumbered (`sql/player_photos.draft.sql`) and runs nowhere until Paul
-approves it and it gets the next free migration number. The web code ships safely before the schema: every photo read
+Status (27 Nov): in the full 0.5.0 candidate as migration `supabase/migrations/0101_player_photos.sql` (number
+provisionally approved by Paul), rollback `supabase/rollback/0101_down.sql`. Applied nowhere yet. Corrections from the
+#108 integration review are in: I-2 (photo access through a game ends 30 days after it ended), I-3 (only a photo
+moderator may release a legal hold on a report holding photo copies; the release is logged and the copies stay 30 more
+days), I-4 (message and game reports for "inappropriate" or "abuse" copy the named player's photo). The sections below
+describe the draft history and still use its old file names. The web code ships safely before the schema: every photo read
 is optional, so without the schema the profile and game pages look and behave exactly as today.
 
 ## What a player gets
