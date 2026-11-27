@@ -69,6 +69,8 @@ export type PaymentStatus = {
   attempt: { status: string; outcome: string | null; attemptNo: number } | null;
   attemptsLeft: number;
   refundsDue: number;
+  /** 0098 (M1): true only when every attempt is known to have taken nothing. Missing or false: never "no fee was taken". */
+  noFeeTaken: boolean;
 };
 
 /** What a start request came back with. `unknown`: no usable answer (offline, timeout, unreadable) — the outcome is
@@ -119,6 +121,7 @@ export function readStatus(httpStatus: number, body: unknown): StatusAnswer {
       attempt: isObj(s.attempt) ? { status: String(s.attempt.status), outcome: typeof s.attempt.outcome === "string" ? s.attempt.outcome : null, attemptNo: Number(s.attempt.attemptNo) || 0 } : null,
       attemptsLeft: Math.max(0, Math.min(3, Number(s.attemptsLeft) || 0)),
       refundsDue: Math.max(0, Number(s.refundsDue) || 0),
+      noFeeTaken: s.noFeeTaken === true,
     } };
   }
   // the server could not read the payment's records right now: says nothing about the payment (review of PR #37)
@@ -191,7 +194,8 @@ export function startProblem(a: StartAnswer, online: boolean): string | null {
     if (a.error === "payment_in_progress") return "A payment for this booking is already in progress. Tap Check payment.";
     return RETRY_FINAL[a.error] ?? "Something went wrong. Nothing was charged.";
   }
-  if (a.kind === "ended") return a.state === "failed" ? "That payment didn't go through. Nothing was charged." : "That payment page expired. Nothing was charged.";
+  // 0098 (M1 review S3): an expired attempt may be CourtBook's own timeout (unknown_timeout): never "nothing was charged"
+  if (a.kind === "ended") return a.state === "failed" ? "That payment didn't go through. Nothing was charged." : "That payment page expired. If you were charged, the fee will be refunded.";
   return null;
 }
 
@@ -199,6 +203,11 @@ export function startProblem(a: StartAnswer, online: boolean): string | null {
  * The screen for a known server state. `holdLeftMs` is from the device clock and is display only: the server decides
  * whether the hold is still live.
  */
+// 0098 (M1, Paul 26 Nov): "No fee was taken" only when the provider said so (or nothing was sent to it)
+export const HOLD_ENDED_NO_FEE = "Your 10-minute hold ended before a payment arrived. No fee was taken. You can reserve again if the court is still free.";
+export const HOLD_ENDED_UNCERTAIN = "Your 10-minute hold ended. We couldn't confirm the payment. If you were charged, the fee will be refunded. You can reserve again if the court is still free.";
+export const NOT_CONFIRMED_NOTE = "If you were charged, the fee will be refunded";
+
 export function payView(s: PaymentStatus | null, opts: { holdLeftMs: number | null; online: boolean; busy: boolean }): PayView {
   const base = { message: null, canCheck: true, canAbandon: false, countdown: false, tone: "neutral" as const };
   if (!s) return { ...base, title: "Checking your booking…", primary: "none", primaryLabel: "", canCheck: opts.online };
@@ -222,7 +231,7 @@ export function payView(s: PaymentStatus | null, opts: { holdLeftMs: number | nu
     case "confirmed":
       return { ...base, title: "Court booked", message: "Your booking fee is paid. Pay the court price at the club.", primary: "view-booking", primaryLabel: "See booking", canCheck: false, tone: "good" };
     case "hold_expired":
-      return { ...base, title: "Hold ended", message: "Your 10-minute hold ended before a payment arrived. No fee was taken. You can reserve again if the court is still free.",
+      return { ...base, title: "Hold ended", message: s.noFeeTaken ? HOLD_ENDED_NO_FEE : HOLD_ENDED_UNCERTAIN,
         primary: "none", primaryLabel: "", canCheck: false, tone: "bad" };
     case "refund_due":
       return { ...base, title: "Booking not confirmed — refund due",
@@ -231,6 +240,12 @@ export function payView(s: PaymentStatus | null, opts: { holdLeftMs: number | nu
       return { ...base, title: "Booking cancelled", message: null, primary: "view-booking", primaryLabel: "See booking", canCheck: false, tone: "bad" };
   }
 }
+
+/** 0098 (M2): what release_hold answered. Before 0098 it answered nothing (void): treated as released, as before. */
+export function releaseOutcome(data: unknown): "released" | "already_confirmed" | "already_closed" {
+  return data === "already_confirmed" || data === "already_closed" ? data : "released";
+}
+export const RELEASE_TOO_LATE = { title: "Your payment went through", body: "Your payment went through: court booked. The hold was not released." } as const;
 
 /** Where a just-made reservation goes: a pending hold never shows "Court booked". */
 export function afterReserve(status: string): "booking-new" | "pay" | "booking" {
@@ -243,14 +258,15 @@ export function afterReserve(status: string): "booking-new" | "pay" | "booking" 
 
 export type FeeLine = { value: string; note: string };
 /** The CourtBook fee on a fee_online booking, from the payment row the player can read. Unknown is never "Paid". */
-export function feeLine(paymentStatus: string | null | undefined, fee: number): FeeLine {
+export function feeLine(paymentStatus: string | null | undefined, fee: number, noFeeTaken = false): FeeLine {
   const amount = `$${fee.toFixed(2)}`;
   switch (paymentStatus) {
     case "paid": return { value: `${amount} paid`, note: "Paid online" };
     case "pending": return { value: `${amount} not paid yet`, note: "Awaiting payment" };
     case "refund_due": return { value: `${amount} refund due`, note: "Refund on its way" };
     case "refunded": return { value: `${amount} refunded`, note: "Refunded" };
-    case "expired": case "failed": return { value: "Not paid", note: "No fee was taken" };
+    // 0098 (M1): the payment row alone cannot tell a provider's refusal from CourtBook's own timeout
+    case "expired": case "failed": return { value: "Not paid", note: noFeeTaken ? "No fee was taken" : NOT_CONFIRMED_NOTE };
     default: return { value: "See details", note: "Fee status unavailable" };
   }
 }

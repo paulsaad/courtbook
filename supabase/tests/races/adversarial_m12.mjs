@@ -286,8 +286,11 @@ const record = (id, invariant, actual, pass) => { results.push({ id, invariant, 
   const y = await heldAndStarted(PLAYERS[11], court2, s, e);
   await call("service", RESULT, [y.attempt, "failed", null, null, null]);
   const late = await succeed(y.attempt, `s9b-${randomUUID()}`);
-  record("S9b", "'failed' then success (hold still live): money is not lost, booking confirmed", { late: late.rows?.[0]?.r ?? late, b: await bookingStatus(y.booking) },
-    late.rows?.[0]?.r === "confirmed" && (await bookingStatus(y.booking)) === "confirmed");
+  // 0098 (M1, Paul 26 Nov): a closed attempt is never revived; the money is recorded and owed back, the live hold stays
+  const yc = await charges(y.payment);
+  record("S9b", "'failed' then success (hold still live): money is not lost (recorded, owed back); the attempt is not revived; the hold stays pending (0098)",
+    { late: late.rows?.[0]?.r ?? late, b: await bookingStatus(y.booking), c: yc },
+    late.rows?.[0]?.r === "late" && (await bookingStatus(y.booking)) === "pending" && yc.length === 1 && yc[0].disposition === "refund_due");
   // (c) success for attempt 1 arrives after the player already paid with attempt 2 (two charges): the second is owed back
   const court3 = await newCourt();
   const z = await heldAndStarted(PLAYERS[12], court3, s, e);

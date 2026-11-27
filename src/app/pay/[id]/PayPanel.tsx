@@ -16,7 +16,7 @@ type Props = {
   price: number; fee: number; total: number;
   /** fee_online club (M12.1): only the booking fee is paid here; the court is paid at the club */
   feeOnly?: boolean; simulated?: boolean;
-  lastAttempt?: { status: string; outcome: string | null } | null; attemptsLeft?: number;
+  lastAttempt?: { status: string; outcome: string | null; endReason?: string | null } | null; attemptsLeft?: number;
 };
 
 /** Attempt states after which this tap is over. Any other ("starting", "open" — even without a usable payment page —
@@ -27,7 +27,11 @@ const FINISHED = new Set(["succeeded", "failed", "expired"]);
 export function attemptNotice(a: Props["lastAttempt"], left: number): string | null {
   if (!a) return null;
   const again = left > 0 ? ` You can try again (${left} ${left === 1 ? "try" : "tries"} left).` : " No tries left for this hold: pick the slot again if it is still free.";
-  if (a.status === "failed" || a.status === "expired") return `That payment did not go through.${again}`;
+  // 0098 (M1 review S3): "did not go through" only when the provider itself said so, or it was never sent to it;
+  // CourtBook's own timeout (unknown_timeout, or no reason recorded) may still turn out to have taken the money
+  if ((a.status === "failed" || a.status === "expired") && ["provider_failed", "provider_expired", "abandoned"].includes(a.endReason ?? ""))
+    return `That payment did not go through.${again}`;
+  if (a.status === "failed" || a.status === "expired") return `We couldn't confirm that payment. If you were charged, the fee will be refunded.${again}`;
   if (a.status === "starting" || a.status === "open") return "Waiting for the payment provider to confirm. If you paid, this page will update — reload it in a moment.";
   if (a.status === "succeeded" && a.outcome && a.outcome !== "confirmed") return `We received a payment we could not use for this booking. It will be refunded in full.${again}`;
   return null;
@@ -88,7 +92,9 @@ export default function PayPanel(p: Props) {
 
   async function giveUp() {
     setBusy(true);
-    await createClient().rpc("release_hold", { p_booking: p.bookingId });
+    const { data } = await createClient().rpc("release_hold", { p_booking: p.bookingId });
+    // 0098 (M2): the payment confirmed the booking first: the court is booked, never answered as released
+    if (data === "already_confirmed") { router.replace(`/bookings/${p.bookingId}?new=1`); return; }
     router.replace(`/club/${p.clubSlug}`);
   }
 

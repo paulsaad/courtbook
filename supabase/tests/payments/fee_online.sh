@@ -29,7 +29,7 @@ MUTANTS=(
   "M1 a wrong amount confirms|elsif p_amount <> a.amount_usd then|elsif false then"
   "M2 a wrong currency confirms|if v_currency <> a.currency then|if false then"
   "M3 a duplicate success confirms again (no duplicate rule)|elsif p.status = 'paid' then v_outcome := 'duplicate'; v_reason := 'duplicate';|"
-  "M4 a failed attempt kills the hold|      update payment_attempts set status = p_result, finished_at = now(), last_checked_at = now(), checks = checks + 1 where id = a.id;|      update payment_attempts set status = p_result, finished_at = now(), last_checked_at = now(), checks = checks + 1 where id = a.id; update bookings set status = 'expired' where id = b.id and status = 'pending';"
+  "M4 a failed attempt kills the hold|             finished_at = now(), last_checked_at = now(), checks = checks + 1 where id = a.id;\n      return p_result;|             finished_at = now(), last_checked_at = now(), checks = checks + 1 where id = a.id;\n      update bookings set status = 'expired' where id = b.id and status = 'pending';\n      return p_result;"
   "M5 the player's cancellation refunds the fee|    if p_cause <> 'club' then return false; end if;|"
   "M6 no limit on attempts|  if v_n >= 3 then raise exception 'attempts_exhausted'; end if;|"
   "M7 a new attempt after the hold's deadline|  if b.hold_expires_at is null or b.hold_expires_at <= now() then raise exception 'hold_expired'; end if;|"
@@ -46,17 +46,46 @@ MUTANTS=(
   "M19 a recorded reference counts as recorded whatever its evidence|  if c.amount = p_amount and c.currency = p_currency and c.attempt_id is not distinct from p_attempt then return true; end if;|  return true;"
   "M14 an unmatched charge is dropped|  insert into fee_charges (provider, provider_ref, amount, currency, collected, disposition, reason, refund_due_at)\n  values (p_provider, v_ref, p_amount, v_currency, p_provider <> 'simulated', 'refund_due', 'unmatched', now())\n  on conflict (provider, provider_ref) do nothing;|"
 )
+# 0098 review (S1): each mutant is made in the definition IN FORCE — the newest of 0098, 0097, 0094 that contains the
+# text — and loaded into a fresh copy of courtbook_test. A mutant of 0094 is followed by 0097 and 0098 again, so the
+# functions they replaced are theirs again (reloading 0094 alone put back 0094's record_attempt_result, which breaks
+# 0098's end_reason constraint: every mutant then "failed" for that reason, not its own). X0, a no-op, must pass.
+LATER=(supabase/migrations/0097_closed_account_fee_payments.sql supabase/migrations/0098_m12_late_charges_release_actor.sql)
+MUTANTS=("X0 no-op control (must NOT be caught)|-- Lock order everywhere: club (share)|-- Lock order everywhere: club (share)" "${MUTANTS[@]}")
+fresh() { $PSQL -q -d postgres -c "drop database if exists $T" -c "create database $T template courtbook_test" >/dev/null; }
 caught=0; total=0
 for m in "${MUTANTS[@]}"; do
   name=${m%%|*}; rest=${m#*|}; from=${rest%%|*}; to=${rest#*|}
-  total=$((total+1))
+  target=""
+  for f in supabase/migrations/0098_m12_late_charges_release_actor.sql supabase/migrations/0097_closed_account_fee_payments.sql "$MIG"; do   # newest first
+    [ -f "$f" ] || continue
+    FROM="$from" python3 -c "import os,sys; f=os.environ['FROM'].replace('\\\\n','\n'); sys.exit(0 if open(sys.argv[1]).read().count(f)==1 else 1)" "$f" && { target=$f; break; }
+  done
+  [ -n "$target" ] || { echo "  MUTANT NOT APPLIED: $name"; status=FAIL; continue; }
   tmp=$(mktemp /tmp/m0094.XXXXXX); chmod 644 "$tmp"   # read by the database's own user
-  FROM="$from" TO="$to" python3 -c "import os,sys; s=open(sys.argv[1]).read(); f=os.environ['FROM'].replace('\\\\n','\n'); t=os.environ['TO'].replace('\\\\n','\n'); n=s.count(f); assert n==1, (n, f); open(sys.argv[2],'w').write(s.replace(f,t))" "$MIG" "$tmp" \
+  FROM="$from" TO="$to" python3 -c "import os,sys; s=open(sys.argv[1]).read(); f=os.environ['FROM'].replace('\\\\n','\n'); t=os.environ['TO'].replace('\\\\n','\n'); n=s.count(f); assert n==1, (n, f); open(sys.argv[2],'w').write(s.replace(f,t))" "$target" "$tmp" \
     || { echo "  MUTANT NOT APPLIED: $name"; status=FAIL; rm -f "$tmp"; continue; }
-  $PSQL -q -d $T -v ON_ERROR_STOP=1 -1 -f "$tmp" >/dev/null 2>&1 || { echo "  MUTANT DID NOT LOAD: $name"; status=FAIL; rm -f "$tmp"; continue; }
+  fresh
+  loaded=ok
+  $PSQL -q -d $T -v ON_ERROR_STOP=1 -1 -f "$tmp" >/dev/null 2>&1 || loaded=no
+  # every migration newer than the one mutated is loaded again after it, so only the mutated definition differs
+  if [ $loaded = ok ]; then
+    newer=no
+    for f in "$MIG" "${LATER[@]}"; do
+      if [ $newer = yes ] && [ -f "$f" ]; then $PSQL -q -d $T -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || loaded=no; fi
+      [ "$f" = "$target" ] && newer=yes
+    done
+  fi
+  [ $loaded = ok ] || { echo "  MUTANT DID NOT LOAD: $name ($(basename "$target"))"; status=FAIL; rm -f "$tmp"; continue; }
   mo=$(suite)
-  if echo "$mo" | grep -qE "^(FAIL|psql)|ERROR"; then caught=$((caught+1)); echo "  caught  $name ($(echo "$mo" | grep -m1 '^FAIL' | cut -c1-70))"
-  else echo "  MISSED  $name"; status=FAIL; fi
+  hit=no; echo "$mo" | grep -qE "^(FAIL|psql)|ERROR" && hit=yes
+  if [[ "$name" == X0* ]]; then
+    if [ $hit = no ]; then echo "  ok      $name (in $(basename "$target"))"; else echo "  FAIL    $name was caught: the harness itself fails ($(echo "$mo" | grep -m1 -E '^FAIL|ERROR' | cut -c1-90))"; status=FAIL; fi
+  else
+    total=$((total+1))
+    if [ $hit = yes ]; then caught=$((caught+1)); echo "  caught  $name in $(basename "$target") ($(echo "$mo" | grep -m1 '^FAIL' | cut -c1-70))"
+    else echo "  MISSED  $name (in $(basename "$target"))"; status=FAIL; fi
+  fi
   rm -f "$tmp"
 done
 [ "$(fp)" = "$before" ] || { echo "courtbook_test's functions changed during the run"; status=FAIL; }

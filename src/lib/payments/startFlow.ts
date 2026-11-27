@@ -185,6 +185,9 @@ export async function startFeePayment(d: FlowDeps, input: { paymentId: unknown; 
  * If any of the reads fails (the payment, its attempts, the refunds owed), the answer is 503
  * `payment_status_unavailable` (not final): no state, no counts — never "nothing tried" or "nothing owed".
  */
+/** Why an attempt ended, when the provider itself said nothing was taken (or it was never sent): 0098. */
+const NO_CHARGE_REASONS = ["provider_failed", "provider_expired", "abandoned"];
+
 export async function feePaymentStatus(d: Pick<FlowDeps, "player" | "admin" | "provider"> & { userId: string }, input: { paymentId: unknown }): Promise<FlowResult> {
   const { paymentId } = input;
   if (!isUuid(paymentId)) return fail("bad_request", 400);
@@ -206,9 +209,9 @@ export async function feePaymentStatus(d: Pick<FlowDeps, "player" | "admin" | "p
   if (!mine.data) return fail("not_found", 404);                              // not this player's (or does not exist)
   if (mine.data.kind !== "fee_only") return fail("wrong_payment_mode", 409);
 
-  type AttemptRead = { id: string; status: string; outcome: string | null; attempt_no: number; provider: string; created_at: string };
+  type AttemptRead = { id: string; status: string; outcome: string | null; attempt_no: number; provider: string; created_at: string; end_reason: string | null };
   const attemptsOf = async (): Promise<{ rows: AttemptRead[] } | { error: string }> => {
-    const { data, error } = await player.from("payment_attempts").select("id, status, outcome, attempt_no, provider, created_at").eq("payment_id", paymentId).order("attempt_no", { ascending: false });
+    const { data, error } = await player.from("payment_attempts").select("id, status, outcome, attempt_no, provider, created_at, end_reason").eq("payment_id", paymentId).order("attempt_no", { ascending: false });
     if (error || !Array.isArray(data)) return { error: error?.code ?? "attempts" };
     return { rows: data as AttemptRead[] };
   };
@@ -250,5 +253,8 @@ export async function feePaymentStatus(d: Pick<FlowDeps, "player" | "admin" | "p
     attempt: latest ? { status: latest.status, outcome: latest.outcome, attemptNo: latest.attempt_no } : null,
     attemptsLeft: Math.max(0, 3 - attempts.length),
     refundsDue,
+    // 0098 (M1): "no fee was taken" may be said only when every attempt is known to have taken nothing: refused or
+    // expired by the provider itself, or never sent to it. CourtBook's own timeout (unknown_timeout) is not that.
+    noFeeTaken: refundsDue === 0 && attempts.every((x) => (x.status === "failed" || x.status === "expired") && NO_CHARGE_REASONS.includes(x.end_reason ?? "")),
   });
 }

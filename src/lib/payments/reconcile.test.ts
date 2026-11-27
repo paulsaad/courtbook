@@ -137,9 +137,10 @@ describe("runPaymentReconciliation", () => {
 
 describe("a provider that has never heard of an attempt (\"unknown\")", () => {
   const g = new FakeGateway(() => 0);
-  it(`is "pending" for ${UNKNOWN_GRACE_MINUTES} minutes, then recorded as expired; without the attempt's age, always pending`, async () => {
+  // 0098 (M1): recorded as CourtBook's own inference (unknown_timeout), never as the provider's expiry
+  it(`is "pending" for ${UNKNOWN_GRACE_MINUTES} minutes, then recorded as unknown_timeout; without the attempt's age, always pending`, async () => {
     const created = new Date("2026-12-01T10:00:00Z");
-    for (const [minutes, want] of [[1, "pending"], [UNKNOWN_GRACE_MINUTES - 1, "pending"], [UNKNOWN_GRACE_MINUTES + 1, "expired"]] as const) {
+    for (const [minutes, want] of [[1, "pending"], [UNKNOWN_GRACE_MINUTES - 1, "pending"], [UNKNOWN_GRACE_MINUTES + 1, "unknown_timeout"]] as const) {
       const { rpc, calls } = db(() => ({ data: "x" }));
       await verifyAndRecord(rpc, g, A2, { createdAt: created, now: new Date(created.getTime() + minutes * 60_000) });
       expect(calls[0].args).toEqual({ p_attempt: A2, p_result: want });
