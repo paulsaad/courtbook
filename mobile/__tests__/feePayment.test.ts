@@ -447,3 +447,11 @@ describe("0098 (M12 review M1/M2)", () => {
     expect(releaseOutcome("")).toBe("released");
   });
 });
+
+describe("0098 (M12 review S3): an attempt that ended", () => {
+  it("expired (possibly CourtBook's own timeout) never says nothing was charged; failed (the provider refused) does", () => {
+    expect(startProblem({ kind: "ended", state: "expired" }, true)).toBe("That payment page expired. If you were charged, the fee will be refunded.");
+    expect(startProblem({ kind: "ended", state: "expired" }, true)).not.toMatch(/Nothing was charged/);
+    expect(startProblem({ kind: "ended", state: "failed" }, true)).toMatch(/Nothing was charged/);
+  });
+});
