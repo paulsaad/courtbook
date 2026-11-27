@@ -101,37 +101,48 @@ else
 fi
 
 echo "--- S3. staff moves keep the club's minimum and maximum length (migration 0066) and the slot rules"
-HAS_0066=$(q admin "select (prosrc like '%min_booking_minutes%')::text from pg_proc where proname='move_booking' and pronamespace='public'::regnamespace")
+# the length rules (0066) live in the move function the desk calls: since F1, the 8-argument move_booking_priced
+HAS_0066=$(q admin "select coalesce(bool_or(prosrc like '%min_booking_minutes%'), false)::text from pg_proc where proname in ('move_booking','move_booking_priced') and pronamespace='public'::regnamespace")
 $PSQL -q -c "update clubs set payment_mode='at_desk', min_booking_minutes = 60 where id='$CLUB'; insert into club_staff (club_id, profile_id) values ('$CLUB', '$U1') on conflict do nothing;" >/dev/null
 check admin "S3a club limits for this test: 30 min grid, 1 h minimum, 3 h maximum, 08:00-23:00" "select slot_minutes||'/'||min_booking_minutes||'/'||max_booking_minutes||'/'||to_char(open_time,'HH24:MI')||'-'||to_char(close_time,'HH24:MI') from clubs where id='$CLUB';" "30/60/180/08:00-23:00"
 MB=$(q $U1 "select staff_book('$CLUB','$COURT3', $(at 09:00), $(at 10:00), 'smoke-move', null);")
 check admin "S3b fixture: a 1 h walk-in booked by staff" "select count(*) from bookings where id='$MB' and status='confirmed' and source='staff';" 1
-mv() { q $U1 "select move_booking('$MB','$1', $(at $2), $(at $3))::text || 'moved';"; }
+mv() { q $U1 "select (case when move_booking_priced('$MB','$1', $(at $2), $(at $3), quote_price('$1', $(at $2), $(at $3)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end)::text || 'moved';"; }
 span() { q admin "select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'-'||to_char(end_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='$MB';"; }
 if [ "$HAS_0066" = "true" ]; then
-  fails_with $U1 "S3c move to 30 min (below the 1 h minimum): refused" "select move_booking('$MB','$COURT3', $(at 09:00), $(at 09:30));" bad_duration
-  fails_with $U1 "S3d move to 4 h (above the 3 h maximum): refused" "select move_booking('$MB','$COURT3', $(at 09:00), $(at 13:00));" bad_duration
-  fails_with $U1 "S3e move to 3 h 30 elsewhere (above the maximum): refused" "select move_booking('$MB','$COURT2', $(at 12:00), $(at 15:30));" bad_duration
+  fails_with $U1 "S3c move to 30 min (below the 1 h minimum): refused" "select (case when move_booking_priced('$MB','$COURT3', $(at 09:00), $(at 09:30), quote_price('$COURT3', $(at 09:00), $(at 09:30)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" bad_duration
+  # refusals the quote would give first (0092: too_long; before opening: no price) pass a constant price (0) instead,
+  # so the MOVE function answers; it refuses the length before it compares the price (review R106-2)
+  fails_with $U1 "S3d move to 4 h (above the 3 h maximum): refused" "select (case when move_booking_priced('$MB','$COURT3', $(at 09:00), $(at 13:00), 0, (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" bad_duration
+  fails_with $U1 "S3e move to 3 h 30 elsewhere (above the maximum): refused" "select (case when move_booking_priced('$MB','$COURT2', $(at 12:00), $(at 15:30), 0, (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" bad_duration
   check admin "S3f ...the booking is unchanged" "select '$(span)';" "09:00-10:00"
-  check $U1 "S3g move to 1 h 30 at another time (within limits): accepted" "select move_booking('$MB','$COURT3', $(at 11:00), $(at 12:30))::text || 'moved';" moved
-  check $U1 "S3h move to exactly 3 h (the maximum): accepted" "select move_booking('$MB','$COURT3', $(at 11:00), $(at 14:00))::text || 'moved';" moved
-  check $U1 "S3i move to exactly 1 h (the minimum): accepted" "select move_booking('$MB','$COURT3', $(at 11:00), $(at 12:00))::text || 'moved';" moved
+  check $U1 "S3g move to 1 h 30 at another time (within limits): accepted" "select (case when move_booking_priced('$MB','$COURT3', $(at 11:00), $(at 12:30), quote_price('$COURT3', $(at 11:00), $(at 12:30)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end)::text || 'moved';" moved
+  check $U1 "S3h move to exactly 3 h (the maximum): accepted" "select (case when move_booking_priced('$MB','$COURT3', $(at 11:00), $(at 14:00), quote_price('$COURT3', $(at 11:00), $(at 14:00)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end)::text || 'moved';" moved
+  check $U1 "S3i move to exactly 1 h (the minimum): accepted" "select (case when move_booking_priced('$MB','$COURT3', $(at 11:00), $(at 12:00), quote_price('$COURT3', $(at 11:00), $(at 12:00)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end)::text || 'moved';" moved
   $PSQL -q -c "update clubs set min_booking_minutes = 120 where id='$CLUB';" >/dev/null
-  check $U1 "S3j club raises its minimum to 2 h: the 1 h booking can still move at its existing length" "select move_booking('$MB','$COURT2', $(at 16:30), $(at 17:30))::text || 'moved';" moved
-  fails_with $U1 "S3k ...but not to another length below the new minimum (1 h 30)" "select move_booking('$MB','$COURT2', $(at 16:30), $(at 18:00));" bad_duration
+  check $U1 "S3j club raises its minimum to 2 h: the 1 h booking can still move at its existing length" "select (case when move_booking_priced('$MB','$COURT2', $(at 16:30), $(at 17:30), quote_price('$COURT2', $(at 16:30), $(at 17:30)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end)::text || 'moved';" moved
+  fails_with $U1 "S3k ...but not to another length below the new minimum (1 h 30)" "select (case when move_booking_priced('$MB','$COURT2', $(at 16:30), $(at 18:00), quote_price('$COURT2', $(at 16:30), $(at 18:00)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" bad_duration
   $PSQL -q -c "update clubs set min_booking_minutes = 60 where id='$CLUB';" >/dev/null
 else
   echo "  (move_booking has no length check yet — 0066 not applied; showing the gap it closes)"
-  check $U1 "S3c-gap without 0066: moving it to 30 min (below the 1 h minimum) is ACCEPTED" "select move_booking('$MB','$COURT3', $(at 09:00), $(at 09:30))::text || 'moved';" moved
-  check $U1 "S3d-gap without 0066: moving it to 4 h (above the 3 h maximum) is ACCEPTED" "select move_booking('$MB','$COURT3', $(at 09:00), $(at 13:00))::text || 'moved';" moved
-  q $U1 "select move_booking('$MB','$COURT3', $(at 09:00), $(at 10:00));" >/dev/null
+  check $U1 "S3c-gap without 0066: moving it to 30 min (below the 1 h minimum) is ACCEPTED" "select (case when move_booking_priced('$MB','$COURT3', $(at 09:00), $(at 09:30), quote_price('$COURT3', $(at 09:00), $(at 09:30)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end)::text || 'moved';" moved
+  check $U1 "S3d-gap without 0066: moving it to 4 h (above the 3 h maximum) is ACCEPTED" "select (case when move_booking_priced('$MB','$COURT3', $(at 09:00), $(at 13:00), quote_price('$COURT3', $(at 09:00), $(at 13:00)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end)::text || 'moved';" moved
+  q $U1 "select (case when move_booking_priced('$MB','$COURT3', $(at 09:00), $(at 10:00), quote_price('$COURT3', $(at 09:00), $(at 10:00)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" >/dev/null
 fi
-fails_with $U1 "S3l off the 30-minute grid (10:10): refused by the slot trigger" "select move_booking('$MB','$COURT2', $(at 10:10), $(at 11:10));" not_on_grid
-fails_with $U1 "S3m before opening (06:00): refused" "select move_booking('$MB','$COURT2', $(at 06:00), $(at 07:00));" outside_opening_hours
-fails_with $U1 "S3n not whole slots (1 h 15): refused" "select move_booking('$MB','$COURT2', $(at 10:00), $(at 11:15));" bad_duration
+fails_with $U1 "S3l off the 30-minute grid (10:10): refused by the slot trigger" "select (case when move_booking_priced('$MB','$COURT2', $(at 10:10), $(at 11:10), quote_price('$COURT2', $(at 10:10), $(at 11:10)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" not_on_grid
+# since 0092 a time with no price is refused first (no_price_rule); before 0092 the hours check answered
+# the move function must answer, not the quote (review R106-2): the desk's price is the quote where the club has a
+# price for 06:00, else a constant 0 (the quote itself would refuse no_price_rule). With no price the move function
+# refuses no_price_rule while pricing the new time; with one, its price check passes and the slot trigger refuses
+# outside_opening_hours. Either way the refusal comes from the move function.
+fails_with $U1 "S3m before opening (06:00): refused" "do \$m\$ declare p numeric; begin
+  begin p := quote_price('$COURT2', $(at 06:00), $(at 07:00)); exception when others then p := 0; end;
+  perform move_booking_priced('$MB','$COURT2', $(at 06:00), $(at 07:00), p, b.court_id, b.start_at, b.end_at) from bookings b where b.id = '$MB';
+end \$m\$;" "no_price_rule\|outside_opening_hours"
+fails_with $U1 "S3n not whole slots (1 h 15): refused" "select (case when move_booking_priced('$MB','$COURT2', $(at 10:00), $(at 11:15), quote_price('$COURT2', $(at 10:00), $(at 11:15)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" bad_duration
 OB=$(q $U1 "select staff_book('$CLUB','$COURT2', $(at 19:00), $(at 20:00), 'smoke-move', null);")
-fails_with $U1 "S3o onto another booking: refused" "select move_booking('$MB','$COURT2', $(at 19:30), $(at 20:30));" slot_taken
-fails_with $U2 "S3p a player who is not staff cannot move it" "select move_booking('$MB','$COURT2', $(at 21:00), $(at 22:00));" forbidden
+fails_with $U1 "S3o onto another booking: refused" "select (case when move_booking_priced('$MB','$COURT2', $(at 19:30), $(at 20:30), quote_price('$COURT2', $(at 19:30), $(at 20:30)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" slot_taken
+fails_with $U2 "S3p a player who is not staff cannot move it" "select (case when move_booking_priced('$MB','$COURT2', $(at 21:00), $(at 22:00), quote_price('$COURT2', $(at 21:00), $(at 22:00)), (select court_id from bookings where id = '$MB'), (select start_at from bookings where id = '$MB'), (select end_at from bookings where id = '$MB')) is not null then ''::text end);" forbidden
 
 echo "--- S4. staff and past times on today's real clock (release fix 0071): walk-in cutoff, extend, past, ended"
 # Times are on the club's 30-minute grid relative to now (F = now rounded down to 30 min), on three courts.
@@ -147,13 +158,13 @@ else
   W1=$(q $U1 "select staff_book('$CLUB','$COURT', $(t -60), $(t 30), 'smoke-walkin', null);")
   check admin "S4a walk-in that started 60–89 min ago: accepted" "select status from bookings where id='$W1';" confirmed
   fails_with $U1 "S4b walk-in that started 3 h ago: refused" "select staff_book('$CLUB','$COURT2', $(t -180), $(t -120), 'smoke-walkin', null);" walk_in_too_old
-  check $U1 "S4c extend the walk-in in progress by 30 min: accepted" "select move_booking('$W1','$COURT', $(t -60), $(t 60))::text || 'moved';" moved
-  fails_with $U1 "S4d move the walk-in in progress to start earlier: refused" "select move_booking('$W1','$COURT', $(t -90), $(t 60));" move_into_past
+  check $U1 "S4c extend the walk-in in progress by 30 min: accepted" "select (case when move_booking_priced('$W1','$COURT', $(t -60), $(t 60), quote_price('$COURT', $(t -60), $(t 60)), (select court_id from bookings where id = '$W1'), (select start_at from bookings where id = '$W1'), (select end_at from bookings where id = '$W1')) is not null then ''::text end)::text || 'moved';" moved
+  fails_with $U1 "S4d move the walk-in in progress to start earlier: refused" "select (case when move_booking_priced('$W1','$COURT', $(t -90), $(t 60), quote_price('$COURT', $(t -90), $(t 60)), (select court_id from bookings where id = '$W1'), (select start_at from bookings where id = '$W1'), (select end_at from bookings where id = '$W1')) is not null then ''::text end);" move_into_past
   N=$(q $U1 "select staff_book('$CLUB','$COURT3', $(t 30), $(t 90), 'smoke-future', null);")
-  fails_with $U1 "S4e move a booking that has not started into the past: refused" "select move_booking('$N','$COURT3', $(t -120), $(t -60));" move_into_past
+  fails_with $U1 "S4e move a booking that has not started into the past: refused" "select (case when move_booking_priced('$N','$COURT3', $(t -120), $(t -60), quote_price('$COURT3', $(t -120), $(t -60)), (select court_id from bookings where id = '$N'), (select start_at from bookings where id = '$N'), (select end_at from bookings where id = '$N')) is not null then ''::text end);" move_into_past
   E=$(q $U1 "select staff_book('$CLUB','$COURT2', $(t -90), $(t -30), 'smoke-ended', null);")
   check admin "S4f walk-in from 90–119 min ago lasting 1 h (already ended): accepted" "select (status = 'confirmed' and end_at < now())::text from bookings where id='$E';" true
-  fails_with $U1 "S4g move the ended booking: refused" "select move_booking('$E','$COURT2', $(t 60), $(t 120));" booking_ended
+  fails_with $U1 "S4g move the ended booking: refused" "select (case when move_booking_priced('$E','$COURT2', $(t 60), $(t 120), quote_price('$COURT2', $(t 60), $(t 120)), (select court_id from bookings where id = '$E'), (select start_at from bookings where id = '$E'), (select end_at from bookings where id = '$E')) is not null then ''::text end);" booking_ended
   check admin "S4h the refused moves changed nothing" "select (select to_char(start_at,'HH24:MI')||'-'||to_char(end_at,'HH24:MI') from bookings where id='$W1') = to_char($(t -60),'HH24:MI')||'-'||to_char($(t 60),'HH24:MI');" t
 fi
 

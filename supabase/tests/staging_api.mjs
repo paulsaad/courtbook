@@ -252,7 +252,9 @@ try {
   const wk = await U1.client.rpc("staff_book", { p_club: CLUB, p_court: COURT3, p_start: at("09:00"), p_end: at("10:00"), p_name: "api-move", p_phone: null });
   const MB = wk.data;
   record("M1", "staff books a 1 h walk-in through the API", !wk.error && typeof MB === "string", errOf(wk) ?? "");
-  const move = (u, court, s0, e0) => u.client.rpc("move_booking", { p_booking: MB, p_court: court, p_start: at(s0), p_end: at(e0) });
+  // F1: the desk's call carries what it sees; here, the booking's current court and time (a fresh view)
+  const seenNow = () => { const [c, s, e] = sql(`select court_id||'|'||(to_json(start_at)#>>'{}')||'|'||(to_json(end_at)#>>'{}') from bookings where id='${MB}'`).split("|"); return { p_seen_court: c, p_seen_start: s, p_seen_end: e }; };
+  const move = (u, court, s0, e0) => u.client.rpc("move_booking_priced", { p_booking: MB, p_court: court, p_start: at(s0), p_end: at(e0), p_expected_price: null, ...seenNow() });
   const span = () => sql(`select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'-'||to_char(end_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='${MB}'`);
   let m = await move(U1, COURT3, "09:00", "09:30");
   record("M2", "move to 30 min (below the 1 h minimum): bad_duration", errOf(m)?.includes("bad_duration"), errOf(m) ?? "moved!");

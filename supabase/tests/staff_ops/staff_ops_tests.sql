@@ -5,6 +5,10 @@ begin;
 -- CONTROL (psql -v control=1): move_booking as it was before 0091 (no quote_move, no confirmed price), to show the move checks see the defect
 \if :{?control}
 \i supabase/migrations/0071_staff_past_times.sql
+-- F1: the desk's moves go through the 8-argument call; in the control it is the pre-0091 mover (no price rule)
+create or replace function move_booking_priced(p_booking uuid, p_court uuid, p_start timestamptz, p_end timestamptz, p_expected_price numeric,
+  p_seen_court uuid, p_seen_start timestamptz, p_seen_end timestamptz) returns jsonb language plpgsql as $c$
+begin perform move_booking(p_booking, p_court, p_start, p_end); return '{}'::jsonb; end $c$;
 \endif
 create temp table t (id text, pass boolean, detail text);
 create temp table kept (k text primary key, v text);
@@ -65,7 +69,7 @@ insert into t values ('O5 off the grid, after closing, over the maximum length, 
 select pg_temp.keep('x_book', pg_temp.r(pg_temp.u(2), format('select staff_book(%L,%L,%L,%L,''X'',null)::text', pg_temp.club(), pg_temp.c(2), pg_temp.at(2,'12:00'), pg_temp.at(2,'13:00'))));
 select pg_temp.keep('x_block', pg_temp.r(pg_temp.u(2), format('select staff_block(%L,%L,%L,%L,''X'')::text', pg_temp.club(), pg_temp.c(2), pg_temp.at(2,'12:00'), pg_temp.at(2,'13:00'))));
 select pg_temp.keep('x_close', pg_temp.r(pg_temp.u(2), format('select close_club(%L,%L,%L,''X'')::text', pg_temp.club(), pg_temp.at(9,'08:00'), pg_temp.at(9,'12:00'))));
-select pg_temp.keep('x_move', pg_temp.r(pg_temp.u(2), format('select move_booking(%L,%L,%L,%L)::text', pg_temp.got('w1'), pg_temp.c(2), pg_temp.at(2,'12:00'), pg_temp.at(2,'13:00'))));
+select pg_temp.keep('x_move', pg_temp.r(pg_temp.u(2), format('select (case when move_booking_priced(%1$L,%2$L,%3$L,%4$L,null,(select court_id from bookings where id = %1$L),(select start_at from bookings where id = %1$L),(select end_at from bookings where id = %1$L)) is not null then ''''::text end)::text', pg_temp.got('w1'), pg_temp.c(2), pg_temp.at(2,'12:00'), pg_temp.at(2,'13:00'))));
 select pg_temp.keep('x_cancel', pg_temp.r(pg_temp.u(2), format('select cancel_booking(%L)::text', pg_temp.got('w1'))));
 select pg_temp.keep('x_read', pg_temp.r(pg_temp.u(2), format('select count(*)::text from bookings where id = %L', pg_temp.got('w1'))));
 insert into t values ('O6 another club''s desk can do nothing here: book, block, close, move, cancel; and cannot see the booking',
@@ -74,7 +78,7 @@ insert into t values ('O6 another club''s desk can do nothing here: book, block,
   concat_ws(' | ', pg_temp.got('x_book'), pg_temp.got('x_block'), pg_temp.got('x_close'), pg_temp.got('x_move'), pg_temp.got('x_cancel'), pg_temp.got('x_read')));
 select pg_temp.keep('p_book', pg_temp.r(pg_temp.u(3), format('select staff_book(%L,%L,%L,%L,''X'',null)::text', pg_temp.club(), pg_temp.c(2), pg_temp.at(2,'12:00'), pg_temp.at(2,'13:00'))));
 select pg_temp.keep('p_block', pg_temp.r(pg_temp.u(3), format('select staff_block(%L,%L,%L,%L,''X'')::text', pg_temp.club(), pg_temp.c(2), pg_temp.at(2,'12:00'), pg_temp.at(2,'13:00'))));
-select pg_temp.keep('p_move', pg_temp.r(pg_temp.u(3), format('select move_booking(%L,%L,%L,%L)::text', pg_temp.got('w1'), pg_temp.c(2), pg_temp.at(2,'12:00'), pg_temp.at(2,'13:00'))));
+select pg_temp.keep('p_move', pg_temp.r(pg_temp.u(3), format('select (case when move_booking_priced(%1$L,%2$L,%3$L,%4$L,null,(select court_id from bookings where id = %1$L),(select start_at from bookings where id = %1$L),(select end_at from bookings where id = %1$L)) is not null then ''''::text end)::text', pg_temp.got('w1'), pg_temp.c(2), pg_temp.at(2,'12:00'), pg_temp.at(2,'13:00'))));
 select pg_temp.keep('p_insert', pg_temp.r(pg_temp.u(3), format('insert into bookings (club_id, court_id, guest_name, start_at, end_at, status, source, created_by, price_usd, fee_usd) values (%L,%L,''X'',%L,%L,''confirmed'',''staff'',%L,0,0)', pg_temp.club(), pg_temp.c(2), pg_temp.at(2,'14:00'), pg_temp.at(2,'15:00'), pg_temp.u(3))));
 insert into t values ('O7 a player can do none of the desk''s actions, nor write a desk booking directly',
   pg_temp.got('p_book') = 'ERR forbidden' and pg_temp.got('p_block') = 'ERR forbidden' and pg_temp.got('p_move') = 'ERR forbidden' and pg_temp.got('p_insert') like 'ERR %',
@@ -83,7 +87,7 @@ insert into t values ('O7 a player can do none of the desk''s actions, nor write
 -- ---------------------------------------------------------------- moves and their price (0091)
 create function pg_temp.mv(who int, bk text, court uuid, s timestamptz, e timestamptz, expected numeric default null) returns text language sql as $$
   select pg_temp.r(pg_temp.u(who), case when expected is null and false then '' else
-    format('select move_booking_priced(%L,%L,%L,%L,%s)::text', bk, court, s, e, coalesce(expected::text, 'null')) end) $$;
+    format('select move_booking_priced(%1$L,%2$L,%3$L,%4$L,%5$s,(select court_id from bookings where id = %1$L),(select start_at from bookings where id = %1$L),(select end_at from bookings where id = %1$L))::text', bk, court, s, e, coalesce(expected::text, 'null')) end) $$;
 create function pg_temp.q(who int, bk text, court uuid, s timestamptz, e timestamptz) returns text language sql as $$
   select pg_temp.r(pg_temp.u(who), format('select quote_move(%L,%L,%L,%L)::text', bk, court, s, e)) $$;
 create function pg_temp.j(k text) returns jsonb language sql as $$ select case when pg_temp.got(k) ~ '^\{' then pg_temp.got(k)::jsonb end $$;
@@ -91,7 +95,7 @@ create function pg_temp.price(bk text) returns numeric language sql as $$ select
 create function pg_temp.span(bk text) returns text language sql as $$ select court_id || ' ' || start_at || ' ' || end_at from bookings where id::text = bk $$;
 
 select pg_temp.keep('span0', pg_temp.span(pg_temp.got('w1')));
-select pg_temp.keep('mv_old', pg_temp.r(pg_temp.u(1), format('select move_booking(%L,%L,%L,%L)::text', pg_temp.got('w1'), pg_temp.c(1), pg_temp.at(2,'10:00'), pg_temp.at(2,'12:00'))));
+select pg_temp.keep('mv_old', pg_temp.r(pg_temp.u(1), format('select (case when move_booking_priced(%1$L,%2$L,%3$L,%4$L,null,(select court_id from bookings where id = %1$L),(select start_at from bookings where id = %1$L),(select end_at from bookings where id = %1$L)) is not null then ''''::text end)::text', pg_temp.got('w1'), pg_temp.c(1), pg_temp.at(2,'10:00'), pg_temp.at(2,'12:00'))));
 insert into t values ('O8a the older move call cannot change a price without showing it: refused, nothing moved',
   pg_temp.got('mv_old') = 'ERR price_confirmation_needed' and pg_temp.span(pg_temp.got('w1')) = pg_temp.got('span0') and pg_temp.price(pg_temp.got('w1')) = 20,
   pg_temp.got('mv_old'));
@@ -125,7 +129,7 @@ do $$ begin perform confirm_payment(p.id, 'ops-ref-1', p.total_usd) from payment
 reset role;
 select pg_temp.keep('app_price', pg_temp.price(pg_temp.got('app'))::text);
 select pg_temp.keep('q_app_peak', pg_temp.q(1, pg_temp.got('app'), pg_temp.c(1), pg_temp.at(3,'19:00'), pg_temp.at(3,'20:00')));
-select pg_temp.keep('mv_app', pg_temp.r(pg_temp.u(1), format('select move_booking(%L,%L,%L,%L)::text', pg_temp.got('app'), pg_temp.c(1), pg_temp.at(3,'19:00'), pg_temp.at(3,'20:00'))));
+select pg_temp.keep('mv_app', pg_temp.r(pg_temp.u(1), format('select (case when move_booking_priced(%1$L,%2$L,%3$L,%4$L,null,(select court_id from bookings where id = %1$L),(select start_at from bookings where id = %1$L),(select end_at from bookings where id = %1$L)) is not null then ''''::text end)::text', pg_temp.got('app'), pg_temp.c(1), pg_temp.at(3,'19:00'), pg_temp.at(3,'20:00'))));
 insert into t select 'O11 a paid app booking moved into the peak (same length) keeps the price the player paid',
   pg_temp.got('mv_app') = 'ok' and pg_temp.j('q_app_peak')->>'kind' = 'same' and b.price_usd::text = pg_temp.got('app_price') and b.start_at = pg_temp.at(3,'19:00'),
   pg_temp.got('mv_app') || ' ' || pg_temp.got('q_app_peak') from (select 1) one left join bookings b on b.id::text = pg_temp.got('app');
@@ -140,12 +144,12 @@ update clubs set payment_mode = 'at_desk' where id = pg_temp.club();
 -- an app booking at a club that takes payment at its desk (book_at_desk: no payment row)
 select pg_temp.keep('desk', pg_temp.r(pg_temp.u(3), format('select booking_id::text from book_at_desk(%L,%L,%L,gen_random_uuid())', pg_temp.c(1), pg_temp.at(4,'14:00'), pg_temp.at(4,'15:00'))));
 select pg_temp.keep('desk_q_same', pg_temp.q(1, pg_temp.got('desk'), pg_temp.c(1), pg_temp.at(4,'19:00'), pg_temp.at(4,'20:00')));
-select pg_temp.keep('desk_mv_same', pg_temp.r(pg_temp.u(1), format('select move_booking(%L,%L,%L,%L)::text', pg_temp.got('desk'), pg_temp.c(1), pg_temp.at(4,'19:00'), pg_temp.at(4,'20:00'))));
+select pg_temp.keep('desk_mv_same', pg_temp.r(pg_temp.u(1), format('select (case when move_booking_priced(%1$L,%2$L,%3$L,%4$L,null,(select court_id from bookings where id = %1$L),(select start_at from bookings where id = %1$L),(select end_at from bookings where id = %1$L)) is not null then ''''::text end)::text', pg_temp.got('desk'), pg_temp.c(1), pg_temp.at(4,'19:00'), pg_temp.at(4,'20:00'))));
 insert into t select 'O12a a desk-paid app booking moved (same length, into the peak) keeps the price the player saw',
   pg_temp.got('desk') !~ '^ERR' and pg_temp.j('desk_q_same')->>'kind' = 'same' and pg_temp.got('desk_mv_same') = 'ok' and b.price_usd = 20 and b.fee_usd = 0,
   concat_ws(' | ', pg_temp.got('desk'), pg_temp.got('desk_q_same'), pg_temp.got('desk_mv_same'), b.price_usd) from (select 1) one left join bookings b on b.id::text = pg_temp.got('desk');
 select pg_temp.keep('desk_q_long', pg_temp.q(1, pg_temp.got('desk'), pg_temp.c(1), pg_temp.at(4,'19:00'), pg_temp.at(4,'21:00')));
-select pg_temp.keep('desk_mv_old', pg_temp.r(pg_temp.u(1), format('select move_booking(%L,%L,%L,%L)::text', pg_temp.got('desk'), pg_temp.c(1), pg_temp.at(4,'19:00'), pg_temp.at(4,'21:00'))));
+select pg_temp.keep('desk_mv_old', pg_temp.r(pg_temp.u(1), format('select (case when move_booking_priced(%1$L,%2$L,%3$L,%4$L,null,(select court_id from bookings where id = %1$L),(select start_at from bookings where id = %1$L),(select end_at from bookings where id = %1$L)) is not null then ''''::text end)::text', pg_temp.got('desk'), pg_temp.c(1), pg_temp.at(4,'19:00'), pg_temp.at(4,'21:00'))));
 insert into t values ('O12b its LENGTH change needs the player''s agreement: quoted as agreement $20 → $80; never changed silently',
   pg_temp.j('desk_q_long') = '{"current": 20.00, "new": 80.00, "kind": "agreement"}'::jsonb and pg_temp.got('desk_mv_old') = 'ERR price_confirmation_needed' and pg_temp.price(pg_temp.got('desk')) = 20,
   pg_temp.got('desk_q_long') || ' | ' || pg_temp.got('desk_mv_old'));
