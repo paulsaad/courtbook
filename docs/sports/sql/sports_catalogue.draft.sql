@@ -72,7 +72,8 @@ begin
   perform set_config('check_function_bodies', 'off', true);
   for f in select * from _sport_fns order by sig loop
     execute f.def;
-    execute format('revoke all on function %s from public', f.sig);
+    -- whatever default privileges gave the re-created function is removed before the captured grants go back (nit)
+    execute format('revoke all on function %s from public, anon, authenticated, service_role', f.sig);
     for g in select (aclexplode(f.proacl)).* loop
       if g.privilege_type = 'EXECUTE' then
         execute format('grant execute on function %s to %s', f.sig,
@@ -137,10 +138,11 @@ begin
     if array_position(v_new, null) is not null then raise exception 'unknown_sport'; end if;
     foreach c in array v_new loop
       if (c = any(v_old)) is not true then
-        if not exists (select 1 from sports where code = c) then raise exception 'unknown_sport'; end if;
-        if not exists (select 1 from sports where code = c and active) then raise exception 'sport_inactive'; end if;
-        -- hold the sport while this row commits, so a concurrent delete waits and then sees it in use (review SF4)
+        -- lock first, then decide (review SF4, both orders): a delete that started earlier makes this wait and then
+        -- find nothing (unknown_sport); a delete that starts later waits for this row and then sees it in use
         perform 1 from sports where code = c for key share;
+        if not found then raise exception 'unknown_sport'; end if;
+        if not exists (select 1 from sports where code = c and active) then raise exception 'sport_inactive'; end if;
       end if;
     end loop;
     return new;
