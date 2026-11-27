@@ -7,7 +7,7 @@ import { color as palette } from "../lib/theme";
  */
 export type IconName =
   | "home" | "court" | "calendar" | "person" | "bell" | "pin" | "chevronRight" | "chevronDown"
-  | "back" | "close" | "check" | "plus" | "minus" | "send" | "chat" | "clock" | "players" | "coach" | "info" | "compass" | "heart" | "heartFilled";
+  | "back" | "close" | "check" | "plus" | "minus" | "send" | "chat" | "clock" | "players" | "coach" | "info" | "compass" | "heart" | "heartFilled" | "search";
 
 export function Icon({ name, size = 24, color = palette.ink, strokeWidth = 1.8 }: { name: IconName; size?: number; color?: string; strokeWidth?: number }) {
   const p = { fill: "none", stroke: color, strokeWidth, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -33,6 +33,7 @@ export function Icon({ name, size = 24, color = palette.ink, strokeWidth = 1.8 }
       {name === "players" && (<><Circle {...p} cx={8} cy={8} r={3} /><Circle {...p} cx={16.5} cy={8} r={3} /><Path {...p} d="M2.5 19c.6-3 2.7-4.6 5.5-4.6s4.9 1.6 5.5 4.6M13.5 14.6c.9-.2 2-.2 3-.2 2.8 0 4.9 1.6 5.5 4.6" /></>)}
       {name === "coach" && (<><Circle {...p} cx={12} cy={7.5} r={3.5} /><Path {...p} d="M5 21c.8-4 3.5-6.5 7-6.5s6.2 2.5 7 6.5M12 14.5v3" /></>)}
       {name === "info" && (<><Circle {...p} cx={12} cy={12} r={8.5} /><Path {...p} d="M12 11v5.5M12 7.6v.1" /></>)}
+      {name === "search" && (<><Circle {...p} cx={10.5} cy={10.5} r={6} /><Path {...p} d="m15 15 5 5" /></>)}
       {name === "compass" && (<><Circle {...p} cx={12} cy={12} r={8.5} /><Path {...p} d="m15.5 8.5-2 5-5 2 2-5z" /></>)}
     </Svg>
   );

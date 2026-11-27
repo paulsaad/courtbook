@@ -28,10 +28,14 @@ checks(item, ok, detail) as (
     pg_get_functiondef('reject_booking_over_block'::regproc) like '%id <> new.id%', ''
   union all select '0091: the older move call cannot change a price',
     pg_get_functiondef('move_booking(uuid,uuid,timestamptz,timestamptz)'::regprocedure) like '%move_booking_priced(p_booking, p_court, p_start, p_end, null)%', ''
-  union all select '0092 (step 6b; ok before it is applied): booked courts stay active, visitors cannot set prices',
+  union all select '0092 (step 6b; ok before it is applied): booked courts stay active for every caller, no live booking lands on an inactive court, published clubs stay priced, visitors cannot set prices',
     to_regprocedure('set_club_base_prices(uuid,numeric,jsonb,boolean)') is null
     or (exists (select 1 from pg_trigger where tgname = 'courts_keep_booked_active' and tgrelid = 'courts'::regclass)
-        and not has_function_privilege('anon', 'set_club_base_prices(uuid,numeric,jsonb,boolean)', 'execute')),
+        and not has_function_privilege('anon', 'set_club_base_prices(uuid,numeric,jsonb,boolean)', 'execute')
+        and exists (select 1 from pg_trigger where tgname = 'clubs_prices_stay_complete' and tgrelid = 'clubs'::regclass and tgdeferrable and tginitdeferred)
+        and exists (select 1 from pg_trigger where tgname = 'price_rules_stay_complete' and tgrelid = 'price_rules'::regclass and tgdeferrable and tginitdeferred)
+        and position('current_user' in pg_get_functiondef('courts_keep_booked_active'::regproc)) = 0
+        and exists (select 1 from pg_trigger where tgname = 'bookings_need_active_court' and tgrelid = 'bookings'::regclass)),
     case when to_regprocedure('set_club_base_prices(uuid,numeric,jsonb,boolean)') is null then 'not applied yet' else 'applied' end
   union all select '0089: publishing requires the map point', pg_get_functiondef('club_readiness_rows'::regproc) like '%c.lat is not null and c.lng is not null%', ''
   union all select 'still clean: no overlapping live bookings, none over a block, payments match bookings',

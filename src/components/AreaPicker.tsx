@@ -23,8 +23,9 @@ export default function AreaPicker({ areas, value, onChange, trigger }: { areas:
   return (
     <>
       {trigger ? trigger(() => { setGov(value.gov); setOpen(true); }, areaLabel(areas, value)) : (
-        <button onClick={() => { setGov(value.gov); setOpen(true); }} className="flex max-w-[60%] items-center gap-1 truncate text-left text-sm font-medium">
-          <span className="text-turf">◉</span><span className="truncate">{areaLabel(areas, value)}</span><span className="text-muted">▾</span>
+        <button onClick={() => { setGov(value.gov); setOpen(true); }} aria-haspopup="dialog" aria-label={`Area: ${areaLabel(areas, value)}`} className="flex min-w-0 max-w-[60%] items-center gap-1 text-left text-sm font-medium">
+          {/* H8: at 150 % text the name was cut ("All Leb…"); it now wraps */}
+          <span className="text-turf" aria-hidden="true">◉</span><span className="min-w-0 break-words">{areaLabel(areas, value)}</span><span className="text-muted" aria-hidden="true">▾</span>
         </button>
       )}
       {open && (
@@ -37,7 +38,7 @@ export default function AreaPicker({ areas, value, onChange, trigger }: { areas:
             <ul className="divide-y divide-grid overflow-hidden rounded-2xl border border-grid bg-white">
               {!g && <li><button onClick={() => pick({ gov: null, district: null })} className="w-full px-4 py-3.5 text-left font-medium">All Lebanon</button></li>}
               {!g && areas.map((x) => (
-                <li key={x.code}><button onClick={() => setGov(x.code)} className="flex w-full items-center justify-between px-4 py-3.5 text-left"><span>{x.name_en}</span><span className="text-muted">›</span></button></li>
+                <li key={x.code}><button onClick={() => setGov(x.code)} className="flex w-full items-center justify-between px-4 py-3.5 text-left"><span>{x.name_en}</span><span className="text-muted" aria-hidden="true">›</span></button></li>
               ))}
               {g && <li><button onClick={() => pick({ gov: g.code, district: null })} className="w-full px-4 py-3.5 text-left font-medium">All of {g.name_en}</button></li>}
               {g && g.districts.map((d) => (

@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { friendlyError } from "@/lib/types";
+import { actionError } from "@/lib/actionError";
 import { GROUP_LABEL, GUIDE, levelGroup } from "@/lib/levels";
 import { useDialog } from "@/components/useDialog";
 
@@ -25,7 +25,7 @@ export default function LevelSheet({ sport, sportName, current, legacy, onClose,
     setBusy(true); setError(null);
     const { error } = await createClient().rpc("set_player_level", { p_sport: sport, p_level: level });
     setBusy(false);
-    if (error) { setError(friendlyError(error.message)); return; }
+    if (error) { setError(actionError(error.message)); return; }
     onSaved(level);
   }
 
@@ -42,7 +42,7 @@ export default function LevelSheet({ sport, sportName, current, legacy, onClose,
             {legacy && current == null ? <>You chose <b className="text-ink">{legacy}</b> before — now pick your number. </> : null}
             Choose what you can do consistently in a game. <Link href={`/levels#${sport}`} className="font-semibold text-turf">Help me choose</Link>
           </p>
-          {error && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+          {error && <p role="alert" className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
         </div>
         <div role="radiogroup" aria-label={`${sportName} level`} className="flex flex-col gap-2 overflow-y-auto px-5 py-3">
           {(guide?.levels ?? Array.from({ length: 10 }, (_, i) => ({ level: i + 1, text: "" }))).map(({ level, text }) => {

@@ -33,9 +33,16 @@ export default function PlayersNeeded({ value, onChange, min = MIN_PLAYERS, acce
           value={text}
           onChange={(e) => {
             const digits = e.target.value.replace(/[^0-9]/g, "").slice(0, 2);
-            setText(digits);                                     // let the field be empty while typing
             const n = Number(digits);
-            if (digits !== "" && n >= lo && n <= MAX_PLAYERS) onChange(n);
+            if (n > MAX_PLAYERS) { set(MAX_PLAYERS); return; }   // never show a number the form won't send
+            setText(digits);                                     // let the field be empty while typing
+            if (digits !== "" && n >= lo) onChange(n);
+          }}
+          onKeyDown={(e) => {
+            // Enter submits the form without leaving the field: an empty or too-small number would be
+            // shown while the previous one is sent. Snap it first; the next Enter sends what is shown.
+            const n = Number(text);
+            if (e.key === "Enter" && (text === "" || n < lo)) { e.preventDefault(); set(n || value); }
           }}
           onBlur={() => set(Number(text) || value)}              // snap back to something valid on the way out
         />

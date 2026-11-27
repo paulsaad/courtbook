@@ -10,6 +10,7 @@ import { Icon } from "../../components/Icon";
 import { SportMark } from "../../components/SportMark";
 import { Ticket, TicketRow } from "../../components/Ticket";
 import { Button } from "../../components/Button";
+import { ErrorState } from "../../components/StateView";
 import { PendingReservationBanner } from "../../components/PendingReservation";
 import { AreasQuestionCard, YourClubsRow } from "../../components/HomeExtras";
 import { useSession } from "../../lib/session";
@@ -127,6 +128,9 @@ export default function Home() {
             </Pressable>
           ) : agenda.isPending ? (
             <Text variant="secondary">Loading…</Text>
+          ) : agenda.isError && !agenda.data ? (
+            // a failed read is not "no bookings": say it failed and offer a retry (player QA, 26 Nov)
+            <ErrorState error={agenda.error} onRetry={() => void agenda.refetch()} />
           ) : (
             <View style={styles.empty}>
               <Text variant="secondary">No upcoming bookings.</Text>

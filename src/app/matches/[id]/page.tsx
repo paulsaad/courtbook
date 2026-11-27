@@ -3,9 +3,12 @@ import { notFound, redirect } from "next/navigation";
 import { playerGatePath } from "@/lib/playerGate";
 import { createClient } from "@/lib/supabase/server";
 import { allLoaded, loaded } from "@/lib/load";
+import { isMalformedId } from "@/lib/ids";
 import { nowMs } from "@/lib/time";
 import MatchActions from "./MatchActions";
 import MatchChat from "./MatchChat";
+import NoticesRead from "./NoticesRead";
+import { markGameNoticesRead } from "@/lib/noticeRead";
 import { MatchCard, type MatchRow } from "@/components/MatchBoard";
 
 export default async function MatchPage({ params }: { params: Promise<{ id: string }> }) {
@@ -30,13 +33,15 @@ export default async function MatchPage({ params }: { params: Promise<{ id: stri
     member ? supabase.rpc("match_messages_list", { p_match: id, p_after: null }) : Promise.resolve({ data: [] }),
       supabase.rpc("match_is_hidden", { p_match: id }),
   ]), "this game");
-  await supabase.rpc("mark_notifications_read", { p_ids: null }).then(() => {}, () => {});   // opening a match clears its notices (simple v0.1 rule)
+  // H11: opening this game marks only this game's own unread notices read (never every notice)
+  const marked = await markGameNoticesRead(supabase as never, user.id, id);
   const participants = (people ?? []) as { profile_id: string; name: string | null; level: number | null; level_legacy: string | null; is_organizer: boolean; status: string }[];
   const accepted = participants.filter((p) => p.status === "accepted");
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5 pb-24">
       <div className="flex justify-between text-sm"><Link href="/play" className="text-muted">‹ Find a game</Link><Link href={`/club/${m.club_slug}/matches`} className="text-action">{m.club_name} board ›</Link></div>
+      <NoticesRead marked={marked.join(",")} />
       <MatchCard m={m} tz={tz} />
       <section className="rounded-2xl border border-grid bg-white p-4">
         <h2 className="mb-2 font-medium">Players {m.joined + 1}/{m.players_needed + 1}</h2>
@@ -68,6 +73,7 @@ type DetailRow = Omit<MatchRow, "pending" | "organizer_id"> & { pending: number 
 // the board, exactly as before.
 async function loadMatch(supabase: Supa, id: string): Promise<{ m: MatchRow; tz: string | null } | null> {
   const detail = await supabase.rpc("match_detail", { p_match: id });
+  if (isMalformedId(detail.error)) return null;   // a malformed id names no game: Not found (as #78)
   if (!detail.error) {
     const d = ((detail.data ?? []) as DetailRow[])[0];
     if (!d) return null;

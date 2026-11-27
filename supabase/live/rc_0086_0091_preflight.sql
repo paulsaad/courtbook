@@ -28,6 +28,9 @@ with checks(part, item, ok, detail) as (
     true, (select count(*)::text from bookings where status = 'pending' and hold_expires_at < now())
   union all select 2, 'upcoming desk walk-ins (0091: a move that changes their price needs the desk to confirm it)',
     true, (select count(*)::text from bookings where source = 'staff' and status = 'confirmed' and start_at > now())
+  union all select 2, 'published clubs with offered start times that have no price (0092 then refuses their longer hours and price edits until priced; players see times they cannot book)',
+    true, coalesce((select string_agg(c.slug, ', ') from clubs c where c.active and not c.is_demo
+      and exists (select 1 from club_readiness_rows(c.id) r where r.item = 'prices' and not r.ok)), 'none')
   union all select 2, 'upcoming bookings on courts already switched off (hidden from the staff calendar; 0092 stops new cases, these need the desk)',
     true, (select count(*)::text from bookings b join courts c on c.id = b.court_id where not c.active and b.status in ('confirmed', 'pending') and b.end_at > now())
   union all select 2, 'public tables that 0086 gives the account lock-out trigger',
