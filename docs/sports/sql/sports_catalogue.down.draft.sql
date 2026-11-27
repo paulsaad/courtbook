@@ -35,8 +35,16 @@ alter table player_levels drop constraint if exists player_levels_sport_fkey;
 delete from sports where code <> all(array['padel','tennis','other','football','basketball','volleyball','squash','badminton']);
 drop index if exists sports_name_en_unique;
 alter table sports drop constraint if exists sports_names_present;
+alter table sports drop constraint if exists sports_names_trimmed;
 alter table sports drop column if exists aliases;
 alter table sports alter column sort_order drop default;
+do $$
+begin
+  if exists (select 1 from sports where name_ar is null) then   -- review nit: a clear refusal, not the raw error
+    raise exception 'rollback_blocked: sport(s) % have no Arabic name, which the old schema requires; add one first',
+      (select string_agg(code, ', ' order by code) from sports where name_ar is null);
+  end if;
+end $$;
 alter table sports alter column name_ar set not null;
 
 -- 2. capture every function whose signature uses the domain (definition and grants), and drop it
@@ -75,9 +83,17 @@ declare f record; g record; d text;
   inserted text := ' or exists (select 1 from courts k join sports s on s.code = k.sport where k.club_id = c.id and k.active and s.active'
     || ' and (s.name_en ilike ''%'' || q.text || ''%'''
     || ' or exists (select 1 from unnest(s.aliases) a where a ilike ''%'' || q.text || ''%'')))';
+  inserted_slots text := ' or exists (select 1 from courts k2 join sports s2 on s2.code = k2.sport where k2.club_id = cl.id and k2.active and s2.active'
+    || ' and (s2.name_en ilike ''%'' || q || ''%'''
+    || ' or exists (select 1 from unnest(s2.aliases) a where a ilike ''%'' || q || ''%'')))';
 begin
-  for f in select * from _sport_fns loop
+  perform set_config('check_function_bodies', 'off', true);   -- as the up draft (B1): the order cannot matter
+  for f in select * from _sport_fns order by sig loop
     d := f.def;
+    if f.sig like 'club_day_slots(%' then
+      if position(inserted_slots in d) = 0 then raise exception 'club_day_slots changed since the catalogue draft: restore it by hand'; end if;
+      d := replace(d, inserted_slots, '');
+    end if;
     if f.sig like 'club_discovery(%' then
       if position(inserted in d) = 0 then raise exception 'club_discovery changed since the catalogue draft: restore it by hand'; end if;
       d := replace(d, inserted, '');
@@ -103,4 +119,5 @@ $orig$;
     end loop;
     if f.proacl is null then execute format('grant execute on function %s to public', f.sig); end if;
   end loop;
+  perform set_config('check_function_bodies', 'on', true);
 end $$;

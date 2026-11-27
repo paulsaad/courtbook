@@ -20,6 +20,7 @@ import {
 } from "../../lib/postGame";
 import { newMessageId as newKey } from "../../lib/chat";
 import { color, space } from "../../lib/theme";
+import { useSports } from "../../lib/sports";
 
 const playersUnit = (n: number) => (n === 1 ? "player needed" : "players needed");
 
@@ -47,7 +48,12 @@ export default function PostGame() {
 
   const usable = useMemo(() => (bookings.data ?? []).filter((b) => !b.gameId), [bookings.data]);
   const booking = d.bookingId ? (bookings.data ?? []).find((b) => b.id === d.bookingId) ?? null : null;
-  const sports = useMemo(() => [...new Set((clubs.data ?? []).flatMap((c) => c.sports))].sort(), [clubs.data]);
+  // the clubs' sports that are active in the catalogue, by display name (#66 review SF3); the database refuses the rest
+  const catalogue = useSports();
+  const sports = useMemo(() => {
+    const here = new Set((clubs.data ?? []).flatMap((c) => c.sports));
+    return catalogue.filter((s) => here.has(s.code)).map((s) => s.code);
+  }, [clubs.data, catalogue]);
   const clubsForSport = (clubs.data ?? []).filter((c) => !d.sport || c.sports.includes(d.sport));
   const club: PostClub | null = (clubs.data ?? []).find((c) => c.id === (booking?.clubId ?? d.clubId)) ?? null;
   const days = useMemo(() => (club ? bookingDays(club.timezone, POST_DAYS) : []), [club]);

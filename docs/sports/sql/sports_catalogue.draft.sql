@@ -64,10 +64,13 @@ alter table coaches       alter column sports type sport[] using sports::text[];
 alter table coaches       alter column sports set default '{}';
 
 -- ------------------------------------------------------------------ 3. re-create the functions, same text, same grants
+-- review of 412156a (B1): bodies are not checked while re-creating (as pg_dump restores), so the order of the
+-- functions cannot matter (club_discovery calls next_free_slot and club_sports); a fixed order besides
 do $$
 declare f record; g record;
 begin
-  for f in select * from _sport_fns loop
+  perform set_config('check_function_bodies', 'off', true);
+  for f in select * from _sport_fns order by sig loop
     execute f.def;
     execute format('revoke all on function %s from public', f.sig);
     for g in select (aclexplode(f.proacl)).* loop
@@ -79,6 +82,7 @@ begin
     -- a function with no ACL (null) had the default: EXECUTE for public
     if f.proacl is null then execute format('grant execute on function %s to public', f.sig); end if;
   end loop;
+  perform set_config('check_function_bodies', 'on', true);
 end $$;
 
 drop type sport_enum_retired;
@@ -90,6 +94,8 @@ alter table sports add constraint sports_names_present check (btrim(name_en) <> 
 -- CourtBook is English only (Paul, 26 Nov): a new sport needs no Arabic name. The column (0029) and the existing
 -- sports' values are left as they are; it simply stops being required. Nothing reads it for sports.
 alter table sports alter column name_ar drop not null;
+alter table sports drop constraint if exists sports_names_trimmed;
+alter table sports add constraint sports_names_trimmed check (name_en = btrim(name_en));   -- review nit: " Zumba"
 create unique index if not exists sports_name_en_unique on sports (lower(name_en));
 -- Sports are listed by name (F16); sort_order no longer orders anything. A default lets an admin add a sport in the
 -- Supabase table editor with only a code and a name.
@@ -127,10 +133,14 @@ begin
   if tg_table_name in ('profiles', 'coaches') then
     v_new := coalesce(new.sports::text[], '{}');
     v_old := case when tg_op = 'UPDATE' then coalesce(old.sports::text[], '{}') else '{}' end;
+    -- review of 412156a (B2): an empty element is never a sport, and must not switch the check off ("is not true")
+    if array_position(v_new, null) is not null then raise exception 'unknown_sport'; end if;
     foreach c in array v_new loop
-      if not (c = any(v_old)) then
+      if (c = any(v_old)) is not true then
         if not exists (select 1 from sports where code = c) then raise exception 'unknown_sport'; end if;
         if not exists (select 1 from sports where code = c and active) then raise exception 'sport_inactive'; end if;
+        -- hold the sport while this row commits, so a concurrent delete waits and then sees it in use (review SF4)
+        perform 1 from sports where code = c for key share;
       end if;
     end loop;
     return new;
@@ -178,5 +188,14 @@ begin
     || ' or exists (select 1 from courts k join sports s on s.code = k.sport where k.club_id = c.id and k.active and s.active'
     || ' and (s.name_en ilike ''%'' || q.text || ''%'''
     || ' or exists (select 1 from unnest(s.aliases) a where a ilike ''%'' || q.text || ''%''))))');
+  execute d;
+  -- review of 412156a (SF1): the Courts search (club_day_slots) matches sports the same way
+  d := pg_get_functiondef('club_day_slots(date,sport,text,text,text)'::regprocedure);
+  if position('tw.name_ar like ''%'' || q || ''%'')' in d) = 0 then raise exception 'club_day_slots changed: review the search clause'; end if;
+  d := replace(d, 'tw.name_ar like ''%'' || q || ''%'')',
+    'tw.name_ar like ''%'' || q || ''%'''
+    || ' or exists (select 1 from courts k2 join sports s2 on s2.code = k2.sport where k2.club_id = cl.id and k2.active and s2.active'
+    || ' and (s2.name_en ilike ''%'' || q || ''%'''
+    || ' or exists (select 1 from unnest(s2.aliases) a where a ilike ''%'' || q || ''%''))))');
   execute d;
 end $$;

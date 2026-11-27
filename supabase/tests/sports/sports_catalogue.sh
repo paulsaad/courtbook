@@ -77,20 +77,35 @@ check "C8 a sport used by a court cannot be deleted" \
 check "C8b a sport listed only on a profile cannot be deleted either" \
   "$(q "insert into sports (code, name_en, sort_order) values ('cricket', 'Cricket', 95); update profiles set sports = '{cricket}' where id = '$P1';
         $(as $ADMIN) delete from sports where code = 'cricket';")" "ERR sport_in_use"
+check "C8d a sport listed only on a coach cannot be deleted" \
+  "$(q "insert into sports (code, name_en) values ('cricket', 'Cricket'); insert into coaches (profile_id, sports) values ('$P1', '{cricket}') on conflict (profile_id) do update set sports = '{cricket}';
+        delete from sports where code = 'cricket';")" "ERR sport_in_use"
 check "C8c an unused sport can be deleted by an admin" \
   "$(q "insert into sports (code, name_en, sort_order) values ('cricket', 'Cricket', 95); $(as $ADMIN) delete from sports where code = 'cricket'; select count(*) from sports where code = 'cricket';")" "^0$"
 check "C9 club_sports lists the club's own sports alphabetically by name" \
   "$(q "insert into courts (club_id, name, sport) values ($CLUB_B, 'Bad 1', 'badminton'), ($CLUB_B, 'TT 1', 'table_tennis'), ($CLUB_B, 'Ten 1', 'tennis');
         $(as $P1) select array_to_string(club_sports($CLUB_B), ',');")" "^badminton,padel,table_tennis,tennis$"
+check "C9b club_sports orders by display name, not by code" \
+  "$(q "insert into sports (code, name_en) values ('aaa_zumba', 'Zumba'); insert into courts (club_id, name, sport) values ($CLUB_B, 'Z 1', 'aaa_zumba');
+        $(as $P1) select array_to_string(club_sports($CLUB_B), ',');")" "^padel,aaa_zumba$"
 check "C10 discovery: 'ping pong' finds a club with a table tennis court" \
   "$(q "insert into courts (club_id, name, sport) values ($BATROUN, 'TT 1', 'table_tennis');
         $(as $P1) select string_agg(slug, ',') from club_discovery(null, null, null, 'ping pong');")" "batroun"
 check "C10b and without one the same search finds nothing" \
   "$(q "$(as $P1) select count(*) from club_discovery(null, null, null, 'ping pong');")" "^0$"
+check "C10c a deactivated sport's name and aliases no longer find clubs (discovery and the Courts search)" \
+  "$(q "insert into courts (club_id, name, sport) values ($BATROUN, 'TT 1', 'table_tennis'); update sports set active = false where code = 'table_tennis';
+        $(as $P1) select (select count(*) from club_discovery(null, null, null, 'ping pong')) || ' ' || (select count(*) from club_day_slots(current_date + 1, null, null, null, 'ping pong'));")" "^0 0$"
+check "C10d the Courts search (club_day_slots) finds a club by sport name or alias, like discovery" \
+  "$(q "insert into courts (club_id, name, sport) values ($BATROUN, 'TT 1', 'table_tennis');
+        $(as $P1) select (select count(distinct club_id) from club_day_slots(current_date + 1, null, null, null, 'ping pong')) || ' ' || (select count(distinct club_id) from club_day_slots(current_date + 1, null, null, null, 'Table Tennis'));")" "^1 1$"
 check "C11 table tennis is an active catalogue sport, English name only (no Arabic name)" \
   "$(q "select name_en || '|' || (name_ar is null) || '|' || active from sports where code = 'table_tennis';")" "^Table tennis\|true\|true$"
 check "C12 the old enum is gone; every sport column is the domain" \
-  "$(q "select count(*) from pg_type where typname = 'sport_enum_retired'; select string_agg(distinct format_type(atttypid, atttypmod), ',') from pg_attribute a join pg_class c on c.oid = a.attrelid where c.relnamespace = 'public'::regnamespace and a.attname in ('sport', 'sports') and c.relkind = 'r' and a.attnum > 0;")" "^0 *$|sport"
+  "$(q "select (select count(*) from pg_type where typname = 'sport_enum_retired') || '|' ||
+          count(*) filter (where not (t.typtype = 'd' or (t.typelem <> 0 and (select e.typtype from pg_type e where e.oid = t.typelem) = 'd'))) || '|' || count(*)
+        from pg_attribute a join pg_class c on c.oid = a.attrelid join pg_type t on t.oid = a.atttypid
+        where c.relnamespace = 'public'::regnamespace and a.attname in ('sport', 'sports', 'code') and c.relname in ('sports','courts','matches','player_levels','profiles','coaches') and c.relkind = 'r' and a.attnum > 0;")" "^0\|0\|6$"
 # review 66-4 (27 Nov): levels follow the same rule as every other NEW use of a sport
 check "C13 a player sets a level for an active sport" \
   "$(q "$(as $P1) select set_player_level('padel', 6); select level from player_levels where profile_id = '$P1' and sport = 'padel';")" "^6$"
@@ -141,7 +156,7 @@ check "C16 every function that existed before keeps its grants, security mode an
           where a.sig is null or a.acl <> b.acl or a.prosecdef <> b.prosecdef or a.cfg <> b.cfg;")" "^same$"
 check "C16b the new functions: guards are not callable by any client role; club_sports keeps its grants (C16)" \
   "$(q "select string_agg(r || ':' || f || '=' || has_function_privilege(r, f, 'execute'), ' ' order by r, f)
-          from unnest(array['anon','authenticated','service_role']) r, unnest(array['sports_guard()','sport_choice_guard()','club_sports(uuid)']) f;")" "^anon:club_sports\(uuid\)=true anon:sport_choice_guard\(\)=false anon:sports_guard\(\)=false authenticated:club_sports\(uuid\)=true authenticated:sport_choice_guard\(\)=false authenticated:sports_guard\(\)=false service_role:club_sports\(uuid\)=true"
+          from unnest(array['anon','authenticated','service_role']) r, unnest(array['sports_guard()','sport_choice_guard()','club_sports(uuid)']) f;")" "^anon:club_sports\(uuid\)=true anon:sport_choice_guard\(\)=false anon:sports_guard\(\)=false authenticated:club_sports\(uuid\)=true authenticated:sport_choice_guard\(\)=false authenticated:sports_guard\(\)=false service_role:club_sports\(uuid\)=true service_role:sport_choice_guard\(\)=true service_role:sports_guard\(\)=true$"
 check "C16c every security-definer function in public pins its search_path" \
   "$(q "select coalesce(string_agg(p.oid::regprocedure::text, ', '), 'all pinned') from pg_proc p join pg_namespace n on n.oid = p.pronamespace
           where n.nspname = 'public' and p.prosecdef and not coalesce(array_to_string(p.proconfig, ',') like '%search_path=%', false)
@@ -156,4 +171,41 @@ sports: admin/ALL/\{authenticated\} sports: read/SELECT/\{public\}
 0$"
 check "C16e a player cannot call the guards directly" \
   "$(q "$(as $P1) select sports_guard();")" "ERR (permission denied|trigger functions can only be called as triggers)"
+# review of 412156a (B2): an empty element in a sports list is refused, and never switches the check off
+check "C17 a NULL in a profile's sports is refused" \
+  "$(q "$(as $P1) update profiles set sports = '{padel,NULL}' where id = '$P1';")" "ERR unknown_sport"
+check "C17b with a NULL already stored, adding an inactive or unknown sport is still refused" \
+  "$(q "update sports set active = false where code = 'squash'; alter table profiles disable trigger sport_choice_guard; update profiles set sports = '{padel,NULL}' where id = '$P1'; alter table profiles enable trigger sport_choice_guard;
+        $(as $P1) update profiles set sports = '{padel,squash}' where id = '$P1';")$(q "alter table profiles disable trigger sport_choice_guard; update profiles set sports = '{padel,NULL}' where id = '$P1'; alter table profiles enable trigger sport_choice_guard;
+        $(as $P1) update profiles set sports = '{padel,curling}' where id = '$P1';")" "^ERR sport_inactiveERR unknown_sport$"
+check "C17c the same for a coach's sports" \
+  "$(q "insert into coaches (profile_id, sports) values ('$P1', '{padel}') on conflict (profile_id) do update set sports = '{padel}';
+        $(as $P1) update coaches set sports = '{padel,NULL,curling}' where profile_id = '$P1';")" "ERR unknown_sport"
+# review of 412156a (B1): the functions are re-created in a fixed order with bodies unchecked; prove the order cannot
+# matter by re-running the draft's §3 loop logic in reverse and alphabetical order on a copy of the pre-draft schema
+reorder() {
+  local db=courtbook_sports_order_$1
+  $PSQL -q -d postgres -c "drop database if exists $db" -c "create database $db" >/dev/null || return 2
+  $PSQL -q -d $db -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql >/dev/null || return 2
+  for f in $(ls supabase/migrations/*.sql | sort); do $PSQL -q -d $db -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || return 2; done
+  sed "s/from _sport_fns order by sig loop/from _sport_fns order by sig $1 loop/" docs/sports/sql/sports_catalogue.draft.sql > /tmp/sc_order_$1.sql
+  grep -q "order by sig $1 loop" /tmp/sc_order_$1.sql || { echo "sed failed"; return 2; }
+  $PSQL -q -d $db -v ON_ERROR_STOP=1 -1 -f /tmp/sc_order_$1.sql 2>&1 | grep -E "ERROR" | sed 's/^.*ERROR:  /ERR /'
+  $PSQL -q -d $db -At -c "select typtype from pg_type where typname = 'sport' and typnamespace = 'public'::regnamespace"
+  $PSQL -q -d postgres -c "drop database if exists $db" >/dev/null; rm -f /tmp/sc_order_$1.sql
+}
+check "C18 the draft applies whatever order the functions come back in (ascending and descending)" "$(reorder asc) $(reorder desc)" "^d d$"
+# review of 412156a (SF4): deleting a sport while another session adds it to a profile: the delete waits, then refuses
+race_delete() {
+  $PSQL -q -d $DB -c "insert into sports (code, name_en) values ('cricket', 'Cricket') on conflict do nothing" >/dev/null
+  { printf '%s\n' "begin;" "update profiles set sports = '{cricket}' where id = '$P1';" "select pg_sleep(2);" "commit;" | $PSQL -d $DB -X -q -At >/dev/null 2>&1; } &
+  local a=$!; sleep 0.7
+  local out; out=$(printf '%s\n' "\\set VERBOSITY terse" "delete from sports where code = 'cricket';" | $PSQL -d $DB -X -q -At 2>&1 | sed 's/^.*ERROR:  /ERR /')
+  wait $a
+  echo "$out $($PSQL -d $DB -At -c "select count(*) from sports where code = 'cricket'")"
+  $PSQL -q -d $DB -c "update profiles set sports = '{padel}' where id = '$P1'" -c "delete from sports where code = 'cricket'" >/dev/null 2>&1
+}
+check "C19 a delete racing a profile that adds the sport waits and is refused (sport_in_use); the sport stays" "$(race_delete)" "^ERR sport_in_use 1$"
+check "C20 display names are stored trimmed, and unique ignoring case" \
+  "$(q "insert into sports (code, name_en) values ('zumba', ' Zumba');")$(q "insert into sports (code, name_en) values ('tt2', 'TABLE TENNIS');")" "^ERR .*sports_names_trimmed.*ERR .*sports_name_en_unique.*$"
 exit $status
