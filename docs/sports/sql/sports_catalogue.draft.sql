@@ -131,8 +131,9 @@ begin
     end loop;
     return new;
   end if;
-  -- courts, matches: a new row, or a changed sport
+  -- courts, matches, player_levels: a new row, or a changed sport
   if tg_op = 'INSERT' or new.sport is distinct from old.sport then
+    if not exists (select 1 from sports where code = new.sport) then raise exception 'unknown_sport'; end if;
     if not exists (select 1 from sports where code = new.sport and active) then raise exception 'sport_inactive'; end if;
   end if;
   return new;
@@ -145,6 +146,12 @@ create trigger sport_choice_guard before insert or update of sports on profiles 
 create trigger sport_choice_guard before insert or update of sports on coaches  for each row execute function sport_choice_guard();
 create trigger sport_choice_guard before insert or update of sport  on courts   for each row execute function sport_choice_guard();
 create trigger sport_choice_guard before insert or update of sport  on matches  for each row execute function sport_choice_guard();
+-- review 66-4 (27 Nov): a level may be set only for an active sport. set_player_level upserts, and a BEFORE INSERT
+-- trigger fires before ON CONFLICT, so changing an existing level of a deactivated sport is refused too; the stored
+-- level is kept as it is (history), and clearing it (delete) still works. An unknown code is refused as
+-- 'unknown_sport' instead of the raw foreign-key error.
+drop trigger if exists sport_choice_guard on player_levels;
+create trigger sport_choice_guard before insert or update of sport on player_levels for each row execute function sport_choice_guard();
 
 -- ------------------------------------------------------------------ 5. alphabetical, and only the club's own sports
 create or replace function club_sports(p_club uuid) returns sport[]

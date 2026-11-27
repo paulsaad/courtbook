@@ -25,6 +25,7 @@ drop trigger if exists sport_choice_guard on profiles;
 drop trigger if exists sport_choice_guard on coaches;
 drop trigger if exists sport_choice_guard on courts;
 drop trigger if exists sport_choice_guard on matches;
+drop trigger if exists sport_choice_guard on player_levels;
 drop trigger if exists sports_guard on sports;
 drop function if exists sport_choice_guard();
 drop function if exists sports_guard();

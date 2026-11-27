@@ -59,7 +59,7 @@ check "C6b a player who already had it keeps it when changing other things" \
   "$(q "update profiles set sports = '{padel,squash}' where id = '$P1'; update sports set active = false where code = 'squash';
         $(as $P1) update profiles set name = 'Renamed', sports = '{squash,padel}' where id = '$P1'; select array_to_string(sports, ',') from profiles where id = '$P1';")" "^squash,padel$"
 check "C7 an unknown sport on a court is refused" \
-  "$(q "$(as $STAFF) insert into courts (club_id, name, sport) values ($CLUB_B, 'X', 'curling');")" "ERR (sport_inactive|.*courts_sport_fkey)"
+  "$(q "$(as $STAFF) insert into courts (club_id, name, sport) values ($CLUB_B, 'X', 'curling');")" "ERR (unknown_sport|sport_inactive|.*courts_sport_fkey)"
 check "C7b an unknown sport on a profile is refused" \
   "$(q "$(as $P1) update profiles set sports = '{curling}' where id = '$P1';")" "ERR unknown_sport"
 check "C7c a malformed code is refused by the type itself" \
@@ -83,4 +83,26 @@ check "C11 table tennis is an active catalogue sport, English name only (no Arab
   "$(q "select name_en || '|' || (name_ar is null) || '|' || active from sports where code = 'table_tennis';")" "^Table tennis\|true\|true$"
 check "C12 the old enum is gone; every sport column is the domain" \
   "$(q "select count(*) from pg_type where typname = 'sport_enum_retired'; select string_agg(distinct format_type(atttypid, atttypmod), ',') from pg_attribute a join pg_class c on c.oid = a.attrelid where c.relnamespace = 'public'::regnamespace and a.attname in ('sport', 'sports') and c.relkind = 'r' and a.attnum > 0;")" "^0 *$|sport"
+# review 66-4 (27 Nov): levels follow the same rule as every other NEW use of a sport
+check "C13 a player sets a level for an active sport" \
+  "$(q "$(as $P1) select set_player_level('padel', 6); select level from player_levels where profile_id = '$P1' and sport = 'padel';")" "^6$"
+check "C13b a level for a deactivated sport is refused (sport_inactive), not stored" \
+  "$(q "update sports set active = false where code = 'squash'; $(as $P1) select set_player_level('squash', 4);")" "ERR sport_inactive"
+check "C13c changing an existing level of a since-deactivated sport is refused (the stored level is left as it was)" \
+  "$(q "insert into player_levels (profile_id, sport, level) values ('$P1', 'squash', 5); update sports set active = false where code = 'squash';
+        $(as $P1) select set_player_level('squash', 8);")" "ERR sport_inactive"
+check "C13d clearing a level of a deactivated sport still works" \
+  "$(q "insert into player_levels (profile_id, sport, level) values ('$P1', 'squash', 5); update sports set active = false where code = 'squash';
+        $(as $P1) select set_player_level('squash', null); reset role; select count(*) from player_levels where profile_id = '$P1' and sport = 'squash';")" "^0$"
+check "C13e an unknown code is refused as unknown_sport (not the raw foreign-key error)" \
+  "$(q "$(as $P1) select set_player_level('curling', 4);")" "^ERR unknown_sport"
+check "C13f a code the catalogue added but has not activated yet: refused for levels, as for games and courts" \
+  "$(q "insert into sports (code, name_en, sort_order, active) values ('cricket', 'Cricket', 95, false); $(as $P1) select set_player_level('cricket', 3);")" "ERR sport_inactive"
+# an older app only sends codes it knows; the database decides. A new, not yet activated code is refused for a game
+# (C3: updated clients ship before a sport is activated for real clubs)
+check "C14 a game for a sport not yet activated is refused, whatever the client" \
+  "$(q "insert into sports (code, name_en, sort_order, active) values ('cricket', 'Cricket', 95, false);
+        insert into matches (club_id, sport, organizer_id, start_at, end_at, players_needed) values ($CLUB_B, 'cricket', '$P1', now() + interval '1 day', now() + interval '1 day 1 hour', 2);")" "ERR sport_inactive"
+check "C14b a game for an unknown code is refused as unknown_sport" \
+  "$(q "insert into matches (club_id, sport, organizer_id, start_at, end_at, players_needed) values ($CLUB_B, 'curling', '$P1', now() + interval '1 day', now() + interval '1 day 1 hour', 2);")" "ERR unknown_sport"
 exit $status
