@@ -1,6 +1,7 @@
--- DRAFT (F1, Paul's decision of 26 Nov): a staff move is applied only if the booking is still where the desk saw it.
--- NOT a numbered migration. NOT applied anywhere. Not part of the 0087–0093 staging sequence. Applying it needs its own
--- number, the read-only preflight (supabase/live/staff_moves_preflight.sql), the postcheck and Paul's authorization.
+-- 0099 (F1, Paul's decision of 26 Nov; number provisionally approved 27 Nov): a staff move is applied only if the booking
+-- is still where the desk saw it. Not part of the 0087–0093 staging sequence. Order: the 0.5.0 website FIRST, then this
+-- migration, between the read-only preflight (supabase/live/staff_moves_preflight.sql) and the postcheck, with Paul's
+-- authorization. Rollback: supabase/rollback/0099_down.sql.
 --
 -- The defect: two desks open the same booking (Padel 2, 18:00). Desk A moves it to Padel 1. Desk B, whose screen still
 -- says Padel 2, moves it to Padel 3. Both calls succeed; the last one silently wins and desk A's move is lost.

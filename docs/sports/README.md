@@ -1,5 +1,9 @@
 # Sports catalogue (F14 table tennis, F15 admin-managed sports, F16 alphabetical) — DRAFT
 
+> **0.5.0 candidate (27 Nov):** this is now migration **0100** — `supabase/migrations/0100_sports_catalogue.sql`, rollback `supabase/rollback/0100_down.sql`
+> (number provisionally approved by Paul). The `sql/…draft.sql` paths below are the historical draft names.
+
+
 **Status: draft, not numbered, not applied anywhere.** Apply locally with
 `EXTRA_MIGRATIONS=supabase/migrations/0100_sports_catalogue.sql`.
 

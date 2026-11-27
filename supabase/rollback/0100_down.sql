@@ -1,4 +1,5 @@
--- DRAFT rollback of sports_catalogue.draft.sql (not numbered, applied nowhere). Returns the schema to 0001–0093 exactly
+-- Rollback of 0100 (supabase/migrations/0100_sports_catalogue.sql). Run it as ONE transaction (psql -1 / the workflow):
+-- its refusals come after some of its statements. Returns the schema to what it was before 0100 exactly
 -- (checked by supabase/tests/sports/sports_catalogue_rollback.sh: schema fingerprint identical to a plain build).
 --
 -- REFUSES, changing nothing, when a sport the old enum does not know is in use anywhere (a court, a game, a level, a

@@ -1532,17 +1532,6 @@ RERUN_FAILS=""
 for f in $(ls supabase/migrations/*.sql | sort); do
   n=$(basename "$f")
   case "$n" in 00[0-3]*|0040_*) continue;; esac
-  # 0100 (sports catalogue) converts the sport type and is deliberately run-once: a second application must REFUSE
-  # with its own message and change nothing (checked just below), instead of succeeding
-  case "$n" in 0100_*)
-    before=$($PSQL -d $DB -X -At -f supabase/tests/schema_fingerprint.sql 2>&1 | md5sum)
-    err=$($PSQL -d $DB -v ON_ERROR_STOP=1 -1 -f "$f" 2>&1 >/dev/null | grep -m1 ERROR)
-    after=$($PSQL -d $DB -X -At -f supabase/tests/schema_fingerprint.sql 2>&1 | md5sum)
-    echo "$err" | grep -q "sports catalogue (0100) already applied" && [ "$before" = "$after" ] \
-      && claim "106e 0100 is run-once: a second application refuses with its own message and changes nothing" 0 \
-      || claim "106e 0100 is run-once: a second application refuses with its own message and changes nothing (got: $err)" 1
-    continue;;
-  esac
   err=$($PSQL -d $DB -v ON_ERROR_STOP=1 -1 -f "$f" 2>&1 >/dev/null | grep -m1 ERROR)
   [ -n "$err" ] && RERUN_FAILS="$RERUN_FAILS\n    $n → $err"
 done
@@ -1551,6 +1540,11 @@ else claim "106a re-applying 0041 onwards raises no error$(printf "$RERUN_FAILS"
 # Succeeding is not the same as landing in the same place. 0056 grants table-level select on
 # club_media and 0057 takes it away again; applied in order the result is right, but only because
 # of the order. These two assert the end state rather than trusting it.
+# 0100 converges (independent review of the 0.5.0 candidate, S1): re-applying 0041 onwards (0078 re-creates the search
+# functions without its clauses) must end with 0100's catalogue in place, not a silently older schema
+check service "106e and 0100's catalogue is back in place afterwards (search by sport and alias, alphabetical club_sports, the domain)" "select (position('unnest(s.aliases)' in pg_get_functiondef('club_discovery(sport,text,text,text)'::regprocedure)) > 0 and position('unnest(s2.aliases)' in pg_get_functiondef('club_day_slots(date,sport,text,text,text)'::regprocedure)) > 0 and position('order by x.name_en' in pg_get_functiondef('club_sports(uuid)'::regprocedure)) > 0 and (select typtype from pg_type where typname = 'sport' and typnamespace = 'public'::regnamespace) = 'd')::text;" true
+# 0099 converges too: re-applying 0091 restores the old movers, and 0099 re-applied after it refuses them again
+check service "106f and 0099's staff moves are back in place afterwards (8-argument move; the 5- and 4-argument calls refuse move_needs_reload)" "select (to_regprocedure('move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric,uuid,timestamptz,timestamptz)') is not null and position('move_needs_reload' in pg_get_functiondef('move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric)'::regprocedure)) > 0 and position('move_needs_reload' in pg_get_functiondef('move_booking(uuid,uuid,timestamptz,timestamptz)'::regprocedure)) > 0)::text;" true
 check service "106b and the uploader is still not public afterwards"  "select has_column_privilege('anon','club_media','created_by','SELECT');" "f"
 check service "106d and still exactly one hold_slot after 0051/0052 re-created the old one" "select count(*)||'/'||max(pronargs) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='hold_slot';" "1/5"
 check service "106c and publication is still server-only afterwards"  "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('set_club_image','add_club_gallery','reorder_club_gallery','set_gallery_caption','remove_club_media','record_media_orphan') and has_function_privilege('authenticated', p.oid, 'EXECUTE');" 0

@@ -1,5 +1,5 @@
--- DRAFT rollback of move_checks_what_desk_saw.draft.sql: the two move functions exactly as 0091 left them, and the
--- function that compares what the desk saw removed. NOT applied anywhere. Rows are untouched either way.
+-- Rollback of 0099 (supabase/migrations/0099_staff_moves_check_what_desk_saw.sql): the two move functions exactly as
+-- 0091 left them, and the function that compares what the desk saw removed. Rows are untouched either way.
 -- Afterwards moves are again applied without the comparison (the F1 defect returns); the website must be one that
 -- still falls back to the 0091 call (see docs/staff-moves/README.md).
 drop function if exists move_booking_priced(uuid, uuid, timestamptz, timestamptz, numeric, uuid, timestamptz, timestamptz);

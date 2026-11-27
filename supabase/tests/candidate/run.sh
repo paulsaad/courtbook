@@ -69,10 +69,12 @@ d=$(diff <(fp $P) <(fp $R))
 $PSQL -q -d postgres -c "drop database if exists $P" -c "drop database if exists $R" >/dev/null 2>&1
 
 echo "== D. own suites"
-o=$(bash supabase/tests/staff_moves/run.sh 2>&1); echo "$o" | tail -1 | grep -q "PASS" && line "D staff_moves/run.sh ($(echo "$o" | grep 'mutants caught' | tail -1))" PASS || { line "D staff_moves/run.sh" FAIL; echo "$o" | tail -8; }
-o=$(bash supabase/tests/staff_moves/activation.sh 2>&1); echo "$o" | grep -qE "^  FAIL" && { line "D staff_moves/activation.sh" FAIL; echo "$o" | grep -E "FAIL" | head; } || line "D staff_moves/activation.sh ($(echo "$o" | grep -c '^  ok') ok)" PASS
-o=$(bash supabase/tests/sports/sports_catalogue.sh 2>&1); n=$(echo "$o" | grep -c "^ok"); echo "$o" | grep -q "^FAIL\|BUILD" && { line "D sports_catalogue.sh" FAIL; echo "$o" | grep "^FAIL\|BUILD" | head; } || line "D sports_catalogue.sh ($n ok)" PASS
-o=$(bash supabase/tests/sports/sports_catalogue_rollback.sh 2>&1); n=$(echo "$o" | grep -c "^ok"); echo "$o" | grep -q "^FAIL\|BUILD" && { line "D sports rollback" FAIL; echo "$o" | grep "^FAIL\|BUILD" | head; } || line "D sports rollback ($n ok)" PASS
+o=$(bash supabase/tests/staff_moves/run.sh 2>&1); rc=$?; [ $rc = 0 ] && echo "$o" | tail -1 | grep -q "PASS" && line "D staff_moves/run.sh ($(echo "$o" | grep 'mutants caught' | tail -1))" PASS || { line "D staff_moves/run.sh" FAIL; echo "$o" | tail -8; }
+o=$(bash supabase/tests/staff_moves/activation.sh 2>&1); rc=$?; { [ $rc != 0 ] || echo "$o" | grep -qE "^  FAIL" || [ "$(echo "$o" | grep -c '^  ok')" = 0 ]; } && { line "D staff_moves/activation.sh (rc=$rc)" FAIL; echo "$o" | grep -E "FAIL|REFUSED" | head; } || line "D staff_moves/activation.sh ($(echo "$o" | grep -c '^  ok') ok)" PASS
+o=$(bash supabase/tests/staff_moves/compat.sh 2>&1); rc=$?; [ $rc = 0 ] && echo "$o" | grep -q "existing suites with the F1 draft: PASS" && line "D staff_moves/compat.sh (legacy adapter as 0099z)" PASS || { line "D staff_moves/compat.sh (rc=$rc)" FAIL; echo "$o" | grep -E "FAIL" | head; }
+bash supabase/tests/run.sh >/dev/null 2>&1   # compat.sh leaves its test-only adapter in courtbook_test: rebuild it
+o=$(bash supabase/tests/sports/sports_catalogue.sh 2>&1); rc=$?; n=$(echo "$o" | grep -c "^ok"); { [ $rc != 0 ] || [ $n = 0 ] || echo "$o" | grep -q "^FAIL\|BUILD"; } && { line "D sports_catalogue.sh" FAIL; echo "$o" | grep "^FAIL\|BUILD" | head; } || line "D sports_catalogue.sh ($n ok)" PASS
+o=$(bash supabase/tests/sports/sports_catalogue_rollback.sh 2>&1); rc=$?; n=$(echo "$o" | grep -c "^ok"); { [ $rc != 0 ] || [ $n = 0 ] || echo "$o" | grep -q "^FAIL\|BUILD"; } && { line "D sports rollback" FAIL; echo "$o" | grep "^FAIL\|BUILD" | head; } || line "D sports rollback ($n ok)" PASS
 
 echo "== E. M12 later, out of order"
 if [ -n "$M12_DIR" ] && ls "$M12_DIR"/009[4-8]_*.sql >/dev/null 2>&1; then

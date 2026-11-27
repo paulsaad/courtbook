@@ -1,6 +1,6 @@
--- DRAFT (not numbered, not applied anywhere): an admin-managed sports catalogue, table tennis, alphabetical sports.
--- Overnight assignment of 26 Nov, priority 6 (F14 table tennis, F15 admins manage sports, F16 alphabetical and only
--- the club's own sports). Apply locally with EXTRA_MIGRATIONS=docs/sports/sql/sports_catalogue.draft.sql (run.sh).
+-- 0100 (0.5.0 candidate; number provisionally approved by Paul 27 Nov): an admin-managed sports catalogue, table
+-- tennis, alphabetical sports (F14 table tennis, F15 admins manage sports, F16 alphabetical and only the club's own
+-- sports). Rollback: supabase/rollback/0100_down.sql (one transaction).
 --
 -- Today a sport is a Postgres ENUM (0001, 0028, 0040): adding one needs a migration (ALTER TYPE … ADD VALUE). The
 -- `sports` table already holds names, order and an active flag, and admins may already write it (0028 RLS), but a new
@@ -24,55 +24,49 @@
 --
 -- How: functions whose signature uses the enum are captured (definition and grants) BEFORE the enum is renamed, dropped,
 -- and re-created from the captured text against the new domain, with exactly the same grants. Nothing else about them
--- changes. Run once; refuses if already applied.
+-- changes. Re-runnable (independent review of the 0.5.0 candidate, S1): the type conversion (sections 1–3) runs only
+-- while `sport` is still the enum; everything after it converges, so re-applying migrations from any number onwards
+-- (run.sh's check 106a) ends in the same schema as applying them once.
 
-do $$
-begin
-  if exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' and t.typname = 'sport' and t.typtype = 'd') then
-    raise exception 'sports catalogue (0100) already applied';
-  end if;
-end $$;
-
--- ------------------------------------------------------------------ 1. capture every function that uses the enum
-create temp table _sport_fns on commit drop as
-  select p.oid, p.oid::regprocedure::text as sig, pg_get_functiondef(p.oid) as def, p.proacl
-  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-  where n.nspname = 'public'
-    and ( 'public.sport'::regtype = any(p.proargtypes::oid[]) or 'public.sport[]'::regtype = any(p.proargtypes::oid[])
-       or 'public.sport'::regtype = any(coalesce(p.proallargtypes, '{}')) or 'public.sport[]'::regtype = any(coalesce(p.proallargtypes, '{}'))
-       or p.prorettype in ('public.sport'::regtype, 'public.sport[]'::regtype));
-
-do $$
-declare f record;
-begin
-  for f in select * from _sport_fns loop execute format('drop function %s', f.sig); end loop;
-end $$;
-
--- ------------------------------------------------------------------ 2. the enum becomes a domain over text
-alter type sport rename to sport_enum_retired;
-create domain sport as text check (value ~ '^[a-z][a-z0-9_]{1,30}$');
-
-alter table sports        alter column code   type sport   using code::text;
-alter table courts        alter column sport  type sport   using sport::text;
-alter table matches       alter column sport  type sport   using sport::text;
-alter table player_levels alter column sport  type sport   using sport::text;
-alter table profiles      alter column sports drop default;
-alter table profiles      alter column sports type sport[] using sports::text[];
-alter table profiles      alter column sports set default '{}';
-alter table coaches       alter column sports drop default;
-alter table coaches       alter column sports type sport[] using sports::text[];
-alter table coaches       alter column sports set default '{}';
-
--- ------------------------------------------------------------------ 3. re-create the functions, same text, same grants
--- review of 412156a (B1): bodies are not checked while re-creating (as pg_dump restores), so the order of the
--- functions cannot matter (club_discovery calls next_free_slot and club_sports); a fixed order besides
-do $$
+-- ------------------------------------------------------------------ 1–3. the enum becomes a domain (once)
+-- Functions whose signature uses the enum are captured (definition and grants), dropped, the type is converted, and they
+-- are re-created from the captured text with exactly the same grants. Bodies are not checked while re-creating (as
+-- pg_dump restores), so their order cannot matter (review of 412156a, B1); a fixed order besides. Skipped entirely once
+-- `sport` is the domain.
+do $conv$
 declare f record; g record;
 begin
+  if not exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace
+                 where n.nspname = 'public' and t.typname = 'sport' and t.typtype = 'e') then
+    return;   -- already the domain: nothing to convert
+  end if;
+
+  create temp table _sport_fns on commit drop as
+    select p.oid, p.oid::regprocedure::text as sig, pg_get_functiondef(p.oid) as def, p.proacl
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and ( 'public.sport'::regtype = any(p.proargtypes::oid[]) or 'public.sport[]'::regtype = any(p.proargtypes::oid[])
+         or 'public.sport'::regtype = any(coalesce(p.proallargtypes, '{}')) or 'public.sport[]'::regtype = any(coalesce(p.proallargtypes, '{}'))
+         or p.prorettype in ('public.sport'::regtype, 'public.sport[]'::regtype));
+  for f in execute 'select sig from _sport_fns' loop execute format('drop function %s', f.sig); end loop;
+
+  execute 'alter type sport rename to sport_enum_retired';
+  execute $d$create domain sport as text check (value ~ '^[a-z][a-z0-9_]{1,30}$')$d$;
+  execute 'alter table sports        alter column code   type sport   using code::text';
+  execute 'alter table courts        alter column sport  type sport   using sport::text';
+  execute 'alter table matches       alter column sport  type sport   using sport::text';
+  execute 'alter table player_levels alter column sport  type sport   using sport::text';
+  execute 'alter table profiles      alter column sports drop default';
+  execute 'alter table profiles      alter column sports type sport[] using sports::text[]';
+  execute $d$alter table profiles      alter column sports set default '{}'$d$;
+  execute 'alter table coaches       alter column sports drop default';
+  execute 'alter table coaches       alter column sports type sport[] using sports::text[]';
+  execute $d$alter table coaches       alter column sports set default '{}'$d$;
+
   perform set_config('check_function_bodies', 'off', true);
-  for f in select * from _sport_fns order by sig loop
+  for f in execute 'select * from _sport_fns order by sig' loop
     execute f.def;
-    -- whatever default privileges gave the re-created function is removed before the captured grants go back (nit)
+    -- whatever default privileges gave the re-created function is removed before the captured grants go back
     execute format('revoke all on function %s from public, anon, authenticated, service_role', f.sig);
     for g in select (aclexplode(f.proacl)).* loop
       if g.privilege_type = 'EXECUTE' then
@@ -84,9 +78,9 @@ begin
     if f.proacl is null then execute format('grant execute on function %s to public', f.sig); end if;
   end loop;
   perform set_config('check_function_bodies', 'on', true);
-end $$;
 
-drop type sport_enum_retired;
+  execute 'drop type sport_enum_retired';
+end $conv$;
 
 -- ------------------------------------------------------------------ 4. the catalogue
 alter table sports add column if not exists aliases text[] not null default '{}';
@@ -107,6 +101,9 @@ values ('table_tennis', 'Table tennis', null, 80, true, '{"ping pong","ping-pong
 on conflict (code) do nothing;
 
 -- every single-valued use references the catalogue
+alter table courts        drop constraint if exists courts_sport_fkey;
+alter table matches       drop constraint if exists matches_sport_fkey;
+alter table player_levels drop constraint if exists player_levels_sport_fkey;
 alter table courts        add constraint courts_sport_fkey        foreign key (sport) references sports(code);
 alter table matches       add constraint matches_sport_fkey       foreign key (sport) references sports(code);
 alter table player_levels add constraint player_levels_sport_fkey foreign key (sport) references sports(code);
@@ -179,11 +176,13 @@ language sql stable security definer set search_path = public as $$
         where k.club_id = p_club and k.active and club_id_visible_to_me(p_club)) x;
 $$;
 
--- discovery: the free-text search also matches a sport the club offers, by name or alias ("ping pong")
+-- discovery: the free-text search also matches a sport the club offers, by name or alias ("ping pong"). Each clause is
+-- added only if it is not there yet (re-runnable: an earlier migration re-applied restores the function without it).
 do $$
 declare d text;
 begin
   d := pg_get_functiondef('club_discovery(sport,text,text,text)'::regprocedure);
+  if position('exists (select 1 from unnest(s.aliases) a' in d) = 0 then
   if position('t.name_ar like ''%'' || q.text || ''%'')' in d) = 0 then raise exception 'club_discovery changed: review the search clause'; end if;
   d := replace(d, 't.name_ar like ''%'' || q.text || ''%'')',
     't.name_ar like ''%'' || q.text || ''%'''
@@ -191,8 +190,10 @@ begin
     || ' and (s.name_en ilike ''%'' || q.text || ''%'''
     || ' or exists (select 1 from unnest(s.aliases) a where a ilike ''%'' || q.text || ''%''))))');
   execute d;
+  end if;
   -- review of 412156a (SF1): the Courts search (club_day_slots) matches sports the same way
   d := pg_get_functiondef('club_day_slots(date,sport,text,text,text)'::regprocedure);
+  if position('exists (select 1 from unnest(s2.aliases) a' in d) = 0 then
   if position('tw.name_ar like ''%'' || q || ''%'')' in d) = 0 then raise exception 'club_day_slots changed: review the search clause'; end if;
   d := replace(d, 'tw.name_ar like ''%'' || q || ''%'')',
     'tw.name_ar like ''%'' || q || ''%'''
@@ -200,4 +201,5 @@ begin
     || ' and (s2.name_en ilike ''%'' || q || ''%'''
     || ' or exists (select 1 from unnest(s2.aliases) a where a ilike ''%'' || q || ''%''))))');
   execute d;
+  end if;
 end $$;

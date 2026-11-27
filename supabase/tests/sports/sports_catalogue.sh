@@ -188,8 +188,8 @@ reorder() {
   $PSQL -q -d postgres -c "drop database if exists $db" -c "create database $db" >/dev/null || return 2
   $PSQL -q -d $db -v ON_ERROR_STOP=1 -f supabase/tests/supabase_shim.sql >/dev/null || return 2
   for f in $(ls supabase/migrations/*.sql | sort | awk -F/ '$NF < "0100"'); do $PSQL -q -d $db -v ON_ERROR_STOP=1 -1 -f "$f" >/dev/null 2>&1 || return 2; done
-  sed "s/from _sport_fns order by sig loop/from _sport_fns order by sig $1 loop/" supabase/migrations/0100_sports_catalogue.sql > /tmp/sc_order_$1.sql
-  grep -q "order by sig $1 loop" /tmp/sc_order_$1.sql || { echo "sed failed"; return 2; }
+  sed "s/from _sport_fns order by sig' loop/from _sport_fns order by sig $1' loop/" supabase/migrations/0100_sports_catalogue.sql > /tmp/sc_order_$1.sql
+  grep -q "order by sig $1' loop" /tmp/sc_order_$1.sql || { echo "sed failed"; return 2; }
   $PSQL -q -d $db -v ON_ERROR_STOP=1 -1 -f /tmp/sc_order_$1.sql 2>&1 | grep -E "ERROR" | sed 's/^.*ERROR:  /ERR /'
   $PSQL -q -d $db -At -c "select typtype from pg_type where typname = 'sport' and typnamespace = 'public'::regnamespace"
   $PSQL -q -d postgres -c "drop database if exists $db" >/dev/null; rm -f /tmp/sc_order_$1.sql
@@ -219,4 +219,26 @@ race_delete_first() {
 check "C19b a profile adding a sport while its delete is in progress waits, then is refused (unknown_sport); nothing dangles" "$(race_delete_first)" "^ERR unknown_sport 0$"
 check "C20 display names are stored trimmed, and unique ignoring case" \
   "$(q "insert into sports (code, name_en) values ('zumba', ' Zumba');")$(q "insert into sports (code, name_en) values ('tt2', 'TABLE TENNIS');")" "^ERR .*sports_names_trimmed.*ERR .*sports_name_en_unique.*$"
+# independent review of the 0.5.0 candidate (S1): 0100 converges. Applied a second time it changes nothing; after an
+# earlier migration that re-creates the search functions is re-applied (0078), 0100 puts its clauses back.
+fpq="select 'fn ' || p.oid::regprocedure::text || ' ' || md5(pg_get_functiondef(p.oid)) || ' ' || coalesce(p.proacl::text, '') from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prokind = 'f' order by 1"
+reapply() {
+  local before after err
+  before=$({ $PSQL -d $DB -X -At -f supabase/tests/schema_fingerprint.sql; $PSQL -d $DB -X -At -c "$fpq"; } 2>&1 | sort | md5sum)
+  err=$($PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0100_sports_catalogue.sql 2>&1 | grep ERROR)
+  after=$({ $PSQL -d $DB -X -At -f supabase/tests/schema_fingerprint.sql; $PSQL -d $DB -X -At -c "$fpq"; } 2>&1 | sort | md5sum)
+  [ -z "$err" ] && [ "$before" = "$after" ] && echo same || echo "different ${err}"
+}
+check "C21 0100 applied a second time: no error, schema and every function body unchanged" "$(reapply)" "^same$"
+restore() {
+  $PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0078_hide_demo_clubs.sql >/dev/null 2>&1 || { echo "0078 re-apply failed"; return; }
+  $PSQL -d $DB -X -At -c "select position('unnest(s.aliases)' in pg_get_functiondef('club_discovery(sport,text,text,text)'::regprocedure)) > 0"
+  $PSQL -q -d $DB -v ON_ERROR_STOP=1 -1 -f supabase/migrations/0100_sports_catalogue.sql 2>&1 | grep ERROR
+  $PSQL -d $DB -X -At -c "select (position('unnest(s.aliases)' in pg_get_functiondef('club_discovery(sport,text,text,text)'::regprocedure)) > 0
+                                  and position('unnest(s2.aliases)' in pg_get_functiondef('club_day_slots(date,sport,text,text,text)'::regprocedure)) > 0)"
+  $PSQL -q -d $DB -c "insert into courts (club_id, name, sport) select id, 'TT conv', 'table_tennis' from clubs where slug = 'batroun'" >/dev/null
+  $PSQL -d $DB -X -At -c "select count(*) from club_discovery(null, null, null, 'ping pong')"
+  $PSQL -q -d $DB -c "delete from courts where name = 'TT conv'" >/dev/null
+}
+check "C21b re-applying 0078 drops the search clauses; re-applying 0100 restores them and 'ping pong' finds the club again" "$(restore | tr '\n' ' ')" "^f t 1 ?$"
 exit $status

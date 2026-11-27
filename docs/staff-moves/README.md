@@ -1,5 +1,9 @@
 # F1 — staff moves check what the desk saw (draft, not applied)
 
+> **0.5.0 candidate (27 Nov):** this is now migration **0099** — `supabase/migrations/0099_staff_moves_check_what_desk_saw.sql`, rollback `supabase/rollback/0099_down.sql`
+> (number provisionally approved by Paul). The `sql/…draft.sql` paths below are the historical draft names.
+
+
 Paul's decision of 26 Nov (operations audit F1): two staff members must not unknowingly overwrite each other's moves.
 Optimistic concurrency, enforced **in the database, atomically inside the move**.
 
