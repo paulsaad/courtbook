@@ -137,6 +137,14 @@ it("Sign out of all devices with an expired access token whose renewal is refuse
   expect((await phone.getSession()).data.session).toBeNull();
   expect((await desk.refreshSession()).error).toBeNull();
 });
+it("Sign out of all devices with no session on this phone: this_device_ended, never ok; nothing asked of the server", async () => {
+  const phone = await device(), desk = await device();
+  await phone.signOut({ scope: "local" });
+  auth.requests.length = 0;
+  expect(await signOutAllDevices(phone)).toEqual({ ok: false, reason: "this_device_ended" });
+  expect(scopes()).not.toContain("global");
+  expect((await desk.refreshSession()).error).toBeNull();
+});
 it("closing the account when Auth refuses the revocation (401): still closed; this phone signed out; the desk is not claimed revoked", async () => {
   const phone = await device(), desk = await device();
   auth.logoutAnswer = { status: 401, code: "no_authorization" };

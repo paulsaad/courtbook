@@ -51,7 +51,9 @@ export async function POST(request: Request) {
   // "ended" (this browser's session was already gone on the server) is unconfirmed too: the other sessions were not
   // asked to end from here
   const revoked = await revokeAllSessions(supabase.auth);
-  if (revoked !== "revoked") await report("deletionStepFailed", "account", { code: "global_signout" });
+  if (revoked !== "revoked") {
+    try { await report("deletionStepFailed", "account", { code: "global_signout" }); } catch { /* never skips the ban */ }
+  }
   if (revoked === "failed") {
     try { await supabase.auth.signOut({ scope: "local" }); } catch { /* the ban (B) and the database lock-out still apply */ }
   }

@@ -10,7 +10,7 @@ import { signOutAllDevices } from "@/lib/signOutAll";
 /**
  * "Sign out of all devices" (F2 review S3, Paul 26 Nov), with a confirmation step. Supabase's global sign-out, from
  * this browser: every session of the account ends on the Auth server, and this browser's session is removed. What it
- * does not do (already-issued access tokens keep working until they expire, up to an hour by default) is in
+ * does not do (already-issued access tokens keep working until they expire, at the project's JWT expiry) is in
  * src/lib/signOutText.ts and said in the confirmation. The Auth server must confirm the revocation before this browser
  * is cleared (src/lib/signOutAll.ts); otherwise this browser stays signed in and the page says the others may be too.
  * If this browser's session had already ended, it is cleared too and the page says so, with a way to sign in again

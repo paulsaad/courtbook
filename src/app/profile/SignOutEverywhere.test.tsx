@@ -145,6 +145,19 @@ describe("F2 S3: what 'Sign out everywhere' revokes, with two real sessions", ()
     }, 60_000);
   });
 
+  it("no session in this browser (signed out in another tab): 'already ended', never 'done'; nothing asked of the server", async () => {
+    const desk = await signIn(), phone = await signIn(); await useBrowser(phone);
+    await clients.get(phone)!.auth.signOut({ scope: "local" });       // e.g. signed out in another tab of this browser
+    auth.requests.length = 0;
+    render(<SignOutEverywhere />);
+    fireEvent.click(screen.getByText(SIGN_OUT_ALL.button));
+    fireEvent.click(screen.getByText(SIGN_OUT_ALL.confirm));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain(SIGN_OUT_ALL.thisDeviceEnded));
+    expect(env.replace).not.toHaveBeenCalled();
+    expect(scopes()).not.toContain("global");
+    expect((await clients.get(desk)!.auth.refreshSession()).error).toBeNull();
+  });
+
   it("Auth unreachable (offline): nothing changes anywhere, the page says so, this browser stays signed in", async () => {
     const desk = await signIn(), phone = await signIn(); await useBrowser(phone);
     await auth.close();

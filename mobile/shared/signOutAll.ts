@@ -38,6 +38,17 @@ const unreachable = (e: AuthErr) => !!e && (e.name === "AuthRetryableFetchError"
 async function clearThisDevice(auth: SignOutAllAuth) {
   try { await auth.signOut({ scope: "local" }); } catch { /* local sign-out removes the session first (auth-js) */ }
 }
+// After a refused renewal auth-js has normally removed the session already, and the local sign-out finds nothing
+// and answers without an error. Within auth-js's retry cool-down it answers the cached renewal error instead and
+// leaves the session stored (review of 3e7c25d, finding 3): then this device is NOT known to be signed out.
+async function clearedAfterRefusal(auth: SignOutAllAuth): Promise<boolean> {
+  try {
+    const out = (await auth.signOut({ scope: "local" })) as { error?: unknown } | undefined;
+    return !out?.error;
+  } catch {
+    return false;
+  }
+}
 
 export async function revokeAllSessions(auth: SignOutAllAuth): Promise<Revocation> {
   try {
@@ -46,8 +57,7 @@ export async function revokeAllSessions(auth: SignOutAllAuth): Promise<Revocatio
       // auth-js returns an error here only when it could not renew an expired access token. Offline: the session is
       // kept and may still be valid on the server. Refused (expired, revoked, banned): auth-js already removed it.
       if (unreachable(error as AuthErr)) return "failed";
-      await clearThisDevice(auth);
-      return "ended";
+      return (await clearedAfterRefusal(auth)) ? "ended" : "failed";
     }
     if (!data.session) return "ended";
     const r = await auth.admin.signOut(data.session.access_token, "global");
