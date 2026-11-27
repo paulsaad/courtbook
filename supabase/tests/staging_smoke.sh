@@ -100,37 +100,53 @@ else
   echo "  (hold_slot has no retry token yet — 0065 not applied; S2b–S2j skipped)"
 fi
 
-echo "--- S3. staff moves keep the club's minimum and maximum length (migration 0066) and the slot rules"
-HAS_0066=$(q admin "select (prosrc like '%min_booking_minutes%')::text from pg_proc where proname='move_booking' and pronamespace='public'::regnamespace")
+echo "--- S3. staff moves keep the club's minimum and maximum length (migration 0066), the slot rules and the price rule (0091)"
+# Since 0091 move_booking is a thin wrapper over move_booking_priced (which holds the 0066 length rule), and it refuses any
+# move that would change the price ('price_confirmation_needed'). Moves that keep the price use the older call; moves meant
+# to reach a rule behind the price check use move_booking_priced with the price quote_move gives (as the website does).
+# Prices on staging's demo club: 08:00-17:00 $20/h, 17:00-23:00 $30/h.
+HAS_0066=$(q admin "select bool_or(prosrc like '%min_booking_minutes%')::text from pg_proc where proname in ('move_booking','move_booking_priced') and pronamespace='public'::regnamespace")
+HAS_0091=$(q admin "select (to_regprocedure('public.move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric)') is not null)::text")
 $PSQL -q -c "update clubs set payment_mode='at_desk', min_booking_minutes = 60 where id='$CLUB'; insert into club_staff (club_id, profile_id) values ('$CLUB', '$U1') on conflict do nothing;" >/dev/null
 check admin "S3a club limits for this test: 30 min grid, 1 h minimum, 3 h maximum, 08:00-23:00" "select slot_minutes||'/'||min_booking_minutes||'/'||max_booking_minutes||'/'||to_char(open_time,'HH24:MI')||'-'||to_char(close_time,'HH24:MI') from clubs where id='$CLUB';" "30/60/180/08:00-23:00"
 MB=$(q $U1 "select staff_book('$CLUB','$COURT3', $(at 09:00), $(at 10:00), 'smoke-move', null);")
 check admin "S3b fixture: a 1 h walk-in booked by staff" "select count(*) from bookings where id='$MB' and status='confirmed' and source='staff';" 1
-mv() { q $U1 "select move_booking('$MB','$1', $(at $2), $(at $3))::text || 'moved';"; }
 span() { q admin "select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'-'||to_char(end_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='$MB';"; }
-if [ "$HAS_0066" = "true" ]; then
+state() { q admin "select court_id||' '||to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'-'||to_char(end_at at time zone 'Asia/Beirut','HH24:MI')||' '||price_usd::numeric(10,2) from bookings where id='$MB';"; }
+# a priced move at the price quote_move gives now (the website's path since 0091)
+pmove() { q $U1 "select (move_booking_priced('$MB','$1', $(at $2), $(at $3), (quote_move('$MB','$1', $(at $2), $(at $3))->>'new')::numeric)->>'price')::numeric(10,2)::text;"; }
+if [ "$HAS_0066" = "true" ] && [ "$HAS_0091" = "true" ]; then
   fails_with $U1 "S3c move to 30 min (below the 1 h minimum): refused" "select move_booking('$MB','$COURT3', $(at 09:00), $(at 09:30));" bad_duration
   fails_with $U1 "S3d move to 4 h (above the 3 h maximum): refused" "select move_booking('$MB','$COURT3', $(at 09:00), $(at 13:00));" bad_duration
   fails_with $U1 "S3e move to 3 h 30 elsewhere (above the maximum): refused" "select move_booking('$MB','$COURT2', $(at 12:00), $(at 15:30));" bad_duration
-  check admin "S3f ...the booking is unchanged" "select '$(span)';" "09:00-10:00"
-  check $U1 "S3g move to 1 h 30 at another time (within limits): accepted" "select move_booking('$MB','$COURT3', $(at 11:00), $(at 12:30))::text || 'moved';" moved
-  check $U1 "S3h move to exactly 3 h (the maximum): accepted" "select move_booking('$MB','$COURT3', $(at 11:00), $(at 14:00))::text || 'moved';" moved
-  check $U1 "S3i move to exactly 1 h (the minimum): accepted" "select move_booking('$MB','$COURT3', $(at 11:00), $(at 12:00))::text || 'moved';" moved
+  fails_with $U1 "S3c2 ...also refused through the priced call at its quoted price (30 min)" "select move_booking_priced('$MB','$COURT3', $(at 09:00), $(at 09:30), 10);" bad_duration
+  check admin "S3f ...the booking is unchanged (court, time, price)" "select '$(state)';" "$COURT3 09:00-10:00 20.00"
+  CHECKS=$((CHECKS+1)); got=$(pmove "$COURT3" 11:00 12:30); if [ "$got" = "30.00" ]; then echo "  ok    S3g move to 1 h 30 at another time (within limits) at its quoted price: accepted (\$30)"; else echo "  FAIL  S3g — got [$got]"; FAILS=$((FAILS+1)); fi
+  CHECKS=$((CHECKS+1)); got=$(pmove "$COURT3" 11:00 14:00); if [ "$got" = "60.00" ]; then echo "  ok    S3h move to exactly 3 h (the maximum) at its quoted price: accepted (\$60)"; else echo "  FAIL  S3h — got [$got]"; FAILS=$((FAILS+1)); fi
+  CHECKS=$((CHECKS+1)); got=$(pmove "$COURT3" 11:00 12:00); if [ "$got" = "20.00" ]; then echo "  ok    S3i move to exactly 1 h (the minimum) at its quoted price: accepted (\$20)"; else echo "  FAIL  S3i — got [$got]"; FAILS=$((FAILS+1)); fi
   $PSQL -q -c "update clubs set min_booking_minutes = 120 where id='$CLUB';" >/dev/null
-  check $U1 "S3j club raises its minimum to 2 h: the 1 h booking can still move at its existing length" "select move_booking('$MB','$COURT2', $(at 16:30), $(at 17:30))::text || 'moved';" moved
-  fails_with $U1 "S3k ...but not to another length below the new minimum (1 h 30)" "select move_booking('$MB','$COURT2', $(at 16:30), $(at 18:00));" bad_duration
+  check $U1 "S3j club raises its minimum to 2 h: the 1 h booking can still move at its existing length (same price, older call)" "select move_booking('$MB','$COURT2', $(at 12:00), $(at 13:00))::text || 'moved';" moved
+  fails_with $U1 "S3k ...but not to another length below the new minimum (1 h 30)" "select move_booking('$MB','$COURT2', $(at 12:00), $(at 13:30));" bad_duration
   $PSQL -q -c "update clubs set min_booking_minutes = 60 where id='$CLUB';" >/dev/null
+  echo "  -- the price rule (0091): no move changes a price without confirming it"
+  fails_with $U1 "S3q the older call refuses a move that would change the price (12:00 off-peak to 17:00 peak)" "select move_booking('$MB','$COURT2', $(at 17:00), $(at 18:00));" price_confirmation_needed
+  fails_with $U1 "S3r the priced call refuses a price that is not the current quote" "select move_booking_priced('$MB','$COURT2', $(at 17:00), $(at 18:00), 20);" price_changed
+  check admin "S3s ...the booking is unchanged (court, time, price)" "select '$(state)';" "$COURT2 12:00-13:00 20.00"
 else
-  echo "  (move_booking has no length check yet — 0066 not applied; showing the gap it closes)"
-  check $U1 "S3c-gap without 0066: moving it to 30 min (below the 1 h minimum) is ACCEPTED" "select move_booking('$MB','$COURT3', $(at 09:00), $(at 09:30))::text || 'moved';" moved
-  check $U1 "S3d-gap without 0066: moving it to 4 h (above the 3 h maximum) is ACCEPTED" "select move_booking('$MB','$COURT3', $(at 09:00), $(at 13:00))::text || 'moved';" moved
-  q $U1 "select move_booking('$MB','$COURT3', $(at 09:00), $(at 10:00));" >/dev/null
+  echo "  (this suite's S3 expects 0066 and 0091; found 0066=$HAS_0066 0091=$HAS_0091)"
+  CHECKS=$((CHECKS+1)); echo "  FAIL  S3 not run: move_booking_priced (0091) with the 0066 length rule is not here"; FAILS=$((FAILS+1))
 fi
 fails_with $U1 "S3l off the 30-minute grid (10:10): refused by the slot trigger" "select move_booking('$MB','$COURT2', $(at 10:10), $(at 11:10));" not_on_grid
-fails_with $U1 "S3m before opening (06:00): refused" "select move_booking('$MB','$COURT2', $(at 06:00), $(at 07:00));" outside_opening_hours
-fails_with $U1 "S3n not whole slots (1 h 15): refused" "select move_booking('$MB','$COURT2', $(at 10:00), $(at 11:15));" bad_duration
-OB=$(q $U1 "select staff_book('$CLUB','$COURT2', $(at 19:00), $(at 20:00), 'smoke-move', null);")
-fails_with $U1 "S3o onto another booking: refused" "select move_booking('$MB','$COURT2', $(at 19:30), $(at 20:30));" slot_taken
+# before opening there is no price, so the priced path refuses first (no_price_rule); the slot trigger, which every
+# booking write goes through, is shown separately with a direct write by the database owner
+fails_with $U1 "S3m before opening (06:00): the move is refused (no price outside opening hours)" "select move_booking('$MB','$COURT2', $(at 06:00), $(at 07:00));" no_price_rule
+fails_with admin "S3m2 ...and any write of it is refused by the slot trigger (outside_opening_hours)" "update bookings set start_at = $(at 06:00), end_at = $(at 07:00) where id='$MB';" outside_opening_hours
+fails_with $U1 "S3n not whole slots (1 h 15), at its quoted price: refused by the slot trigger" "select move_booking_priced('$MB','$COURT2', $(at 10:00), $(at 11:15), (quote_move('$MB','$COURT2', $(at 10:00), $(at 11:15))->>'new')::numeric);" bad_duration
+# the other booking sits in off-peak time, so the overlap is reached without any price change
+OB=$(q $U1 "select staff_book('$CLUB','$COURT2', $(at 13:00), $(at 14:00), 'smoke-move', null);")
+fails_with $U1 "S3o onto another booking (same price, older call): refused" "select move_booking('$MB','$COURT2', $(at 13:30), $(at 14:30));" slot_taken
+fails_with $U1 "S3o2 onto another booking through the priced call: refused" "select move_booking_priced('$MB','$COURT2', $(at 13:30), $(at 14:30), 20);" slot_taken
+check admin "S3o3 ...the booking is unchanged after every refusal (court, time, price)" "select '$(state)';" "$COURT2 12:00-13:00 20.00"
 fails_with $U2 "S3p a player who is not staff cannot move it" "select move_booking('$MB','$COURT2', $(at 21:00), $(at 22:00));" forbidden
 
 echo "--- S4. staff and past times on today's real clock (release fix 0071): walk-in cutoff, extend, past, ended"
