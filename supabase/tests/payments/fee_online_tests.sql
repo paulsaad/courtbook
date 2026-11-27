@@ -264,12 +264,18 @@ insert into t values ('R6 a callback (or anything posing as the provider) still 
 -- review of PR #34 at 45f53dd: a reference already recorded counts as recorded only if amount, currency AND attempt agree
 select pg_temp.keep('y_other_attempt', pg_temp.s(format('select reconcile_provider_charge(''simulated'', %L, ''R-1'', 1.00, ''USD'')', pg_temp.aid('a3'))));
 select pg_temp.keep('y_unmatched_vs_attempt', pg_temp.s($$select reconcile_provider_charge('simulated', 'not-an-attempt', 'R-1', 1.00, 'USD')$$));
+-- 0098 (case 6): with NO reference at all (none, or blank) the same money is already recorded
+select pg_temp.keep('y_noref_null', pg_temp.s($$select reconcile_provider_charge('simulated', null, 'R-1', 1.00, 'USD')$$));
+select pg_temp.keep('y_noref_blank', pg_temp.s($$select reconcile_provider_charge('simulated', '  ', 'R-1', 1.00, 'USD')$$));
+select pg_temp.keep('y_noref_amount', pg_temp.s($$select reconcile_provider_charge('simulated', null, 'R-1', 2.00, 'USD')$$));
 select pg_temp.keep('y_un_first', pg_temp.s($$select reconcile_provider_charge('simulated', 'not-ours-777', 'R-UN-S', 1.00, 'USD')$$));
 select pg_temp.keep('y_attempt_vs_unmatched', pg_temp.s(format('select reconcile_provider_charge(''simulated'', %L, ''R-UN-S'', 1.00, ''USD'')', pg_temp.aid('rc_a'))));
 select pg_temp.keep('y_cur', pg_temp.s($$select reconcile_provider_charge('whish', 'not-ours-123', 'R-UN-1', 1.00, 'EUR')$$));
 -- 0098 (case 6 decision): the same reference with NO attempt of ours, same amount and currency, is the same money
-insert into t values ('R7 the same provider reference under another attempt or in another currency is a conflict; under no attempt (same amount, currency) it is already_recorded (0098)',
-  pg_temp.got('y_other_attempt') = 'ERR charge_evidence_conflict' and pg_temp.got('y_unmatched_vs_attempt') = 'already_recorded'
+insert into t values ('R7 the same provider reference under another attempt, under a reference not ours, or in another currency is a conflict; with no reference at all (same amount, currency) it is already_recorded (0098)',
+  pg_temp.got('y_other_attempt') = 'ERR charge_evidence_conflict' and pg_temp.got('y_unmatched_vs_attempt') = 'ERR charge_evidence_conflict'
+  and pg_temp.got('y_noref_null') = 'already_recorded' and pg_temp.got('y_noref_blank') = 'already_recorded'
+  and pg_temp.got('y_noref_amount') = 'ERR charge_evidence_conflict'
   and pg_temp.got('y_cur') = 'ERR charge_evidence_conflict'
   and pg_temp.got('y_un_first') = 'unmatched' and pg_temp.got('y_attempt_vs_unmatched') = 'ERR charge_evidence_conflict'
   and (select count(*) from fee_charges where provider_ref in ('R-1', 'R-UN-1', 'R-UN-S')) = 3

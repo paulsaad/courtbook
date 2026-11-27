@@ -239,6 +239,19 @@ await invariants("C2");
   await q("update bookings set hold_expires_at = now() + interval '30 minutes' where id = $1", [v.booking]);       // the hold was extended since
   const r6 = await succeed(v.attempt, `c3x-${randomUUID()}`);
   record("C3-deadline", "a hold extended after the attempt started does not stretch the attempt's deadline: owed back", { r: r0(r6), hasDeadline }, hasDeadline === 1 && r0(r6) === "late");
+  // exactly at the deadline (same transaction, so now() is the deadline itself): still within it → confirmed (<=)
+  const court7 = await newCourt();
+  const u = await heldAndStarted(nextPlayer(), court7, s, e);
+  let edge;
+  try {
+    await q("begin");
+    await q("update bookings set hold_expires_at = now() where id = $1", [u.booking]);
+    if (hasDeadline) await q("update payment_attempts set hold_deadline = now() where id = $1", [u.attempt]);
+    await q("set local role service_role");
+    edge = (await q("select record_attempt_result($1, 'succeeded', $2, 1, 'USD') as r", [u.attempt, `c3edge-${randomUUID()}`]))[0]?.r;
+    await q("commit");
+  } catch (err) { await q("rollback").catch(() => {}); edge = String(err.message); }
+  record("C3-edge", "a success recorded exactly at the deadline is within it: confirmed (the rule is now() <= deadline)", { edge }, edge === "confirmed");
 }
 await invariants("C3");
 

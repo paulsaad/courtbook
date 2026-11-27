@@ -25,7 +25,7 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
   if (!p) notFound();
   // fee-only (M12.1): what happened to the latest attempt, and how many are left of the three
   const { data: attempts } = p.kind === "fee_only"
-    ? loaded(await supabase.from("payment_attempts").select("status, outcome, attempt_no").eq("payment_id", p.id).order("attempt_no", { ascending: false }), "this payment")
+    ? loaded(await supabase.from("payment_attempts").select("status, outcome, attempt_no, end_reason").eq("payment_id", p.id).order("attempt_no", { ascending: false }), "this payment")
     : { data: [] as { status: string; outcome: string | null; attempt_no: number }[] };
   const last = (attempts ?? [])[0] ?? null;
 
@@ -49,7 +49,7 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
       total={Number(p.total_usd)}
       feeOnly={p.kind === "fee_only"}
       simulated={p.provider === "simulated"}
-      lastAttempt={last ? { status: last.status, outcome: last.outcome } : null}
+      lastAttempt={last ? { status: last.status, outcome: last.outcome, endReason: (last as { end_reason?: string | null }).end_reason ?? null } : null}
       attemptsLeft={3 - (attempts ?? []).length}
     />
   );

@@ -21,9 +21,9 @@
 --    member and the time on the charge (fee_charges.club_cancel_by / club_cancel_at). Admin-readable (the table's
 --    existing policy), not writable through the API (no grant), immutable once set (trigger, also for the server key).
 --    No foreign key: like the moderation log, the record outlives the account (decision: kept, not set null).
--- Case 6 open point: the same provider reference presented again WITHOUT our attempt reference, with the same amount
---    and currency, is 'already_recorded' (a charge list that omits the reference does not fail every run); a different
---    amount or currency stays 'charge_evidence_conflict'.
+-- Case 6 open point: the same provider reference presented again with NO reference at all (none or blank), with the
+--    same amount and currency, is 'already_recorded' (a charge list that omits the reference does not fail every run);
+--    a reference that is present but not ours, or a different amount or currency, stays 'charge_evidence_conflict'.
 -- Lock order unchanged everywhere: club (share) → court → booking → payment → payment_attempts → fee_charges.
 
 -- ------------------------------------------------------------------ data
@@ -33,7 +33,8 @@ alter table payment_attempts drop constraint if exists payment_attempts_end_reas
 alter table payment_attempts add constraint payment_attempts_end_reason_check
   check (end_reason is null or end_reason in ('provider_failed', 'provider_expired', 'unknown_timeout', 'abandoned'));
 -- attempts that ended before 0098 (local tests only): what their status said
-update payment_attempts set end_reason = case status when 'failed' then 'provider_failed' else 'provider_expired' end
+-- (conservative: an old 'expired' may have been CourtBook's own timeout, so it is never taken as the provider's word)
+update payment_attempts set end_reason = case status when 'failed' then 'provider_failed' else 'unknown_timeout' end
 where status in ('failed', 'expired') and end_reason is null;
 alter table payment_attempts drop constraint if exists payment_attempts_end_reason_terminal;
 alter table payment_attempts add constraint payment_attempts_end_reason_terminal
@@ -45,7 +46,7 @@ alter table fee_charges add column if not exists club_cancel_by uuid;     -- no 
 alter table fee_charges add column if not exists club_cancel_at timestamptz;
 alter table fee_charges drop constraint if exists fee_charges_club_cancel_shape;
 alter table fee_charges add constraint fee_charges_club_cancel_shape
-  check (club_cancel_at is null or reason = 'club_cancelled');
+  check ((club_cancel_by is null) = (club_cancel_at is null) and (club_cancel_at is null or reason = 'club_cancelled'));
 create or replace function fee_charges_club_cancel_immutable() returns trigger
 language plpgsql as $$
 begin
@@ -369,9 +370,9 @@ begin
   begin v_attempt := btrim(p_external_ref)::uuid; exception when invalid_text_representation then v_attempt := null; end;
   select * into a from payment_attempts where id = v_attempt and provider = p_provider;
   if not found then v_attempt := null; end if;                    -- the attempt the provider's record names, if ours
-  -- 0098 (case 6): the provider's list shows a charge we already recorded but without our reference: the same money,
-  -- if amount and currency agree (any other difference is still a conflict, below)
-  if v_attempt is null and exists (select 1 from fee_charges where provider = p_provider and provider_ref = v_ref
+  -- 0098 (case 6): the provider's list shows a charge we already recorded but WITHOUT any reference (none, or blank):
+  -- the same money, if amount and currency agree. A reference that is present but not ours stays a conflict, below.
+  if nullif(btrim(p_external_ref), '') is null and exists (select 1 from fee_charges where provider = p_provider and provider_ref = v_ref
                                      and amount = p_amount and currency = v_currency) then
     return 'already_recorded';
   end if;

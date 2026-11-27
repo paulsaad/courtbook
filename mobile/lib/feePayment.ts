@@ -194,7 +194,8 @@ export function startProblem(a: StartAnswer, online: boolean): string | null {
     if (a.error === "payment_in_progress") return "A payment for this booking is already in progress. Tap Check payment.";
     return RETRY_FINAL[a.error] ?? "Something went wrong. Nothing was charged.";
   }
-  if (a.kind === "ended") return a.state === "failed" ? "That payment didn't go through. Nothing was charged." : "That payment page expired. Nothing was charged.";
+  // 0098 (M1 review S3): an expired attempt may be CourtBook's own timeout (unknown_timeout): never "nothing was charged"
+  if (a.kind === "ended") return a.state === "failed" ? "That payment didn't go through. Nothing was charged." : "That payment page expired. If you were charged, the fee will be refunded.";
   return null;
 }
 
