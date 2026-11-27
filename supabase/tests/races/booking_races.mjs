@@ -345,8 +345,12 @@ async function feeRaces() {
     const a2 = await attempt(P1, h.payment_id);
     const [ra, rb] = await race(mode, result(a1, `F8b-1-${mode}-${court}`), result(a2, `F8b-2-${mode}-${court}`));
     const answers = [out(ra), out(rb)].sort();
-    rep(`F8b two attempts succeed at once [${mode}]: one confirms, the other is a duplicate owed back`,
-      JSON.stringify(answers) === JSON.stringify(["confirmed", "duplicate"]) && (await charges(h.payment_id)) === "kept,refund_due:duplicate", `${JSON.stringify(answers)} ${await charges(h.payment_id)}`);
+    // 0098 (M1): the attempt CourtBook had closed never confirms. Whichever is recorded first, the open one confirms and
+    // the closed one is owed back: 'late' if it is recorded before the confirmation, 'duplicate' after it
+    const ch = await charges(h.payment_id);
+    rep(`F8b two attempts succeed at once [${mode}]: the open one confirms, the closed one is owed back (late or duplicate)`,
+      (JSON.stringify(answers) === JSON.stringify(["confirmed", "duplicate"]) && ch === "kept,refund_due:duplicate")
+        || (JSON.stringify(answers) === JSON.stringify(["confirmed", "late"]) && ch === "kept,refund_due:not_confirmed"), `${JSON.stringify(answers)} ${ch}`);
   }
   await invariants("F8");
 

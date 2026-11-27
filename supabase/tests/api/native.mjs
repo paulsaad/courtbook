@@ -211,16 +211,16 @@ console.log("--- F2 races and resilience");
     s.status === 200 && s.body.state === "payment_open" && reported.some(([k, , d]) => k === "paymentProvider" && d.code === "provider_unavailable"), s.body);
 }
 {
-  // M12.1 rule (0014/0090, record_attempt_result): a pending hold just past its deadline still owns the slot until it
-  // is swept, so money arriving then confirms it. Once swept, the same money is owed back.
+  // 0098 (M1, Paul 26 Nov) replaces the M12.1 rule: money discovered after the hold's deadline is owed back, never
+  // confirmed on discovery time (no trustworthy provider time is used). The slot is then set free.
   const x = await hold();
   await pay(x);
   await elapse(x, 11);                                // the hold ran out while the page was open, not yet swept
   const s1 = await look(x);
   gw.pay((await attemptsOf(x))[0].id);
   const s2 = await look(x);
-  rep("N15 hold past its deadline but not yet swept, page open: still payment_open; money arriving then confirms it (the accepted M12.1 rule)",
-    s1.body.state === "payment_open" && s2.body.state === "confirmed" && (await row(x)).booking === "confirmed", { s1: s1.body, s2: s2.body });
+  rep("N15 hold past its deadline but not yet swept, page open: still payment_open; money arriving then is owed back, the booking not confirmed (0098)",
+    s1.body.state === "payment_open" && s2.body.state === "refund_due" && s2.body.noFeeTaken === false && (await row(x)).booking === "expired", { s1: s1.body, s2: s2.body });
 
   const y = await hold();
   await pay(y);
