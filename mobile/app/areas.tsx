@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { Text } from "../components/Text";
 import { Button } from "../components/Button";
@@ -19,6 +20,7 @@ import { color, font, radius, space } from "../lib/theme";
 type Step = { gov: string | null; district: string | null };
 
 export default function Areas() {
+  const insets = useSafeAreaInsets();   // A17: a long list must end above Android's navigation bar (edge to edge)
   const session = useSession();
   const userId = session.status === "signed-in" ? session.session.user.id : null;
   const prefs = usePlayingPrefs(userId);
@@ -56,7 +58,7 @@ export default function Areas() {
   );
 
   return (
-    <ScrollView style={styles.page} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.page} contentContainerStyle={[styles.content, { paddingBottom: 40 + insets.bottom }]}>
       <Text variant="secondary">Your areas are one tap away on Courts, on every device.</Text>
       {areas.length === 0 ? <Text>No areas yet.</Text> : (
         <View style={styles.list}>
