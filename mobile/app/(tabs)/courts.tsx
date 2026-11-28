@@ -7,7 +7,8 @@ import { Text } from "../../components/Text";
 import { Chip } from "../../components/Chip";
 import { Icon } from "../../components/Icon";
 import { DateStrip } from "../../components/DateStrip";
-import { SportMark, SPORTS } from "../../components/SportMark";
+import { SportMark } from "../../components/SportMark";
+import { useSports } from "../../lib/sports";
 import { CourtLines } from "../../components/CourtLines";
 import { Image } from "expo-image";
 import { useClubCovers } from "../../lib/clubInfo";
@@ -19,7 +20,7 @@ import { BEIRUT, useDaySlots } from "../../lib/queries";
 import { bookingDays, sportName } from "../../lib/days";
 import { FavouriteHeart } from "../../components/FavouriteHeart";
 import { useSession } from "../../lib/session";
-import { rememberArea, usePlayingPrefs } from "../../lib/playing";
+import { usePlayingPrefs, useRememberArea } from "../../lib/playing";
 import { areaKey, distanceLabel, sameArea, sortByDistance, type PlayingArea } from "@shared/places";
 import { locationNote } from "../../lib/nearby";
 import { useNearby } from "../../lib/deviceLocation";
@@ -36,10 +37,11 @@ export default function Courts() {
   const days = useMemo(() => bookingDays(BEIRUT), []);
   const [date, setDate] = useState(days[0].key);
   const [sport, setSport] = useState<string | null>(null);
+  const catalogue = useSports();   // active sports, alphabetical (admin-managed catalogue)
   // Home's sport chips open this tab with ?sport=…; a later chip tap on Home changes it again
   const p = useLocalSearchParams<{ sport?: string }>();
   useEffect(() => {
-    if (p.sport && (SPORTS as readonly string[]).includes(p.sport)) setSport(p.sport);
+    if (p.sport && /^[a-z][a-z0-9_]{1,30}$/.test(p.sport)) setSport(p.sport);
   }, [p.sport]);
   const session = useSession();
   const userId = session.status === "signed-in" ? session.session.user.id : null;
@@ -58,7 +60,11 @@ export default function Courts() {
   // restored from their account, even if it arrives after Near me came on) never narrows it; it is kept, and comes
   // back when Near me is turned off. Choosing an area chip turns Near me off, including one still asking.
   const browseArea = nearOn ? null : area;
-  const pickArea = (a: PlayingArea | null) => { near.turnOff(); setArea(a); if (userId && playing.data) rememberArea(a); };
+  const remember = useRememberArea(userId);
+  const pickArea = (a: PlayingArea | null) => { near.turnOff(); setArea(a); if (userId && playing.data) remember(a); };
+  // The area narrowing this list, by name, so an empty result says where it looked (a club with no town, or in
+  // another area, is not in it) and offers all of Lebanon in one tap instead of a bare "No free courts".
+  const areaShown = browseArea ? (browseArea.label ?? "this area") : null;
   const points = useClubPoints(nearOn);
   // Visitors (no account, nothing saved): the governorates as one-tap chips, so refusing location still leaves a
   // way to narrow the list (spec addendum R2). Not remembered anywhere.
@@ -89,8 +95,8 @@ export default function Courts() {
       <View style={styles.filters}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           <Chip tone="sport" label="All sports" selected={sport === null} onPress={() => setSport(null)} />
-          {SPORTS.filter((s) => s !== "other").map((s) => (
-            <Chip key={s} tone="sport" label={sportName(s)} selected={sport === s} onPress={() => setSport(s)} icon={<SportMark sport={s} size={20} />} />
+          {catalogue.map(({ code: s, name }) => (
+            <Chip key={s} tone="sport" label={name} selected={sport === s} onPress={() => setSport(s)} icon={<SportMark sport={s} size={20} />} />
           ))}
         </ScrollView>
         {userId && playing.data && (
@@ -142,7 +148,7 @@ export default function Courts() {
         )}
         {q.isSuccess && (
           <Text variant="label">
-            {open.length === 0 ? "No free courts" : `${open.length} ${open.length === 1 ? "club" : "clubs"} with free times`}
+            {open.length === 0 ? (areaShown ? `No free courts in ${areaShown}` : "No free courts") : `${open.length} ${open.length === 1 ? "club" : "clubs"} with free times`}
           </Text>
         )}
         <Freshness lastSuccessAt={q.dataUpdatedAt} fetching={q.isFetching} failedSinceSuccess={q.isError && q.dataUpdatedAt > 0} />
@@ -155,6 +161,9 @@ export default function Courts() {
       ) : open.length === 0 ? (
         search ? (
           <Empty title={`No free courts matching “${search}”`} body="Check the spelling, try another day, or clear the search." action="Clear search" onAction={() => { setTyped(""); setSearch(""); }} />
+        ) : areaShown ? (
+          <Empty title={`Nothing free in ${areaShown} that day`} body="You're seeing one area only. Show every club in Lebanon, or try another day or sport."
+                 action="Show all Lebanon" onAction={() => pickArea(null)} />
         ) : (
           <Empty title="Nothing free that day" body="Try another day or another sport." />
         )

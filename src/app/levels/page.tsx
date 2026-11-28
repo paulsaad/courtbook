@@ -6,7 +6,7 @@ import { GROUP_LABEL, GROUP_RANGE, GUIDE, HOW_TO_CHOOSE, INTRO, levelGroup } fro
 /** "Find your playing level" — the article and the per-sport tables. Public. */
 export default async function LevelsGuide() {
   const supabase = await createClient();
-  const { data: sportRows } = loaded(await supabase.from("sports").select("code, name_en").eq("active", true).order("sort_order"), "the sports");
+  const { data: sportRows } = loaded(await supabase.from("sports").select("code, name_en").eq("active", true).order("name_en"), "the sports");
   const names = new Map(((sportRows ?? []) as { code: string; name_en: string }[]).map((s) => [s.code, s.name_en]));
   const sports = ((sportRows ?? []) as { code: string }[]).map((s) => s.code).filter((c) => GUIDE[c]);
   return (

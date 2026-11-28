@@ -53,7 +53,17 @@ export function useDismissQuestion(userId: string | null) {
   });
 }
 
-/** Remember the area being browsed (best effort; the screen keeps working if it fails). */
+/** Remember the area being browsed (best effort; the screen keeps working if it fails). Also updates this device's
+ *  copy of the account's prefs at once, so the Courts tab, when it opens again before the prefs are re-read, opens on
+ *  the area the player chose last and not on an older one (staging, 28 Nov: an older "North" came back). */
+export function useRememberArea(userId: string | null): (a: PlayingArea | null) => void {
+  const qc = useQueryClient();
+  return (a: PlayingArea | null) => {
+    if (userId) qc.setQueryData<PlayingPrefs | null>(playingKeys.mine(userId), (p) => (p ? { ...p, last: a } : p));
+    rememberArea(a);
+  };
+}
+
 export function rememberArea(a: PlayingArea | null): void {
   void Promise.resolve(supabase.rpc("set_last_area", { p_governorate: a?.governorate ?? null, p_district: a?.district ?? null, p_town: a?.district ? a.town : null }))
     .catch(() => {});

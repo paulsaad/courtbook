@@ -252,20 +252,55 @@ try {
   const wk = await U1.client.rpc("staff_book", { p_club: CLUB, p_court: COURT3, p_start: at("09:00"), p_end: at("10:00"), p_name: "api-move", p_phone: null });
   const MB = wk.data;
   record("M1", "staff books a 1 h walk-in through the API", !wk.error && typeof MB === "string", errOf(wk) ?? "");
-  const move = (u, court, s0, e0) => u.client.rpc("move_booking", { p_booking: MB, p_court: court, p_start: at(s0), p_end: at(e0) });
+  // F1 (0099): the desk's call carries the price it shows and what it saw (court, start, end); here the booking's
+  // current court and time (a fresh view). Since 0091 a move that changes a walk-in's price must be confirmed at the
+  // price the database computes (quote_move shows it); a null price only moves when the price stays the same.
+  // Since 0099 the older 4- and 5-argument calls refuse with move_needs_reload (a page from before 0099 reloads).
+  const seenNow = () => { const [c, s, e] = sql(`select court_id||'|'||(to_json(start_at)#>>'{}')||'|'||(to_json(end_at)#>>'{}') from bookings where id='${MB}'`).split("|"); return { p_seen_court: c, p_seen_start: s, p_seen_end: e }; };
+  const priced = (u, court, s0, e0, p, seen = seenNow()) =>
+    u.client.rpc("move_booking_priced", { p_booking: MB, p_court: court, p_start: at(s0), p_end: at(e0), p_expected_price: p, ...seen });
+  const move = (u, court, s0, e0) => priced(u, court, s0, e0, null);
   const span = () => sql(`select to_char(start_at at time zone 'Asia/Beirut','HH24:MI')||'-'||to_char(end_at at time zone 'Asia/Beirut','HH24:MI') from bookings where id='${MB}'`);
+  const price = () => Number(sql(`select price_usd from bookings where id='${MB}'`));
   let m = await move(U1, COURT3, "09:00", "09:30");
   record("M2", "move to 30 min (below the 1 h minimum): bad_duration", errOf(m)?.includes("bad_duration"), errOf(m) ?? "moved!");
   m = await move(U1, COURT3, "09:00", "13:00");
   record("M3", "move to 4 h (above the 3 h maximum): bad_duration", errOf(m)?.includes("bad_duration"), errOf(m) ?? "moved!");
   record("M4", "...booking unchanged", span() === "09:00-10:00", span());
   // 14:00 onwards is free on test court 3 whether or not section P ran (P replaces a player's 12:00 hold).
+  const p0 = price();
+  m = await U1.client.rpc("move_booking", { p_booking: MB, p_court: COURT3, p_start: at("14:00"), p_end: at("15:00") });
+  record("M5r", "the pre-0099 4-argument call is refused: move_needs_reload", errOf(m)?.includes("move_needs_reload"), errOf(m) ?? "moved!");
+  m = await U1.client.rpc("move_booking_priced", { p_booking: MB, p_court: COURT3, p_start: at("14:00"), p_end: at("15:00"), p_expected_price: p0 });
+  record("M5r2", "the pre-0099 5-argument call is refused: move_needs_reload", errOf(m)?.includes("move_needs_reload") && span() === "09:00-10:00", errOf(m) ?? "moved!");
   m = await move(U1, COURT3, "14:00", "15:30");
-  record("M5", "move to 1 h 30 at another time: accepted", !m.error && span() === "14:00-15:30", errOf(m) ?? span());
-  m = await move(U1, COURT3, "14:10", "15:40");
-  record("M6", "off the grid: not_on_grid (slot trigger)", errOf(m)?.includes("not_on_grid"), errOf(m) ?? "moved!");
+  record("M5a", "a move that would change the walk-in's price (1 h → 1 h 30) without a confirmed price: price_confirmation_needed",
+    errOf(m)?.includes("price_confirmation_needed"), errOf(m) ?? "moved!");
+  record("M5b", "...nothing moved, price unchanged", span() === "09:00-10:00" && price() === p0, `${span()} $${price()}`);
+  const qm = await U1.client.rpc("quote_move", { p_booking: MB, p_court: COURT3, p_start: at("14:00"), p_end: at("15:30") });
+  const qNew = Number(qm.data?.new), qCur = Number(qm.data?.current);
+  const dbPrice = Number(sql(`select quote_price('${COURT3}', '${at("14:00")}', '${at("15:30")}')`));
+  record("M5c", "quote_move shows the desk the current and the new price (the club's price for 1 h 30)",
+    !qm.error && qCur === p0 && qNew === dbPrice && qNew !== p0 && qm.data?.kind === "reprice", errOf(qm) ?? JSON.stringify(qm.data));
+  m = await priced(U1, COURT3, "14:00", "15:30", qNew + 1);
+  record("M5d", "confirming a price that is not the database's: price_changed, nothing moved",
+    errOf(m)?.includes("price_changed") && span() === "09:00-10:00" && price() === p0, errOf(m) ?? `moved! ${span()}`);
+  m = await priced(U1, COURT3, "14:00", "15:30", qNew, { p_seen_court: COURT3, p_seen_start: at("08:00"), p_seen_end: at("09:00") });
+  record("M5e", "a desk that saw an older court or time: booking_changed_elsewhere, nothing moved",
+    errOf(m)?.includes("booking_changed_elsewhere") && span() === "09:00-10:00" && price() === p0, errOf(m) ?? `moved! ${span()}`);
+  m = await priced(U1, COURT3, "14:00", "15:30", qNew);
+  record("M5", "move to 1 h 30 at another time, confirmed at the quoted price: accepted, booking repriced",
+    !m.error && span() === "14:00-15:30" && price() === qNew, errOf(m) ?? `${span()} $${price()}`);
+  // M6: the slot grid (bookings_slot_validation) still refuses an off-grid move. The price is confirmed first, so the
+  // grid check itself is what is reached and must refuse.
+  const q6 = await U1.client.rpc("quote_move", { p_booking: MB, p_court: COURT3, p_start: at("14:10"), p_end: at("15:40") });
+  m = await priced(U1, COURT3, "14:10", "15:40", Number(q6.data?.new));
+  record("M6", "off the grid (14:10–15:40), price confirmed: not_on_grid (slot trigger), nothing moved",
+    !q6.error && errOf(m)?.includes("not_on_grid") && span() === "14:00-15:30" && price() === qNew, `${errOf(q6) ?? ""}${errOf(m) ?? "moved!"} ${span()}`);
   m = await move(U2, COURT3, "16:00", "17:00");
   record("M7", "a player who is not staff: forbidden", errOf(m)?.includes("forbidden"), errOf(m) ?? "moved!");
+  m = await priced(U2, COURT3, "16:00", "17:00", qNew);
+  record("M7b", "...nor with a confirmed price", errOf(m)?.includes("forbidden") && span() === "14:00-15:30", errOf(m) ?? "moved!");
   sql(`delete from club_staff where profile_id='${U1.id}'`);
 
 } catch (e) {

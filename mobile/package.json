@@ -59,6 +59,9 @@
     "moduleNameMapper": {
       "^@shared/(.*)$": "<rootDir>/shared/$1"
     },
+    "modulePaths": [
+      "<rootDir>/node_modules"
+    ],
     "testPathIgnorePatterns": [
       "/node_modules/",
       "/__tests__/fixtures/"

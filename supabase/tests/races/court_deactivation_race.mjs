@@ -90,12 +90,12 @@ const kinds = [
     const from = await newCourt(SIM);
     const id = await one(`insert into bookings (club_id, court_id, start_at, end_at, status, source, price_usd, fee_usd, guest_name, created_by)
       values ($1,$2,$3,$4,'confirmed','staff',20,0,'Mover',$5) returning id`, [SIM, from, T10, T11, S_SIM]);
-    return [S_SIM, "select move_booking_priced($1,$2,$3,$4,20)::text as id", [id, court, T10, T11]];
+    return [S_SIM, "select move_booking_priced($1,$2,$3,$4,20,(select court_id from bookings where id = $1), (select start_at from bookings where id = $1), (select end_at from bookings where id = $1))::text as id", [id, court, T10, T11]];
   }],
 ];
-// the move needs 0091 (#23); on a branch without it the move races are skipped and say so
-const hasMove = await one("select to_regprocedure('move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric)') is not null");
-if (!hasMove) { kinds.pop(); console.log("skip  desk move onto the court: move_booking_priced (0091) is not on this branch"); }
+// the move uses F1's call (what the desk saw); on a database without it the move races are skipped and say so
+const hasMove = await one("select to_regprocedure('move_booking_priced(uuid,uuid,timestamptz,timestamptz,numeric,uuid,timestamptz,timestamptz)') is not null");
+if (!hasMove) { kinds.pop(); console.log("skip  desk move onto the court: F1's move_booking_priced is not on this database"); }
 for (const [label, club, staff, mk] of kinds) {
   for (const mode of ["ab", "ba", "sim", "sim", "sim", "sim", "sim"]) {
     const court = await newCourt(club);

@@ -18,7 +18,6 @@ import { color, font, radius, space, text, MAX_FONT_SCALE } from "../lib/theme";
  */
 type Mine = { status?: string; requested_at?: string; closed?: boolean } | null;
 const rpc = (fn: string, a: Record<string, unknown>) => supabase.rpc(fn, a);
-const signOut = (o: { scope: "global" | "local" }) => supabase.auth.signOut(o);
 
 export function DeleteAccount() {
   const [mine, setMine] = useState<Mine | undefined>(undefined);
@@ -45,13 +44,13 @@ export function DeleteAccount() {
   };
   const close = async () => {
     setBusy(true); setProblem(null);
-    await done(await closeMyAccount(rpc, signOut));
+    await done(await closeMyAccount(rpc, supabase.auth));
     setBusy(false);
   };
   const confirmCode = async () => {
     if (!codeFor) return;
     setBusy(true); setProblem(null);
-    await done(await verifyAndClose(supabase.auth, rpc, signOut, codeFor, code));
+    await done(await verifyAndClose(supabase.auth, rpc, supabase.auth, codeFor, code));
     setBusy(false);
   };
   const keep = async () => {
