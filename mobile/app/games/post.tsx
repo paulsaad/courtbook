@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { Text } from "../../components/Text";
 import { KeyboardAware } from "../../components/KeyboardAware";
@@ -19,7 +20,8 @@ import {
   type PostBooking, type PostClub, type PostDraft,
 } from "../../lib/postGame";
 import { newMessageId as newKey } from "../../lib/chat";
-import { color, space } from "../../lib/theme";
+import { color, radius, space } from "../../lib/theme";
+import { NO_COURT } from "../../lib/gameFormat";
 
 const playersUnit = (n: number) => (n === 1 ? "player needed" : "players needed");
 
@@ -30,6 +32,7 @@ const playersUnit = (n: number) => (n === 1 ? "player needed" : "players needed"
  * checks — it never posts twice (lib/postGame.ts).
  */
 export default function PostGame() {
+  const insets = useSafeAreaInsets();   // A17: the last controls must clear Android's navigation bar (edge to edge)
   const params = useLocalSearchParams<{ booking?: string; club?: string }>();
   const session = useSession();
   const signedIn = session.status === "signed-in";
@@ -104,7 +107,7 @@ export default function PostGame() {
 
   return page(
     <KeyboardAware>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" testID="post-game">
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: space.xxxl * 2 + insets.bottom }]} keyboardShouldPersistTaps="handled" testID="post-game">
         {usable.length > 0 || booking ? (
           <Field label="Court" hint={booking ? "Club, sport and time come from your booking." : null}>
             <ChoiceRow title="No booking — choose a time" detail="Arrange the court yourself" selected={!d.bookingId}
@@ -118,6 +121,12 @@ export default function PostGame() {
 
         {!d.bookingId ? (
           <>
+            {/* A17, 28 Nov: a game without a booking can be posted for any time, even when CourtBook shows no free
+                court (allowed: players may arrange the court themselves). Never let it look like a reservation. */}
+            <View style={styles.notice} testID="post-no-court">
+              <Text variant="strong">{NO_COURT}</Text>
+              <Text variant="secondary">Posting a game doesn't reserve a court. Book one in Courts first, or arrange it with the club yourself.</Text>
+            </View>
             <Field label="Sport">
               <View style={styles.wrap}>
                 {sports.map((s) => <Chip key={s} tone="sport" testID={`sport-${s}`} label={sportName(s)} selected={d.sport === s} onPress={() => set({ sport: s, clubId: clubs.data!.find((c) => c.id === d.clubId)?.sports.includes(s) ? d.clubId : null })} />)}
@@ -158,7 +167,11 @@ export default function PostGame() {
         <NoteField value={d.note} onChange={(note) => set({ note })} max={NOTE_MAX} />
 
         <View style={styles.footer}>
-          {where && !why ? <Text variant="secondary" testID="post-review">Your game will appear on Find a game for players at {where}.</Text> : null}
+          {where && !why ? (
+            <Text variant="secondary" testID="post-review">
+              Your game will appear on Find a game for players at {where}.{d.bookingId ? " Your court booking is linked to it." : ` It will show “${NO_COURT}”.`}
+            </Text>
+          ) : null}
           {problem ? <Text style={styles.problem} accessibilityRole="alert" accessibilityLiveRegion="polite" testID="post-problem">{problem}</Text> : null}
           {pending && POST_TOKEN_AVAILABLE ? (
             // with the key a retry cannot make a second game: posting again is the check
@@ -178,6 +191,7 @@ export default function PostGame() {
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: color.ground },
   content: { padding: space.lg, gap: space.xl, paddingBottom: space.xxxl * 2 },
+  notice: { gap: space.xs, padding: space.md, borderRadius: radius.lg, backgroundColor: color.card, borderWidth: 1, borderColor: color.line },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
   footer: { gap: space.md, paddingTop: space.sm },
   problem: { color: color.danger },

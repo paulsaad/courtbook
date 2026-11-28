@@ -65,6 +65,25 @@ async function chooseTime() {
   await fireEvent.press(screen.getByText("18:00"));
 }
 
+describe("Post a game: a game is not a court booking (A17, 28 Nov)", () => {
+  it("without a booking: says plainly that no court is reserved, and the review repeats it", async () => {
+    fakePost(jest.fn());
+    await show(<PostGame />);
+    const notice = await screen.findByTestId("post-no-court");
+    expect(notice).toHaveTextContent(/No court booked through CourtBook/);
+    expect(notice).toHaveTextContent(/doesn't reserve a court/);
+    await chooseTime();
+    expect(screen.getByTestId("post-review")).toHaveTextContent(/It will show “No court booked through CourtBook”/);
+  });
+  it("from a booking: no such notice; the review says the booking is linked", async () => {
+    fakePost(jest.fn());
+    mockParams.current = { booking: "b1" };
+    await show(<PostGame />);
+    expect(await screen.findByTestId("post-review")).toHaveTextContent(/Your court booking is linked to it/);
+    expect(screen.queryByTestId("post-no-court")).toBeNull();
+  });
+});
+
 describe("Post a game", () => {
   it("the joining choice is shown with what each means; Join straight away by default", async () => {
     fakePost(jest.fn());

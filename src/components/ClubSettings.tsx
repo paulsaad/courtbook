@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import ClubReadiness, { type ReadinessRow } from "./ClubReadiness";
 import ClubPhotos from "@/components/ClubPhotos";
@@ -37,6 +37,11 @@ const section = "flex flex-col gap-3 rounded-2xl border border-grid bg-white p-4
 export default function ClubSettings({ club, courts, rules, staff, coaches, isAdmin, backHref, areas, sports, town, media, readiness }: { club: ClubRow; courts: CourtRow[]; rules: RuleRow[]; staff: StaffRow[]; coaches: CoachReq[]; isAdmin: boolean; backHref: string; areas: Governorate[]; sports: Sport[]; town: TownWithArea | null; media: ClubMedia[]; readiness?: ReadinessRow[] | null }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  // UI-1 (27 Nov): a refusal (e.g. deactivating a court with upcoming bookings) is shown in the box under the club
+  // name, often far above the button that was pressed. Bring it into view, and announce it, so the page never looks
+  // as if nothing happened.
+  const errorBox = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (error) errorBox.current?.scrollIntoView?.({ behavior: "smooth", block: "center" }); }, [error]);
   const [busy, setBusy] = useState(false);
 
   async function run(fn: () => PromiseLike<{ error: { message: string } | null }>, after?: () => void) {
@@ -65,7 +70,7 @@ export default function ClubSettings({ club, courts, rules, staff, coaches, isAd
     <main className="mx-auto flex min-h-screen max-w-md md:max-w-2xl lg:max-w-[720px] flex-col gap-5 p-5 pb-16">
       <Link href={backHref} className="inline-flex min-h-11 items-center text-sm text-muted sm:min-h-0">‹ Back</Link>
       <h1 className="text-2xl font-semibold tracking-tight">{club.name}</h1>
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <p ref={errorBox} role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
 
       {readiness && <ClubReadiness clubId={club.id} active={club.active} rows={readiness} isAdmin={isAdmin} />}
       {isAdmin && <AdminBasics club={club} busy={busy} run={run} hasChecklist={!!readiness} />}
