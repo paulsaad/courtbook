@@ -162,7 +162,19 @@ export function newMessageId(rand: () => number = Math.random): string {
   return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20)}`;
 }
 
-/** Day separator text: Today, Yesterday, "Sat 21 Nov" (club time). */
+/**
+ * The phone's own time zone, for when messages were sent (A17, 28 Nov: a phone in Sweden showed 12:49 while its fresh
+ * message said 13:49, the club's time). Game times stay in the club's time zone; message times are the reader's own,
+ * as in every messaging app. Falls back to the club's zone if the phone does not say.
+ */
+export function deviceTimeZone(fallback: string): string {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || fallback; } catch { return fallback; }
+}
+
+/** The organiser alone in the game (nobody accepted yet): messages wait for whoever joins. */
+export const ALONE_HINT = "You're the only player here. Other players can see messages after they join.";
+
+/** Day separator text: Today, Yesterday, "Sat 21 Nov" (in the zone given: the reader's own for chat). */
 export function dayLabel(iso: string, tz: string, now = new Date()): string {
   const day = formatInTimeZone(new Date(iso), tz, "yyyy-MM-dd");
   if (day === formatInTimeZone(now, tz, "yyyy-MM-dd")) return "Today";

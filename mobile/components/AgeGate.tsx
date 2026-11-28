@@ -2,13 +2,15 @@ import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Button } from "./Button";
 import { supabase } from "../lib/supabase";
+import { signOutThisDevice } from "../lib/signOut";
 import { useSession } from "../lib/session";
 import { useAgeState, useConfirmAge } from "../lib/age";
 import { color, font, space, text, MAX_FONT_SCALE } from "../lib/theme";
 
 /**
  * Full-screen question over the whole app for a signed-in person who has not confirmed they are 18 or over (0080).
- * Signed-out browsing is unaffected. "No" records nothing: the person is told CourtBook is not for them and can sign out.
+ * Signed-out browsing is unaffected. "No" records nothing: the person is told CourtBook is not for them and can sign out
+ * (this phone only, as every ordinary sign-out: F2).
  */
 export function AgeGate() {
   const session = useSession();
@@ -26,7 +28,7 @@ export function AgeGate() {
           <>
             <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.title} accessibilityRole="header">CourtBook is for ages 18 and over</Text>
             <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={styles.body}>You can&apos;t book courts, join games or chat on CourtBook.</Text>
-            <Button label="Sign out" variant="secondary" onPress={() => void supabase.auth.signOut()} testID="age-signout" />
+            <Button label="Sign out" variant="secondary" onPress={() => void signOutThisDevice(supabase.auth)} testID="age-signout" />
             <Button label="I answered by mistake" variant="quiet" onPress={() => setUnder(false)} testID="age-back" />
           </>
         ) : (

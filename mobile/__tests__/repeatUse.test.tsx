@@ -14,6 +14,7 @@ import type { ReactNode } from "react";
 import { Alert } from "react-native";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
 import { fetchPlaying, rememberArea } from "../lib/playing";
 import { AreasQuestionCard, YourClubsRow } from "../components/HomeExtras";
@@ -32,7 +33,7 @@ const calls = () => rpc.mock.calls.map((c) => c[0]);
 function wrap(children: ReactNode) {
   // gcTime Infinity schedules no clean-up timer (a mutation's default 5-minute timer would keep Jest from exiting)
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { gcTime: Infinity } } });
-  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  return <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 0, left: 0, right: 0, bottom: 0 } }}><QueryClientProvider client={qc}>{children}</QueryClientProvider></SafeAreaProvider>;
 }
 beforeEach(() => {
   rpc.mockReset(); from.mockReset(); mockPush.mockReset();

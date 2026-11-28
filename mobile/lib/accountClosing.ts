@@ -3,11 +3,16 @@
  *
  * The app does not call the website: close_my_account runs with the person's own session (the database decides who
  * may, and refuses staff and admins with nothing changed). From its commit every write by this account is refused.
- * Then the app signs out everywhere (refresh tokens revoked). Banning the sign-in, removing the data and deleting the
- * sign-in happen on the server (retry route or the admin page), not here.
+ * Then the app asks the Auth server to end every session (shared/signOutAll.ts: confirmed, never assumed) and signs
+ * this phone out whatever the answer. If the server does not confirm, other devices can still renew until the server
+ * bans the sign-in (retry route, every 15 minutes, or the admin page); the database refuses their writes from the
+ * close. Already-issued access tokens work until they expire in every case. Banning the sign-in, removing the data
+ * and deleting the sign-in happen on the server, not here.
  *
  * The wording is the website's (src/lib/deletion/copy.ts); a test keeps the two identical.
  */
+import { revokeAllSessions, type SignOutAllAuth } from "../shared/signOutAll";
+
 export const CONFIRM_TITLE = "Delete your CourtBook account?";
 export const CONFIRM_TEXT =
   "You'll be signed out straight away and can't undo this. Your upcoming bookings and the games you organise are " +
@@ -40,21 +45,22 @@ export function legacyRequestText(requestedAt: string | null | undefined): strin
 
 type Rpc = (fn: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: { message?: string } | null }>;
 type SignOut = (opts: { scope: "global" | "local" }) => PromiseLike<{ error: unknown } | unknown>;
+type CloseAuth = SignOutAllAuth;
 
 const isClosed = (data: unknown) => !!(data && typeof data === "object" && (data as { closed?: unknown }).closed === true);
 
-async function signOutEverywhere(signOut: SignOut) {
-  try {
-    const r = (await signOut({ scope: "global" })) as { error?: unknown } | undefined;
-    if (r?.error) await signOut({ scope: "local" });
-  } catch {
-    try { await signOut({ scope: "local" }); } catch { /* the database lock-out still applies */ }
+// follow-up 27 Nov: auth.signOut({ scope: "global" }) reported success on a 401/403/404 without revoking anything.
+// Now the revocation is confirmed by the server (revokeAllSessions); this phone is signed out in every case.
+async function signOutEverywhere(auth: CloseAuth) {
+  const r = await revokeAllSessions(auth);
+  if (r === "failed") {
+    try { await auth.signOut({ scope: "local" }); } catch { /* the database lock-out still applies */ }
   }
 }
 
 export type CloseResult = { ok: true } | { ok: false; message: string } | { ok: false; reauth: true };
 
-export async function closeMyAccount(rpc: Rpc, signOut: SignOut): Promise<CloseResult> {
+export async function closeMyAccount(rpc: Rpc, auth: CloseAuth): Promise<CloseResult> {
   let error: { message?: string } | null = null;
   try { ({ error } = await rpc("close_my_account", { p_via: "app" })); } catch { error = { message: "network" }; }
   if (error) {
@@ -65,11 +71,11 @@ export async function closeMyAccount(rpc: Rpc, signOut: SignOut): Promise<CloseR
     // the close may have committed before the answer was lost: if the account is closed, carry on
     try {
       const s = await rpc("my_account_deletion", {});
-      if (!s.error && isClosed(s.data)) { await signOutEverywhere(signOut); return { ok: true }; }
+      if (!s.error && isClosed(s.data)) { await signOutEverywhere(auth); return { ok: true }; }
     } catch { /* offline */ }
     return { ok: false, message: CLOSE_FAILED };
   }
-  await signOutEverywhere(signOut);
+  await signOutEverywhere(auth);
   return { ok: true };
 }
 
@@ -87,10 +93,10 @@ export async function sendReauthCode(otp: Otp): Promise<{ email: string } | { me
   return error ? { message: "We couldn't send the code just now. Please try again in a minute." } : { email };
 }
 /** A fresh sign-in from the code, then the same close. */
-export async function verifyAndClose(otp: Otp, rpc: Rpc, signOut: SignOut, email: string, code: string): Promise<CloseResult> {
+export async function verifyAndClose(otp: Otp, rpc: Rpc, auth: CloseAuth, email: string, code: string): Promise<CloseResult> {
   const { error } = await otp.verifyOtp({ email, token: code.replace(/\D/g, ""), type: "email" });
   if (error) return { ok: false, message: "That code didn't work. Check it, or send a new one." };
-  return closeMyAccount(rpc, signOut);
+  return closeMyAccount(rpc, auth);
 }
 
 /** At sign-in and cold start: a session for an account that is already closed (another device closed it) is ended. */

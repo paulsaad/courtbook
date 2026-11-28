@@ -22,6 +22,7 @@ import PostGame from "../app/games/post";
 import EditGame from "../app/games/edit";
 import { bookingDays } from "../lib/days";
 import { gameKeys } from "../lib/games";
+import { sportsKey } from "../lib/sports";
 import type { GameDetail } from "../lib/gameTypes";
 
 const metrics = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 0, left: 0, right: 0, bottom: 0 } };
@@ -64,6 +65,25 @@ async function chooseTime() {
   await fireEvent.press(screen.getByLabelText(tomorrow.a11y));
   await fireEvent.press(screen.getByText("18:00"));
 }
+
+describe("Post a game: a game is not a court booking (A17, 28 Nov)", () => {
+  it("without a booking: says plainly that no court is reserved, and the review repeats it", async () => {
+    fakePost(jest.fn());
+    await show(<PostGame />);
+    const notice = await screen.findByTestId("post-no-court");
+    expect(notice).toHaveTextContent(/No court booked through CourtBook/);
+    expect(notice).toHaveTextContent(/doesn't reserve a court/);
+    await chooseTime();
+    expect(screen.getByTestId("post-review")).toHaveTextContent(/It will show “No court booked through CourtBook”/);
+  });
+  it("from a booking: no such notice; the review says the booking is linked", async () => {
+    fakePost(jest.fn());
+    mockParams.current = { booking: "b1" };
+    await show(<PostGame />);
+    expect(await screen.findByTestId("post-review")).toHaveTextContent(/Your court booking is linked to it/);
+    expect(screen.queryByTestId("post-no-court")).toBeNull();
+  });
+});
 
 describe("Post a game", () => {
   it("the joining choice is shown with what each means; Join straight away by default", async () => {
@@ -211,5 +231,16 @@ describe("Edit game", () => {
     await fireEvent.press(screen.getByTestId("edit-save"));
     expect(await screen.findByText("You already have more players accepted than that.")).toBeTruthy();
     expect(mockBack).not.toHaveBeenCalled();
+  });
+});
+
+describe("Post a game: sports offered (#66 review SF3)", () => {
+  it("offers only the clubs' sports that are active in the catalogue", async () => {
+    fakePost(jest.fn());
+    const qc = client();
+    qc.setQueryData(sportsKey, [{ code: "padel", name: "Padel" }], { updatedAt: Date.now() + 864e5 });   // tennis deactivated
+    await show(<PostGame />, qc);
+    expect(await screen.findByTestId("sport-padel")).toBeTruthy();
+    expect(screen.queryByTestId("sport-tennis")).toBeNull();
   });
 });

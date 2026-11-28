@@ -3,6 +3,7 @@
 #   run-check.sh <db url> <file> <required>
 #     required = part1 : rows are part|item|ok|detail; every part-1 row must be ok (part 2 is information)
 #     required = all   : rows are item|ok|detail; every row must be ok
+#     required = status: rows are item|detail|OK or STOP (the 0099–0101 checks); every row must be OK
 # The whole result is printed either way. No rows, or a psql error, is a failure too.
 set -uo pipefail
 db=$1; file=$2; required=$3
@@ -16,6 +17,8 @@ case $required in
          bad=$(echo "$rows" | awk -F'|' '$1 == "1" && $3 != "t" { print $2 }') ;;
   all)   echo "$rows" | awk -F'|' '{ d = $3; for (i = 4; i <= NF; i++) d = d "|" $i; printf "%-6s %s%s\n", $2 == "t" ? "ok" : "FAIL", $1, d == "" ? "" : "  — " d }'
          bad=$(echo "$rows" | awk -F'|' '$2 != "t" { print $1 }') ;;
+  status) echo "$rows" | awk -F'|' '{ printf "%-6s %s  — %s\n", $NF == "OK" ? "ok" : $NF, $1, $2 }'
+         bad=$(echo "$rows" | awk -F'|' '$NF != "OK" { print $1 }') ;;
   *) echo "::error::unknown mode $required"; exit 2 ;;
 esac
 if [ -n "$bad" ]; then

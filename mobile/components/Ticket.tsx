@@ -57,12 +57,15 @@ export function Ticket({ date, start, end, sport, children }: { date: string; st
   );
 }
 
-export function TicketRow({ label, value, note, last = false }: { label: string; value: string; note?: string; last?: boolean }) {
+export function TicketRow({ label, value, note, last = false, tone }: { label: string; value: string; note?: string; last?: boolean; tone?: "danger" }) {
   return (
     <View style={[styles.row, !last && styles.rowRule]}>
       <Text variant="secondary">{label}</Text>
       <View style={styles.rowValue}>
-        <Text variant="strong" style={{ textAlign: "right" }}>{value}</Text>
+        {tone === "danger"
+          // the approved status style (cc45baf): cancelled in danger red, in words, on its soft fill — as in Bookings
+          ? <View style={styles.badge} testID="status-badge"><Text style={styles.badgeText}>{value.toUpperCase()}</Text></View>
+          : <Text variant="strong" style={{ textAlign: "right" }}>{value}</Text>}
         {note ? <Text variant="caption" style={{ textAlign: "right" }}>{note}</Text> : null}
       </View>
     </View>
@@ -93,4 +96,6 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12, paddingVertical: 12 },
   rowRule: { borderBottomWidth: 1, borderBottomColor: "#EEEAE1" },
   rowValue: { flexShrink: 1, alignItems: "flex-end" },
+  badge: { backgroundColor: color.dangerSoft, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 },
+  badgeText: { fontFamily: font.semibold, fontSize: 13, letterSpacing: 0.6, color: color.danger },
 });

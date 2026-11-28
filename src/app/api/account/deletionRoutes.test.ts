@@ -12,11 +12,17 @@ let user: { id: string } | null;
 let userRpc: Record<string, { data?: unknown; error?: { message: string; code?: string } | null }>;
 let serviceRpc: Record<string, (args: Record<string, unknown>) => { data?: unknown; error?: { message: string; code?: string } | null }>;
 let signOut: ReturnType<typeof vi.fn>;
+let logout: ReturnType<typeof vi.fn>;   // auth.admin.signOut(jwt, "global"): the confirmed revocation (follow-up 27 Nov)
 const reported: Array<[string, string, unknown]> = [];
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
-    auth: { getUser: async () => ({ data: { user } }), signOut: (...a: unknown[]) => signOut(...a) },
+    auth: {
+      getUser: async () => ({ data: { user } }),
+      getSession: async () => ({ data: { session: user ? { access_token: "this-browser" } : null }, error: null }),
+      admin: { signOut: (...a: unknown[]) => logout(...a) },
+      signOut: (...a: unknown[]) => signOut(...a),
+    },
     rpc: async (fn: string, args?: unknown) => { calls.push({ client: "user", fn, args }); return { data: null, error: null, ...(userRpc[fn] ?? {}) }; },
   }),
 }));
@@ -73,6 +79,8 @@ beforeEach(() => {
   happyService();
   delete process.env.CRON_SECRET;
 });
+// a separate hook (not the line above) so the staging website's version of this file merges without a conflict here
+beforeEach(() => { logout = vi.fn(async () => ({ error: null })); });
 const services = () => calls.filter((c) => c.client === "service").map((c) => c.fn);
 
 describe("POST /api/account/close", () => {
@@ -81,7 +89,11 @@ describe("POST /api/account/close", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ closed: true });
     expect(calls[0]).toEqual({ client: "user", fn: "close_my_account", args: { p_via: "web" } });
+    // F2: closure ends every session, not just this browser; confirmed by the Auth server (follow-up 27 Nov)
+    expect(logout).toHaveBeenCalledWith("this-browser", "global");
     expect(signOut).toHaveBeenCalledTimes(1);
+    expect(signOut).toHaveBeenCalledWith({ scope: "local" });   // this browser's cookies, after the confirmed revocation
+    expect(reported).toEqual([]);
     expect(services()).toEqual(["claim_deletion", "auth.ban", "record_deletion_step", "record_deletion_step", "delete_account_data", "record_deletion_step", "auth.delete", "record_deletion_step", "finish_account_deletion"]);
     for (const c of calls.filter((c) => c.client === "service")) expect(JSON.stringify(c.args)).toContain(ME);
   });
@@ -159,6 +171,46 @@ describe("POST /api/account/close", () => {
     const res = await close.POST(post("/api/account/close", { confirm: true }));
     expect(res.status).toBe(200);
     expect(services()).toContain("finish_account_deletion");
+  });
+  // follow-up 27 Nov: the old call (signOut scope "global") reported success on these without revoking anything
+  for (const status of [401, 403, 404, 500]) {
+    it(`revocation refused (${status}): reported, never assumed; this browser signed out; the ban still runs`, async () => {
+      logout = vi.fn(async () => ({ error: { name: "AuthApiError", status } }));
+      const res = await close.POST(post("/api/account/close", { confirm: true }));
+      expect(await res.json()).toEqual({ closed: true });
+      expect(reported).toContainEqual(["deletionStepFailed", "account", { code: "global_signout" }]);
+      expect(signOut).toHaveBeenCalledWith({ scope: "local" });
+      expect(services()).toContain("auth.ban");
+    });
+  }
+  it("the report of an unconfirmed revocation itself failing never skips the ban (review nit of db8ac32)", async () => {
+    logout = vi.fn(async () => ({ error: { name: "AuthApiError", status: 401 } }));
+    // a monitoring outage: report() rejects for this one entry (done here, not in the mock above, so the staging
+    // website's version of this file still merges without a conflict)
+    const push = reported.push.bind(reported);
+    reported.push = ((...rows: Array<[string, string, unknown]>) => {
+      if ((rows[0]?.[2] as { code?: string } | undefined)?.code === "global_signout") throw new Error("sentry down");
+      return push(...rows);
+    }) as typeof reported.push;
+    try {
+      const res = await close.POST(post("/api/account/close", { confirm: true }));
+      expect(await res.json()).toEqual({ closed: true });
+      expect(services()).toContain("auth.ban");
+      expect(services()).toContain("finish_account_deletion");
+    } finally { delete (reported as { push?: unknown }).push; }   // back to Array.prototype.push
+  });
+  it("revocation unreachable (offline): reported; this browser signed out; the ban still runs", async () => {
+    logout = vi.fn(async () => ({ error: { name: "AuthRetryableFetchError", status: 0 } }));
+    await close.POST(post("/api/account/close", { confirm: true }));
+    expect(reported).toContainEqual(["deletionStepFailed", "account", { code: "global_signout" }]);
+    expect(signOut).toHaveBeenCalledWith({ scope: "local" });
+    expect(services()).toContain("auth.ban");
+  });
+  it("this browser's session already ended on the server (session_not_found): reported (the others were not asked); this browser cleared", async () => {
+    logout = vi.fn(async () => ({ error: { name: "AuthSessionMissingError", status: 404 } }));
+    await close.POST(post("/api/account/close", { confirm: true }));
+    expect(reported).toContainEqual(["deletionStepFailed", "account", { code: "global_signout" }]);
+    expect(signOut).toHaveBeenCalledWith({ scope: "local" });
   });
   it("a second close while the first run holds the lease: still closed, nothing processed twice", async () => {
     serviceRpc.claim_deletion = () => ({ data: { claimed: false, reason: "leased" } });

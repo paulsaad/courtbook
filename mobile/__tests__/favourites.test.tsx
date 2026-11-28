@@ -17,6 +17,10 @@ beforeEach(() => rpc.mockReset());
 const client = () => new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
 const wrap = (qc: QueryClient) => ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
 
+/** Re-reads of the favourites list itself (Home's "Your clubs" rows are re-read alongside since A17 F3). */
+const listReads = (spy: jest.SpyInstance) => spy.mock.calls.filter((c) => JSON.stringify((c[0] as { queryKey: unknown }).queryKey)?.startsWith('["favourites"')).length;
+const rowReads = (spy: jest.SpyInstance) => spy.mock.calls.filter((c) => JSON.stringify((c[0] as { queryKey: unknown }).queryKey)?.startsWith('["favourite-clubs"')).length;
+
 describe("available only where the server has 0087", () => {
   // 23 Nov: the switch is on (0087 written); a server without the functions still means no call result, no hearts
   it("switched on; a switched-off build makes no call and draws no hearts", async () => {
@@ -96,8 +100,9 @@ describe("favourite sync — basic outcomes", () => {
     t.calls[0].resolve(true);
     await expect(p).resolves.toEqual({ ok: true, favourite: true });
     expect(t.list()).toEqual(["b", "a"]);
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(listReads(spy)).toBe(1);
     expect(spy).toHaveBeenCalledWith({ queryKey: favouriteKeys.mine("u1") });
+    expect(rowReads(spy)).toBe(1);
   });
 
   it("a refusal (club gone) puts that club back and says why", async () => {
@@ -244,7 +249,8 @@ describe("favourite sync — overlapping taps and refreshes (regressions)", () =
     expect(spy).not.toHaveBeenCalled(); // b still saving: a re-read now could show b off
     t.calls[1].resolve(true);
     await pb;
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(listReads(spy)).toBe(1);
+    expect(rowReads(spy)).toBe(1);
   });
 
   it("after everything settles, the re-read makes the cache equal to the server", async () => {

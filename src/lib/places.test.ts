@@ -11,6 +11,19 @@ describe("directionsUrl", () => {
     expect(directionsUrl(null, null, "http://maps.example")).toBeNull();
     expect(directionsUrl(null, null, null)).toBeNull();
   });
+  it("a link is followed only when it names one place: a point in Lebanon inside it, or the club's share link (A17, 28 Nov)", () => {
+    // a place-name search is resolved by Google near the phone: in Sweden it opened a restaurant called Batroun
+    expect(directionsUrl(null, null, "https://maps.google.com/?q=Batroun")).toBeNull();
+    expect(directionsUrl(null, null, "https://www.google.com/maps/search/?api=1&query=Batroun%20Padel")).toBeNull();
+    expect(directionsUrl(null, null, "https://example.com/our-club")).toBeNull();
+    // a point inside the link: routed to that point, the same way as an exact point
+    expect(directionsUrl(null, null, "https://maps.google.com/?q=34.2553,35.6586")).toBe("https://www.google.com/maps/dir/?api=1&destination=34.2553,35.6586");
+    expect(directionsUrl(null, null, "https://www.google.com/maps/place/Club/@34.2553,35.6586,17z")).toBe("https://www.google.com/maps/dir/?api=1&destination=34.2553,35.6586");
+    // a point outside Lebanon inside a link: not followed
+    expect(directionsUrl(null, null, "https://maps.google.com/?q=59.33,18.06")).toBeNull();
+    // the club's own share link for its spot: kept
+    expect(directionsUrl(null, null, "https://goo.gl/maps/xyz")).toBe("https://goo.gl/maps/xyz");
+  });
   it("ignores a point outside Lebanon's range or half a point", () => {
     expect(directionsUrl(48.85, 2.35, null)).toBeNull();
     expect(directionsUrl(34.2, null, null)).toBeNull();

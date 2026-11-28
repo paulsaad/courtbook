@@ -70,10 +70,17 @@ export function sortByDistance<T extends { id: string }>(items: T[], points: Map
  * offers Apple Maps). Uses the exact map point when there is one, otherwise the club's own map link.
  */
 export function directionsUrl(lat: unknown, lng: unknown, fallback: string | null | undefined): string | null {
+  const route = (q: LatLng) => `https://www.google.com/maps/dir/?api=1&destination=${q.lat},${q.lng}`;
   const p = clubPoint(lat, lng);
-  if (p) return `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`;
+  if (p) return route(p);
   const f = (fallback ?? "").trim();
-  return /^https:\/\//i.test(f) ? f : null;
+  if (!/^https:\/\//i.test(f)) return null;
+  // The club's link, only when it names one place: a point in Lebanon inside it, or a share link the club made for its
+  // spot. A place-name search ("maps.google.com/?q=Batroun") is resolved by Google near the PHONE, not in Lebanon
+  // (A17 in Sweden, 28 Nov: a restaurant called Batroun in Sweden), so it gives no Directions rather than a wrong place.
+  const inLink = pointFromMapLink(f);
+  if (inLink) return route(inLink);
+  return linkWithoutPoint(f) === "short" ? f : null;
 }
 
 /**
