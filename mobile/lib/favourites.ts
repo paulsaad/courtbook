@@ -182,6 +182,9 @@ export function createFavouriteSync(o: {
     if (!stale() && running.size === 0 && (touched || resync)) {
       touched = false;
       void o.qc.invalidateQueries({ queryKey: key }); // rule 6
+      // and Home's "Your clubs" rows (name, town), read separately: a row fetched while a save was still pending can
+      // lack the club just added (A17, 28 Nov: re-added Batroun stayed off Home until the app restarted)
+      void o.qc.invalidateQueries({ queryKey: ["favourite-clubs", o.userId] });
     }
     return result;
   }

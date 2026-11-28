@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 const calls: Array<[string, unknown]> = [];
 let rpcAnswer: { data: unknown; error: { message: string } | null } = { data: 2, error: null };
+let writeError: { message: string } | null = null;
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
@@ -14,7 +15,7 @@ vi.mock("@/lib/supabase/client", () => ({
       b.delete = () => { calls.push([`delete:${t}`, null]); return b; };
       b.insert = (v: unknown) => { calls.push([`insert:${t}`, v]); return b; };
       b.eq = () => b; b.select = () => b; b.order = () => b;
-      b.then = (res: (v: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(res);
+      b.then = (res: (v: unknown) => unknown) => Promise.resolve({ data: [], error: writeError }).then(res);
       return b;
     },
   }),
@@ -28,7 +29,7 @@ const court = { id: "k1", name: "Padel 1", sport: "padel", surface: null, sort: 
 const view = (rules: unknown[] = []) => render(<ClubSettings club={club as never} courts={[court] as never} rules={rules as never} staff={[]} coaches={[]} isAdmin={false} backHref="/"
   areas={[]} sports={[{ code: "padel", name_en: "Padel" } as never]} town={null} media={[]} readiness={null} />);
 
-beforeEach(() => { calls.length = 0; rpcAnswer = { data: 2, error: null }; });
+beforeEach(() => { calls.length = 0; rpcAnswer = { data: 2, error: null }; writeError = null; });
 afterEach(cleanup);
 
 describe("quick set-up: one price for all opening hours (0092)", () => {
@@ -80,5 +81,17 @@ describe("destructive changes ask first (0092)", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/upcoming bookings can't be deactivated/);
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Deactivate Padel 1" })); });
     expect(calls.find(([k]) => k === "update:courts")?.[1]).toEqual({ active: false });
+  });
+  it("UI-1: a refusal is brought into view and announced, not left at the top of the page", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    writeError = { message: "court_has_bookings" };
+    view();
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Deactivate Padel 1" })); });
+    const box = screen.getAllByRole("alert").find((e) => /still has upcoming bookings/.test(e.textContent ?? ""));
+    expect(box).toBeTruthy();
+    expect(scroll).toHaveBeenCalled();
+    expect(scroll.mock.contexts[0]).toBe(box);
   });
 });

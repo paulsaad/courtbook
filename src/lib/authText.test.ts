@@ -23,4 +23,13 @@ describe("sign-in code wording (Mission 3A)", () => {
     expect(t).toBe(AUTH_TEXT.sendFailed);
     expect(Object.values(AUTH_TEXT)).not.toContain("Error sending magic link email");
   });
+  it("a server failure as auth-js 2.119 really names it (AuthRetryableFetchError, 500–530) is not called a lost connection", () => {
+    // Auth's answer when the code email cannot be sent (sync sending): 500 "Error sending confirmation email"
+    expect(sendCodeError({ name: "AuthRetryableFetchError", status: 500, message: "Error sending confirmation email" })).toBe(AUTH_TEXT.sendFailed);
+    expect(sendCodeError({ name: "AuthRetryableFetchError", status: 503, message: "HTTP 503" })).toBe(AUTH_TEXT.sendFailed);
+    expect(verifyCodeError({ name: "AuthRetryableFetchError", status: 500, message: "Internal error" })).toBe(AUTH_TEXT.server);
+    expect(verifyCodeError({ name: "AuthRetryableFetchError", status: 522, message: "HTTP 522" })).toBe(AUTH_TEXT.server);
+    // no answer at all is still offline
+    expect(sendCodeError({ name: "AuthRetryableFetchError", status: 0, message: "Failed to fetch" })).toBe(AUTH_TEXT.offline);
+  });
 });

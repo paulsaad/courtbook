@@ -37,7 +37,9 @@ export function YourClubsRow({ userId }: { userId: string }) {
   const rows = useFavouriteClubRows(userId, shown);
   const ids = fav.data ?? [];
   // the row follows the hearts: a club added elsewhere is fetched again; a removed one disappears at once
-  const missing = ids.some((id) => !rows.data?.some((r) => r.club_id === id));
+  // keyed by WHICH clubs are missing, so a club added after an earlier refetch (which may have answered before the save
+  // was committed) triggers another one
+  const missing = ids.filter((id) => !rows.data?.some((r) => r.club_id === id)).join(",");
   useEffect(() => { if (shown && missing && !rows.isFetching) void rows.refetch(); }, [shown, missing]); // eslint-disable-line react-hooks/exhaustive-deps
   const clubs = (rows.data ?? []).filter((r) => ids.includes(r.club_id));
   if (!shown || clubs.length === 0) return null;

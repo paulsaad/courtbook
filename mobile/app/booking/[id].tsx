@@ -115,6 +115,7 @@ export default function Booking() {
           label={statusLine ? "Status" : "Cancellation"}
           value={statusLine ?? (freeCancel ? `Free until ${formatInTimeZone(cutoffAt, tz, "EEE HH:mm")}` : "Inside the cutoff")}
           note={statusLine ? undefined : freeCancel ? `${b.club.cancel_cutoff_hours} hours before you play` : `Less than ${b.club.cancel_cutoff_hours} h before start — please tell the club`}
+          tone={b.status === "cancelled" ? "danger" : undefined}
           last
         />
       </Ticket>

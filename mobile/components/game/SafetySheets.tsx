@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text } from "../Text";
 import { Icon } from "../Icon";
@@ -24,14 +24,19 @@ function Sheet({ visible, title, onClose, children }: { visible: boolean; title:
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      {/* A17, 28 Nov: the keyboard covered the sheet. A modal is its own window and the app draws edge to edge, so
+          Android does not resize it for the keyboard: the sheet is lifted by padding instead (as KeyboardAware does for
+          screens), and its scrolling body keeps the text field and the send button reachable above the keyboard. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" testID="sheet-keyboard">
       <Pressable style={styles.scrim} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
       <View style={[styles.sheet, { paddingBottom: insets.bottom + space.md }]}>
         <View style={styles.head}>
           <Text variant="heading" accessibilityRole="header" style={{ flex: 1 }}>{title}</Text>
           <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} style={styles.close}><Icon name="close" size={22} /></Pressable>
         </View>
-        <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">{children}</ScrollView>
+        <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled" keyboardDismissMode="none">{children}</ScrollView>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

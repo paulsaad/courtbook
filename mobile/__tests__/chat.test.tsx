@@ -130,6 +130,18 @@ async function show(d: GameDetail, messages: ServerMessage[], has0074 = false) {
 describe("chat screen", () => {
   beforeEach(() => jest.clearAllMocks());
 
+  it("the organiser alone: told that others see the messages after they join; can still write (A17, 28 Nov)", async () => {
+    await show({ ...game, joined: 0 }, []);
+    expect(await screen.findByText("You're the only player here. Other players can see messages after they join.")).toBeTruthy();
+    await show({ ...game, joined: 0 }, [msg("b", "2026-11-20T10:01:00Z", { profile_id: "me", name: "Emma", body: "Court booked for 18:00" })]);
+    expect(await screen.findByTestId("chat-alone")).toBeTruthy();
+  });
+  it("with another player in: no such hint", async () => {
+    await show(game, [msg("b", "2026-11-20T10:01:00Z", { profile_id: "me", name: "Emma", body: "Hi" })]);
+    expect(await screen.findByText("Hi")).toBeTruthy();
+    expect(screen.queryByTestId("chat-alone")).toBeNull();
+  });
+
   it("members see the messages, with names on others' runs and a composer", async () => {
     await show(game, [msg("a", "2026-11-20T10:00:00Z", { body: "Running 5 minutes late" }), msg("b", "2026-11-20T10:01:00Z", { profile_id: "me", name: "Emma", body: "No problem" })]);
     expect(await screen.findByText("Running 5 minutes late")).toBeTruthy();

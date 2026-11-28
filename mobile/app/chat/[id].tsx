@@ -17,7 +17,7 @@ import { sportName } from "../../lib/days";
 import { useActivity, useMarkRead } from "../../lib/activity";
 import { useGameActions } from "../../lib/gameActions";
 import {
-  CHAT_AVAILABLE, chatKey, chatRows, COUNTER_FROM, composerState, MESSAGE_MAX, useChat, useChatActions, type ChatData, type ChatMessage, type ChatRow,
+  ALONE_HINT, CHAT_AVAILABLE, chatKey, chatRows, COUNTER_FROM, deviceTimeZone, composerState, MESSAGE_MAX, useChat, useChatActions, type ChatData, type ChatMessage, type ChatRow,
 } from "../../lib/chat";
 import { afterBlockChange, blockPlayer, reportContent, useAcceptRules, useRulesAccepted, useSafety } from "../../lib/safety";
 import { confirmBlock, ReportSheet, RulesSheet } from "../../components/game/SafetySheets";
@@ -57,9 +57,11 @@ export default function Chat() {
   const reloadChat = () => { qc.setQueryData<ChatData>(chatKey(id ?? ""), (x) => (x ? { ...x, fullAt: 0 } : x)); void chat.refetch(); };
   const list = useRef<FlatList<ChatRow>>(null);
   const lastCount = useRef(0);
-  const tz = d?.club_timezone ?? "Asia/Beirut";
+  const tz = d?.club_timezone ?? "Asia/Beirut";          // the game's own times (title)
+  const msgTz = useMemo(() => deviceTimeZone(tz), [tz]);   // when messages were sent: the phone's time
   const messages = chat.data?.messages ?? [];
-  const rows = useMemo(() => chatRows(messages, tz), [messages, tz]);
+  const rows = useMemo(() => chatRows(messages, msgTz), [messages, msgTz]);
+  const alone = !!d && d.i_organize && d.joined === 0;
 
   // new messages: followed when at the bottom (onContentSizeChange), otherwise counted for the pill
   useEffect(() => {
@@ -160,7 +162,8 @@ export default function Chat() {
             data={rows}
             keyExtractor={(r) => r.key}
             contentContainerStyle={[styles.list, rows.length === 0 && { flexGrow: 1, justifyContent: "center" }]}
-            ListEmptyComponent={<Empty title="No messages yet" body="Say hello to the players in this game." />}
+            ListEmptyComponent={<Empty title="No messages yet" body={alone ? ALONE_HINT : "Say hello to the players in this game."} />}
+            ListHeaderComponent={alone && rows.length > 0 ? <Text variant="caption" style={styles.day} testID="chat-alone">{ALONE_HINT}</Text> : undefined}
             onContentSizeChange={() => { if (atBottom) list.current?.scrollToEnd({ animated: false }); }}
             onScroll={(e) => {
               const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
@@ -171,7 +174,7 @@ export default function Chat() {
             scrollEventThrottle={100}
             renderItem={({ item }) => item.kind === "day"
               ? <Text variant="caption" style={styles.day} accessibilityRole="header">{item.label}</Text>
-              : <Bubble r={item} mine={item.m.profile_id === me} tz={tz} onLong={onLong} onRetry={(mid) => void actions.retry(mid)} />}
+              : <Bubble r={item} mine={item.m.profile_id === me} tz={msgTz} onLong={onLong} onRetry={(mid) => void actions.retry(mid)} />}
             testID="chat-list"
           />
           {unseen > 0 ? (
