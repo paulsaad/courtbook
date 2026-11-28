@@ -140,6 +140,10 @@ export const ERRORS: Record<string, string> = {
   bad_reason: "Choose a reason for the report.",
   bad_status: "Choose handled or dismissed.",
   reason_required: "Enter a reason. It is kept in the moderation log.",
+  // #67 photo moderation (I-3)
+  photo_moderator_required: "This report holds photo evidence. Only a photo moderator can release its legal hold.",
+  report_on_legal_hold: "This report is on legal hold (or was released less than 30 days ago) and keeps its evidence.",
+  report_expired: "This report is past its 180-day retention. File a new report to act on the photo.",
   text_required: "Write a few words first.",
   // M3-H (game hardening) refusals
   court_not_lost: "Something went wrong. Refresh and try again.",
